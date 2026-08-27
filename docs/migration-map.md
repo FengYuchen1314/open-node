@@ -82,5 +82,8 @@ This document records the starting source map for the Open Node refactor.
    - Done: interactive Vue probe drill-down drawer backed by public 1h/6h/24h
      ping and system series, with SVG latency, loss, resource, and throughput
      charts.
-   - Next: richer network target comparison and automated probe task scheduling.
+   - Done: private probe task schedules with due dispatch into the existing
+     agent command queue plus domain-latency command result ingestion into
+     public probe series.
+   - Next: richer network target comparison and deeper Xray runtime integration.
 5. Revisit Xray integration once the agent protocol surface is stable.

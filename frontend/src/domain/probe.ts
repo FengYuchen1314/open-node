@@ -1,3 +1,5 @@
+import type { AgentCommand } from "./inventory";
+
 export interface ProbeAppearance {
   theme: string;
   color_mode?: "light" | "dark" | "system";
@@ -152,5 +154,82 @@ export interface ProbeSeriesResponse {
   all_series?: ProbePingSeries[] | null;
   bucket_sec?: number | null;
   generated_at?: number | null;
+  license_required: false;
+}
+
+export type ProbeTaskKind = "system" | "domain_latency" | "return_route";
+
+export interface ProbeTaskReturnRouteTarget {
+  carrier: ProbeRouteCarrier;
+  region?: string;
+  host: string;
+  port?: number;
+}
+
+export interface ProbeTaskCreateRequest {
+  server_id: string;
+  kind: ProbeTaskKind;
+  enabled?: boolean;
+  interval_sec?: number;
+  domains?: string[];
+  domain_timeout_ms?: number;
+  allow_icmp?: boolean;
+  return_route_targets?: ProbeTaskReturnRouteTarget[];
+  return_route_timeout_seconds?: number;
+  ip_version?: 4 | 6;
+  command_timeout_ms?: number;
+  next_run_at?: string | null;
+}
+
+export interface ProbeTaskUpdateRequest {
+  enabled?: boolean | null;
+  interval_sec?: number | null;
+  domains?: string[] | null;
+  domain_timeout_ms?: number | null;
+  allow_icmp?: boolean | null;
+  return_route_targets?: ProbeTaskReturnRouteTarget[] | null;
+  return_route_timeout_seconds?: number | null;
+  ip_version?: 4 | 6 | null;
+  command_timeout_ms?: number | null;
+  next_run_at?: string | null;
+}
+
+export interface ProbeTask {
+  id: string;
+  server_id: string;
+  kind: ProbeTaskKind;
+  enabled: boolean;
+  interval_sec: number;
+  domains: string[];
+  domain_timeout_ms: number;
+  allow_icmp: boolean;
+  return_route_targets: ProbeTaskReturnRouteTarget[];
+  return_route_timeout_seconds: number;
+  ip_version: 4 | 6;
+  command_timeout_ms: number;
+  last_dispatched_at?: string | null;
+  next_run_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProbeTaskResponse {
+  task: ProbeTask;
+  license_required: false;
+}
+
+export interface ProbeTaskListResponse {
+  tasks: ProbeTask[];
+  license_required: false;
+}
+
+export interface ProbeTaskDispatchItem {
+  task: ProbeTask;
+  command: AgentCommand;
+}
+
+export interface ProbeTaskDispatchResponse {
+  checked_at: string;
+  dispatched: ProbeTaskDispatchItem[];
   license_required: false;
 }

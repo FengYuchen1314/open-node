@@ -320,6 +320,10 @@ license gates. The primary endpoints are:
 - `PUT /api/v1/public/probe-settings`
 - `GET /api/v1/public/probe-series`
 - `GET /api/v1/public/probe-ws`
+- `GET /api/v1/probe/tasks`
+- `POST /api/v1/probe/tasks`
+- `PATCH /api/v1/probe/tasks/{task_id}`
+- `POST /api/v1/probe/tasks/dispatch-due`
 
 For compatibility with the `mmwx-probe` Worker route mapping, the same handlers
 are also mounted at:
@@ -359,6 +363,16 @@ return-route badges, renewal badges, live traffic hotspot rows, and per-node
 drill-down charts. Drill-downs call the public series endpoint with the
 selected public server index, range, and metric mode, then render latency, loss,
 CPU, memory, and throughput history without revealing private server IDs.
+
+Probe task schedules are private management data stored in SQLite. Each task
+targets one server and one active agent child operation: system info,
+domain-latency probing, or return-route testing. `dispatch-due` can be called
+from a frontend button, cron job, or systemd timer; due tasks create normal
+`agent_commands` rows and then reuse the existing WebSocket push or HTTP lease
+flow. Domain-latency command results from `/api/child/domains/latency` are
+converted into telemetry latency samples so the public series endpoint can show
+new probe history without exposing server IDs or agent tokens. Return-route
+results continue to use the sanitized carrier summary table.
 
 The WebSocket stream is also public and read-only. It sends the same
 `ProbePayload` structure as the HTTP list endpoint, drops any client messages,

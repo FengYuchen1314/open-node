@@ -9,7 +9,9 @@ import type {
   ProbeSeriesResponse,
   ProbeSettingsUpdate,
   ProbeSystemSeries,
+  ProbeTask,
 } from "../domain/probe";
+import type { ServerSummary } from "../domain/inventory";
 import type {
   ProbeHealth,
   ProbeLatencyBucket,
@@ -35,11 +37,16 @@ import {
   trafficUsed,
 } from "../domain/probe-insights";
 import {
+  createProbeTask,
+  dispatchDueProbeTasks,
   getPublicProbePayload,
   getPublicProbeSeries,
   getPublicProbeStreamUrl,
+  listProbeTasks,
+  updateProbeTask,
   updatePublicProbeSettings,
 } from "../services/probe";
+import { listServers } from "../services/inventory";
 
 type ProbeSeriesRange = "1h" | "6h" | "24h";
 type ProbeSeriesMetric = "ping" | "system";
@@ -76,6 +83,19 @@ const selectedSeriesMetric = ref<ProbeSeriesMetric>("ping");
 const selectedSeries = ref<ProbeSeriesResponse | null>(null);
 const selectedSeriesLoading = ref(false);
 const selectedSeriesError = ref("");
+const probeTasks = ref<ProbeTask[]>([]);
+const taskServers = ref<ServerSummary[]>([]);
+const tasksLoading = ref(false);
+const taskSaving = ref(false);
+const taskDispatching = ref(false);
+const taskMessage = ref("");
+const taskForm = reactive({
+  server_id: "",
+  domains: "example.com",
+  interval_sec: 300,
+  domain_timeout_ms: 2_000,
+  allow_icmp: false,
+});
 let selectedSeriesRequest = 0;
 let probeStream: WebSocket | undefined;
 
@@ -202,6 +222,31 @@ const selectedSeriesGeneratedAt = computed(() => {
   const generatedAt = selectedSeries.value?.generated_at;
   return generatedAt ? new Date(generatedAt * 1000).toLocaleString() : "";
 });
+const taskServerOptions = computed(() =>
+  taskServers.value.map((server) => ({
+    title: server.name,
+    value: server.id,
+  })),
+);
+const taskServerNameById = computed(
+  () => new Map(taskServers.value.map((server) => [server.id, server.name])),
+);
+const dueTaskCount = computed(() => {
+  const now = Date.now();
+  return probeTasks.value.filter((task) => task.enabled && Date.parse(task.next_run_at) <= now)
+    .length;
+});
+const taskRows = computed(() =>
+  probeTasks.value.map((task) => ({
+    ...task,
+    serverName: taskServerNameById.value.get(task.server_id) ?? task.server_id.slice(0, 8),
+    targetLabel:
+      task.kind === "domain_latency"
+        ? task.domains.join(", ")
+        : task.return_route_targets.map((target) => target.host).join(", ") || "system info",
+    nextRunLabel: new Date(task.next_run_at).toLocaleString(),
+  })),
+);
 const pingTrendCards = computed<ProbeTrendCard[]>(() => {
   const series = selectedPingSeries.value;
   if (!series) {
@@ -280,6 +325,7 @@ watch([detailOpen, selectedServerIndex, selectedSeriesRange, selectedSeriesMetri
 
 onMounted(() => {
   void refreshProbe();
+  void refreshProbeTasks();
   openProbeStream();
 });
 
@@ -297,6 +343,23 @@ async function refreshProbe() {
     errorMessage.value = error instanceof Error ? error.message : "Probe request failed.";
   } finally {
     loading.value = false;
+  }
+}
+
+async function refreshProbeTasks() {
+  tasksLoading.value = true;
+  try {
+    const [serversResponse, tasksResponse] = await Promise.all([listServers(), listProbeTasks()]);
+    taskServers.value = serversResponse;
+    probeTasks.value = tasksResponse.tasks;
+    if (!taskForm.server_id && serversResponse.length > 0) {
+      taskForm.server_id = serversResponse[0].id;
+    }
+  } catch (error) {
+    taskMessage.value =
+      error instanceof Error ? `Probe tasks failed: ${error.message}` : "Probe tasks failed.";
+  } finally {
+    tasksLoading.value = false;
   }
 }
 
@@ -357,6 +420,65 @@ async function saveProbeSettings() {
   }
 }
 
+async function createScheduledProbeTask() {
+  const domains = splitTaskDomains(taskForm.domains);
+  if (!taskForm.server_id) {
+    taskMessage.value = "Select a server before creating a probe task.";
+    return;
+  }
+  if (domains.length === 0) {
+    taskMessage.value = "Add at least one domain target.";
+    return;
+  }
+
+  taskSaving.value = true;
+  taskMessage.value = "";
+  try {
+    await createProbeTask({
+      server_id: taskForm.server_id,
+      kind: "domain_latency",
+      interval_sec: taskForm.interval_sec,
+      domains,
+      domain_timeout_ms: taskForm.domain_timeout_ms,
+      allow_icmp: taskForm.allow_icmp,
+    });
+    taskForm.domains = domains.join(", ");
+    await refreshProbeTasks();
+    taskMessage.value = "Probe task created.";
+  } catch (error) {
+    taskMessage.value =
+      error instanceof Error ? `Probe task failed: ${error.message}` : "Probe task failed.";
+  } finally {
+    taskSaving.value = false;
+  }
+}
+
+async function dispatchScheduledProbeTasks() {
+  taskDispatching.value = true;
+  taskMessage.value = "";
+  try {
+    const response = await dispatchDueProbeTasks();
+    await refreshProbeTasks();
+    taskMessage.value = `${response.dispatched.length} due probe task(s) dispatched.`;
+  } catch (error) {
+    taskMessage.value =
+      error instanceof Error ? `Probe dispatch failed: ${error.message}` : "Probe dispatch failed.";
+  } finally {
+    taskDispatching.value = false;
+  }
+}
+
+async function toggleScheduledProbeTask(task: ProbeTask) {
+  taskMessage.value = "";
+  try {
+    await updateProbeTask(task.id, { enabled: !task.enabled });
+    await refreshProbeTasks();
+  } catch (error) {
+    taskMessage.value =
+      error instanceof Error ? `Probe task failed: ${error.message}` : "Probe task failed.";
+  }
+}
+
 function syncSettingsForm(nextPayload: ProbePayload) {
   settingsForm.enabled = nextPayload.enabled;
   settingsForm.title = nextPayload.title ?? "Open Node Probe";
@@ -376,6 +498,17 @@ function syncSettingsForm(nextPayload: ProbePayload) {
   settingsForm.show_return_route = nextPayload.show_return_route === true;
   settingsForm.show_renewal_timeline = nextPayload.show_renewal_timeline === true;
   settingsForm.show_health_score = nextPayload.show_health_score !== false;
+}
+
+function splitTaskDomains(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\s,;]+/)
+        .map((domain) => domain.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function settingsPayload(): ProbeSettingsUpdate {
@@ -1005,6 +1138,123 @@ function formatBytes(value: number) {
           </v-btn>
         </div>
       </v-form>
+    </v-sheet>
+
+    <v-sheet class="section-surface probe-task-surface" border>
+      <div class="section-head">
+        <div>
+          <div class="section-title">Scheduled probes</div>
+          <div class="section-subtitle">{{ probeTasks.length }} task(s), {{ dueTaskCount }} due</div>
+        </div>
+        <div class="probe-task-actions">
+          <v-tooltip text="Refresh probe tasks">
+            <template #activator="{ props }">
+              <v-btn
+                v-bind="props"
+                :loading="tasksLoading"
+                icon="mdi-refresh"
+                variant="text"
+                @click="refreshProbeTasks"
+              />
+            </template>
+          </v-tooltip>
+          <v-btn
+            :loading="taskDispatching"
+            prepend-icon="mdi-play-circle-outline"
+            variant="tonal"
+            @click="dispatchScheduledProbeTasks"
+          >
+            Dispatch due
+          </v-btn>
+        </div>
+      </div>
+
+      <v-form class="probe-task-form" @submit.prevent="createScheduledProbeTask">
+        <v-select
+          v-model="taskForm.server_id"
+          :items="taskServerOptions"
+          density="comfortable"
+          label="Server"
+          prepend-inner-icon="mdi-server-network"
+          variant="outlined"
+        />
+        <v-text-field
+          v-model="taskForm.domains"
+          density="comfortable"
+          label="Domains"
+          prepend-inner-icon="mdi-web"
+          variant="outlined"
+        />
+        <v-text-field
+          v-model.number="taskForm.interval_sec"
+          density="comfortable"
+          label="Interval seconds"
+          max="86400"
+          min="60"
+          type="number"
+          variant="outlined"
+        />
+        <v-text-field
+          v-model.number="taskForm.domain_timeout_ms"
+          density="comfortable"
+          label="Timeout ms"
+          max="10000"
+          min="200"
+          type="number"
+          variant="outlined"
+        />
+        <v-switch
+          v-model="taskForm.allow_icmp"
+          color="primary"
+          density="comfortable"
+          hide-details
+          label="ICMP fallback"
+        />
+        <v-btn
+          :disabled="taskServerOptions.length === 0"
+          :loading="taskSaving"
+          color="primary"
+          prepend-icon="mdi-calendar-plus"
+          type="submit"
+          variant="flat"
+        >
+          Add task
+        </v-btn>
+      </v-form>
+
+      <v-alert
+        v-if="taskMessage"
+        :type="taskMessage.includes('failed') ? 'error' : 'success'"
+        class="probe-task-message"
+        density="comfortable"
+        variant="tonal"
+      >
+        {{ taskMessage }}
+      </v-alert>
+
+      <div v-if="taskRows.length > 0" class="probe-task-list">
+        <div v-for="task in taskRows" :key="task.id" class="probe-task-row">
+          <v-switch
+            :model-value="task.enabled"
+            color="primary"
+            density="compact"
+            hide-details
+            @update:model-value="toggleScheduledProbeTask(task)"
+          />
+          <div>
+            <strong>{{ task.serverName }}</strong>
+            <span>{{ task.targetLabel }}</span>
+          </div>
+          <v-chip density="comfortable" size="small" variant="tonal">
+            {{ task.kind.replace("_", " ") }}
+          </v-chip>
+          <small>{{ task.nextRunLabel }}</small>
+        </div>
+      </div>
+      <div v-else class="empty-state">
+        <v-icon icon="mdi-calendar-clock" size="28" />
+        <div>No scheduled probe tasks.</div>
+      </div>
     </v-sheet>
 
     <v-sheet class="section-surface server-surface" border>

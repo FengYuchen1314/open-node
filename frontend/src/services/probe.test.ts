@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createProbeTask,
+  dispatchDueProbeTasks,
   getPublicProbePayload,
   getPublicProbeSeries,
   getPublicProbeSettings,
   getPublicProbeStreamUrl,
+  listProbeTasks,
+  updateProbeTask,
   updatePublicProbeSettings,
 } from "./probe";
 
@@ -135,6 +139,106 @@ describe("public probe API client", () => {
     ]);
   });
 
+  it("manages scheduled probe tasks without license headers", async () => {
+    const calls: Array<{
+      body?: unknown;
+      headers: HeadersInit | undefined;
+      method?: string;
+      url: string;
+    }> = [];
+    const task = {
+      id: "task-1",
+      server_id: "server-1",
+      kind: "domain_latency",
+      enabled: true,
+      interval_sec: 300,
+      domains: ["example.com"],
+      domain_timeout_ms: 500,
+      allow_icmp: true,
+      return_route_targets: [],
+      return_route_timeout_seconds: 25,
+      ip_version: 4,
+      command_timeout_ms: 12_000,
+      next_run_at: "2026-08-27T09:00:00Z",
+      created_at: "2026-08-27T09:00:00Z",
+      updated_at: "2026-08-27T09:00:00Z",
+    };
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = input.toString();
+      calls.push({
+        url,
+        method: init?.method,
+        headers: init?.headers,
+        body: init?.body ? JSON.parse(init.body.toString()) : undefined,
+      });
+      if (url.endsWith("/dispatch-due")) {
+        return jsonResponse({
+          checked_at: "2026-08-27T09:00:00Z",
+          dispatched: [],
+          license_required: false,
+        });
+      }
+      if (init?.method === "PATCH") {
+        return jsonResponse({ task: { ...task, enabled: false }, license_required: false });
+      }
+      if (init?.method === "POST") {
+        return jsonResponse({ task, license_required: false });
+      }
+      return jsonResponse({ tasks: [task], license_required: false });
+    };
+
+    const listed = await listProbeTasks(fetcher);
+    const created = await createProbeTask(
+      {
+        server_id: "server-1",
+        kind: "domain_latency",
+        domains: ["example.com"],
+        domain_timeout_ms: 500,
+        allow_icmp: true,
+      },
+      fetcher,
+    );
+    const updated = await updateProbeTask("task-1", { enabled: false }, fetcher);
+    const dispatched = await dispatchDueProbeTasks(fetcher);
+
+    expect(listed.tasks[0].id).toBe("task-1");
+    expect(created.license_required).toBe(false);
+    expect(updated.task.enabled).toBe(false);
+    expect(dispatched.dispatched).toEqual([]);
+    expect(calls).toEqual([
+      {
+        url: "/api/v1/probe/tasks",
+        method: undefined,
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/probe/tasks",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          server_id: "server-1",
+          kind: "domain_latency",
+          domains: ["example.com"],
+          domain_timeout_ms: 500,
+          allow_icmp: true,
+        },
+      },
+      {
+        url: "/api/v1/probe/tasks/task-1",
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: { enabled: false },
+      },
+      {
+        url: "/api/v1/probe/tasks/dispatch-due",
+        method: "POST",
+        headers: undefined,
+        body: undefined,
+      },
+    ]);
+  });
+
   it("builds a same-origin public probe websocket URL", () => {
     expect(
       getPublicProbeStreamUrl({
@@ -150,3 +254,10 @@ describe("public probe API client", () => {
     ).toBe("ws://localhost:5173/api/v1/public/probe-ws");
   });
 });
+
+function jsonResponse(payload: unknown) {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}

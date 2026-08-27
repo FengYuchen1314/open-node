@@ -400,6 +400,63 @@ body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.probe-task-surface {
+  display: grid;
+  gap: 14px;
+}
+
+.probe-task-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.probe-task-form {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.4fr) 140px 120px auto auto;
+}
+
+.probe-task-form .v-btn {
+  min-width: 0;
+}
+
+.probe-task-message {
+  margin-top: -2px;
+}
+
+.probe-task-list {
+  display: grid;
+  gap: 10px;
+}
+
+.probe-task-row {
+  align-items: center;
+  background: #f7faf9;
+  border: 1px solid #dfe7e4;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(150px, auto);
+  min-height: 54px;
+  padding: 8px 10px;
+}
+
+.probe-task-row strong,
+.probe-task-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.probe-task-row span,
+.probe-task-row small {
+  color: #66736f;
+  font-size: 12px;
+}
+
 .probe-insight-grid {
   display: grid;
   gap: 16px;
@@ -1072,6 +1129,8 @@ body {
   .probe-target-row,
   .probe-filter-row,
   .probe-insight-grid,
+  .probe-task-form,
+  .probe-task-row,
   .probe-toggle-grid,
   .probe-trend-grid,
   .service-command-grid,

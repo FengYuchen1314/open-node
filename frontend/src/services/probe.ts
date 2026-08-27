@@ -3,6 +3,11 @@ import type {
   ProbeSeriesResponse,
   ProbeSettingsResponse,
   ProbeSettingsUpdate,
+  ProbeTaskCreateRequest,
+  ProbeTaskDispatchResponse,
+  ProbeTaskListResponse,
+  ProbeTaskResponse,
+  ProbeTaskUpdateRequest,
 } from "../domain/probe";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -72,6 +77,57 @@ export async function getPublicProbeSeries(
     throw await apiError(response, "Public probe series request failed");
   }
   return response.json() as Promise<ProbeSeriesResponse>;
+}
+
+export async function listProbeTasks(fetcher = fetch): Promise<ProbeTaskListResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/probe/tasks`);
+  if (!response.ok) {
+    throw await apiError(response, "Probe task list request failed");
+  }
+  return response.json() as Promise<ProbeTaskListResponse>;
+}
+
+export async function createProbeTask(
+  payload: ProbeTaskCreateRequest,
+  fetcher = fetch,
+): Promise<ProbeTaskResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/probe/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Probe task create request failed");
+  }
+  return response.json() as Promise<ProbeTaskResponse>;
+}
+
+export async function updateProbeTask(
+  taskId: string,
+  payload: ProbeTaskUpdateRequest,
+  fetcher = fetch,
+): Promise<ProbeTaskResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/probe/tasks/${taskId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Probe task update request failed");
+  }
+  return response.json() as Promise<ProbeTaskResponse>;
+}
+
+export async function dispatchDueProbeTasks(
+  fetcher = fetch,
+): Promise<ProbeTaskDispatchResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/probe/tasks/dispatch-due`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Probe task dispatch request failed");
+  }
+  return response.json() as Promise<ProbeTaskDispatchResponse>;
 }
 
 export function getPublicProbeStreamUrl(locationLike: BrowserLocationLike = window.location) {

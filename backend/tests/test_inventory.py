@@ -498,6 +498,145 @@ def test_public_probe_series_uses_public_index_and_aggregates_latency(tmp_path: 
     assert "server_id" not in payload
 
 
+def test_probe_tasks_dispatch_due_agent_commands(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-probe-tasks"}).json()
+    server_id = created["server"]["id"]
+
+    latency = client.post(
+        "/api/v1/probe/tasks",
+        json={
+            "server_id": server_id,
+            "kind": "domain_latency",
+            "interval_sec": 60,
+            "domains": [" https://example.com/path", "example.com", "[2001:db8::1]"],
+            "domain_timeout_ms": 500,
+            "allow_icmp": True,
+            "command_timeout_ms": 12_000,
+        },
+    )
+    routes = client.post(
+        "/api/v1/probe/tasks",
+        json={
+            "server_id": server_id,
+            "kind": "return_route",
+            "interval_sec": 3600,
+            "return_route_targets": [
+                {"carrier": "telecom", "region": "Guangzhou", "host": "ct.example"},
+                {"carrier": "unicom", "region": "Shanghai", "host": "cu.example"},
+            ],
+            "return_route_timeout_seconds": 20,
+        },
+    )
+    system = client.post(
+        "/api/v1/probe/tasks",
+        json={"server_id": server_id, "kind": "system", "interval_sec": 300},
+    )
+
+    assert latency.status_code == 201
+    assert routes.status_code == 201
+    assert system.status_code == 201
+    assert latency.json()["license_required"] is False
+    assert latency.json()["task"]["domains"] == ["example.com", "2001:db8::1"]
+
+    listed = client.get("/api/v1/probe/tasks")
+    assert listed.status_code == 200
+    assert listed.json()["license_required"] is False
+    assert len(listed.json()["tasks"]) == 3
+
+    dispatch = client.post("/api/v1/probe/tasks/dispatch-due")
+
+    assert dispatch.status_code == 200
+    payload = dispatch.json()
+    assert payload["license_required"] is False
+    commands = [item["command"] for item in payload["dispatched"]]
+    assert [command["path"] for command in commands] == [
+        "/api/child/domains/latency",
+        "/api/child/network/return-route-test",
+        "/api/child/system/info",
+    ]
+    assert commands[0]["body"] == {
+        "domains": ["example.com", "2001:db8::1"],
+        "timeout_ms": 500,
+        "allow_icmp": True,
+    }
+    assert commands[1]["body"] == {
+        "ip_version": 4,
+        "timeout_seconds": 20,
+        "targets": [
+            {"carrier": "telecom", "region": "Guangzhou", "host": "ct.example", "port": 80},
+            {"carrier": "unicom", "region": "Shanghai", "host": "cu.example", "port": 80},
+        ],
+    }
+    assert all(command["status"] == "pending" for command in commands)
+    assert all(item["task"]["last_dispatched_at"] for item in payload["dispatched"])
+
+    second_dispatch = client.post("/api/v1/probe/tasks/dispatch-due")
+    assert second_dispatch.status_code == 200
+    assert second_dispatch.json()["dispatched"] == []
+
+    invalid_task_update = client.patch(
+        f"/api/v1/probe/tasks/{latency.json()['task']['id']}",
+        json={"domains": []},
+    )
+    assert invalid_task_update.status_code == 422
+
+
+def test_domain_latency_command_result_updates_public_probe_series(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-latency-result"}).json()
+    server_id = created["server"]["id"]
+
+    command = client.post(
+        f"/api/v1/servers/{server_id}/operations/domain-latency",
+        json={"domains": ["example.com", "down.example"]},
+    ).json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                "success": True,
+                "results": [
+                    {
+                        "domain": "example.com",
+                        "target": "example.com:443",
+                        "success": True,
+                        "latency_ms": 57,
+                    },
+                    {
+                        "domain": "down.example",
+                        "target": "down.example:443",
+                        "success": False,
+                        "error": "dial timeout",
+                    },
+                ],
+            },
+        },
+    )
+
+    assert result.status_code == 200
+    assert result.json()["command"]["status"] == "succeeded"
+
+    series = client.get(
+        "/api/v1/public/probe-series?server=0&range=1h&target=example.com&all=1"
+    )
+
+    assert series.status_code == 200
+    payload = series.json()
+    assert payload["license_required"] is False
+    assert payload["series"]["key"] == "example.com"
+    assert payload["series"]["current_ms"] == 57
+    by_key = {item["key"]: item for item in payload["all_series"]}
+    assert by_key["example.com"]["loss_pct"] == 0
+    assert by_key["down.example"]["current_ms"] == -1
+    assert by_key["down.example"]["loss_pct"] == 100
+    assert "server_id" not in payload
+
+
 def test_public_probe_mmwx_worker_alias_is_available(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     client.post("/api/v1/servers", json={"name": "edge-probe-alias"})

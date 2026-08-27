@@ -1,7 +1,10 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
+from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from open_node.domain.inventory import AgentCommandRead
 
 
 def _strip_optional_text(value: str | None, field_name: str) -> str | None:
@@ -218,3 +221,156 @@ class ProbeSeriesResponse(BaseModel):
     bucket_sec: int | None = None
     generated_at: int | None = None
     license_required: Literal[False] = False
+
+
+ProbeTaskKind = Literal["system", "domain_latency", "return_route"]
+
+
+class ProbeTaskReturnRouteTarget(BaseModel):
+    carrier: Literal["telecom", "unicom", "mobile"]
+    region: str = Field(default="", max_length=120)
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=80, ge=1, le=65_535)
+
+    @field_validator("carrier", mode="before")
+    @classmethod
+    def normalize_carrier(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("region")
+    @classmethod
+    def validate_region(cls, value: str) -> str:
+        return _strip_optional_text(value, "return route target region") or ""
+
+    @field_validator("host")
+    @classmethod
+    def validate_host(cls, value: str) -> str:
+        return _strip_required_text(value, "return route target host")
+
+
+class ProbeTaskCreate(BaseModel):
+    server_id: UUID
+    kind: ProbeTaskKind
+    enabled: bool = True
+    interval_sec: int = Field(default=300, ge=60, le=86_400)
+    domains: list[str] = Field(default_factory=list, max_length=200)
+    domain_timeout_ms: int = Field(default=2_000, ge=200, le=10_000)
+    allow_icmp: bool = False
+    return_route_targets: list[ProbeTaskReturnRouteTarget] = Field(
+        default_factory=list,
+        max_length=3,
+    )
+    return_route_timeout_seconds: int = Field(default=25, ge=10, le=45)
+    ip_version: Literal[4, 6] = 4
+    command_timeout_ms: int = Field(default=90_000, ge=1_000, le=300_000)
+    next_run_at: datetime | None = None
+
+    @field_validator("domains")
+    @classmethod
+    def normalize_domains(cls, value: list[str]) -> list[str]:
+        return _normalize_probe_domains(value)
+
+    @model_validator(mode="after")
+    def validate_kind_config(self) -> "ProbeTaskCreate":
+        _validate_probe_task_config(self.kind, self.domains, self.return_route_targets)
+        return self
+
+
+class ProbeTaskUpdate(BaseModel):
+    enabled: bool | None = None
+    interval_sec: int | None = Field(default=None, ge=60, le=86_400)
+    domains: list[str] | None = Field(default=None, max_length=200)
+    domain_timeout_ms: int | None = Field(default=None, ge=200, le=10_000)
+    allow_icmp: bool | None = None
+    return_route_targets: list[ProbeTaskReturnRouteTarget] | None = Field(
+        default=None,
+        max_length=3,
+    )
+    return_route_timeout_seconds: int | None = Field(default=None, ge=10, le=45)
+    ip_version: Literal[4, 6] | None = None
+    command_timeout_ms: int | None = Field(default=None, ge=1_000, le=300_000)
+    next_run_at: datetime | None = None
+
+    @field_validator("domains")
+    @classmethod
+    def normalize_optional_domains(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return _normalize_probe_domains(value)
+
+
+class ProbeTaskRead(BaseModel):
+    id: UUID
+    server_id: UUID
+    kind: ProbeTaskKind
+    enabled: bool
+    interval_sec: int
+    domains: list[str] = Field(default_factory=list)
+    domain_timeout_ms: int
+    allow_icmp: bool
+    return_route_targets: list[ProbeTaskReturnRouteTarget] = Field(default_factory=list)
+    return_route_timeout_seconds: int
+    ip_version: Literal[4, 6]
+    command_timeout_ms: int
+    last_dispatched_at: datetime | None = None
+    next_run_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProbeTaskResponse(BaseModel):
+    task: ProbeTaskRead
+    license_required: Literal[False] = False
+
+
+class ProbeTaskListResponse(BaseModel):
+    tasks: list[ProbeTaskRead] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
+class ProbeTaskDispatchItem(BaseModel):
+    task: ProbeTaskRead
+    command: AgentCommandRead
+
+
+class ProbeTaskDispatchResponse(BaseModel):
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    dispatched: list[ProbeTaskDispatchItem] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
+def _normalize_probe_domain(raw: str) -> str:
+    value = raw.strip()
+    if not value:
+        return ""
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    if "/" in value:
+        value = value.split("/", 1)[0]
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    return value
+
+
+def _normalize_probe_domains(value: list[str]) -> list[str]:
+    domains: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        normalized = _normalize_probe_domain(raw)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        domains.append(normalized)
+    return domains
+
+
+def _validate_probe_task_config(
+    kind: ProbeTaskKind,
+    domains: list[str],
+    return_route_targets: list[ProbeTaskReturnRouteTarget],
+) -> None:
+    if kind == "domain_latency" and not domains:
+        raise ValueError("domain latency probe tasks require at least one domain")
+    if kind == "return_route" and not return_route_targets:
+        raise ValueError("return-route probe tasks require at least one target")

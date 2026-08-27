@@ -83,6 +83,10 @@ from open_node.domain.probe import (
     ProbeSettingsResponse,
     ProbeSettingsUpdate,
     ProbeSystemSeries,
+    ProbeTaskCreate,
+    ProbeTaskRead,
+    ProbeTaskReturnRouteTarget,
+    ProbeTaskUpdate,
 )
 from open_node.domain.subscriptions import (
     ManagedNodeCreate,
@@ -139,6 +143,10 @@ class ChangeSetNotFoundError(ValueError):
 
 class ProbeNotFoundError(ValueError):
     """Raised when a public probe lookup targets data outside the public list."""
+
+
+class ProbeTaskNotFoundError(ValueError):
+    """Raised when a probe task lookup targets an unknown schedule."""
 
 
 class DuplicateProductUserError(ValueError):
@@ -706,6 +714,34 @@ class ProbeSettingsModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ProbeTaskModel(Base):
+    __tablename__ = "probe_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    interval_sec: Mapped[int] = mapped_column(Integer, default=300)
+    domains: Mapped[list[str]] = mapped_column(JSON, default=list)
+    domain_timeout_ms: Mapped[int] = mapped_column(Integer, default=2_000)
+    allow_icmp: Mapped[bool] = mapped_column(Boolean, default=False)
+    return_route_targets: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    return_route_timeout_seconds: Mapped[int] = mapped_column(Integer, default=25)
+    ip_version: Mapped[int] = mapped_column(Integer, default=4)
+    command_timeout_ms: Mapped[int] = mapped_column(Integer, default=90_000)
+    last_dispatched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class InventoryStore:
     def __init__(self, database_url: str) -> None:
         self._engine = create_inventory_engine(database_url)
@@ -1029,6 +1065,118 @@ class InventoryStore:
             session.commit()
             session.refresh(settings)
             return ProbeSettingsResponse(settings=self._probe_settings_read(session, settings))
+
+    def list_probe_tasks(self) -> list[ProbeTaskRead]:
+        with self._session() as session:
+            tasks = session.scalars(
+                select(ProbeTaskModel).order_by(ProbeTaskModel.created_at)
+            ).all()
+            return [self._probe_task_read(task) for task in tasks]
+
+    def create_probe_task(self, payload: ProbeTaskCreate) -> ProbeTaskRead:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            server = session.get(ServerModel, str(payload.server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {payload.server_id}")
+            task = ProbeTaskModel(
+                id=str(uuid4()),
+                server_id=server.id,
+                kind=payload.kind,
+                enabled=payload.enabled,
+                interval_sec=payload.interval_sec,
+                domains=list(payload.domains),
+                domain_timeout_ms=payload.domain_timeout_ms,
+                allow_icmp=payload.allow_icmp,
+                return_route_targets=[
+                    target.model_dump(mode="json") for target in payload.return_route_targets
+                ],
+                return_route_timeout_seconds=payload.return_route_timeout_seconds,
+                ip_version=payload.ip_version,
+                command_timeout_ms=payload.command_timeout_ms,
+                last_dispatched_at=None,
+                next_run_at=(
+                    self._aware_datetime(payload.next_run_at) if payload.next_run_at else now
+                ),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(task)
+            session.commit()
+            session.refresh(task)
+            return self._probe_task_read(task)
+
+    def update_probe_task(self, task_id: UUID, payload: ProbeTaskUpdate) -> ProbeTaskRead:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            task = session.get(ProbeTaskModel, str(task_id))
+            if not task:
+                raise ProbeTaskNotFoundError(f"probe task not found: {task_id}")
+
+            update = payload.model_dump(exclude_unset=True)
+            if "return_route_targets" in update and update["return_route_targets"] is not None:
+                update["return_route_targets"] = [
+                    target.model_dump(mode="json")
+                    if isinstance(target, ProbeTaskReturnRouteTarget)
+                    else target
+                    for target in update["return_route_targets"]
+                ]
+            if "next_run_at" in update and update["next_run_at"] is None:
+                update["next_run_at"] = now
+            for field, value in update.items():
+                if value is not None:
+                    next_value = self._aware_datetime(value) if field == "next_run_at" else value
+                    setattr(task, field, next_value)
+
+            self._validate_probe_task_model(task)
+            task.updated_at = now
+            session.commit()
+            session.refresh(task)
+            return self._probe_task_read(task)
+
+    def dispatch_due_probe_tasks(
+        self,
+        limit: int = 100,
+        now: datetime | None = None,
+    ) -> tuple[datetime, list[tuple[ProbeTaskRead, AgentCommandRead]]]:
+        active_now = self._aware_datetime(now or datetime.now(tz=UTC))
+        with self._session() as session:
+            due_tasks = session.scalars(
+                select(ProbeTaskModel)
+                .where(
+                    ProbeTaskModel.enabled.is_(True),
+                    ProbeTaskModel.next_run_at <= active_now,
+                )
+                .order_by(ProbeTaskModel.next_run_at, ProbeTaskModel.created_at)
+                .limit(limit)
+            ).all()
+
+            dispatched: list[tuple[ProbeTaskModel, CommandModel]] = []
+            for task in due_tasks:
+                server = session.get(ServerModel, task.server_id)
+                if not server:
+                    task.enabled = False
+                    task.updated_at = active_now
+                    continue
+                command = self._create_command_model(
+                    session,
+                    server,
+                    self._probe_task_command(task),
+                    active_now,
+                )
+                task.last_dispatched_at = active_now
+                task.next_run_at = active_now + timedelta(seconds=task.interval_sec)
+                task.updated_at = active_now
+                dispatched.append((task, command))
+
+            session.commit()
+            for task, command in dispatched:
+                session.refresh(task)
+                session.refresh(command)
+            return active_now, [
+                (self._probe_task_read(task), self._command_read(command))
+                for task, command in dispatched
+            ]
 
     def public_probe_series(
         self,
@@ -2080,6 +2228,85 @@ class InventoryStore:
             appearance=ProbeAppearance.model_validate(settings.appearance or {}),
             updated_at=InventoryStore._aware_datetime(settings.updated_at),
         )
+
+    @staticmethod
+    def _probe_task_read(task: ProbeTaskModel) -> ProbeTaskRead:
+        return ProbeTaskRead(
+            id=UUID(task.id),
+            server_id=UUID(task.server_id),
+            kind=task.kind,
+            enabled=InventoryStore._stored_bool(task.enabled, True),
+            interval_sec=task.interval_sec,
+            domains=list(task.domains or []),
+            domain_timeout_ms=task.domain_timeout_ms,
+            allow_icmp=InventoryStore._stored_bool(task.allow_icmp, False),
+            return_route_targets=[
+                ProbeTaskReturnRouteTarget.model_validate(target)
+                for target in (task.return_route_targets or [])
+            ],
+            return_route_timeout_seconds=task.return_route_timeout_seconds,
+            ip_version=task.ip_version,
+            command_timeout_ms=task.command_timeout_ms,
+            last_dispatched_at=InventoryStore._aware_datetime(task.last_dispatched_at)
+            if task.last_dispatched_at
+            else None,
+            next_run_at=InventoryStore._aware_datetime(task.next_run_at),
+            created_at=InventoryStore._aware_datetime(task.created_at),
+            updated_at=InventoryStore._aware_datetime(task.updated_at),
+        )
+
+    @staticmethod
+    def _validate_probe_task_model(task: ProbeTaskModel) -> None:
+        ProbeTaskCreate(
+            server_id=UUID(task.server_id),
+            kind=task.kind,
+            enabled=task.enabled,
+            interval_sec=task.interval_sec,
+            domains=list(task.domains or []),
+            domain_timeout_ms=task.domain_timeout_ms,
+            allow_icmp=task.allow_icmp,
+            return_route_targets=[
+                ProbeTaskReturnRouteTarget.model_validate(target)
+                for target in (task.return_route_targets or [])
+            ],
+            return_route_timeout_seconds=task.return_route_timeout_seconds,
+            ip_version=task.ip_version,
+            command_timeout_ms=task.command_timeout_ms,
+            next_run_at=task.next_run_at,
+        )
+
+    @staticmethod
+    def _probe_task_command(task: ProbeTaskModel) -> AgentCommandCreate:
+        match task.kind:
+            case "system":
+                return AgentCommandCreate(
+                    method="GET",
+                    path="/api/child/system/info",
+                    timeout_ms=task.command_timeout_ms,
+                )
+            case "domain_latency":
+                return AgentCommandCreate(
+                    method="POST",
+                    path="/api/child/domains/latency",
+                    body={
+                        "domains": list(task.domains or []),
+                        "timeout_ms": task.domain_timeout_ms,
+                        "allow_icmp": InventoryStore._stored_bool(task.allow_icmp, False),
+                    },
+                    timeout_ms=task.command_timeout_ms,
+                )
+            case "return_route":
+                return AgentCommandCreate(
+                    method="POST",
+                    path="/api/child/network/return-route-test",
+                    body={
+                        "ip_version": task.ip_version,
+                        "timeout_seconds": task.return_route_timeout_seconds,
+                        "targets": list(task.return_route_targets or []),
+                    },
+                    timeout_ms=task.command_timeout_ms,
+                )
+        raise ValueError(f"unsupported probe task kind: {task.kind}")
 
     @staticmethod
     def _stored_bool(value: bool | None, default: bool) -> bool:
@@ -4387,6 +4614,7 @@ class InventoryStore:
         server.last_heartbeat = now
         server.updated_at = now
         self._upsert_return_route_results(session, server, command, payload, now)
+        self._record_domain_latency_result(session, server, command, payload, now)
 
     def _upsert_return_route_results(
         self,
@@ -4479,6 +4707,83 @@ class InventoryStore:
         normalized = str(value).strip()
         normalized = "".join(char for char in normalized if ord(char) >= 32)
         return normalized[:max_length]
+
+    def _record_domain_latency_result(
+        self,
+        session: Session,
+        server: ServerModel,
+        command: CommandModel,
+        payload: AgentCommandResultRequest,
+        received_at: datetime,
+    ) -> None:
+        if command.path != "/api/child/domains/latency" or payload.error or payload.status >= 400:
+            return
+        samples = self._domain_latency_result_samples(payload.body, received_at)
+        if not samples:
+            return
+        telemetry = TelemetrySnapshotModel(
+            id=str(uuid4()),
+            server_id=server.id,
+            reported_at=received_at,
+            received_at=received_at,
+            stats=None,
+            online_users={},
+            user_speeds={},
+            conn_counts={},
+            system_rx_total=None,
+            system_tx_total=None,
+            system_boot_time_unix=None,
+            sysmetrics=None,
+            latency=[sample.model_dump(mode="json") for sample in samples],
+        )
+        session.add(telemetry)
+
+    @staticmethod
+    def _domain_latency_result_samples(
+        body: Any,
+        received_at: datetime,
+    ) -> list[ProbeLatencySample]:
+        samples: list[ProbeLatencySample] = []
+        for item in InventoryStore._domain_latency_result_items(body):
+            if not isinstance(item, dict):
+                continue
+            key = InventoryStore._domain_latency_key(item)
+            if not key:
+                continue
+            at = InventoryStore._nonnegative_int(item.get("at"))
+            samples.append(
+                ProbeLatencySample(
+                    key=key,
+                    success=bool(item.get("success")),
+                    latency_ms=InventoryStore._nonnegative_int(item.get("latency_ms")) or 0,
+                    at=at if at is not None else int(received_at.timestamp()),
+                )
+            )
+        return samples
+
+    @staticmethod
+    def _domain_latency_result_items(body: Any) -> list[Any]:
+        if isinstance(body, dict):
+            results = body.get("results")
+            return results if isinstance(results, list) else []
+        return body if isinstance(body, list) else []
+
+    @staticmethod
+    def _domain_latency_key(item: dict[str, Any]) -> str:
+        raw = item.get("key") or item.get("domain") or item.get("target")
+        if raw is None:
+            return ""
+        normalized = str(raw).strip()
+        normalized = "".join(char for char in normalized if ord(char) >= 32)
+        return normalized[:120]
+
+    @staticmethod
+    def _nonnegative_int(value: Any) -> int | None:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return max(parsed, 0)
 
 
 def create_inventory_engine(database_url: str) -> Engine:
