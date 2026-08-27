@@ -10,6 +10,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
+  "crossplane>=0.5.8,<0.6",
+  "cryptography>=44,<47",
   "httpx>=0.28,<1.0",
   "pydantic>=2.9,<3.0",
   "psutil>=6.0,<8.0",

@@ -67,7 +67,10 @@ class Agent:
                 and time.monotonic() - self.last_contact
                 <= max(45, self.config.heartbeat_seconds * 3)
             ),
-            "runtime_ready": not desired or await self.runtime.running(),
+            "runtime_ready": (not desired or await self.runtime.running()) and (
+                not self.journal.desired_running(False, "nginx")
+                or await self.operations.nginx.running()
+            ),
         }
 
     async def health_loop(self) -> None:
@@ -156,7 +159,7 @@ class Agent:
             await self.send("heartbeat", {})
             if time.monotonic() >= next_telemetry:
                 await self.send("telemetry", await self.collect_telemetry())
-                await self.send("scan_result", await self.runtime.scan())
+                await self.send("scan_result", await self.operations.scan())
                 next_telemetry = time.monotonic() + self.config.telemetry_seconds
             await asyncio.sleep(self.config.heartbeat_seconds)
 
@@ -278,7 +281,7 @@ class Agent:
                     client, base + "/telemetry", {"token": token, **await self.collect_telemetry()}
                 )
                 await self._post(
-                    client, base + "/scan", {"token": token, **await self.runtime.scan()}
+                    client, base + "/scan", {"token": token, **await self.operations.scan()}
                 )
                 next_report = time.monotonic() + self.config.telemetry_seconds
             await asyncio.sleep(self.config.heartbeat_seconds)
@@ -301,6 +304,14 @@ class Agent:
             except (OSError, ValueError, TimeoutError) as exc:
                 log.warning(
                     "Xray unavailable (%s); agent connection remains active", type(exc).__name__
+                )
+            try:
+                async with self.runtime.lock:
+                    if self.journal.desired_running(False, "nginx"):
+                        await self.operations.nginx.start()
+            except (OSError, ValueError, TimeoutError) as exc:
+                log.warning(
+                    "Nginx unavailable (%s); agent connection remains active", type(exc).__name__
                 )
             await asyncio.sleep(5)
 
@@ -339,5 +350,6 @@ class Agent:
         for task in self.tasks:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
+        await self.operations.nginx.close()
         await self.runtime.close()
         self.journal.close()

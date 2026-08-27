@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from open_node.core.config import Settings
 from open_node.domain.inventory import AgentCapabilities, AgentCommandResultRequest
 from open_node.main import create_app
-from open_node.services.inventory import CommandModel
+from open_node.services.inventory import AgentScanResultModel, CommandModel
 from sqlalchemy import Column, MetaData, Table, select, update
 
 
@@ -30,6 +30,12 @@ def make_client(tmp_path: Path) -> TestClient:
 def scan_result_payload() -> dict[str, object]:
     return {
         "xray_running": True,
+        "nginx": {
+            "running": True, "installed": True, "available": True, "mode": "managed",
+            "config_path": "/opt/open-node-agent/config/nginx/nginx.conf",
+            "certificate_dir": "/opt/open-node-agent/config/certificates",
+            "html_path": "/opt/open-node-agent/state/nginx/html",
+        },
         "xray_version": "Xray 1.8.24",
         "api_port": 46736,
         "config_path": "/usr/local/etc/xray/config.json",
@@ -52,6 +58,7 @@ def test_agent_can_report_scan_over_http_without_operator_session(tmp_path: Path
     assert created["agent_token"] not in response.text
     stored = client.get(f"/api/v1/servers/{created['server']['id']}/scan/latest").json()
     assert stored["scan"]["xray_running"] is True
+    assert stored["scan"]["nginx"] == scan_result_payload()["nginx"]
     rejected = public.post("/api/v1/agents/scan", json={**payload, "token": "invalid"})
     assert rejected.status_code == 401
 
@@ -3021,6 +3028,39 @@ def test_existing_sqlite_commands_migrate_without_losing_history(tmp_path: Path)
     assert recovery["commands"][1]["depends_on_command_id"] == recovery["commands"][0]["id"]
 
 
+def test_existing_sqlite_scans_gain_nginx_without_losing_xray_inventory(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-scan-schema"}).json()
+    reported = client.post("/api/v1/agents/scan", json={
+        "token": created["agent_token"], **scan_result_payload(),
+    })
+    assert reported.status_code == 200
+    legacy = Table(
+        "agent_scan_results", MetaData(),
+        *[
+            Column(column.name, column.type,
+                   primary_key=column.primary_key, nullable=column.nullable)
+            for column in AgentScanResultModel.__table__.columns if column.name != "nginx"
+        ],
+    )
+    with client.app.state.inventory._engine.begin() as connection:
+        row = connection.execute(select(AgentScanResultModel.__table__)).mappings().one()
+        AgentScanResultModel.__table__.drop(connection)
+        legacy.create(connection)
+        connection.execute(legacy.insert().values(
+            {column.name: row[column.name] for column in legacy.columns}
+        ))
+    upgraded = make_client(tmp_path)
+    url = f"/api/v1/servers/{created['server']['id']}/scan/latest"
+    migrated = upgraded.get(url).json()["scan"]
+    assert migrated["nginx"] is None
+    assert migrated["inbounds"] == scan_result_payload()["inbounds"]
+    assert upgraded.post("/api/v1/agents/scan", json={
+        "token": created["agent_token"], **scan_result_payload(),
+    }).status_code == 200
+    assert upgraded.get(url).json()["scan"]["nginx"] == scan_result_payload()["nginx"]
+
+
 def test_xray_mutating_commands_queue_deduped_master_snapshot_refresh(
     tmp_path: Path,
 ) -> None:
@@ -4108,6 +4148,7 @@ def test_agent_websocket_scan_result_updates_latest_without_license(tmp_path: Pa
     assert payload["scan"]["xray_running"] is True
     assert payload["scan"]["config_path"] == "/usr/local/etc/xray/config.json"
     assert payload["scan"]["message"] == "Xray is running, found 1 inbound(s)"
+    assert payload["scan"]["nginx"] == scan_result_payload()["nginx"]
 
 
 def test_online_agent_websocket_receives_rpc_call_and_completes_command(tmp_path: Path) -> None:

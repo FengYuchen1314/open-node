@@ -139,7 +139,7 @@ async def test_long_failure_can_be_accepted_by_control_plane(config):
 async def test_unimplemented_and_unexpected_operations_do_not_report_success(config):
     agent = Agent(config)
     try:
-        unsupported = await agent.execute(command(path="/api/child/nginx/install"))
+        unsupported = await agent.execute(command(path="/api/child/warp/install"))
         assert unsupported["status"] == 501
         agent.operations.handle = AsyncMock(side_effect=[RuntimeError("bug"), {"success": True}])
         assert (await agent.execute(command(request_id="unexpected")))["status"] == 500

@@ -100,6 +100,31 @@ any cleanup that needs attention. Stopped-Agent upgrades and path/ownership
 guards have additional focused unit tests. External `runtime_mode: systemd`
 and arbitrary future schema rollback are not covered by this smoke.
 
+## Nginx And Certificate Smoke
+
+On the root-accessible systemd VPS, supply a trusted Nginx binary and matching
+stream module. Debian packages can be downloaded and extracted into a disposable
+directory with `apt-get download` and `dpkg-deb -x`, without installing a global
+service. Install `cryptography` in the smoke runner environment, then run:
+
+```bash
+backend/.venv/bin/pip install cryptography
+backend/.venv/bin/python scripts/vps/smoke-nginx.py \
+  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --nginx /path/to/extracted/usr/sbin/nginx \
+  --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so
+```
+
+An optional `--xray-archive` uses the existing pinned-digest Xray fixture. The
+test installs a separate non-root Agent service for each transport, then checks
+real HTTP, verified TLS, leaf serial rotation, key mismatch rejection, actual
+reverse-proxy and stream response bytes, invalid configuration and occupied-port
+rollback, exact stream cleanup, private file boundaries, site deletion, logs,
+independent stop intent, Agent/Nginx crashes, durable interrupted-file recovery,
+and data-preserving uninstall/reinstall. Test certificates are local fixtures;
+no public CA or real domain validation is used. Fixture units/accounts and
+directories are purged after the run, with existing services untouched.
+
 ## Reference-Agent Smoke
 
 After installing the backend development dependencies, run this on the VPS
@@ -154,17 +179,21 @@ bootstrap token. No test disables management authentication.
 
 ## Latest Verification
 
-On 2026-08-28, the Agent-deployment worktree passed on the VPS:
+On 2026-08-27 (UTC), the Nginx/certificate worktree passed on the VPS:
 
-- Backend: 142 tests, including HTTP agent scan reporting, anonymous management-route rejection, session
+- Backend: 143 tests, including HTTP/WebSocket Nginx scan reporting, legacy SQLite
+  scan-schema migration, anonymous management-route rejection, session
   persistence/expiry/revocation, CSRF/Origin rejection, concurrent login limiting,
   a password-reset/login race, administrator CLI recovery, and the existing
   inventory, dependency, migration, subscription, and change-set suites.
-- Independent agent: 58 tests, including private state/lock protection, TLS
+- Independent agent: 74 tests, including private state/lock protection, TLS
   configuration, persistent deduplication, transport reconnects, heartbeats
   during commands, interrupted execution, bounded errors/subprocesses, atomic
   rollback, client edits, stop intent, network rate calculation, deployment
   ownership/path guards, package identity, activation recovery, and readiness checks.
+  New coverage includes certificate matching/SAN/dates, file-boundary enforcement,
+  include parsing/cycles, multi-file rollback, command cancellation, interrupted-file
+  recovery, exact stream cleanup, separate stop intent, and master PID reuse guards.
 - Agent wheel: isolated build and installation into a separate environment;
   real Xray smoke passed over WebSocket and HTTP, including provisioning,
   revocation, actual forwarding/statistics, failed-start rollback, recovery,
@@ -173,13 +202,19 @@ On 2026-08-28, the Agent-deployment worktree passed on the VPS:
   ownership and forwarding, upgrade/rollback, failed preflight and startup,
   interrupted-switch recovery, crash restart with child cleanup, data-preserving
   uninstall/reinstall, and explicit purge. No fixture units/accounts remain.
+- Real Nginx: both transports with non-root Debian Nginx 1.22.1, verified HTTP/TLS,
+  leaf serial rotation, key rejection, proxy/stream response bytes, occupied-listener
+  rollback, exact stream cleanup, Agent and Nginx master crash recovery, interrupted
+  file recovery, site deletion, and data-preserving service removal/reinstallation.
 - Frontend: 74 tests, including session/CSRF request handling, expired-session
   transitions, waiting/skipped Vuetify component rendering, and the production build.
 - Probe Worker: TypeScript checks.
-- Ruff: backend, independent agent, and all four smoke scripts.
+- Ruff: backend, independent agent, and all five smoke scripts.
 - Reference-agent smoke: all ten stages, with the pinned image.
 - Chromium operator smoke: desktop 1440x900 and mobile 390x844 sign-in/access,
-  server creation, reload persistence, password change, logout, and expiry.
+  server creation, reload persistence, password change, logout, and expiry. Nginx
+  form defaults, page/control bounds, and full visibility of the active tab are
+  also checked on both viewports, with configuration screenshots.
 
 The backend test run still reports a Starlette/httpx deprecation warning, and
 the frontend build reports a large bundle warning. Neither is a failed check.

@@ -44,7 +44,9 @@ including newly provisioned users, failed-restart rollback, and restart-safe
 command deduplication. The [host deployment CLI](docs/agent-deployment.md) adds
 a dedicated systemd account, per-release environments, upgrade rollback,
 interrupted-switch recovery, and data-preserving uninstall/reinstall.
-Remote lifecycle handlers, Nginx/WARP, and fork-specific runtime workflows are
+Optional [Nginx and certificate management](docs/nginx-management.md) supports
+owned HTTP/TLS sites and supplied certificate rotation. Remote lifecycle
+handlers, WARP, ACME renewal, and fork-specific runtime workflows are
 still incomplete; control-plane wrappers
 for those operations do not imply the independent agent implements them.
 

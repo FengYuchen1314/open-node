@@ -807,6 +807,7 @@ class AgentScanResultModel(Base):
         primary_key=True,
     )
     xray_running: Mapped[bool] = mapped_column(Boolean, default=False)
+    nginx: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     xray_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
     api_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     config_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -1190,6 +1191,8 @@ class InventoryStore:
             return
         inspector = inspect(self._engine)
         table_names = set(inspector.get_table_names())
+        if "agent_scan_results" in table_names:
+            self._sqlite_add_missing_columns(inspector, "agent_scan_results", {"nginx": "JSON"})
         if "agent_commands" in table_names:
             self._sqlite_add_missing_columns(
                 inspector,
@@ -8144,6 +8147,7 @@ class InventoryStore:
     def _scan_result_read(scan: AgentScanResultModel) -> AgentScanResultRead:
         return AgentScanResultRead(
             server_id=UUID(scan.server_id),
+            nginx=scan.nginx,
             xray_running=scan.xray_running,
             xray_version=scan.xray_version,
             api_port=scan.api_port,

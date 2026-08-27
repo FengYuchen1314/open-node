@@ -397,6 +397,16 @@ WantedBy=multi-user.target
             write_file(target, Path(config["ca_file"]).read_bytes(), owner=self.account_owner())
             config["ca_file"] = str(target)
         write_file(self.root / "runtime/xray", xray_binary.read_bytes(), mode=0o755)
+        if config.get("nginx_binary"):
+            target = self.root / "runtime/nginx"
+            write_file(target, Path(config["nginx_binary"]).read_bytes(), mode=0o755)
+            config["nginx_binary"] = str(target)
+        modules = []
+        for index, source_module in enumerate(config.get("nginx_modules", [])):
+            target = self.root / "runtime" / f"nginx-module-{index}.so"
+            write_file(target, Path(source_module).read_bytes(), mode=0o644)
+            modules.append(str(target))
+        config["nginx_modules"] = modules
         if asset_dir:
             for name in ("geoip.dat", "geosite.dat"):
                 if (asset_dir / name).is_file():
@@ -422,6 +432,9 @@ WantedBy=multi-user.target
             self.config,
             "--check",
         )
+        config = json.loads(self.config.read_text())
+        if config.get("nginx_binary"):
+            command("runuser", "-u", self.user, "--", config["nginx_binary"], "-V")
         command(
             "runuser",
             "-u",

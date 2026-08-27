@@ -457,7 +457,18 @@ class AgentTelemetryRead(BaseModel):
     latency: list[ProbeLatencySample] = Field(default_factory=list)
 
 
+class AgentNginxScan(BaseModel):
+    running: bool = False
+    installed: bool = False
+    available: bool = False
+    mode: Literal["managed"] = "managed"
+    config_path: str = Field(max_length=512)
+    certificate_dir: str = Field(max_length=512)
+    html_path: str = Field(max_length=512)
+
+
 class AgentScanResultPayload(BaseModel):
+    nginx: AgentNginxScan | None = None
     xray_running: bool = False
     xray_version: str | None = Field(default=None, max_length=120)
     api_port: int | None = Field(default=None, ge=0, le=65535)

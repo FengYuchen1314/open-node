@@ -81,15 +81,17 @@ class CommandJournal:
             )
         ]
 
-    def desired_running(self, default: bool) -> bool:
-        row = self.db.execute("SELECT value FROM settings WHERE key='runtime_running'").fetchone()
+    def desired_running(self, default: bool, service: str = "xray") -> bool:
+        key = "runtime_running" if service == "xray" else service + "_running"
+        row = self.db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
         return row[0] == "true" if row else default
 
-    def set_desired_running(self, running: bool) -> None:
+    def set_desired_running(self, running: bool, service: str = "xray") -> None:
+        key = "runtime_running" if service == "xray" else service + "_running"
         with self.db:
             self.db.execute(
-                "INSERT OR REPLACE INTO settings VALUES ('runtime_running', ?)",
-                ("true" if running else "false",),
+                "INSERT OR REPLACE INTO settings VALUES (?, ?)",
+                (key, "true" if running else "false"),
             )
 
     def close(self) -> None:

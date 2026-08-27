@@ -1,6 +1,7 @@
 """Run browser-level operator workflows against disposable, loopback-only services."""
 
 import argparse
+import json
 import os
 import secrets
 import socket
@@ -37,12 +38,20 @@ def sign_in(page, password: str) -> None:
 
 def check_layout(page) -> None:
     page.wait_for_function("document.documentElement.scrollWidth <= innerWidth + 1", timeout=5000)
+    page.wait_for_function("""() =>
+        [...document.querySelectorAll('form input:not([hidden]), form button')]
+        .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
+        .every(el => {
+            const box = el.getBoundingClientRect();
+            return box.x >= 0 && box.right <= innerWidth + 1;
+        })
+    """, timeout=5000)
     for control in page.locator("form input:not([hidden]), form button").all():
         if control.is_visible():
             box = control.bounding_box()
             assert (
                 box and box["x"] >= 0 and box["x"] + box["width"] <= page.viewport_size["width"] + 1
-            )
+            ), {"box": box, "control": control.evaluate("el => el.outerHTML.slice(0, 300)")}
 
 
 def exercise(url: str, password: str, output: Path, database_url: str) -> None:
@@ -72,6 +81,39 @@ def exercise(url: str, password: str, output: Path, database_url: str) -> None:
         page.reload()
         expect(page.get_by_text("browser-smoke-edge", exact=True).first).to_be_visible()
         print("PASS desktop sign-in, authenticated server creation, and reload", flush=True)
+
+        page.goto(f"{url}/config")
+        page.get_by_role("tab", name="Files", exact=True).click()
+        nginx_form = page.locator("form").filter(has=page.get_by_text("Nginx file", exact=True))
+        expect(nginx_form.get_by_label("Read path", exact=True)).to_have_value("servers/site.conf")
+        expect(nginx_form.get_by_label("Write path", exact=True)).to_have_value("servers/site.conf")
+        page.get_by_role("tab", name="Sites", exact=True).click()
+        payload = page.get_by_label("Payload", exact=True)
+        expect(payload).to_be_visible()
+        assert json.loads(payload.input_value()) == {"domain": "example.com"}
+        for width, height, name in ((1440, 900, "desktop"), (390, 844, "mobile")):
+            page.set_viewport_size({"width": width, "height": height})
+            page.wait_for_function("""() => {
+                const tab = document.querySelector('[role=tab][aria-selected=true]');
+                const track = tab.closest('.v-slide-group__container').getBoundingClientRect();
+                const box = tab.getBoundingClientRect();
+                return box.left >= track.left - 1 && box.right <= track.right + 1;
+            }""", timeout=5000)
+            page.screenshot(path=output / f"nginx-sites-{name}.png", full_page=True,
+                            animations="disabled")
+            try:
+                check_layout(page)
+            except Exception:
+                print(page.evaluate("""() => [...document.querySelectorAll('body *')]
+                    .filter(el => el.getClientRects().length &&
+                        el.getBoundingClientRect().right > innerWidth + 1)
+                    .slice(0, 20).map(el => ({tag: el.tagName, class: el.className,
+                        width: el.getBoundingClientRect().width,
+                        right: el.getBoundingClientRect().right}))
+                """), file=sys.stderr)
+                raise
+        page.set_viewport_size({"width": 1440, "height": 900})
+        print("PASS owned Nginx paths and SSL form on desktop/mobile", flush=True)
 
         page.get_by_role("link", name="Access", exact=True).click()
         expect(page.get_by_role("heading", name="Change Password", exact=True)).to_be_visible()

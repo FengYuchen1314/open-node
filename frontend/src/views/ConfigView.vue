@@ -101,8 +101,8 @@ const nginxConfigForm = reactive({
   configText: "events {}\nhttp {}\n",
 });
 const nginxFileForm = reactive({
-  file: "/etc/nginx/conf.d/site.conf",
-  path: "/etc/nginx/conf.d/site.conf",
+  file: "servers/site.conf",
+  path: "servers/site.conf",
   content: "server {\n    listen 80;\n}\n",
 });
 const runtimeOperation = ref<AgentOperationKind>("inbounds_manage");
@@ -111,7 +111,7 @@ const runtimePayloadText = ref(
 );
 const siteOperation = ref<AgentOperationKind>("nginx_setup_ssl");
 const sitePayloadText = ref(
-  '{\n  "domain": "example.com",\n  "domain_config": "server {\\n    listen 443 ssl;\\n}"\n}',
+  '{\n  "domain": "example.com"\n}',
 );
 const runtimeTunnelChainForm = reactive({
   label: "relay",
@@ -1516,7 +1516,7 @@ function formatDateTime(value: string) {
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell config-page">
     <section class="page-heading">
       <div>
         <div class="eyebrow">Agent config</div>
@@ -1574,7 +1574,7 @@ function formatDateTime(value: string) {
           />
         </div>
 
-        <v-tabs v-model="activeTab" class="config-tabs" density="comfortable">
+        <v-tabs v-model="activeTab" class="config-tabs" density="comfortable" center-active show-arrows>
           <v-tab prepend-icon="mdi-alpha-x-circle-outline" value="xray">Xray</v-tab>
           <v-tab prepend-icon="mdi-tune-variant" value="system">System</v-tab>
           <v-tab prepend-icon="mdi-routes" value="runtime">Runtime</v-tab>

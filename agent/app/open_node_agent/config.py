@@ -1,5 +1,6 @@
 import os
 import ssl
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
@@ -25,20 +26,40 @@ class AgentConfig(BaseModel):
         default="open-node-xray.service", pattern=r"^[a-zA-Z0-9_.@-]+\.service$"
     )
     auto_start: bool = True
+    nginx_binary: Path | None = None
+    nginx_modules: list[Path] = Field(default_factory=list, max_length=16)
+    nginx_site_roots: list[Path] = Field(default_factory=list, max_length=16)
+    nginx_http_port: int = Field(default=80, ge=1, le=65535)
+    nginx_https_port: int = Field(default=443, ge=1, le=65535)
+    nginx_listen_address: str = "0.0.0.0"
     stats_address: str | None = None
     heartbeat_seconds: float = Field(default=15, ge=1, le=300)
     telemetry_seconds: float = Field(default=30, ge=1, le=300)
     poll_seconds: float = Field(default=3, ge=0.2, le=60)
 
-    @field_validator("state_dir", "xray_binary", "xray_config", "ca_file")
+    @field_validator("nginx_listen_address")
+    @classmethod
+    def listen_address(cls, value: str) -> str:
+        return str(ip_address(value))
+
+    @field_validator("state_dir", "xray_binary", "xray_config", "ca_file", "nginx_binary")
     @classmethod
     def absolute_path(cls, value: Path | None) -> Path | None:
         if value is not None and not value.is_absolute():
             raise ValueError("Agent filesystem paths must be absolute")
         return value
 
+    @field_validator("nginx_modules", "nginx_site_roots")
+    @classmethod
+    def absolute_paths(cls, value: list[Path]) -> list[Path]:
+        if any(not path.is_absolute() or ".." in path.parts for path in value):
+            raise ValueError("Nginx module and site paths must be absolute without traversal")
+        return value
+
     @model_validator(mode="after")
     def validate_master(self):
+        if self.nginx_modules and self.nginx_binary is None:
+            raise ValueError("nginx_modules requires nginx_binary")
         url = urlsplit(self.master_url)
         if url.scheme not in {"http", "https"} or not url.hostname:
             raise ValueError("master_url must be an HTTP(S) URL")

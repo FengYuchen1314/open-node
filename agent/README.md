@@ -84,9 +84,12 @@ batch client provisioning, host metrics/NICs, network speed, Xray stats, and
 bounded Xray logs. Network speed is bytes per second between successive speed
 requests; the first sample returns zero and counter resets never produce
 negative rates.
-Unsupported operations return 501 rather than reporting success. Nginx/WARP,
-certificate lifecycle, remote upgrade/removal handlers, fork-only protocols,
-and further migration workflows remain release gates.
+Optional [owned Nginx management](../docs/nginx-management.md) includes service
+control, configuration/site files, HTTP/TLS sites, reverse proxies, stream-port
+cleanup, logs, and supplied certificate deployment/rotation with rollback.
+Unsupported operations return 501 rather than reporting success. WARP, ACME
+issuance/renewal, remote upgrade/removal handlers, fork-only protocols, and
+further migration workflows remain release gates.
 
 ## Verification
 

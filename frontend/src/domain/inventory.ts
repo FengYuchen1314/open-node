@@ -222,6 +222,15 @@ export interface ServerTelemetryResponse {
 }
 
 export interface AgentScanResult {
+  nginx?: {
+    running: boolean;
+    installed: boolean;
+    available: boolean;
+    mode: "managed";
+    config_path: string;
+    certificate_dir: string;
+    html_path: string;
+  } | null;
   server_id: string;
   xray_running: boolean;
   xray_version?: string | null;

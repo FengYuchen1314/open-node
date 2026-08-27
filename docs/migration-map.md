@@ -207,8 +207,13 @@ These passing command and snapshot checks do not prove a complete replacement:
   path is implemented and tested; it is not a remote lifecycle handler.
 - Support or explicitly migrate existing agents that use MMWX `securechan`
   key exchange; JSON RPC compatibility alone does not cover them.
-- Complete Nginx/WARP, certificate, diagnostics, and remaining host operations
-  in the independent agent. Unimplemented operations currently return 501.
+- Owned Nginx HTTP/TLS/configuration/sites, reverse proxy, stream cleanup,
+  supplied certificate deployment/rotation, and crash/transaction recovery are
+  implemented in the independent agent. Complete WARP, ACME issuance/renewal,
+  diagnostics, and remaining host operations. Unimplemented operations return 501.
+- Adapt the high-level legacy tunnel-deploy templates to the independent
+  Nginx directory/ownership contract and supported runtime protocols; existing
+  MMWX/fork templates are not evidence for this migration path.
 - Verify the fork-specific runtime protocols and migration from fork-only
   configurations. Actual VLESS traffic is verified using official Xray with
   the independent agent; the reference-agent smoke still uses external mode

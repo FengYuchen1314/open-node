@@ -9,6 +9,7 @@ import psutil
 
 from open_node_agent import __version__
 from open_node_agent.journal import CommandJournal
+from open_node_agent.nginx import NginxRuntime
 from open_node_agent.runtime import RuntimeFailure, XrayRuntime
 
 
@@ -166,8 +167,12 @@ class Operations:
     def __init__(self, runtime: XrayRuntime, journal: CommandJournal):
         self.runtime = runtime
         self.journal = journal
+        self.nginx = NginxRuntime(runtime, journal)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
+
+    async def scan(self) -> dict:
+        return {**await self.runtime.scan(), "nginx": await self.nginx.status()}
 
     def network_speed(self) -> dict:
         current = telemetry()["system"]
@@ -193,6 +198,11 @@ class Operations:
             raise RuntimeFailure("Command body must be an object")
         query = parse_qs(command.get("query") or "")
         async with self.runtime.lock:
+            if path.startswith("/api/child/nginx/") or path in {
+                "/api/child/cert/deploy",
+                "/api/child/validate-site",
+            }:
+                return await self.nginx.handle(method, path, body, query)
             if path == "/api/child/xray/config":
                 supplied_path = body.get("path") or query.get("path", [None])[0]
                 if supplied_path and supplied_path != str(self.runtime.config.xray_config):
@@ -209,23 +219,40 @@ class Operations:
                 ok, output = await self.runtime.validate(body.get("config"))
                 return {"ok": ok, "output": output}
             if path == "/api/child/scan" and method == "POST":
-                return await self.runtime.scan()
+                return await self.scan()
             if path == "/api/child/services/status" and method == "GET":
                 return {
                     "success": True,
+                    "nginx": await self.nginx.status(),
                     "xray": {
                         "running": await self.runtime.running(),
                         "mode": self.runtime.config.runtime_mode,
                     },
                 }
             if path == "/api/child/services/control" and method == "POST":
-                if body.get("service") != "xray" or body.get("action") not in {
+                if body.get("service") not in {"xray", "nginx"} or body.get("action") not in {
                     "start",
                     "stop",
                     "restart",
                     "reload",
                 }:
-                    raise RuntimeFailure("Only the configured Xray service can be controlled")
+                    raise RuntimeFailure(
+                        "Only the configured Xray and Nginx services can be controlled"
+                    )
+                if body["service"] == "nginx":
+                    if body["action"] == "start":
+                        await self.nginx.start()
+                    elif body["action"] == "stop":
+                        await self.nginx.stop()
+                    elif body["action"] == "reload":
+                        await self.nginx.apply({}, activate=True)
+                    else:
+                        await self.nginx.apply({})
+                        await self.nginx.stop()
+                        await self.nginx.start()
+                    if body["action"] != "reload":
+                        self.journal.set_desired_running(body["action"] != "stop", "nginx")
+                    return {"success": True, **await self.nginx.status()}
                 desired = body["action"] != "stop"
                 if desired:
                     await (
@@ -263,7 +290,7 @@ class Operations:
                 return {
                     "success": True,
                     "agent_version": __version__,
-                    "runtime": await self.runtime.scan(),
+                    "runtime": await self.scan(),
                     **telemetry(),
                 }
             if path == "/api/child/system/nics" and method == "GET":
@@ -279,10 +306,11 @@ class Operations:
             if path == "/api/child/traffic" and method == "GET":
                 return {"success": True, "stats": await self.runtime.stats(), **telemetry()}
             if path == "/api/child/logs" and method == "GET":
-                if query.get("service", ["xray"])[0] != "xray":
-                    raise RuntimeFailure("This endpoint currently exposes only the owned Xray log")
+                service = query.get("service", ["xray"])[0]
+                if service not in {"xray", "nginx"}:
+                    raise RuntimeFailure("This endpoint exposes only owned Xray and Nginx logs")
                 lines = min(2000, max(1, int(query.get("lines", ["200"])[0])))
-                with (self.runtime.config.state_dir / "xray.log").open("rb") as log:
+                with (self.runtime.config.state_dir / (service + ".log")).open("rb") as log:
                     log.seek(max(0, log.seek(0, 2) - 128_000))
                     content = log.read().decode(errors="replace")
                 return {"success": True, "logs": "\n".join(content.splitlines()[-lines:])}

@@ -175,6 +175,15 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(340px, 480px);
 }
 
+.config-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.config-surface,
+.config-results-surface {
+  min-width: 0;
+}
+
 .subscription-layout {
   display: grid;
   gap: 16px;
@@ -279,10 +288,13 @@ body {
 
 .config-server-select {
   max-width: 300px;
+  min-width: 0;
 }
 
 .config-tabs {
   margin-top: 8px;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .config-window {
@@ -300,6 +312,8 @@ body {
 .config-form {
   display: grid;
   gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
 }
 
 .snapshot-panel {
@@ -1507,6 +1521,29 @@ body {
 
   .config-server-select {
     max-width: none;
+  }
+
+  .config-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .config-page {
+    padding: 20px;
+  }
+
+  .config-page .page-heading {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .config-page .page-title {
+    font-size: 24px;
+    overflow-wrap: anywhere;
+  }
+
+  .config-page .section-head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
   }
 
   .config-action-row,

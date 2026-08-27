@@ -9,6 +9,11 @@ This deploys the Agent and its owned Xray child, not the FastAPI/Vue control
 plane. The control plane must already be reachable and have issued this node's
 token. Do not reuse a production token while its previous agent is still running.
 
+Optional [Nginx and certificate management](nginx-management.md) runs another
+owned child under this account. Set `nginx_binary` and optional `nginx_modules`
+in the installation input to copy those runtime files, without replacing any
+existing Nginx service. Its desired running state participates in readiness.
+
 ## Prepare
 
 Use a trusted wheel built from this repository. The VPS test runner builds
