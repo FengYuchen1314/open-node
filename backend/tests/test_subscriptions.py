@@ -430,8 +430,17 @@ def test_subscription_node_preset_creates_renderable_node(tmp_path: Path) -> Non
         "trojan-tls",
         "shadowsocks-2022",
         "hysteria2",
+        "anytls",
+        "snell-v4",
+        "snell-v6",
+        "mieru",
         "routed-outbound",
     ]
+    presets_by_id = {preset["id"]: preset for preset in presets}
+    assert presets_by_id["anytls"]["config"]["idle-session-check-interval"] == 30
+    assert presets_by_id["snell-v6"]["client_template"]["v6Mode"] == "default"
+    assert "clientId" not in presets_by_id["snell-v6"]["client_template"]
+    assert presets_by_id["mieru"]["config"]["transport"] == "TCP"
 
     create_response = client.post(
         "/api/v1/node-presets/vless-vision-tls/nodes",
@@ -452,6 +461,195 @@ def test_subscription_node_preset_creates_renderable_node(tmp_path: Path) -> Non
     assert node["config"]["server"] == "edge.example.com"
     assert node["config"]["port"] == 8443
     assert node["client_template"]["flow"] == "xtls-rprx-vision"
+
+    snell_response = client.post(
+        "/api/v1/node-presets/snell-v6/nodes",
+        json={
+            "server_id": server_id,
+            "host": "snell.example.com",
+        },
+    )
+    assert snell_response.status_code == 201
+    snell_node = snell_response.json()["node"]
+    assert snell_node["protocol"] == "snell"
+    assert snell_node["inbound_tag"] == "snell-v6-443"
+    assert snell_node["config"]["server"] == "snell.example.com"
+    assert snell_node["config"]["version"] == 6
+    assert snell_node["client_template"]["v6Mode"] == "default"
+    assert "clientId" not in snell_node["client_template"]
+
+
+def test_xray_fork_protocols_provision_and_render_subscriptions(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    server = client.post(
+        "/api/v1/servers",
+        json={"name": "fork-edge", "domain": "fork.example.com"},
+    ).json()["server"]
+    user_response = client.post(
+        "/api/v1/users",
+        json={"username": "bob", "email": "bob@example.com"},
+    )
+    assert user_response.status_code == 201
+
+    node_payloads = [
+        {
+            "name": "AnyTLS Edge",
+            "server_id": server["id"],
+            "protocol": "anytls",
+            "inbound_tag": "anytls-443",
+            "client_template": {"email": "{username}__anytls-443"},
+            "config": {
+                "name": "AnyTLS Edge",
+                "type": "anytls",
+                "server": "fork.example.com",
+                "port": 443,
+                "udp": True,
+                "sni": "fork.example.com",
+                "idle-session-check-interval": 30,
+                "idle-session-timeout": 45,
+                "min-idle-session": 0,
+            },
+        },
+        {
+            "name": "Snell Edge",
+            "server_id": server["id"],
+            "protocol": "snell",
+            "inbound_tag": "snell-443",
+            "client_template": {
+                "email": "{username}__snell-443",
+                "version": 4,
+                "obfsMode": "http",
+                "obfsHost": "example.org",
+            },
+            "config": {
+                "name": "Snell Edge",
+                "type": "snell",
+                "server": "fork.example.com",
+                "port": 443,
+                "version": 4,
+                "udp": True,
+                "reuse": True,
+                "obfs-opts": {"mode": "http", "host": "example.org"},
+            },
+        },
+        {
+            "name": "Snell v6 Edge",
+            "server_id": server["id"],
+            "protocol": "snell",
+            "inbound_tag": "snell-v6-443",
+            "client_template": {
+                "email": "{username}__snell-v6-443",
+                "version": 6,
+                "v6Mode": "default",
+            },
+            "config": {
+                "name": "Snell v6 Edge",
+                "type": "snell",
+                "server": "fork.example.com",
+                "port": 443,
+                "version": 6,
+                "mode": "default",
+                "udp": True,
+            },
+        },
+        {
+            "name": "Mieru Edge",
+            "server_id": server["id"],
+            "protocol": "mieru",
+            "inbound_tag": "mieru-2999",
+            "client_template": {"email": "{username}__mieru-2999"},
+            "config": {
+                "name": "Mieru Edge",
+                "type": "mieru",
+                "server": "fork.example.com",
+                "port": 2999,
+                "transport": "TCP",
+            },
+        },
+    ]
+    node_ids = []
+    for payload in node_payloads:
+        response = client.post("/api/v1/nodes", json=payload)
+        assert response.status_code == 201
+        node_ids.append(response.json()["node"]["id"])
+
+    plan_response = client.post(
+        "/api/v1/plans",
+        json={"name": "Fork Protocols", "traffic_limit_gb": 64, "node_ids": node_ids},
+    )
+    assert plan_response.status_code == 201
+    assigned = client.post(
+        "/api/v1/users/bob/plan",
+        json={"plan_id": plan_response.json()["plan"]["id"]},
+    ).json()
+    clients_by_tag = {
+        item["tag"]: item["client"]
+        for item in assigned["provisioning_batches"][0]["body"]["inbound_clients"]
+    }
+
+    anytls_client = clients_by_tag["anytls-443"]
+    snell_client = clients_by_tag["snell-443"]
+    snell_v6_client = clients_by_tag["snell-v6-443"]
+    mieru_client = clients_by_tag["mieru-2999"]
+    assert str(UUID(anytls_client["password"])) == anytls_client["password"]
+    assert anytls_client["email"] == "bob__anytls-443"
+    assert str(UUID(snell_client["psk"])) == snell_client["psk"]
+    assert snell_client["version"] == 4
+    assert snell_client["obfsMode"] == "http"
+    assert snell_client["obfsHost"] == "example.org"
+    assert str(UUID(snell_v6_client["psk"])) == snell_v6_client["psk"]
+    assert snell_v6_client["version"] == 6
+    assert snell_v6_client["v6Mode"] == "default"
+    assert "clientId" not in snell_v6_client
+    assert mieru_client["username"] == "bob"
+    assert str(UUID(mieru_client["password"])) == mieru_client["password"]
+
+    token = client.post("/api/v1/users/bob/subscription-token").json()["subscription"]["token"]
+    clash_response = client.get(f"/api/v1/subscribe/{token}")
+    sing_box_response = client.get(f"/api/v1/subscribe/{token}?format=sing-box")
+
+    assert clash_response.status_code == 200
+    clash = yaml.safe_load(clash_response.text)
+    clash_proxies = {proxy["name"]: proxy for proxy in clash["proxies"]}
+    assert clash_proxies["AnyTLS Edge"]["password"] == anytls_client["password"]
+    assert clash_proxies["AnyTLS Edge"]["idle-session-timeout"] == 45
+    assert clash_proxies["Snell Edge"]["psk"] == snell_client["psk"]
+    assert clash_proxies["Snell Edge"]["obfs-opts"] == {"mode": "http", "host": "example.org"}
+    assert clash_proxies["Snell v6 Edge"]["psk"] == snell_v6_client["psk"]
+    assert clash_proxies["Snell v6 Edge"]["mode"] == "default"
+    assert clash_proxies["Mieru Edge"]["username"] == "bob"
+    assert clash_proxies["Mieru Edge"]["password"] == mieru_client["password"]
+    assert clash_proxies["Mieru Edge"]["transport"] == "TCP"
+
+    assert sing_box_response.status_code == 200
+    sing_box = json.loads(sing_box_response.text)
+    assert sing_box["outbounds"][0]["outbounds"] == [
+        "AnyTLS Edge",
+        "Snell Edge",
+        "Snell v6 Edge",
+    ]
+    sing_box_outbounds = {outbound["tag"]: outbound for outbound in sing_box["outbounds"][2:]}
+    anytls_outbound = sing_box_outbounds["AnyTLS Edge"]
+    assert anytls_outbound["type"] == "anytls"
+    assert anytls_outbound["password"] == anytls_client["password"]
+    assert anytls_outbound["idle_session_check_interval"] == "30s"
+    assert anytls_outbound["idle_session_timeout"] == "45s"
+    assert anytls_outbound["min_idle_session"] == 0
+    assert anytls_outbound["tls"] == {"enabled": True, "server_name": "fork.example.com"}
+    snell_outbound = sing_box_outbounds["Snell Edge"]
+    assert snell_outbound["type"] == "snell"
+    assert snell_outbound["version"] == 4
+    assert snell_outbound["psk"] == snell_client["psk"]
+    assert snell_outbound["reuse"] is True
+    assert snell_outbound["network"] == "tcp"
+    assert snell_outbound["obfs_mode"] == "http"
+    assert snell_outbound["obfs_host"] == "example.org"
+    snell_v6_outbound = sing_box_outbounds["Snell v6 Edge"]
+    assert snell_v6_outbound["version"] == 6
+    assert snell_v6_outbound["psk"] == snell_v6_client["psk"]
+    assert snell_v6_outbound["mode"] == "default"
+    assert "userkey" not in snell_v6_outbound
+    assert "Mieru Edge" not in sing_box_outbounds
 
 
 def test_subscription_catalog_export_import_round_trips_by_names(tmp_path: Path) -> None:

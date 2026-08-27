@@ -278,9 +278,9 @@ the active `mmw-agent` `/api/child/batch-apply` route.
 
 Node presets provide ready-made free catalog templates for common MMWX
 subscription shapes: VLESS Vision TLS, Trojan TLS, Shadowsocks 2022, Hysteria2,
-and routed outbound entries. Applying a preset creates a normal managed node
-for an existing inventory server while allowing operators to override host,
-port, tags, and route markers.
+AnyTLS, Snell v4/v6, Mieru, and routed outbound entries. Applying a preset
+creates a normal managed node for an existing inventory server while allowing
+operators to override host, port, tags, and route markers.
 
 Catalog export serializes users, nodes, plans, and optionally generated
 credentials by stable names instead of local database IDs. Catalog import can
@@ -298,9 +298,10 @@ and HTTP lease paths. The catalog response models all include
 Open Node also stores stable per-user, per-node credentials and public
 subscription tokens. Credential generation follows the active MMWX contract:
 `<username>__<inbound_tag>` client emails, UUID-style IDs for VLESS/VMess,
-password credentials for Trojan/AnyTLS/Hysteria, base64 Shadowsocks keys, and
-user/pass pairs for socks/http. The same credential row is reused for agent
-batch provisioning and Clash subscription rendering.
+password credentials for Trojan/AnyTLS/Hysteria, Snell PSK credentials, Mieru
+username/password credentials, base64 Shadowsocks keys, and user/pass pairs
+for socks/http. The same credential row is reused for agent batch provisioning
+and Clash subscription rendering.
 
 Users can receive a full token URL or short-code URL at:
 
@@ -320,7 +321,8 @@ YAML, and callers can request alternate formats with
 `GET /api/v1/subscribe/{token_or_short_code}?format=...`:
 
 - `clash`: Clash-compatible YAML with a select group.
-- `sing-box`: sing-box JSON outbounds with a selector.
+- `sing-box`: sing-box JSON outbounds with a selector, including AnyTLS and
+  Snell when their managed-node config contains the required client fields.
 - `uri-list`: plaintext proxy URI lines.
 - `base64`: base64-encoded URI list for clients that expect legacy
   subscription bodies.

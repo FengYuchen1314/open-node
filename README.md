@@ -35,8 +35,9 @@ operation wrappers, a subscription catalog with user-plan binding, optional
 agent `batch-apply` provisioning, public subscription links with generated
 per-user credentials, Clash/sing-box/URI subscription rendering, durable
 per-user traffic ledgering, rollback-friendly multi-server change sets, and
-subscription template presets, catalog import/export workflows, quota status
-plus traffic reset automation, and the customizable public probe surface with
+subscription template presets including Xray fork AnyTLS/Snell/Mieru coverage,
+catalog import/export workflows, quota status plus traffic reset automation,
+and the customizable public probe surface with
 region/provider/renewal metadata, daily traffic aggregation, and public insight
 views plus return-route summaries from agent test results, scheduled probe task
 dispatch, domain-latency result ingestion, cross-node target comparison, and

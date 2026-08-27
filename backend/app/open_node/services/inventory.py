@@ -288,6 +288,101 @@ _SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
         },
     },
     {
+        "id": "anytls",
+        "name": "AnyTLS",
+        "description": "AnyTLS node for the active Xray fork with generated passwords.",
+        "protocol": "anytls",
+        "node_type": "physical",
+        "inbound_tag": "anytls-443",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "anytls",
+        "tags": ["anytls", "tls"],
+        "client_template": {"email": "{username}__anytls-443"},
+        "config": {
+            "name": "{server_name} AnyTLS",
+            "type": "anytls",
+            "server": "{server_domain}",
+            "port": 443,
+            "udp": True,
+            "idle-session-check-interval": 30,
+            "idle-session-timeout": 30,
+            "min-idle-session": 0,
+        },
+    },
+    {
+        "id": "snell-v4",
+        "name": "Snell v4",
+        "description": "Snell v4 node with generated per-user PSK credentials.",
+        "protocol": "snell",
+        "node_type": "physical",
+        "inbound_tag": "snell-443",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "snell",
+        "tags": ["snell"],
+        "client_template": {
+            "email": "{username}__snell-443",
+            "version": 4,
+            "obfsMode": "none",
+        },
+        "config": {
+            "name": "{server_name} Snell",
+            "type": "snell",
+            "server": "{server_domain}",
+            "port": 443,
+            "version": 4,
+            "udp": True,
+            "reuse": True,
+        },
+    },
+    {
+        "id": "snell-v6",
+        "name": "Snell v6",
+        "description": "Snell v6 node using the fork's per-user PSK identification.",
+        "protocol": "snell",
+        "node_type": "physical",
+        "inbound_tag": "snell-v6-443",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "snell-v6",
+        "tags": ["snell", "v6"],
+        "client_template": {
+            "email": "{username}__snell-v6-443",
+            "version": 6,
+            "v6Mode": "default",
+        },
+        "config": {
+            "name": "{server_name} Snell v6",
+            "type": "snell",
+            "server": "{server_domain}",
+            "port": 443,
+            "version": 6,
+            "mode": "default",
+            "udp": True,
+        },
+    },
+    {
+        "id": "mieru",
+        "name": "Mieru",
+        "description": "Mieru node for the active Xray fork with username/password credentials.",
+        "protocol": "mieru",
+        "node_type": "physical",
+        "inbound_tag": "mieru-2999",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "mieru",
+        "tags": ["mieru"],
+        "client_template": {"email": "{username}__mieru-2999"},
+        "config": {
+            "name": "{server_name} Mieru",
+            "type": "mieru",
+            "server": "{server_domain}",
+            "port": 2999,
+            "transport": "TCP",
+        },
+    },
+    {
         "id": "routed-outbound",
         "name": "Routed outbound",
         "description": "Catalog-only routed node that adds users to an outbound route.",
@@ -3854,6 +3949,65 @@ class InventoryStore:
                 outbound["flow"] = str(proxy["flow"])
         elif proxy_type in {"trojan", "hysteria2"}:
             outbound["password"] = str(proxy.get("password") or proxy.get("auth") or "")
+        elif proxy_type == "anytls":
+            outbound["password"] = str(proxy.get("password") or "")
+            for source_keys, target_key in (
+                (
+                    (
+                        "idle_session_check_interval",
+                        "idleSessionCheckInterval",
+                        "idle-session-check-interval",
+                    ),
+                    "idle_session_check_interval",
+                ),
+                (
+                    ("idle_session_timeout", "idleSessionTimeout", "idle-session-timeout"),
+                    "idle_session_timeout",
+                ),
+            ):
+                if duration := cls._sing_box_duration(cls._proxy_value(proxy, *source_keys)):
+                    outbound[target_key] = duration
+            min_idle_session = cls._proxy_nonnegative_int(
+                cls._proxy_value(proxy, "min_idle_session", "minIdleSession", "min-idle-session")
+            )
+            if min_idle_session is not None:
+                outbound["min_idle_session"] = min_idle_session
+            client_metadata = cls._proxy_value(
+                proxy,
+                "client_metadata",
+                "clientMetadata",
+                "client-metadata",
+            )
+            if client_metadata is not None:
+                outbound["client_metadata"] = str(client_metadata)
+        elif proxy_type == "snell":
+            raw_version = cls._proxy_int(proxy.get("version")) or 4
+            version = 6 if raw_version == 6 else 4
+            outbound["version"] = version
+            outbound["psk"] = str(proxy.get("psk") or "")
+            outbound["network"] = str(proxy.get("network") or "tcp")
+            if reuse := cls._proxy_value(proxy, "reuse"):
+                outbound["reuse"] = cls._proxy_bool(reuse)
+            userkey = cls._proxy_value(proxy, "userkey", "userKey", "client_id", "clientId")
+            if userkey:
+                outbound["userkey"] = str(userkey)
+            if version == 6:
+                mode = cls._proxy_value(proxy, "mode", "v6_mode", "v6Mode")
+                if mode:
+                    outbound["mode"] = str(mode)
+            else:
+                obfs_options = proxy.get("obfs-opts")
+                obfs_options = obfs_options if isinstance(obfs_options, dict) else {}
+                obfs_mode = cls._proxy_value(proxy, "obfs_mode", "obfsMode") or obfs_options.get(
+                    "mode"
+                )
+                obfs_host = cls._proxy_value(proxy, "obfs_host", "obfsHost") or obfs_options.get(
+                    "host"
+                )
+                if obfs_mode and str(obfs_mode).lower() != "none":
+                    outbound["obfs_mode"] = str(obfs_mode)
+                if obfs_host:
+                    outbound["obfs_host"] = str(obfs_host)
         elif proxy_type == "shadowsocks":
             outbound["method"] = str(proxy.get("cipher") or proxy.get("method") or "aes-128-gcm")
             outbound["password"] = str(proxy.get("password") or "")
@@ -3862,8 +4016,15 @@ class InventoryStore:
                 outbound["username"] = str(proxy["username"])
             if proxy.get("password"):
                 outbound["password"] = str(proxy["password"])
+        elif proxy_type == "mieru":
+            return None
 
         tls = cls._sing_box_tls(proxy)
+        if proxy_type == "anytls" and tls is None and proxy.get("tls") is not False:
+            tls = {"enabled": True}
+            server_name = proxy.get("servername") or proxy.get("sni")
+            if isinstance(server_name, str) and server_name:
+                tls["server_name"] = server_name
         if tls:
             outbound["tls"] = tls
         return outbound
@@ -4047,6 +4208,38 @@ class InventoryStore:
         if isinstance(value, str) and value.isdigit():
             parsed = int(value)
             return parsed if parsed > 0 else None
+        return None
+
+    @staticmethod
+    def _proxy_nonnegative_int(value: object) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str) and value.isdigit():
+            parsed = int(value)
+            return parsed if parsed >= 0 else None
+        return None
+
+    @staticmethod
+    def _proxy_value(proxy: dict[str, Any], *keys: str) -> object:
+        for key in keys:
+            value = proxy.get(key)
+            if value is not None and value != "":
+                return value
+        return None
+
+    @staticmethod
+    def _sing_box_duration(value: object) -> str | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int | float):
+            return f"{value:g}s" if value > 0 else None
+        if isinstance(value, str):
+            duration = value.strip()
+            if not duration:
+                return None
+            return f"{duration}s" if duration.isdigit() else duration
         return None
 
     @staticmethod
