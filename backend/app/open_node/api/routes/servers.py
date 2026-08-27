@@ -54,6 +54,8 @@ from open_node.domain.inventory import (
 from open_node.domain.subscriptions import (
     ManagedNodeResponse,
     XrayRuntimeCredentialReconciliationResponse,
+    XrayRuntimeCredentialRepairRequest,
+    XrayRuntimeCredentialRepairResponse,
     XrayRuntimeNodeCreateRequest,
     XrayRuntimeNodeDraftsResponse,
     XrayRuntimeNodeImportRequest,
@@ -241,6 +243,40 @@ def xray_runtime_credential_reconciliation(
         return store.xray_runtime_credential_reconciliation(server_id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{server_id}/xray/runtime/credentials/repair-missing",
+    response_model=XrayRuntimeCredentialRepairResponse,
+)
+async def repair_missing_xray_runtime_credentials(
+    server_id: UUID,
+    payload: XrayRuntimeCredentialRepairRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> XrayRuntimeCredentialRepairResponse:
+    try:
+        response = store.repair_missing_xray_runtime_credentials(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ManagedNodeNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    if payload.queue_agent_commands:
+        commands = []
+        for batch in response.provisioning_batches:
+            command = store.create_command(
+                batch.server_id,
+                AgentCommandCreate(
+                    method="POST",
+                    path="/api/child/batch-apply",
+                    body=batch.body,
+                    timeout_ms=payload.command_timeout_ms,
+                ),
+            )
+            commands.append(await connections.dispatch_command(store, command))
+        response = response.model_copy(update={"commands": commands})
+    return response
 
 
 @router.get("/{server_id}/xray/config-snapshots", response_model=ServerXrayConfigSnapshotsResponse)

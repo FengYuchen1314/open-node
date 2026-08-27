@@ -506,6 +506,35 @@ export interface XrayRuntimeCredentialReconciliationResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeCredentialRepairRequest {
+  node_ids?: string[] | null;
+  queue_agent_commands?: boolean;
+  no_restart?: boolean;
+  command_timeout_ms?: number;
+}
+
+export interface XrayRuntimeCredentialRepairEntry {
+  node_id: string;
+  node_name: string;
+  protocol: string;
+  inbound_tag: string;
+  runtime_source_index: number;
+  runtime_display_name: string;
+  emails: string[];
+}
+
+export interface XrayRuntimeCredentialRepairResponse {
+  server_id: string;
+  has_scan: boolean;
+  entries: XrayRuntimeCredentialRepairEntry[];
+  provisioning_batches: SubscriptionProvisionBatch[];
+  commands: AgentCommand[];
+  planned_client_count: number;
+  batch_count: number;
+  warnings: string[];
+  license_required: false;
+}
+
 export interface SubscriptionPlansResponse {
   plans: SubscriptionPlan[];
   license_required: false;

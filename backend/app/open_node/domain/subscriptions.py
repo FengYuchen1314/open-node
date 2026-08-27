@@ -372,6 +372,37 @@ class XrayRuntimeCredentialReconciliationResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeCredentialRepairRequest(BaseModel):
+    node_ids: list[UUID] | None = Field(default=None, max_length=100)
+    queue_agent_commands: bool = False
+    no_restart: bool = True
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @field_validator("node_ids")
+    @classmethod
+    def validate_node_ids(cls, value: list[UUID] | None) -> list[UUID] | None:
+        if value is None:
+            return None
+        node_ids: list[UUID] = []
+        seen: set[UUID] = set()
+        for node_id in value:
+            if node_id in seen:
+                continue
+            seen.add(node_id)
+            node_ids.append(node_id)
+        return node_ids
+
+
+class XrayRuntimeCredentialRepairEntry(BaseModel):
+    node_id: UUID
+    node_name: str
+    protocol: str
+    inbound_tag: str
+    runtime_source_index: int = Field(ge=0)
+    runtime_display_name: str
+    emails: list[str] = Field(default_factory=list)
+
+
 class SubscriptionCredentialRead(BaseModel):
     id: UUID
     username: str
@@ -684,6 +715,18 @@ class SubscriptionProvisionBatch(BaseModel):
     server_id: UUID
     server_name: str
     body: dict[str, Any]
+
+
+class XrayRuntimeCredentialRepairResponse(BaseModel):
+    server_id: UUID
+    has_scan: bool = False
+    entries: list[XrayRuntimeCredentialRepairEntry] = Field(default_factory=list)
+    provisioning_batches: list[SubscriptionProvisionBatch] = Field(default_factory=list)
+    commands: list[AgentCommandRead] = Field(default_factory=list)
+    planned_client_count: int = 0
+    batch_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    license_required: Literal[False] = False
 
 
 class SubscriptionPlanAssignResponse(BaseModel):

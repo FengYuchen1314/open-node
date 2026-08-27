@@ -136,6 +136,9 @@ from open_node.domain.subscriptions import (
     SubscriptionTrafficMode,
     XrayRuntimeCredentialReconciliationEntry,
     XrayRuntimeCredentialReconciliationResponse,
+    XrayRuntimeCredentialRepairEntry,
+    XrayRuntimeCredentialRepairRequest,
+    XrayRuntimeCredentialRepairResponse,
     XrayRuntimeNodeCreateRequest,
     XrayRuntimeNodeDraft,
     XrayRuntimeNodeDraftsResponse,
@@ -477,6 +480,15 @@ class SubscriptionTokenRecord:
     short_code: str
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ExpectedRuntimeCredential:
+    user: ProductUserModel
+    plan: SubscriptionPlanModel
+    node: ManagedNodeModel
+    credential: SubscriptionCredentialModel | None
+    email: str
 
 
 @dataclass(frozen=True)
@@ -1536,44 +1548,24 @@ class InventoryStore:
                 )
                 .order_by(ManagedNodeModel.created_at)
             ).all()
-            node_ids = [node.id for node in managed_nodes]
-            credentials_by_node_id: dict[str, list[SubscriptionCredentialModel]] = {
-                node_id: [] for node_id in node_ids
-            }
-            if node_ids:
-                credentials = session.scalars(
-                    select(SubscriptionCredentialModel)
-                    .where(
-                        SubscriptionCredentialModel.server_id == server.id,
-                        SubscriptionCredentialModel.node_id.in_(node_ids),
-                    )
-                    .order_by(SubscriptionCredentialModel.created_at)
-                ).all()
-                for credential in credentials:
-                    credentials_by_node_id.setdefault(credential.node_id, []).append(credential)
-
-            runtime_by_node_id: dict[str, XrayRuntimeInboundRead] = {}
-            if scan:
-                for index, inbound in enumerate(scan.inbounds or []):
-                    draft = self._xray_runtime_node_draft(
-                        session=session,
-                        server=server,
-                        inbound=inbound,
-                        index=index,
-                    )
-                    if not draft.existing_node_id:
-                        continue
-                    node_id = str(draft.existing_node_id)
-                    runtime_by_node_id.setdefault(
-                        node_id,
-                        self._xray_runtime_inbound_read(inbound, index),
-                    )
+            runtime_by_node_id = self._runtime_inbounds_by_managed_node_id(
+                session,
+                server,
+                scan,
+            )
+            expected_by_node_id = self._expected_runtime_credentials_by_node_id(
+                session,
+                server,
+                managed_nodes,
+            )
 
             entries = [
                 self._runtime_credential_reconciliation_entry(
                     node=node,
                     runtime=runtime_by_node_id.get(node.id),
-                    credentials=credentials_by_node_id.get(node.id, []),
+                    expected_emails=[
+                        context.email for context in expected_by_node_id.get(node.id, [])
+                    ],
                 )
                 for node in managed_nodes
             ]
@@ -1594,6 +1586,113 @@ class InventoryStore:
             ),
             extra_runtime_client_count=sum(len(entry.extra_runtime_emails) for entry in entries),
             entries=entries,
+        )
+
+    def repair_missing_xray_runtime_credentials(
+        self,
+        server_id: UUID,
+        payload: XrayRuntimeCredentialRepairRequest,
+    ) -> XrayRuntimeCredentialRepairResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            scan = session.get(AgentScanResultModel, str(server_id))
+            if not scan:
+                return XrayRuntimeCredentialRepairResponse(
+                    server_id=server_id,
+                    has_scan=False,
+                    warnings=["runtime scan not found"],
+                )
+
+            managed_nodes = self._selected_physical_managed_nodes(session, server, payload.node_ids)
+            runtime_by_node_id = self._runtime_inbounds_by_managed_node_id(
+                session,
+                server,
+                scan,
+            )
+            expected_by_node_id = self._expected_runtime_credentials_by_node_id(
+                session,
+                server,
+                managed_nodes,
+            )
+            body: dict[str, Any] = {
+                "inbound_clients": [],
+                "routing_user_additions": [],
+                "no_restart": payload.no_restart,
+            }
+            entries: list[XrayRuntimeCredentialRepairEntry] = []
+            warnings: list[str] = []
+
+            for node in managed_nodes:
+                if not node.enabled:
+                    warnings.append(f"node {node.name} is disabled")
+                    continue
+                if not node.inbound_tag:
+                    warnings.append(f"node {node.name} has no inbound tag")
+                    continue
+                runtime = runtime_by_node_id.get(node.id)
+                if not runtime:
+                    warnings.append(f"node {node.name} has no matching runtime inbound")
+                    continue
+                runtime_email_keys = {email.lower() for email in runtime.user_emails}
+                missing_contexts = [
+                    context
+                    for context in expected_by_node_id.get(node.id, [])
+                    if context.email.lower() not in runtime_email_keys
+                ]
+                if not missing_contexts:
+                    continue
+
+                emails: list[str] = []
+                for context in missing_contexts:
+                    credential = context.credential or self._get_or_create_subscription_credential(
+                        session,
+                        context.user,
+                        node,
+                        server,
+                    )
+                    client = self._provisioning_client_from_credential(
+                        context.user,
+                        context.plan,
+                        node,
+                        server,
+                        credential,
+                    )
+                    body["inbound_clients"].append({"tag": node.inbound_tag, "client": client})
+                    emails.append(credential.email)
+
+                entries.append(
+                    XrayRuntimeCredentialRepairEntry(
+                        node_id=UUID(node.id),
+                        node_name=node.name,
+                        protocol=node.protocol,
+                        inbound_tag=node.inbound_tag,
+                        runtime_source_index=runtime.source_index,
+                        runtime_display_name=runtime.display_name,
+                        emails=emails,
+                    )
+                )
+
+            provisioning_batches: list[SubscriptionProvisionBatch] = []
+            if body["inbound_clients"]:
+                provisioning_batches.append(
+                    SubscriptionProvisionBatch(
+                        server_id=UUID(server.id),
+                        server_name=server.name,
+                        body=body,
+                    )
+                )
+            session.commit()
+
+        return XrayRuntimeCredentialRepairResponse(
+            server_id=server_id,
+            has_scan=True,
+            entries=entries,
+            provisioning_batches=provisioning_batches,
+            planned_client_count=sum(len(entry.emails) for entry in entries),
+            batch_count=len(provisioning_batches),
+            warnings=warnings,
         )
 
     def list_xray_config_snapshots(
@@ -6340,14 +6439,129 @@ class InventoryStore:
             current[key] = value
         return True
 
+    @staticmethod
+    def _selected_physical_managed_nodes(
+        session: Session,
+        server: ServerModel,
+        node_ids: list[UUID] | None,
+    ) -> list[ManagedNodeModel]:
+        nodes = session.scalars(
+            select(ManagedNodeModel)
+            .where(
+                ManagedNodeModel.server_id == server.id,
+                ManagedNodeModel.node_type == ManagedNodeType.PHYSICAL.value,
+            )
+            .order_by(ManagedNodeModel.created_at)
+        ).all()
+        if node_ids is None:
+            return nodes
+        nodes_by_id = {node.id: node for node in nodes}
+        selected = []
+        for node_id in node_ids:
+            node = nodes_by_id.get(str(node_id))
+            if not node:
+                raise ManagedNodeNotFoundError(f"physical managed node not found: {node_id}")
+            selected.append(node)
+        return selected
+
+    @classmethod
+    def _runtime_inbounds_by_managed_node_id(
+        cls,
+        session: Session,
+        server: ServerModel,
+        scan: AgentScanResultModel | None,
+    ) -> dict[str, XrayRuntimeInboundRead]:
+        runtime_by_node_id: dict[str, XrayRuntimeInboundRead] = {}
+        if not scan:
+            return runtime_by_node_id
+        for index, inbound in enumerate(scan.inbounds or []):
+            draft = cls._xray_runtime_node_draft(
+                session=session,
+                server=server,
+                inbound=inbound,
+                index=index,
+            )
+            if not draft.existing_node_id:
+                continue
+            node_id = str(draft.existing_node_id)
+            runtime_by_node_id.setdefault(
+                node_id,
+                cls._xray_runtime_inbound_read(inbound, index),
+            )
+        return runtime_by_node_id
+
+    def _expected_runtime_credentials_by_node_id(
+        self,
+        session: Session,
+        server: ServerModel,
+        nodes: list[ManagedNodeModel],
+    ) -> dict[str, list[ExpectedRuntimeCredential]]:
+        contexts_by_node_id: dict[str, list[ExpectedRuntimeCredential]] = {
+            node.id: [] for node in nodes
+        }
+        if not nodes:
+            return contexts_by_node_id
+        node_ids = [node.id for node in nodes]
+        nodes_by_id = {node.id: node for node in nodes}
+        users = session.scalars(
+            select(ProductUserModel)
+            .where(
+                ProductUserModel.is_active.is_(True),
+                ProductUserModel.current_plan_id.is_not(None),
+            )
+            .order_by(ProductUserModel.username)
+        ).all()
+        if not users:
+            return contexts_by_node_id
+        plan_ids = sorted({user.current_plan_id for user in users if user.current_plan_id})
+        plans = session.scalars(
+            select(SubscriptionPlanModel).where(SubscriptionPlanModel.id.in_(plan_ids))
+        ).all()
+        plans_by_id = {plan.id: plan for plan in plans}
+        credentials = session.scalars(
+            select(SubscriptionCredentialModel)
+            .where(
+                SubscriptionCredentialModel.server_id == server.id,
+                SubscriptionCredentialModel.node_id.in_(node_ids),
+            )
+            .order_by(SubscriptionCredentialModel.created_at)
+        ).all()
+        credentials_by_user_node = {
+            (credential.username, credential.node_id): credential for credential in credentials
+        }
+        now = datetime.now(tz=UTC)
+        for user in users:
+            plan = plans_by_id.get(user.current_plan_id or "")
+            if not plan:
+                continue
+            quota = self._subscription_quota_status(session, user, plan, now)
+            if not quota.available:
+                continue
+            for node_id in plan.node_ids or []:
+                node = nodes_by_id.get(node_id)
+                if not node or not node.enabled:
+                    continue
+                credential = credentials_by_user_node.get((user.username, node.id))
+                email = credential.email if credential else self._default_client_email(user, node)
+                contexts_by_node_id.setdefault(node.id, []).append(
+                    ExpectedRuntimeCredential(
+                        user=user,
+                        plan=plan,
+                        node=node,
+                        credential=credential,
+                        email=email,
+                    )
+                )
+        return contexts_by_node_id
+
     @classmethod
     def _runtime_credential_reconciliation_entry(
         cls,
         node: ManagedNodeModel,
         runtime: XrayRuntimeInboundRead | None,
-        credentials: list[SubscriptionCredentialModel],
+        expected_emails: list[str],
     ) -> XrayRuntimeCredentialReconciliationEntry:
-        expected_emails = cls._dedupe_text(credential.email for credential in credentials)
+        expected_emails = cls._dedupe_text(expected_emails)
         runtime_emails = cls._dedupe_text(runtime.user_emails if runtime else [])
         expected_keys = {email.lower() for email in expected_emails}
         runtime_keys = {email.lower() for email in runtime_emails}

@@ -36,6 +36,7 @@ import {
   getXrayRuntimeNodeReconciliation,
   importManagedNodesFromRuntimeInbounds,
   listXrayRuntimeNodeDrafts,
+  repairMissingXrayRuntimeCredentials,
   syncManagedNodeFromRuntime,
 } from "../services/subscriptions";
 
@@ -55,6 +56,7 @@ const runtimeInventoryLoading = ref(false);
 const runtimeNodeImporting = ref(false);
 const runtimeNodeSavingKey = ref("");
 const runtimeNodeSyncingId = ref("");
+const runtimeCredentialRepairing = ref(false);
 const savingOperation = ref<AgentOperationKind | "">("");
 const restoringSnapshotId = ref("");
 const errorMessage = ref("");
@@ -666,6 +668,7 @@ function runtimeNodeCreateDisabled(inbound: XrayRuntimeInbound) {
     Boolean(draft.existing_node_id) ||
     runtimeNodeImporting.value ||
     Boolean(runtimeNodeSyncingId.value) ||
+    runtimeCredentialRepairing.value ||
     (Boolean(runtimeNodeSavingKey.value) &&
       runtimeNodeSavingKey.value !== runtimeNodeSavingId(inbound))
   );
@@ -681,7 +684,38 @@ function runtimeImportTooltip() {
   if (runtimeMissingNodeCount.value === 0) {
     return "All available runtime inbounds are already managed";
   }
+  if (runtimeCredentialRepairing.value) {
+    return "Runtime credential repair is running";
+  }
   return `Import ${runtimeMissingNodeCount.value} missing runtime nodes`;
+}
+
+function runtimeCredentialRepairTooltip() {
+  if (runtimeInventoryLoading.value) {
+    return "Runtime inventory is loading";
+  }
+  if (!xrayRuntimeInventory.value?.has_scan) {
+    return "Run a scan before repairing runtime clients";
+  }
+  if (!runtimeCredentialReconciliation.value?.missing_runtime_client_count) {
+    return "No missing runtime clients";
+  }
+  if (runtimeNodeImporting.value || runtimeNodeSavingKey.value || runtimeNodeSyncingId.value) {
+    return "Another runtime catalog action is running";
+  }
+  return `Queue ${runtimeCredentialReconciliation.value.missing_runtime_client_count} missing runtime clients`;
+}
+
+function runtimeCredentialRepairDisabled() {
+  return (
+    runtimeInventoryLoading.value ||
+    runtimeCredentialRepairing.value ||
+    !xrayRuntimeInventory.value?.has_scan ||
+    !runtimeCredentialReconciliation.value?.missing_runtime_client_count ||
+    runtimeNodeImporting.value ||
+    Boolean(runtimeNodeSavingKey.value) ||
+    Boolean(runtimeNodeSyncingId.value)
+  );
 }
 
 function managedEntryStatusLabel(entry: XrayRuntimeNodeReconciliationManagedEntry) {
@@ -752,7 +786,8 @@ function runtimeSyncDisabled(entry: XrayRuntimeNodeReconciliationManagedEntry) {
     runtimeInventoryLoading.value ||
     runtimeNodeImporting.value ||
     Boolean(runtimeNodeSavingKey.value) ||
-    Boolean(runtimeNodeSyncingId.value)
+    Boolean(runtimeNodeSyncingId.value) ||
+    runtimeCredentialRepairing.value
   );
 }
 
@@ -766,7 +801,12 @@ function runtimeSyncTooltip(entry: XrayRuntimeNodeReconciliationManagedEntry) {
   if (runtimeInventoryLoading.value) {
     return "Runtime inventory is loading";
   }
-  if (runtimeNodeImporting.value || runtimeNodeSavingKey.value || runtimeNodeSyncingId.value) {
+  if (
+    runtimeNodeImporting.value ||
+    runtimeNodeSavingKey.value ||
+    runtimeNodeSyncingId.value ||
+    runtimeCredentialRepairing.value
+  ) {
     return "Another runtime catalog action is running";
   }
   return `Sync public fields from ${entry.runtime_display_name ?? "runtime"}`;
@@ -788,6 +828,31 @@ async function importRuntimeManagedNodes() {
     errorMessage.value = readableError(error);
   } finally {
     runtimeNodeImporting.value = false;
+  }
+}
+
+async function repairMissingRuntimeCredentials() {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  if (runtimeCredentialRepairDisabled()) {
+    errorMessage.value = runtimeCredentialRepairTooltip();
+    return;
+  }
+  runtimeCredentialRepairing.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await repairMissingXrayRuntimeCredentials(selectedServerId.value, {
+      queue_agent_commands: true,
+    });
+    successMessage.value = `Queued ${response.planned_client_count} runtime clients in ${response.commands.length} commands.`;
+    await Promise.all([refreshCommands(), refreshXrayRuntimeInventory()]);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    runtimeCredentialRepairing.value = false;
   }
 }
 
@@ -1182,7 +1247,8 @@ function formatDateTime(value: string) {
                             runtimeNodeImporting ||
                             runtimeMissingNodeCount === 0 ||
                             Boolean(runtimeNodeSavingKey) ||
-                            Boolean(runtimeNodeSyncingId)
+                            Boolean(runtimeNodeSyncingId) ||
+                            runtimeCredentialRepairing
                           "
                           :loading="runtimeNodeImporting"
                           color="primary"
@@ -1192,6 +1258,23 @@ function formatDateTime(value: string) {
                           @click="importRuntimeManagedNodes"
                         >
                           Import missing
+                        </v-btn>
+                      </span>
+                    </template>
+                  </v-tooltip>
+                  <v-tooltip :text="runtimeCredentialRepairTooltip()">
+                    <template #activator="{ props }">
+                      <span v-bind="props" class="runtime-node-action">
+                        <v-btn
+                          :disabled="runtimeCredentialRepairDisabled()"
+                          :loading="runtimeCredentialRepairing"
+                          color="primary"
+                          prepend-icon="mdi-account-plus-outline"
+                          size="small"
+                          variant="tonal"
+                          @click="repairMissingRuntimeCredentials"
+                        >
+                          Repair clients
                         </v-btn>
                       </span>
                     </template>

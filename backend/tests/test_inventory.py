@@ -1061,6 +1061,80 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
     assert "secret-runtime-client-id" not in serialized
     assert "secret-orphan-client-id" not in serialized
 
+    repair = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/credentials/repair-missing",
+        json={},
+    )
+
+    assert repair.status_code == 200
+    repair_payload = repair.json()
+    assert repair_payload["license_required"] is False
+    assert repair_payload["has_scan"] is True
+    assert repair_payload["planned_client_count"] == 1
+    assert repair_payload["batch_count"] == 1
+    assert repair_payload["commands"] == []
+    assert repair_payload["entries"] == [
+        {
+            "node_id": node["id"],
+            "node_name": "edge-runtime-credentials vless-443",
+            "protocol": "vless",
+            "inbound_tag": "vless-443",
+            "runtime_source_index": 0,
+            "runtime_display_name": "vless-443",
+            "emails": ["bob__vless-443"],
+        }
+    ]
+    assert repair_payload["provisioning_batches"][0]["body"] == {
+        "inbound_clients": [
+            {
+                "tag": "vless-443",
+                "client": {
+                    "id": bob_id,
+                    "email": "bob__vless-443",
+                    "level": 0,
+                },
+            }
+        ],
+        "routing_user_additions": [],
+        "no_restart": True,
+    }
+    repair_serialized = json.dumps(repair_payload)
+    assert alice_id not in repair_serialized
+    assert "secret-runtime-client-id" not in repair_serialized
+    assert "secret-orphan-client-id" not in repair_serialized
+    assert "orphan@example.com" not in repair_serialized
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-runtime-credentials",
+                    "capabilities": {"rpc": True},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+        queued = client.post(
+            f"/api/v1/servers/{server_id}/xray/runtime/credentials/repair-missing",
+            json={
+                "queue_agent_commands": True,
+                "no_restart": False,
+                "command_timeout_ms": 75_000,
+            },
+        )
+        assert queued.status_code == 200
+        queued_payload = queued.json()
+        assert queued_payload["commands"][0]["status"] == "leased"
+        assert queued_payload["commands"][0]["path"] == "/api/child/batch-apply"
+        assert queued_payload["commands"][0]["body"]["no_restart"] is False
+        rpc_call = websocket.receive_json()
+        assert rpc_call["type"] == "rpc_call"
+        assert rpc_call["payload"]["path"] == "/api/child/batch-apply"
+        assert rpc_call["payload"]["timeout_ms"] == 75_000
+        assert rpc_call["payload"]["body"] == queued_payload["provisioning_batches"][0]["body"]
+
 
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:
     client = make_client(tmp_path)
