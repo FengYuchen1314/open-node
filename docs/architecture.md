@@ -87,3 +87,26 @@ Stream-capable agents can also receive `rpc_call` payloads with `stream=true`.
 They may send any number of MMWX-compatible `rpc_stream_data` text frames before
 the final `rpc_reply`. Open Node persists each frame in command sequence order
 and exposes them at `/api/v1/servers/{server_id}/commands/{command_id}/stream`.
+
+## Public Probe API
+
+Open Node exposes the read-only public probe surface without authentication or
+license gates. The primary endpoints are:
+
+- `GET /api/v1/public/probe-servers`
+- `GET /api/v1/public/probe-series`
+
+For compatibility with the `mmwx-probe` Worker route mapping, the same handlers
+are also mounted at:
+
+- `GET /api/public/probe-servers`
+- `GET /api/public/probe-series`
+
+Probe responses are built from persisted agent telemetry snapshots. The server
+list exposes only public status, speed, resource, traffic, and latency fields;
+internal identifiers, IP addresses, bootstrap tokens, and agent secrets are not
+serialized. Series lookups use the public server index from the sanitized list
+instead of private server IDs.
+
+The HTTP payload and series endpoints are implemented. The public
+`/api/public/probe-ws` real-time stream remains a future migration slice.

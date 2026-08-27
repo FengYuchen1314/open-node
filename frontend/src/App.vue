@@ -14,11 +14,11 @@
           prepend-icon="mdi-view-dashboard-outline"
           title="Overview"
           value="overview"
-          active
+          to="/"
         />
         <v-list-item prepend-icon="mdi-server-network" title="Servers" value="servers" />
         <v-list-item prepend-icon="mdi-lan-connect" title="Agents" value="agents" />
-        <v-list-item prepend-icon="mdi-chart-line" title="Probe" value="probe" />
+        <v-list-item prepend-icon="mdi-chart-line" title="Probe" value="probe" to="/probe" />
         <v-list-item prepend-icon="mdi-shield-check-outline" title="Access" value="access" />
       </v-list>
     </v-navigation-drawer>

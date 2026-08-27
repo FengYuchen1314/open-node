@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from secrets import token_urlsafe
@@ -47,6 +48,15 @@ from open_node.domain.inventory import (
     XrayMode,
     XrayStats,
 )
+from open_node.domain.probe import (
+    ProbeBucket,
+    ProbeMetricPoint,
+    ProbePayload,
+    ProbePingSeries,
+    ProbeSeriesResponse,
+    ProbeServer,
+    ProbeSystemSeries,
+)
 
 
 class InvalidAgentTokenError(ValueError):
@@ -63,6 +73,17 @@ class ServerNotFoundError(ValueError):
 
 class CommandNotFoundError(ValueError):
     """Raised when an agent command cannot be found for the requesting server."""
+
+
+class ProbeNotFoundError(ValueError):
+    """Raised when a public probe lookup targets data outside the public list."""
+
+
+_PROBE_SERIES_RANGES = {
+    "1h": (12, 300),
+    "6h": (36, 600),
+    "24h": (48, 1800),
+}
 
 
 class Base(DeclarativeBase):
@@ -368,6 +389,66 @@ class InventoryStore:
             telemetry = self._latest_telemetry_model(session, str(server_id))
             return self._telemetry_read(telemetry) if telemetry else None
 
+    def public_probe_payload(self) -> ProbePayload:
+        with self._session() as session:
+            servers = session.scalars(select(ServerModel).order_by(ServerModel.created_at)).all()
+            probe_servers = []
+            for server in servers:
+                latest = self._latest_telemetry_model(session, server.id)
+                ping = self._probe_ping_series(session, server.id, bucket_count=12, bucket_sec=300)
+                probe_servers.append(self._probe_server(server, latest, ping))
+            return ProbePayload(servers=probe_servers)
+
+    def public_probe_series(
+        self,
+        server_index: int,
+        metric: str,
+        range_name: str,
+        target: str,
+        all_targets: bool,
+    ) -> ProbeSeriesResponse:
+        if server_index < 0:
+            raise ProbeNotFoundError("probe server not found")
+        buckets, bucket_sec = _PROBE_SERIES_RANGES.get(range_name, _PROBE_SERIES_RANGES["1h"])
+
+        with self._session() as session:
+            servers = session.scalars(select(ServerModel).order_by(ServerModel.created_at)).all()
+            if server_index >= len(servers):
+                raise ProbeNotFoundError("probe server not found")
+            server = servers[server_index]
+            generated_at = int(datetime.now(tz=UTC).timestamp())
+
+            if metric == "system":
+                return ProbeSeriesResponse(
+                    success=True,
+                    series=self._probe_system_series(session, server.id, buckets, bucket_sec),
+                    bucket_sec=bucket_sec,
+                    generated_at=generated_at,
+                )
+            if metric != "ping":
+                raise ProbeNotFoundError("probe metric not found")
+
+            series_by_key = self._probe_ping_series(session, server.id, buckets, bucket_sec)
+            if target and target not in {"__avg__", "__all__"}:
+                series = series_by_key.get(target)
+                if not series:
+                    raise ProbeNotFoundError("probe target not found")
+            else:
+                series = self._average_probe_ping_series(series_by_key.values(), buckets)
+
+            response = ProbeSeriesResponse(
+                success=True,
+                series=series,
+                bucket_sec=bucket_sec,
+                generated_at=generated_at,
+            )
+            if all_targets:
+                response.all_series = sorted(
+                    series_by_key.values(),
+                    key=lambda item: (item.label, item.key or ""),
+                )
+            return response
+
     def create_command(self, server_id: UUID, payload: AgentCommandCreate) -> AgentCommandRead:
         with self._session() as session:
             server = session.get(ServerModel, str(server_id))
@@ -577,6 +658,333 @@ class InventoryStore:
             session.commit()
             session.refresh(command)
             return self._command_read(command)
+
+    def _probe_server(
+        self,
+        server: ServerModel,
+        latest: TelemetrySnapshotModel | None,
+        ping_by_key: dict[str, ProbePingSeries],
+    ) -> ProbeServer:
+        probe = ProbeServer(
+            name=server.name,
+            online=server.status == ServerStatus.CONNECTED.value,
+            upload_speed=server.current_upload_speed,
+            download_speed=server.current_download_speed,
+            traffic_limit=server.traffic_limit,
+        )
+
+        if latest:
+            if latest.system_tx_total is not None or latest.system_rx_total is not None:
+                probe.cumulative_up = latest.system_tx_total or 0
+                probe.cumulative_down = latest.system_rx_total or 0
+
+            if latest.stats:
+                up, down = self._traffic_totals_from_stats(latest.stats)
+                if up or down:
+                    probe.traffic_used_up = up
+                    probe.traffic_used_down = down
+                    probe.traffic_used_total = up + down
+                    probe.traffic_used = up + down
+
+            if latest.sysmetrics:
+                metrics = ProbeSysMetrics.model_validate(latest.sysmetrics)
+                probe.uptime = metrics.uptime or None
+                probe.cpu_model = metrics.cpu_model or None
+                probe.cpu_cores = metrics.cpu_cores or None
+                probe.cpu_threads = metrics.cpu_threads or None
+                probe.os = metrics.os or None
+                probe.kernel = metrics.kernel or None
+                probe.arch = metrics.arch or None
+                if metrics.has_cpu:
+                    probe.cpu_pct = metrics.cpu_pct
+                    probe.loadavg = metrics.loadavg
+                if metrics.has_mem:
+                    probe.mem_used = metrics.mem_used
+                    probe.mem_total = metrics.mem_total
+                if metrics.has_disk:
+                    probe.disk_used = metrics.disk_used
+                    probe.disk_total = metrics.disk_total
+
+        if ping_by_key:
+            probe.ping = sorted(ping_by_key.values(), key=lambda item: (item.label, item.key or ""))
+        return probe
+
+    def _probe_ping_series(
+        self,
+        session: Session,
+        server_id: str,
+        bucket_count: int,
+        bucket_sec: int,
+    ) -> dict[str, ProbePingSeries]:
+        now_ts = int(datetime.now(tz=UTC).timestamp())
+        last_bucket = now_ts - now_ts % bucket_sec
+        first_bucket = last_bucket - (bucket_count - 1) * bucket_sec
+        since = datetime.fromtimestamp(first_bucket, tz=UTC)
+        snapshots = session.scalars(
+            select(TelemetrySnapshotModel)
+            .where(
+                TelemetrySnapshotModel.server_id == server_id,
+                TelemetrySnapshotModel.reported_at >= since,
+            )
+            .order_by(TelemetrySnapshotModel.reported_at)
+        ).all()
+
+        series: dict[str, dict[str, Any]] = {}
+        for snapshot in snapshots:
+            for raw_sample in snapshot.latency or []:
+                key = str(raw_sample.get("key") or "").strip()
+                if not key:
+                    continue
+                timestamp = self._probe_sample_timestamp(raw_sample, snapshot)
+                bucket_start = timestamp - timestamp % bucket_sec
+                bucket_index = int((bucket_start - first_bucket) / bucket_sec)
+                if bucket_index < 0 or bucket_index >= bucket_count:
+                    continue
+
+                state = series.setdefault(
+                    key,
+                    {
+                        "current_at": -1,
+                        "current_ms": -1,
+                        "success": 0,
+                        "fail": 0,
+                        "buckets": [
+                            {"sum": 0, "success": 0, "fail": 0} for _ in range(bucket_count)
+                        ],
+                    },
+                )
+                bucket = state["buckets"][bucket_index]
+                success = bool(raw_sample.get("success"))
+                if success:
+                    latency_ms = int(raw_sample.get("latency_ms") or 0)
+                    bucket["sum"] += latency_ms
+                    bucket["success"] += 1
+                    state["success"] += 1
+                    if timestamp >= state["current_at"]:
+                        state["current_at"] = timestamp
+                        state["current_ms"] = latency_ms
+                else:
+                    bucket["fail"] += 1
+                    state["fail"] += 1
+                    if timestamp >= state["current_at"]:
+                        state["current_at"] = timestamp
+                        state["current_ms"] = -1
+
+        return {
+            key: self._probe_ping_series_from_state(key, state)
+            for key, state in series.items()
+        }
+
+    @staticmethod
+    def _probe_ping_series_from_state(key: str, state: dict[str, Any]) -> ProbePingSeries:
+        buckets = []
+        for bucket in state["buckets"]:
+            total = bucket["success"] + bucket["fail"]
+            if total == 0:
+                buckets.append(ProbeBucket(ms=-1, loss=-1))
+                continue
+            ms = int(bucket["sum"] / bucket["success"]) if bucket["success"] else -1
+            buckets.append(ProbeBucket(ms=ms, loss=bucket["fail"] * 100 / total))
+
+        total = state["success"] + state["fail"]
+        loss_pct = state["fail"] * 100 / total if total else 0
+        return ProbePingSeries(
+            key=key,
+            label=key,
+            current_ms=state["current_ms"],
+            loss_pct=loss_pct,
+            buckets=buckets,
+        )
+
+    @staticmethod
+    def _average_probe_ping_series(
+        source_series: Iterable[ProbePingSeries],
+        bucket_count: int,
+    ) -> ProbePingSeries:
+        series = list(source_series)
+        if not series:
+            return ProbePingSeries(
+                key="__avg__",
+                label="Average",
+                current_ms=-1,
+                loss_pct=0,
+                buckets=[ProbeBucket(ms=-1, loss=-1) for _ in range(bucket_count)],
+            )
+
+        current_values = [item.current_ms for item in series if item.current_ms >= 0]
+        current_ms = int(sum(current_values) / len(current_values)) if current_values else -1
+        loss_pct = sum(item.loss_pct for item in series) / len(series)
+        buckets = []
+        for index in range(bucket_count):
+            ms_values = [
+                item.buckets[index].ms
+                for item in series
+                if index < len(item.buckets) and item.buckets[index].ms >= 0
+            ]
+            loss_values = [
+                item.buckets[index].loss
+                for item in series
+                if index < len(item.buckets) and item.buckets[index].loss >= 0
+            ]
+            ms = int(sum(ms_values) / len(ms_values)) if ms_values else -1
+            loss = sum(loss_values) / len(loss_values) if loss_values else -1
+            buckets.append(ProbeBucket(ms=ms, loss=loss))
+
+        return ProbePingSeries(
+            key="__avg__",
+            label="Average",
+            current_ms=current_ms,
+            loss_pct=loss_pct,
+            buckets=buckets,
+        )
+
+    def _probe_system_series(
+        self,
+        session: Session,
+        server_id: str,
+        bucket_count: int,
+        bucket_sec: int,
+    ) -> ProbeSystemSeries:
+        now_ts = int(datetime.now(tz=UTC).timestamp())
+        last_bucket = now_ts - now_ts % bucket_sec
+        first_bucket = last_bucket - (bucket_count - 1) * bucket_sec
+        since = datetime.fromtimestamp(first_bucket, tz=UTC)
+        snapshots = session.scalars(
+            select(TelemetrySnapshotModel)
+            .where(
+                TelemetrySnapshotModel.server_id == server_id,
+                TelemetrySnapshotModel.reported_at >= since,
+            )
+            .order_by(TelemetrySnapshotModel.reported_at)
+        ).all()
+
+        buckets: dict[int, dict[str, Any]] = {}
+        previous: TelemetrySnapshotModel | None = None
+        for snapshot in snapshots:
+            timestamp = int(self._aware_datetime(snapshot.reported_at).timestamp())
+            bucket_start = timestamp - timestamp % bucket_sec
+            bucket_index = int((bucket_start - first_bucket) / bucket_sec)
+            if bucket_index < 0 or bucket_index >= bucket_count:
+                continue
+
+            bucket = buckets.setdefault(
+                bucket_index,
+                {
+                    "t": bucket_start,
+                    "cpu_sum": 0.0,
+                    "cpu_count": 0,
+                    "mem_sum": 0,
+                    "mem_count": 0,
+                    "mem_total": 0,
+                    "up_sum": 0,
+                    "down_sum": 0,
+                    "net_count": 0,
+                    "cumulative_up": 0,
+                    "cumulative_down": 0,
+                },
+            )
+            if snapshot.sysmetrics:
+                metrics = ProbeSysMetrics.model_validate(snapshot.sysmetrics)
+                if metrics.has_cpu:
+                    bucket["cpu_sum"] += metrics.cpu_pct
+                    bucket["cpu_count"] += 1
+                if metrics.has_mem:
+                    bucket["mem_sum"] += metrics.mem_used
+                    bucket["mem_count"] += 1
+                    bucket["mem_total"] = metrics.mem_total
+
+            if snapshot.system_tx_total is not None or snapshot.system_rx_total is not None:
+                bucket["cumulative_up"] = snapshot.system_tx_total or 0
+                bucket["cumulative_down"] = snapshot.system_rx_total or 0
+                speed = self._system_speed_between(previous, snapshot)
+                if speed:
+                    upload_speed, download_speed = speed
+                    bucket["up_sum"] += upload_speed
+                    bucket["down_sum"] += download_speed
+                    bucket["net_count"] += 1
+            previous = snapshot
+
+        output = ProbeSystemSeries()
+        for index in range(bucket_count):
+            bucket = buckets.get(index)
+            if not bucket:
+                continue
+            timestamp = bucket["t"]
+            if bucket["cpu_count"]:
+                output.cpu_pct.append(
+                    ProbeMetricPoint(t=timestamp, value=bucket["cpu_sum"] / bucket["cpu_count"])
+                )
+            if bucket["mem_count"]:
+                output.mem_used.append(
+                    ProbeMetricPoint(t=timestamp, value=bucket["mem_sum"] / bucket["mem_count"])
+                )
+                output.mem_total.append(ProbeMetricPoint(t=timestamp, value=bucket["mem_total"]))
+            if bucket["net_count"]:
+                output.upload_speed.append(
+                    ProbeMetricPoint(t=timestamp, value=bucket["up_sum"] / bucket["net_count"])
+                )
+                output.download_speed.append(
+                    ProbeMetricPoint(t=timestamp, value=bucket["down_sum"] / bucket["net_count"])
+                )
+            if bucket["cumulative_up"] or bucket["cumulative_down"]:
+                output.cumulative_up.append(
+                    ProbeMetricPoint(t=timestamp, value=bucket["cumulative_up"])
+                )
+                output.cumulative_down.append(
+                    ProbeMetricPoint(t=timestamp, value=bucket["cumulative_down"])
+                )
+        return output
+
+    @staticmethod
+    def _system_speed_between(
+        previous: TelemetrySnapshotModel | None,
+        current: TelemetrySnapshotModel,
+    ) -> tuple[int, int] | None:
+        if not previous:
+            return None
+        if (
+            previous.system_rx_total is None
+            or previous.system_tx_total is None
+            or current.system_rx_total is None
+            or current.system_tx_total is None
+            or previous.system_boot_time_unix != current.system_boot_time_unix
+            or current.system_rx_total < previous.system_rx_total
+            or current.system_tx_total < previous.system_tx_total
+        ):
+            return None
+
+        previous_at = InventoryStore._aware_datetime(previous.reported_at)
+        current_at = InventoryStore._aware_datetime(current.reported_at)
+        elapsed = (current_at - previous_at).total_seconds()
+        if elapsed <= 0:
+            return None
+        upload_speed = int((current.system_tx_total - previous.system_tx_total) / elapsed)
+        download_speed = int((current.system_rx_total - previous.system_rx_total) / elapsed)
+        return upload_speed, download_speed
+
+    @staticmethod
+    def _probe_sample_timestamp(
+        sample: dict[str, Any],
+        snapshot: TelemetrySnapshotModel,
+    ) -> int:
+        raw_at = sample.get("at")
+        if isinstance(raw_at, (int, float)) and raw_at > 0:
+            return int(raw_at)
+        return int(InventoryStore._aware_datetime(snapshot.reported_at).timestamp())
+
+    @staticmethod
+    def _traffic_totals_from_stats(stats: dict[str, Any]) -> tuple[int, int]:
+        source = stats.get("inbound") or stats.get("user") or {}
+        if not isinstance(source, dict):
+            return 0, 0
+        uplink = 0
+        downlink = 0
+        for item in source.values():
+            if not isinstance(item, dict):
+                continue
+            uplink += int(item.get("uplink") or 0)
+            downlink += int(item.get("downlink") or 0)
+        return uplink, downlink
 
     def _session(self) -> Session:
         return self._session_factory()

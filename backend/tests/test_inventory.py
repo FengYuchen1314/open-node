@@ -232,6 +232,149 @@ def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> Non
     assert second.json()["server"]["current_upload_speed"] == 25
 
 
+def test_public_probe_servers_returns_sanitized_mmwx_probe_payload(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={
+            "name": "edge-probe",
+            "ip_address": "203.0.113.55",
+            "traffic_limit": 10_000,
+        },
+    ).json()
+    first_at = datetime.now(tz=UTC).replace(microsecond=0) - timedelta(seconds=20)
+    second_at = first_at + timedelta(seconds=20)
+    client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": created["agent_token"],
+            "reported_at": first_at.isoformat(),
+            "system": {"rx_total": 1_000, "tx_total": 2_000, "boot_time_unix": 123},
+        },
+    )
+    client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": created["agent_token"],
+            "reported_at": second_at.isoformat(),
+            "stats": {
+                "inbound": {"proxy-in": {"uplink": 100, "downlink": 200}},
+                "outbound": {},
+                "user": {},
+            },
+            "system": {"rx_total": 1_600, "tx_total": 3_000, "boot_time_unix": 123},
+            "sysmetrics": {
+                "cpu_pct": 35.5,
+                "loadavg": "0.40 0.50 0.60",
+                "mem_used": 2048,
+                "mem_total": 4096,
+                "disk_used": 8192,
+                "disk_total": 16384,
+                "uptime": 456,
+                "cpu_model": "Open Node CPU",
+                "cpu_cores": 2,
+                "cpu_threads": 4,
+                "os": "Debian",
+                "kernel": "6.1",
+                "arch": "amd64",
+                "has_cpu": True,
+                "has_mem": True,
+                "has_disk": True,
+            },
+            "latency": [
+                {"key": "cmcc", "success": True, "latency_ms": 31, "at": int(second_at.timestamp())}
+            ],
+        },
+    )
+
+    response = client.get("/api/v1/public/probe-servers")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is True
+    assert payload["license_required"] is False
+    assert payload["title"] == "Open Node Probe"
+    server = payload["servers"][0]
+    assert server["name"] == "edge-probe"
+    assert server["online"] is True
+    assert server["upload_speed"] == 50
+    assert server["download_speed"] == 30
+    assert server["traffic_limit"] == 10_000
+    assert server["traffic_used_up"] == 100
+    assert server["traffic_used_down"] == 200
+    assert server["traffic_used_total"] == 300
+    assert server["cumulative_up"] == 3_000
+    assert server["cumulative_down"] == 1_600
+    assert server["cpu_pct"] == 35.5
+    assert server["mem_used"] == 2048
+    assert server["disk_total"] == 16384
+    assert server["ping"][0]["key"] == "cmcc"
+    assert server["ping"][0]["current_ms"] == 31
+    assert len(server["ping"][0]["buckets"]) == 12
+    assert "id" not in server
+    assert "ip_address" not in server
+    assert "agent_token" not in server
+
+
+def test_public_probe_series_uses_public_index_and_aggregates_latency(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-probe-series"}).json()
+    first_at = datetime.now(tz=UTC).replace(microsecond=0) - timedelta(minutes=10)
+    second_at = first_at + timedelta(minutes=5)
+    for reported_at, latency_ms in [(first_at, 88), (second_at, 42)]:
+        response = client.post(
+            "/api/v1/agents/telemetry",
+            json={
+                "token": created["agent_token"],
+                "reported_at": reported_at.isoformat(),
+                "latency": [
+                    {
+                        "key": "ct-shanghai",
+                        "success": True,
+                        "latency_ms": latency_ms,
+                        "at": int(reported_at.timestamp()),
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+
+    response = client.get(
+        "/api/v1/public/probe-series?server=0&range=1h&target=ct-shanghai&all=1"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["license_required"] is False
+    assert payload["bucket_sec"] == 300
+    assert payload["generated_at"] > 0
+    assert payload["series"]["key"] == "ct-shanghai"
+    assert payload["series"]["current_ms"] == 42
+    assert len(payload["series"]["buckets"]) == 12
+    assert payload["all_series"][0]["key"] == "ct-shanghai"
+    assert "server_id" not in payload
+
+
+def test_public_probe_mmwx_worker_alias_is_available(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    client.post("/api/v1/servers", json={"name": "edge-probe-alias"})
+
+    response = client.get("/api/public/probe-servers")
+
+    assert response.status_code == 200
+    assert response.json()["servers"][0]["name"] == "edge-probe-alias"
+
+
+def test_public_probe_series_unknown_index_returns_public_404(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/api/v1/public/probe-series?server=99")
+
+    assert response.status_code == 404
+    assert response.json() == {"success": False, "license_required": False}
+
+
 def test_invalid_telemetry_token_is_rejected_as_auth_not_license(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 
