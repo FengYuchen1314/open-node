@@ -279,6 +279,12 @@ config as the new current snapshot, queue the current master snapshot back to
 the agent through test, write, and restart commands, or restore any saved
 snapshot through the same command dispatch path. Successful master writes
 discard stale pending recovery rows.
+Successful mutating Xray child commands for inbounds, outbounds, routing,
+batch apply, config files, system config, direct config writes, and external
+takeover also enqueue one deduplicated `GET /api/child/xray/config` refresh.
+That follow-up read is marked as a master-write refresh, so it updates the
+current snapshot and runtime inventory instead of creating a false drift
+warning from the master's own operation.
 
 The Xray external takeover wrapper queues the active agent's
 `/api/child/external-xray/takeover` route. It lets an operator merge an

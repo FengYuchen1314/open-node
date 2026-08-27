@@ -2663,6 +2663,105 @@ def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_succe
     ).hexdigest()
 
 
+def test_xray_mutating_commands_queue_deduped_master_snapshot_refresh(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-refresh"}).json()
+    server_id = created["server"]["id"]
+    current_config = '{"inbounds":[{"tag":"vless-443"}],"outbounds":[]}'
+    drift_config = '{"inbounds":[],"outbounds":[]}'
+    refreshed_config = (
+        '{"inbounds":[{"tag":"vless-443"},{"tag":"trojan-8443"}],"outbounds":[]}'
+    )
+
+    for config_text in (current_config, drift_config):
+        command = client.post(
+            f"/api/v1/servers/{server_id}/operations/xray/config/read",
+        ).json()["command"]
+        result = client.post(
+            f"/api/v1/agents/commands/{command['id']}/result",
+            json={
+                "token": created["agent_token"],
+                "status": 200,
+                "body": {"success": True, "config": config_text},
+            },
+        )
+        assert result.status_code == 200
+
+    assert client.get(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery",
+    ).json()["has_pending"] is True
+
+    mutation = client.post(
+        f"/api/v1/servers/{server_id}/commands",
+        json={
+            "method": "POST",
+            "path": "/api/child/inbounds",
+            "body": {"action": "add-client", "tag": "vless-443"},
+        },
+    ).json()["command"]
+    mutation_result = client.post(
+        f"/api/v1/agents/commands/{mutation['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True},
+        },
+    )
+    assert mutation_result.status_code == 200
+
+    second_mutation = client.post(
+        f"/api/v1/servers/{server_id}/commands",
+        json={
+            "method": "POST",
+            "path": "/api/child/routing",
+            "body": {"action": "add-rule"},
+        },
+    ).json()["command"]
+    second_mutation_result = client.post(
+        f"/api/v1/agents/commands/{second_mutation['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True},
+        },
+    )
+    assert second_mutation_result.status_code == 200
+
+    commands = client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"]
+    refresh_commands = [
+        command
+        for command in commands
+        if command["method"] == "GET"
+        and command["path"] == "/api/child/xray/config"
+        and command["query"] == "snapshot_source=master_write"
+    ]
+    assert len(refresh_commands) == 1
+    refresh_command = refresh_commands[0]
+    assert refresh_command["status"] == "pending"
+    assert refresh_command["timeout_ms"] == 60_000
+
+    refresh_result = client.post(
+        f"/api/v1/agents/commands/{refresh_command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True, "config": refreshed_config},
+        },
+    )
+    assert refresh_result.status_code == 200
+
+    recovery_after_refresh = client.get(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery",
+    ).json()
+    assert recovery_after_refresh["has_pending"] is False
+    assert recovery_after_refresh["current"]["source"] == "master_write"
+    assert recovery_after_refresh["current"]["config_hash"] == hashlib.sha256(
+        refreshed_config.encode()
+    ).hexdigest()
+
+
 def test_xray_runtime_tunnel_inventory_reads_current_config_snapshot(
     tmp_path: Path,
 ) -> None:

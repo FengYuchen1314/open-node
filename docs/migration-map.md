@@ -116,6 +116,10 @@ This document records the starting source map for the Open Node refactor.
      `pending_recovery`, lets operators accept the agent config as current, or
      queue the master current snapshot back to the agent with test/write/restart
      commands.
+   - Done: successful Xray-mutating child command results automatically queue a
+     deduplicated config refresh, so snapshots and runtime inventory catch up
+     after inbound, outbound, routing, batch, config-file, system-config, and
+     external-takeover changes.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
    - Done: compatibility wrappers for the active non-stream Xray/nginx

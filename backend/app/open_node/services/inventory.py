@@ -420,6 +420,18 @@ _TUNNEL_DOMAIN_STATIC_CONFIG = """server {
 _XRAY_TUNNEL_FORWARD_PORT = 46_174
 _XRAY_API_PORT = 46_736
 _XRAY_METRICS_PORT = 38_889
+_XRAY_SNAPSHOT_REFRESH_QUERY = "snapshot_source=master_write"
+_XRAY_SNAPSHOT_REFRESH_TIMEOUT_MS = 60_000
+_XRAY_MUTATING_PATH_PREFIXES = (
+    "/api/child/inbounds",
+    "/api/child/outbounds",
+    "/api/child/routing",
+    "/api/child/batch-apply",
+    "/api/child/xray/config",
+    "/api/child/xray/config-files",
+    "/api/child/xray/system-config",
+    "/api/child/external-xray/takeover",
+)
 
 _XRAY_CLIENT_CONTAINER_BY_PROTOCOL = {
     "vless": "clients",
@@ -6360,6 +6372,55 @@ class InventoryStore:
         for snapshot in pending_snapshots:
             session.delete(snapshot)
 
+    @classmethod
+    def _queue_xray_snapshot_refresh_after_mutation(
+        cls,
+        session: Session,
+        server: ServerModel,
+        command: CommandModel,
+        payload: AgentCommandResultRequest,
+        now: datetime,
+    ) -> None:
+        if payload.error or payload.status >= 400:
+            return
+        if not cls._should_refresh_xray_snapshot_after(command.method, command.path):
+            return
+
+        existing = session.scalar(
+            select(CommandModel)
+            .where(
+                CommandModel.server_id == server.id,
+                CommandModel.method == "GET",
+                CommandModel.path == "/api/child/xray/config",
+                CommandModel.query == _XRAY_SNAPSHOT_REFRESH_QUERY,
+                CommandModel.status.in_(
+                    [AgentCommandStatus.PENDING.value, AgentCommandStatus.LEASED.value]
+                ),
+            )
+            .order_by(CommandModel.created_at.desc())
+        )
+        if existing is not None:
+            return
+
+        refresh = AgentCommandCreate(
+            method="GET",
+            path="/api/child/xray/config",
+            query=_XRAY_SNAPSHOT_REFRESH_QUERY,
+            timeout_ms=_XRAY_SNAPSHOT_REFRESH_TIMEOUT_MS,
+        )
+        cls._create_command_model(session, server, refresh, now=now)
+
+    @staticmethod
+    def _should_refresh_xray_snapshot_after(method: str, path: str) -> bool:
+        normalized_method = method.upper()
+        if normalized_method in {"", "GET", "HEAD", "OPTIONS"}:
+            return False
+        normalized_path = path.split("?", 1)[0]
+        return any(
+            normalized_path == prefix or normalized_path.startswith(f"{prefix}/")
+            for prefix in _XRAY_MUTATING_PATH_PREFIXES
+        )
+
     @staticmethod
     def _xray_config_snapshot_source(
         command: CommandModel,
@@ -6369,8 +6430,13 @@ class InventoryStore:
             body = payload.body if isinstance(payload.body, dict) else {}
             if body.get("success") is False:
                 return None, XrayConfigSnapshotSource.AGENT_REPORT
+            source = (
+                XrayConfigSnapshotSource.MASTER_WRITE
+                if command.query == _XRAY_SNAPSHOT_REFRESH_QUERY
+                else XrayConfigSnapshotSource.AGENT_REPORT
+            )
             return InventoryStore._xray_config_text(body.get("config")), (
-                XrayConfigSnapshotSource.AGENT_REPORT
+                source
             )
 
         body = command.body if isinstance(command.body, dict) else {}
@@ -8098,6 +8164,7 @@ class InventoryStore:
         self._record_domain_latency_result(session, server, command, payload, now)
         self._record_scan_result_from_command(session, server, command, payload, now)
         self._record_xray_config_snapshot_from_command(session, server, command, payload, now)
+        self._queue_xray_snapshot_refresh_after_mutation(session, server, command, payload, now)
 
     def _record_scan_result_from_command(
         self,
