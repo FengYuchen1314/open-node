@@ -2,6 +2,11 @@ import type { ProbePayload, ProbeSeriesResponse } from "../domain/probe";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 
+interface BrowserLocationLike {
+  origin: string;
+  protocol: string;
+}
+
 export interface ProbeSeriesOptions {
   range?: "1h" | "6h" | "24h";
   metric?: "ping" | "system";
@@ -39,6 +44,12 @@ export async function getPublicProbeSeries(
     throw await apiError(response, "Public probe series request failed");
   }
   return response.json() as Promise<ProbeSeriesResponse>;
+}
+
+export function getPublicProbeStreamUrl(locationLike: BrowserLocationLike = window.location) {
+  const url = new URL("/api/v1/public/probe-ws", apiBaseUrl || locationLike.origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }
 
 async function apiError(response: Response, fallback: string): Promise<Error> {

@@ -95,12 +95,14 @@ license gates. The primary endpoints are:
 
 - `GET /api/v1/public/probe-servers`
 - `GET /api/v1/public/probe-series`
+- `GET /api/v1/public/probe-ws`
 
 For compatibility with the `mmwx-probe` Worker route mapping, the same handlers
 are also mounted at:
 
 - `GET /api/public/probe-servers`
 - `GET /api/public/probe-series`
+- `GET /api/public/probe-ws`
 
 Probe responses are built from persisted agent telemetry snapshots. The server
 list exposes only public status, speed, resource, traffic, and latency fields;
@@ -108,5 +110,7 @@ internal identifiers, IP addresses, bootstrap tokens, and agent secrets are not
 serialized. Series lookups use the public server index from the sanitized list
 instead of private server IDs.
 
-The HTTP payload and series endpoints are implemented. The public
-`/api/public/probe-ws` real-time stream remains a future migration slice.
+The WebSocket stream is also public and read-only. It sends the same
+`ProbePayload` structure as the HTTP list endpoint, drops any client messages,
+limits concurrent connections in memory, and keeps the no-license response
+contract.

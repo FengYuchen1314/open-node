@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import type { ProbePayload, ProbeServer } from "../domain/probe";
-import { getPublicProbePayload } from "../services/probe";
+import { getPublicProbePayload, getPublicProbeStreamUrl } from "../services/probe";
 
 const payload = ref<ProbePayload | null>(null);
 const loading = ref(false);
 const errorMessage = ref("");
+const streamActive = ref(false);
+let probeStream: WebSocket | undefined;
 
 const servers = computed(() => payload.value?.servers ?? []);
 const onlineCount = computed(() => servers.value.filter((server) => server.online).length);
@@ -20,7 +22,7 @@ const metrics = computed(() => [
   {
     label: "Public Nodes",
     value: servers.value.length.toString(),
-    note: payload.value?.enabled ? "Probe endpoint enabled" : "Probe endpoint disabled",
+    note: probeEndpointNote(),
     icon: "mdi-access-point-network",
     color: "primary",
   },
@@ -42,17 +44,63 @@ const metrics = computed(() => [
 
 onMounted(() => {
   void refreshProbe();
+  openProbeStream();
+});
+
+onUnmounted(() => {
+  probeStream?.close();
+  probeStream = undefined;
 });
 
 async function refreshProbe() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    payload.value = await getPublicProbePayload();
+    acceptProbe(await getPublicProbePayload());
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "Probe request failed.";
   } finally {
     loading.value = false;
+  }
+}
+
+function acceptProbe(nextPayload: ProbePayload) {
+  payload.value = nextPayload;
+  errorMessage.value = "";
+}
+
+function probeEndpointNote() {
+  if (streamActive.value) {
+    return "Live stream connected";
+  }
+  return payload.value?.enabled ? "Probe endpoint enabled" : "Probe endpoint disabled";
+}
+
+function openProbeStream() {
+  if (typeof WebSocket === "undefined") {
+    return;
+  }
+  try {
+    probeStream = new WebSocket(getPublicProbeStreamUrl(window.location));
+    probeStream.onopen = () => {
+      streamActive.value = true;
+    };
+    probeStream.onmessage = (event) => {
+      try {
+        acceptProbe(JSON.parse(event.data as string) as ProbePayload);
+      } catch {
+        // Ignore malformed stream frames; the next snapshot replaces the page state.
+      }
+    };
+    probeStream.onerror = () => {
+      streamActive.value = false;
+    };
+    probeStream.onclose = () => {
+      streamActive.value = false;
+      probeStream = undefined;
+    };
+  } catch {
+    streamActive.value = false;
   }
 }
 

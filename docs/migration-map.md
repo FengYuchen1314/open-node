@@ -36,5 +36,7 @@ This document records the starting source map for the Open Node refactor.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.
-   - Next: public probe WebSocket stream and richer appearance/settings data.
+   - Done: public probe WebSocket stream compatible with the `mmwx-probe`
+     Worker `/api/stream` mapping.
+   - Next: richer probe appearance/settings data.
 5. Revisit Xray integration once the agent protocol surface is stable.

@@ -7,6 +7,7 @@ from open_node.api.routes.system import healthz
 from open_node.core.config import Settings, get_settings
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import InventoryStore
+from open_node.services.probe_stream import PublicProbeStreamManager
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -28,6 +29,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.inventory = InventoryStore(active_settings.database_url)
     app.state.inventory.create_schema()
     app.state.agent_connections = AgentConnectionManager()
+    app.state.public_probe_streams = PublicProbeStreamManager()
     app.include_router(api_router, prefix=active_settings.api_prefix)
     app.include_router(public_router, prefix="/api")
     app.add_api_route("/healthz", healthz, methods=["GET"], include_in_schema=False)

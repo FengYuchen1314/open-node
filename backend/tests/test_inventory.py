@@ -366,6 +366,42 @@ def test_public_probe_mmwx_worker_alias_is_available(tmp_path: Path) -> None:
     assert response.json()["servers"][0]["name"] == "edge-probe-alias"
 
 
+def test_public_probe_websocket_alias_streams_sanitized_payload(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-probe-ws", "ip_address": "203.0.113.44"},
+    ).json()
+    client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": created["agent_token"],
+            "latency": [{"key": "cmcc", "success": True, "latency_ms": 24}],
+        },
+    )
+
+    with client.websocket_connect("/api/public/probe-ws") as websocket:
+        payload = websocket.receive_json()
+
+    assert payload["enabled"] is True
+    assert payload["license_required"] is False
+    assert payload["servers"][0]["name"] == "edge-probe-ws"
+    assert payload["servers"][0]["ping"][0]["current_ms"] == 24
+    assert "ip_address" not in payload["servers"][0]
+    assert "agent_token" not in payload["servers"][0]
+
+
+def test_public_probe_websocket_v1_route_is_available(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    client.post("/api/v1/servers", json={"name": "edge-probe-ws-v1"})
+
+    with client.websocket_connect("/api/v1/public/probe-ws") as websocket:
+        payload = websocket.receive_json()
+
+    assert payload["servers"][0]["name"] == "edge-probe-ws-v1"
+    assert payload["license_required"] is False
+
+
 def test_public_probe_series_unknown_index_returns_public_404(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getPublicProbePayload, getPublicProbeSeries } from "./probe";
+import { getPublicProbePayload, getPublicProbeSeries, getPublicProbeStreamUrl } from "./probe";
 
 describe("public probe API client", () => {
   it("loads public probe payload without sending license headers", async () => {
@@ -62,5 +62,20 @@ describe("public probe API client", () => {
     );
     expect(response.series).toMatchObject({ current_ms: 42 });
     expect(response.license_required).toBe(false);
+  });
+
+  it("builds a same-origin public probe websocket URL", () => {
+    expect(
+      getPublicProbeStreamUrl({
+        origin: "https://probe.example",
+        protocol: "https:",
+      }),
+    ).toBe("wss://probe.example/api/v1/public/probe-ws");
+    expect(
+      getPublicProbeStreamUrl({
+        origin: "http://localhost:5173",
+        protocol: "http:",
+      }),
+    ).toBe("ws://localhost:5173/api/v1/public/probe-ws");
   });
 });
