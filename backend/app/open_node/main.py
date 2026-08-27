@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from open_node.api.router import api_router
 from open_node.api.routes.system import healthz
 from open_node.core.config import Settings, get_settings
+from open_node.services.inventory import InventoryStore
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -22,6 +23,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.state.inventory = InventoryStore()
     app.include_router(api_router, prefix=active_settings.api_prefix)
     app.add_api_route("/healthz", healthz, methods=["GET"], include_in_schema=False)
     return app

@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { licenseContract } from "../domain/license";
+import { defaultServerCreateRequest } from "../domain/inventory";
+
+const serverDefaults = defaultServerCreateRequest();
 
 const statusTiles = [
   {
@@ -12,7 +15,7 @@ const statusTiles = [
   {
     label: "Backend",
     value: "FastAPI",
-    note: "API-first control plane foundation under /api/v1.",
+    note: `Inventory and agent registration APIs default to port ${serverDefaults.listen_port}.`,
     icon: "mdi-api",
     color: "info",
   },
@@ -26,8 +29,8 @@ const statusTiles = [
 ] as const;
 
 const migrationSlices = [
-  "Control-plane inventory",
-  "Agent registration",
+  "Control-plane inventory API",
+  "Agent registration and heartbeat",
   "Telemetry and probe APIs",
   "Xray runtime integration",
 ];
