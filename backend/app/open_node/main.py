@@ -4,23 +4,31 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from open_node.api.router import api_router
 from open_node.api.routes.agents import agent_websocket
 from open_node.api.routes.public import router as public_router
 from open_node.api.routes.system import healthz
 from open_node.core.config import Settings, get_settings
+from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.auth import AuthStore
 from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
 from open_node.services.inventory import InventoryStore
 from open_node.services.probe_stream import PublicProbeStreamManager
+from open_node.services.secure_channel import AgentIdentity
 from open_node.web import FrontendFiles
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings = settings or get_settings()
+    identity = (
+        AgentIdentity.load(active_settings.agent_identity_file)
+        if active_settings.agent_identity_file
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(app):
@@ -40,6 +48,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url="/redoc",
         lifespan=lifespan,
     )
+
+    @app.exception_handler(AgentCommandPayloadError)
+    async def invalid_agent_command(_request, exc):
+        return JSONResponse(
+            status_code=422,
+            content={"detail": str(exc), "license_required": False},
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=active_settings.cors_origins,
@@ -48,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     app.state.settings = active_settings
+    app.state.agent_identity = identity
     app.state.auth = AuthStore(active_settings.database_url)
     app.state.inventory = InventoryStore(active_settings.database_url)
     app.state.inventory.create_schema()

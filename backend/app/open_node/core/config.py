@@ -26,6 +26,19 @@ class Settings(BaseSettings):
     certificate_poll_seconds: float = Field(default=30, ge=1, le=3600)
     certificate_job_timeout: int = Field(default=240, ge=5, le=600)
     frontend_dir: Path | None = None
+    agent_identity_file: Path | None = None
+
+    @field_validator("agent_identity_file", mode="before")
+    @classmethod
+    def optional_identity_file(cls, value):
+        return None if value == "" else value
+
+    @field_validator("agent_identity_file")
+    @classmethod
+    def absolute_identity_file(cls, value: Path | None) -> Path | None:
+        if value is not None and not value.is_absolute():
+            raise ValueError("Agent identity path must be absolute")
+        return value
 
     @field_validator("frontend_dir")
     @classmethod

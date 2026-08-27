@@ -11,6 +11,7 @@ import {
   getXrayConfigSnapshotRecovery,
   getLatestScanResult,
   getLatestTelemetry,
+  getAgentIdentity,
   getXrayRuntimeInventory,
   getXrayRuntimeTunnelInventory,
   listCommandStreamFrames,
@@ -23,6 +24,21 @@ import {
 } from "./inventory";
 
 describe("inventory API client", () => {
+  it("reads only public Agent identity metadata", async () => {
+    const identity = { enabled: true, protocol: "securechan-v1", public_key: "public-key",
+      fingerprint: "fingerprint", license_required: false };
+    const fetcher: typeof fetch = async (input) => {
+      expect(input.toString()).toBe("/api/v1/agents/identity");
+      return new Response(JSON.stringify(identity));
+    };
+    expect(await getAgentIdentity(fetcher)).toEqual(identity);
+  });
+
+  it("preserves identity access failures", async () => {
+    const fetcher: typeof fetch = async () => new Response(JSON.stringify({ detail: "Sign in required" }), { status: 401 });
+    await expect(getAgentIdentity(fetcher)).rejects.toThrow("Sign in required");
+  });
+
   it("creates servers without sending license headers", async () => {
     let body: unknown;
     let headers: HeadersInit | undefined;

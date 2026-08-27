@@ -159,6 +159,7 @@ def exercise(
     database_url: str,
     *,
     certificate_spki: str = "",
+    agent_identity: dict | None = None,
 ) -> None:
     from open_node.services.auth import AuthStore, OperatorSession
     from sqlalchemy import update
@@ -303,6 +304,15 @@ def exercise(
         expect(
             page.get_by_role("heading", name="Change Password", exact=True)
         ).to_be_visible()
+        if agent_identity:
+            expect(page.locator(".identity-public-key")).to_have_text(agent_identity["public_key"])
+            expect(page.locator(".identity-fingerprint")).to_have_text(agent_identity["fingerprint"])
+            context.grant_permissions(["clipboard-read", "clipboard-write"], origin=url)
+            page.get_by_role("button", name="Copy public key", exact=True).click()
+            assert page.evaluate("navigator.clipboard.readText()") == agent_identity["public_key"]
+            print("PASS public Agent identity, fingerprint and clipboard copy", flush=True)
+        else:
+            expect(page.locator(".agent-identity").get_by_text("Not configured", exact=True)).to_be_visible()
         check_layout(page)
         page.screenshot(
             path=output / "access-desktop.png", full_page=True, animations="disabled"
@@ -373,17 +383,21 @@ def exercise(
 
 
 def run(output: Path) -> None:
+    from open_node.services.secure_channel import AgentIdentity
+
     root = Path(__file__).resolve().parents[2]
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="open-node-ui-") as temporary:
         work = Path(temporary)
+        identity = AgentIdentity.create(work / "identity" / "seed")
         password = secrets.token_urlsafe(32)
         database_url = f"sqlite:///{work / 'ui.db'}"
         env = {
-            **os.environ,
+            **{key: value for key, value in os.environ.items() if not key.startswith("OPEN_NODE_")},
             "PYTHONPATH": str(root / "backend" / "app"),
             "OPEN_NODE_DATABASE_URL": database_url,
             "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+            "OPEN_NODE_AGENT_IDENTITY_FILE": str(work / "identity" / "seed"),
         }
         subprocess.run(
             [sys.executable, "-m", "open_node.admin", "create", "--password-stdin"],
@@ -437,7 +451,7 @@ def run(output: Path) -> None:
                 url = f"http://127.0.0.1:{port}"
                 wait_http(f"{backend_url}/healthz", backend)
                 wait_http(url, frontend)
-                exercise(url, password, output, database_url)
+                exercise(url, password, output, database_url, agent_identity=identity.public_metadata())
             except Exception:
                 log.seek(0)
                 print(log.read().replace(password, "[redacted]"), file=sys.stderr)

@@ -51,6 +51,7 @@ from open_node.domain.changes import (
 from open_node.domain.inventory import (
     AgentCapabilities,
     AgentCommandCreate,
+    AgentCommandPayloadError,
     AgentCommandRead,
     AgentCommandResultRequest,
     AgentCommandStatus,
@@ -3565,6 +3566,10 @@ class InventoryStore:
             return self._change_set_read(session, change_set)
 
     def create_change_set(self, payload: AgentChangeSetCreate) -> AgentChangeSetRead:
+        for step in payload.steps:
+            step.forward.validate_wire_payload()
+            if step.rollback:
+                step.rollback.validate_wire_payload()
         now = datetime.now(tz=UTC)
         with self._session() as session:
             self._ensure_step_servers_exist(session, payload.steps)
@@ -3838,6 +3843,7 @@ class InventoryStore:
                 raise CommandNotFoundError(f"command not found: {command_id}")
             now = datetime.now(tz=UTC)
             if not self._claim_command_lease(session, command, now):
+                session.commit()
                 return None
             session.commit()
             session.refresh(command)
@@ -6351,6 +6357,7 @@ class InventoryStore:
         *,
         depends_on: CommandModel | None = None,
     ) -> CommandModel:
+        payload.validate_wire_payload()
         active_now = now or datetime.now(tz=UTC)
         command = CommandModel(
             id=str(uuid4()),
@@ -8368,6 +8375,24 @@ class InventoryStore:
         ):
             return False
         if not self._change_sets().can_lease(session, command):
+            return False
+        try:
+            AgentCommandCreate(
+                method=command.method,
+                path=command.path,
+                query=command.query,
+                body=command.body,
+                timeout_ms=command.timeout_ms,
+                stream=command.stream,
+            ).validate_wire_payload()
+        except AgentCommandPayloadError as exc:
+            command.result_error = f"Not sent: {exc}"
+            command.updated_at = now
+            if command.attempts == 0:
+                command.status = AgentCommandStatus.SKIPPED.value
+                command.completed_at = now
+                self._advance_command_dependents(session, command, now)
+                self._change_sets().advance_after_result(session, command, now)
             return False
         # Both transports must claim the same persisted version before dispatching.
         result = session.execute(

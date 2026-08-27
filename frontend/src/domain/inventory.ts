@@ -826,3 +826,10 @@ export const defaultServerCreateRequest = (): ServerCreateRequest => ({
   renewal_currency: "",
   telecom_paid_peer: null,
 });
+export interface AgentIdentityInfo {
+  enabled: boolean;
+  protocol: string;
+  public_key: string | null;
+  fingerprint: string | null;
+  license_required: false;
+}

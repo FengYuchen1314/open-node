@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Protocol
 from uuid import UUID
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocketDisconnect
 
 from open_node.domain.inventory import AgentCapabilities, AgentCommandRead
 from open_node.services.inventory import CommandNotFoundError, InventoryStore
 
 
+class AgentTransport(Protocol):
+    async def send_json(self, data: Any) -> None: ...
+
+
 @dataclass
 class AgentConnection:
     server_id: UUID
-    websocket: WebSocket
+    websocket: AgentTransport
     capabilities: AgentCapabilities
 
 
@@ -26,7 +31,7 @@ class AgentConnectionManager:
     def register(
         self,
         server_id: UUID,
-        websocket: WebSocket,
+        websocket: AgentTransport,
         capabilities: AgentCapabilities,
     ) -> None:
         self._connections[server_id] = AgentConnection(
@@ -35,7 +40,7 @@ class AgentConnectionManager:
             capabilities=capabilities,
         )
 
-    def unregister(self, server_id: UUID, websocket: WebSocket) -> None:
+    def unregister(self, server_id: UUID, websocket: AgentTransport) -> None:
         current = self._connections.get(server_id)
         if current and current.websocket is websocket:
             self._connections.pop(server_id, None)

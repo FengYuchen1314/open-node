@@ -147,6 +147,12 @@ Remote host files and Agent state are not in the control-plane backup.
 
 ## Upgrade And Roll Back
 
+Legacy MMWX Agents that require a signing identity need the explicit setup in
+[legacy-agent-migration.md](legacy-agent-migration.md). Keep that private seed
+inside the persistent volume so the ordinary whole-volume backup includes it.
+Setting `OPEN_NODE_AGENT_IDENTITY_FILE` to a missing or invalid file deliberately
+prevents startup rather than changing the identity trusted by existing Agents.
+
 1. Back up the stopped volume and retain the current image and configuration.
 2. Start from a clean Git checkout and update with `git fetch origin` followed
    by `git merge --ff-only origin/main`. Do not reset or discard local edits.

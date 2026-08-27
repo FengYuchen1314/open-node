@@ -2,7 +2,15 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -30,8 +38,18 @@ from open_node.services.inventory import (
     InvalidAgentTokenError,
     InventoryStore,
 )
+from open_node.services.secure_channel import AgentSocket, ChannelError
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+@router.get("/identity", dependencies=[Depends(require_administrator)])
+def agent_identity(request: Request) -> dict:
+    identity = request.app.state.agent_identity
+    return identity.public_metadata() if identity else {
+        "enabled": False, "protocol": "securechan-v1", "public_key": None,
+        "fingerprint": None, "license_required": False,
+    }
 
 
 @router.get("", response_model=list[AgentRead], dependencies=[Depends(require_administrator)])
@@ -130,47 +148,54 @@ async def agent_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     store: InventoryStore = websocket.app.state.inventory
     connections: AgentConnectionManager = websocket.app.state.agent_connections
+    channel = AgentSocket(websocket)
     server_id: UUID | None = None
     token = ""
 
     try:
-        auth_message = await websocket.receive_json()
+        identity = websocket.app.state.agent_identity
+        auth_message = await channel.authenticate_message(
+            identity,
+            require_encryption=identity is not None and websocket.url.path == "/api/remote/ws",
+        )
         auth_payload = _message_payload(auth_message)
         if not isinstance(auth_message, dict) or auth_message.get("type") != "auth":
-            await _send_auth_result(websocket, False, "first message must be auth")
-            await websocket.close(code=1008)
+            await _send_auth_result(channel, False, "first message must be auth")
+            await channel.close(code=1008)
             return
 
         token = str(auth_payload.get("token") or "")
         try:
             if auth_payload.get("probe") is True:
                 server = store.authenticate_agent(token)
-                await _send_auth_result(websocket, True, "authenticated", server.id)
-                await websocket.close(code=1000)
+                await _send_auth_result(channel, True, "authenticated", server.id)
+                await channel.close(code=1000)
                 return
             agent, server = store.register_agent(_registration_from_ws_payload(auth_payload))
         except (InvalidAgentTokenError, ValidationError) as exc:
-            await _send_auth_result(websocket, False, str(exc))
-            await websocket.close(code=1008)
+            await _send_auth_result(channel, False, str(exc))
+            await channel.close(code=1008)
             return
 
         server_id = server.id
-        await _send_auth_result(websocket, True, "authenticated", server.id)
-        connections.register(server.id, websocket, agent.capabilities)
+        await _send_auth_result(channel, True, "authenticated", server.id)
+        connections.register(server.id, channel, agent.capabilities)
         await connections.dispatch_pending_commands(store, server.id)
 
         while True:
-            message = await websocket.receive_json()
-            await _handle_agent_ws_message(websocket, store, token, message)
+            message = await channel.receive_json()
+            await _handle_agent_ws_message(channel, store, token, message)
             if isinstance(message, dict) and message.get("type") == "rpc_reply":
                 await connections.dispatch_ready_commands(store)
             else:
                 await connections.dispatch_pending_commands(store, server.id)
     except WebSocketDisconnect:
         pass
+    except (ChannelError, TimeoutError, UnicodeError):
+        await channel.close(code=1008)
     finally:
         if server_id:
-            connections.unregister(server_id, websocket)
+            connections.unregister(server_id, channel)
 
 
 def _message_payload(message: object) -> dict[str, Any]:
@@ -198,7 +223,7 @@ def _registration_from_ws_payload(payload: dict[str, Any]) -> AgentRegistrationR
 
 
 async def _handle_agent_ws_message(
-    websocket: WebSocket,
+    websocket: AgentSocket,
     store: InventoryStore,
     token: str,
     message: object,
@@ -309,7 +334,7 @@ async def _handle_agent_ws_message(
 
 
 async def _send_auth_result(
-    websocket: WebSocket,
+    websocket: AgentSocket,
     success: bool,
     message: str,
     server_id: UUID | None = None,
@@ -325,7 +350,7 @@ async def _send_auth_result(
     await websocket.send_json({"type": "auth_result", "payload": payload})
 
 
-async def _send_ws_error(websocket: WebSocket, message: str) -> None:
+async def _send_ws_error(websocket: AgentSocket, message: str) -> None:
     await websocket.send_json(
         {
             "type": "error",

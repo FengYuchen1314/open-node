@@ -8,6 +8,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+MAX_AGENT_MESSAGE_BYTES = 4 * 1024 * 1024
+
+
+class AgentCommandPayloadError(ValueError):
+    pass
+
 
 def _strip_required_text(value: str, field_name: str) -> str:
     normalized = value.strip()
@@ -785,6 +791,23 @@ class AgentCommandCreate(BaseModel):
     body: Any = None
     timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
     stream: bool = False
+
+    def validate_wire_payload(self) -> Self:
+        # Reserve room for the controller-generated request ID and RPC envelope.
+        try:
+            payload = {"request_id": "x" * 80, **self.model_dump(mode="python")}
+            encoded = json.dumps(
+                {"type": "rpc_call", "payload": payload},
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            )
+            size = len(encoded.encode("utf-8"))
+        except (ValueError, TypeError, UnicodeError) as exc:
+            raise AgentCommandPayloadError("Command must contain valid UTF-8 JSON") from exc
+        if size > MAX_AGENT_MESSAGE_BYTES:
+            raise AgentCommandPayloadError("Agent command exceeds the 4 MiB wire limit")
+        return self
 
     @field_validator("method")
     @classmethod

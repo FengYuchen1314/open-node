@@ -243,8 +243,8 @@ their prerequisite IDs.
 
 Agents can connect to `/api/v1/agents/ws` or the active MMWX agent's
 `/api/remote/ws` address and authenticate with the same
-server bootstrap token used by HTTP registration. The first message must be
-`auth`; after that, the socket accepts `heartbeat`, `traffic`/`telemetry`,
+server bootstrap token used by HTTP registration. Authentication uses `auth`,
+optionally preceded by the legacy key exchange; after that, the socket accepts `heartbeat`, `traffic`/`telemetry`,
 `scan_result`, `ping`, and `rpc_reply` messages. Successful auth registers or
 refreshes the agent record and stores its capability flags.
 An auth payload with `probe=true` only verifies the token and closes after the
@@ -262,10 +262,17 @@ refreshes to connected RPC agents. Unsupported stream commands remain queued
 for a compatible transport. An authentication response is always sent before
 any RPC work on that socket.
 
-The compatibility address currently supports JSON auth and RPC. MMWX's optional
-`securechan` key-exchange handshake is not implemented yet; existing agents
-configured to require it are not covered by this compatibility slice. Public
-deployment also requires transport TLS and control-plane access protection.
+The transport adapter supports MMWX `securechan-v1` using the `cryptography`
+library. An explicitly configured private signing seed enables X25519 key
+exchange, Ed25519 identity verification, HKDF and directional AES-GCM frames.
+After exchange, authentication, acknowledgments, RPC and stream messages all
+use encrypted binary frames. Replay checks advance only after authentication
+of the ciphertext. The legacy `/api/remote/ws` endpoint requires exchange when
+an identity is configured; the native endpoint retains its TLS-protected JSON
+contract. There is no silent key regeneration or in-connection downgrade.
+See [legacy-agent-migration.md](legacy-agent-migration.md) for key custody,
+HTTP/pull migration and protocol limits. TLS and operator authentication remain
+required; the legacy extension is not an alternative to either.
 
 Stream-capable agents can also receive `rpc_call` payloads with `stream=true`.
 They may send any number of MMWX-compatible `rpc_stream_data` text frames before

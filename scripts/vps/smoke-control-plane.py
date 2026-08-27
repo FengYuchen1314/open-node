@@ -176,6 +176,12 @@ def run(tag, nginx, output, agent_python, archive):
         stack.callback(deployment.close)
         deployment.up()
         hardening(deployment)
+        identity_path = "/var/lib/open-node/agent-identity/seed"
+        identity_command = ["exec", "-T", "open-node", "python", "-m", "open_node.agent_identity"]
+        identity = json.loads(deployment.compose(*identity_command, "create", identity_path).stdout)
+        assert deployment.compose(*identity_command, "create", identity_path, check=False).returncode != 0
+        assert json.loads(deployment.compose(*identity_command, "show", identity_path).stdout) == identity
+        deployment.env["OPEN_NODE_AGENT_IDENTITY_FILE"] = identity_path
         plain = f"http://127.0.0.1:{deployment.port}"
         with httpx.Client(base_url=plain, trust_env=False) as anonymous:
             assert not anonymous.get("/api/v1/auth/session").json()["configured"]
@@ -341,6 +347,9 @@ def run(tag, nginx, output, agent_python, archive):
         volume = deployment.volume()
         vault = volume / "certificates/vault.key"
         original_vault = vault.read_bytes()
+        identity_file = volume / "agent-identity/seed"
+        original_identity = identity_file.read_bytes()
+        assert identity_file.stat().st_mode & 0o777 == 0o600
         assert vault.stat().st_mode & 0o777 == 0o600
         assert (volume / "open-node.db").stat().st_mode & 0o777 == 0o600
         assert secret.encode() not in (volume / "open-node.db").read_bytes()
@@ -356,6 +365,8 @@ def run(tag, nginx, output, agent_python, archive):
         assert deployment.inspect()["Id"] != original
         preserved(client, server_id, certificate_id, cert, key)
         assert vault.read_bytes() == original_vault
+        assert identity_file.read_bytes() == original_identity
+        assert client.get("/api/v1/agents/identity").json() == identity
         print(
             "PASS container recreation preserves login, inventory and encrypted private key",
             flush=True,
@@ -402,6 +413,7 @@ def run(tag, nginx, output, agent_python, archive):
             output,
             f"sqlite:///{volume / 'open-node.db'}",
             certificate_spki=base64.b64encode(hashlib.sha256(spki).digest()).decode(),
+            agent_identity=identity,
         )
         deployment.compose(
             "exec",
@@ -421,6 +433,7 @@ def run(tag, nginx, output, agent_python, archive):
 
 
 def backup_restore(deployment, work, client, server_id, certificate_id, cert, key):
+    identity = client.get("/api/v1/agents/identity").json()
     deployment.compose("stop")
     backup = deployment.compose(
         "run",
@@ -442,6 +455,7 @@ def backup_restore(deployment, work, client, server_id, certificate_id, cert, ke
     deployment.up()
     preserved(client, server_id, certificate_id, cert, key)
     restored = Deployment(deployment.env["OPEN_NODE_IMAGE_TAG"])
+    restored.env["OPEN_NODE_AGENT_IDENTITY_FILE"] = deployment.env["OPEN_NODE_AGENT_IDENTITY_FILE"]
     try:
         restored.compose("create", "--no-build")
         assert not list(restored.volume().iterdir())
@@ -471,6 +485,7 @@ def backup_restore(deployment, work, client, server_id, certificate_id, cert, ke
                 f"{k}={v}" for k, v in client.cookies.items()
             )
             preserved(restored_client, server_id, certificate_id, cert, key)
+            assert restored_client.get("/api/v1/agents/identity").json() == identity
         print(
             "PASS stopped-volume backup restores sessions, database and vault into a fresh install",
             flush=True,

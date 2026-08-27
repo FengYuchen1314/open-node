@@ -16,6 +16,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
+from open_node.services.secure_channel import AgentIdentity
 
 REFERENCE_IMAGE = (
     "ghcr.io/iluobei/mmw-agent@sha256:"
@@ -50,7 +51,7 @@ def poll(description, read, ready, timeout=60):
     raise TimeoutError(description)
 
 
-def run(image: str) -> None:
+def run(image: str, secure_channel: bool = False) -> None:
     root = Path(__file__).resolve().parents[2]
     network = f"open-node-smoke-{uuid4().hex[:10]}"
     container = None
@@ -64,13 +65,16 @@ def run(image: str) -> None:
         ]
         with tempfile.TemporaryDirectory(prefix="open-node-agent-smoke-") as temporary:
             work = Path(temporary)
+            identity = AgentIdentity.create(work / "identity" / "seed") if secure_channel else None
             password = secrets.token_urlsafe(32)
             backend_env = {
-                **os.environ,
+                **{key: value for key, value in os.environ.items() if not key.startswith("OPEN_NODE_")},
                 "PYTHONPATH": str(root / "backend" / "app"),
                 "OPEN_NODE_DATABASE_URL": f"sqlite:///{work / 'open-node.db'}",
                 "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
             }
+            if identity:
+                backend_env["OPEN_NODE_AGENT_IDENTITY_FILE"] = str(work / "identity" / "seed")
             subprocess.run(
                 [sys.executable, "-m", "open_node.admin", "create", "--password-stdin"],
                 input=password + "\n", text=True, env=backend_env, cwd=work,
@@ -94,21 +98,15 @@ def run(image: str) -> None:
                 listener.bind((gateway, 0))
                 listener.listen()
                 url = f"http://{gateway}:{listener.getsockname()[1]}"
-                backend = subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-m",
-                        "uvicorn",
-                        "open_node.main:app",
-                        "--fd",
-                        str(listener.fileno()),
-                    ],
-                    cwd=work,
-                    env=backend_env,
-                    pass_fds=(listener.fileno(),),
-                    stdout=log,
-                    stderr=log,
-                )
+                def start_backend():
+                    return subprocess.Popen(
+                        [sys.executable, "-m", "uvicorn", "open_node.main:app",
+                         "--fd", str(listener.fileno())],
+                        cwd=work, env=backend_env, pass_fds=(listener.fileno(),),
+                        stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                    )
+
+                backend = start_backend()
                 with httpx.Client(base_url=url, timeout=5, trust_env=False) as client:
                     poll(
                         "backend starts on the isolated bridge",
@@ -142,6 +140,8 @@ def run(image: str) -> None:
                             }
                         ],
                     }
+                    if identity:
+                        config["master_public_key"] = AgentIdentity(bytes(32)).public_metadata()["public_key"]
                     (agent_dir / "config.yaml").write_text(json.dumps(config))
                     container = docker(
                         "run",
@@ -168,6 +168,23 @@ def run(image: str) -> None:
                         "-config",
                         "/etc/mmw-agent/config.yaml",
                     )
+                    if identity:
+                        poll("wrong pinned identity is rejected by the reference Agent",
+                             lambda: docker("logs", container, check=False),
+                             lambda logs: "master signature verification failed" in logs)
+                        assert client.get("/api/v1/agents").json() == []
+                        assert client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"] == []
+                        config["master_public_key"] = "invalid"
+                        (agent_dir / "config.yaml").write_text(json.dumps(config))
+                        docker("restart", container)
+                        poll("malformed pin cannot downgrade the legacy endpoint",
+                             lambda: docker("logs", container, check=False),
+                             lambda logs: "close 1008" in logs)
+                        assert client.get("/api/v1/agents").json() == []
+                        config["master_public_key"] = identity.public_metadata()["public_key"]
+                        (agent_dir / "config.yaml").write_text(json.dumps(config))
+                        docker("restart", container)
+                        assert client.get("/api/v1/agents/identity").json() == identity.public_metadata()
                     recovery_url = (
                         f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery"
                         "?with_config=true"
@@ -187,6 +204,21 @@ def run(image: str) -> None:
                     assert json.loads(first["current"]["config"]) == json.loads(
                         xray_file.read_text()
                     )
+                    if identity:
+                        assert "Encrypted session established" in docker("logs", container, check=False)
+                        backend.terminate()
+                        backend.wait(timeout=10)
+                        backend = start_backend()
+                        poll("controller restarts with its stored signing identity",
+                             lambda: client.get("/healthz"), lambda reply: reply.status_code == 200)
+                        assert client.get("/api/v1/agents/identity").json() == identity.public_metadata()
+                        probe = client.post(f"/api/v1/servers/{server_id}/operations/system-info")
+                        probe.raise_for_status()
+                        probe_id = probe.json()["command"]["id"]
+                        poll("reference Agent reconnects with fresh encryption after controller restart",
+                             lambda: next(item for item in client.get(commands_url).json()["commands"]
+                                          if item["id"] == probe_id),
+                             lambda command: command["status"] == "succeeded")
                     changed = json.loads(first["current"]["config"])
                     changed["log"]["loglevel"] = "error"
                     response = client.post(
@@ -336,7 +368,8 @@ def run(image: str) -> None:
                     assert all(command["attempts"] == 0 for command in stopped[1:])
                     assert xray_file.read_text() == healthy_config
                     print(
-                        json.dumps({"status": "passed", "reference_image": image}),
+                        json.dumps({"status": "passed", "reference_image": image,
+                                    "secure_channel": secure_channel}),
                         flush=True,
                     )
     except Exception:
@@ -363,4 +396,6 @@ def run(image: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default=REFERENCE_IMAGE)
-    run(parser.parse_args().image)
+    parser.add_argument("--secure-channel", action="store_true")
+    args = parser.parse_args()
+    run(args.image, args.secure_channel)

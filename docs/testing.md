@@ -11,9 +11,19 @@ From Windows PowerShell in the repository root:
 .\scripts\vps\sync-and-test.ps1
 ```
 
-The script uses the default SSH key for `root@185.99.135.224`, checks out the
-GitHub repository into `/opt/open-node`, bootstraps the Debian test host, and
-runs:
+The script pushes the named local branch, records its exact commit and uses
+the default SSH key for `root@185.99.135.224`. The VPS needs Python 3.11+ and Git
+before the first call. It clones into a missing/empty target or fast-forwards
+an existing clean checkout with the matching origin and branch. Local edits,
+untracked files, divergence, symlinked paths, incoming ignored-file conflicts,
+and a remote branch that moved after the push stop the update. Nothing is
+reset or recursively removed. Uncommitted local Windows edits are not tested.
+
+The default target is `/opt/open-node`; `-RemoteDir` can select a direct,
+non-hidden child. Use a separate checkout for tests when the default directory
+serves a live process. This helper does not stop services or back up databases;
+follow [deployment.md](deployment.md) for production upgrades. The script then
+bootstraps the Debian test host (unless `-SkipBootstrap` is set) and runs:
 
 1. Python venv and Node.js bootstrap;
 2. backend dependency installation;
@@ -23,6 +33,21 @@ runs:
 6. frontend Vitest suite;
 7. frontend production build;
 8. probe Worker dependency installation and TypeScript checks.
+
+The checkout safety tests use disposable local Git repositories on the VPS.
+For the actual PowerShell-to-SSH path, run:
+
+```bash
+python3 scripts/vps/smoke-sync-and-test.py --pwsh /path/to/pwsh
+```
+
+This root-only fixture starts its own loopback `sshd`, generates temporary
+client/host keys, and uses strict host-key checking. It verifies quoted branch
+and repository names, the exact tested revision, bootstrap selection, and
+preservation of a dirty checkout. It uses fixture bootstrap/test commands to
+check the launch contract, not as a substitute for the application suites.
+It does not change the existing SSH daemon, authorized keys or live checkout;
+its temporary direct-child checkout and SSH files are removed on exit.
 
 ## Direct VPS Command
 
@@ -249,6 +274,7 @@ with Docker available:
 ```bash
 docker pull ghcr.io/iluobei/mmw-agent@sha256:d9ff8cd1525947e1e535ca49d6b22f1b63ff28d393c46efea6f88eeb40e8840d
 backend/.venv/bin/python scripts/vps/smoke-reference-agent.py
+backend/.venv/bin/python scripts/vps/smoke-reference-agent.py --secure-channel
 ```
 
 The script uses the unmodified `mmw-agent` 0.4.7 image pinned by digest. It
@@ -264,10 +290,12 @@ and its returned config, restart-induced drift, and manual acceptance of the
 pending config. It also checks sequential recovery validation/write and the
 failure path: when the real agent returns HTTP 200 with `ok=false`, neither
 the write nor restart is attempted and a previously repaired healthy config
-is unchanged on disk. It runs in external Xray mode without a live Xray process or
-key-exchange configuration. It does not prove forwarding traffic, embedded
-runtime behavior, or migration from an encrypted MMWX connection. It also
-does not make the reference image the distributable Open Node agent.
+is unchanged on disk. With `--secure-channel`, it also verifies rejection of
+wrong and malformed pins before registration, encrypted round trips, and fresh
+encrypted sessions after controller restart with the same stored identity.
+Both modes run in external Xray mode without a live Xray process. They do not
+prove forwarding traffic, embedded runtime behavior or legacy HTTP callbacks.
+They do not make the reference image the distributable Open Node agent.
 
 ## Operator Browser Smoke
 
@@ -293,6 +321,13 @@ Certificate coverage also creates a DNS provider and profile, requires explicit
 CA terms, imports a real PEM pair, downloads certificate/private key separately,
 verifies secret fields clear on reopening, and checks desktop/mobile forms.
 Private keys and provider credentials must not appear in browser storage.
+
+The Access page also verifies the configured Agent public key/fingerprint,
+native clipboard copy and desktop/mobile layout. The disposable browser fixture
+creates its own private identity. The production-image smoke creates the seed
+with the non-root container CLI and verifies refusal to overwrite it, private
+permissions and identity preservation through container recreation and volume
+backup/restore; its HTTPS browser run checks the same public metadata.
 
 The reference-agent smoke also creates a temporary administrator and signs in
 as the operator; the reference agent still authenticates only with its own
@@ -328,6 +363,36 @@ lease races, overlapping reservations, draining earlier sequences, late
 rollback rejection, restart persistence and missing-column SQLite migration.
 
 ## Latest Verification
+
+The encrypted-Agent and safe-sync worktree passed on the designated VPS:
+
+- Backend: 242 tests; Agent: 86 tests; frontend: 84 tests and production build.
+- Ruff and Probe Worker TypeScript checks passed.
+- The unmodified pinned reference Agent passed both plaintext compatibility
+  and encrypted WebSocket auth, config writes, refresh, controller/Agent
+  restart and recovery. Wrong pins and malformed-pin plaintext fallback were
+  rejected without registering the Agent or issuing work.
+- Replay/tamper/direction/sequence checks, handshake deadlines, private-key
+  files, concurrent send order, UTF-8/finite JSON and oversized historical
+  command handling passed. Attempted historical work is not falsely completed.
+- The production image passed HTTPS/WSS, real Xray forwarding on both native
+  transports, private identity creation, non-overwrite, recreation and volume
+  restore. Public key/fingerprint display and real clipboard copy passed in
+  the desktop/mobile operator flow; screenshots were inspected.
+- The real two-node WebSocket/WebSocket, HTTP/HTTP and mixed-transport smoke
+  passed again, including reverse compensation, in-flight cancellation and
+  the desktop/mobile retry and explicit-acceptance workflows.
+- The sync launcher passed real loopback SSH with key authentication and
+  PowerShell 7.6.5 on Linux. Git fixtures verified non-destructive refusal of
+  dirty/diverged/wrong-origin/wrong-branch checkouts and ignored-file conflicts.
+  Windows PowerShell itself was not executed because tests run only on the VPS.
+
+These results do not close the remaining runtime gates in
+[migration-map.md](migration-map.md), including remote runtime lifecycle
+handlers and broader protocol/host coverage. Existing Starlette/httpx
+deprecation and frontend bundle-size warnings remain.
+
+## Earlier Change-Set Verification
 
 The coordinated change-set worktree passed on the designated VPS:
 

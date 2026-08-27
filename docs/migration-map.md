@@ -39,6 +39,11 @@ This document records the starting source map for the Open Node refactor.
      verifies service ownership, data preservation, and actual forwarding.
    - Done: HTTP `/api/v1/agents/scan` accepts node-token-authenticated scan
      reports without requiring an operator session.
+   - Done: legacy `securechan-v1` WebSocket exchange and encrypted auth/RPC/stream
+     messages, replay protection, explicit private identity CLI and public-key
+     display/copy. Wrong and malformed pins are rejected; independent native
+     transports remain available. Legacy HTTP/pull Agents have an explicit
+     WebSocket or independent-Agent migration procedure.
    - Done: the installed independent wheel has exercised real VLESS forwarding,
      new-user provisioning, user traffic reporting, failed-restart rollback,
      ordered recovery, and restart persistence over both transports on the VPS.
@@ -208,8 +213,10 @@ These passing command and snapshot checks do not prove a complete replacement:
 - Complete remote upgrade/uninstall command handlers and Xray binary upgrade
   automation. The host CLI's managed systemd install/upgrade/rollback/removal
   path is implemented and tested; it is not a remote lifecycle handler.
-- Support or explicitly migrate existing agents that use MMWX `securechan`
-  key exchange; JSON RPC compatibility alone does not cover them.
+- Legacy `securechan-v1` WebSocket compatibility is implemented and verified
+  with the unmodified pinned Agent. Legacy HTTP/pull callbacks remain distinct
+  from the independent HTTP lease API and require the explicit migration in
+  [legacy-agent-migration.md](legacy-agent-migration.md).
 - Owned Nginx HTTP/TLS/configuration/sites, reverse proxy, stream cleanup,
   supplied certificate deployment/rotation, and crash/transaction recovery are
   implemented in the independent agent. Complete WARP,

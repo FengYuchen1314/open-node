@@ -46,6 +46,9 @@ Remaining migration gates still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
 
+Existing encrypted MMWX Agents have a [legacy migration path](docs/legacy-agent-migration.md)
+with pinned controller identity, encrypted WebSocket RPC and explicit key custody.
+
 The independent [Open Node Agent](agent/README.md) now handles WebSocket and
 HTTP control connections, durable command execution, host telemetry, and Xray
 configuration and client management without activation or license checks.

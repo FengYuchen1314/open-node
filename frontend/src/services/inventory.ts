@@ -1,5 +1,6 @@
 import { authenticatedFetch } from "./auth";
 import type {
+  AgentIdentityInfo,
   AgentCommandCreateRequest,
   AgentCommandCreateResponse,
   AgentCommandStreamFramesResponse,
@@ -96,6 +97,12 @@ const operationPaths: Record<AgentOperationKind, string> = {
   agent_upgrade: "agent/upgrade",
   agent_uninstall: "agent/uninstall",
 };
+
+export async function getAgentIdentity(fetcher = authenticatedFetch): Promise<AgentIdentityInfo> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/agents/identity`);
+  if (!response.ok) throw await apiError(response, "Agent identity request failed");
+  return response.json() as Promise<AgentIdentityInfo>;
+}
 
 export async function listServers(fetcher = authenticatedFetch): Promise<ServerSummary[]> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers`);

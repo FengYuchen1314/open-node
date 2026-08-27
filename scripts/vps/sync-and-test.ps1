@@ -8,42 +8,36 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($RemoteDir -notmatch "^/opt/open-node(/[-A-Za-z0-9._]+)?$") {
-  throw "RemoteDir must be /opt/open-node or a direct child of /opt/open-node."
+if ($RemoteDir -notmatch "^/opt/open-node(/[A-Za-z0-9][A-Za-z0-9._-]*)?$") {
+  throw "RemoteDir must be /opt/open-node or a direct non-hidden child."
 }
-
-git push -u origin $Branch
+if ($HostName -notmatch "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$") {
+  throw "Invalid SSH host name."
+}
+git check-ref-format "refs/heads/$Branch"
+if ($LASTEXITCODE -ne 0) {
+  exit $LASTEXITCODE
+}
+$revision = git rev-parse --verify "refs/heads/$Branch^{commit}"
+if ($LASTEXITCODE -ne 0) {
+  exit $LASTEXITCODE
+}
+git push origin "refs/heads/${Branch}:refs/heads/${Branch}"
 if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-$remoteCommand = @"
-set -euo pipefail
-REMOTE_DIR='$RemoteDir'
-REPO_URL='$RepoUrl'
-BRANCH='$Branch'
-
-case "`$REMOTE_DIR" in
-  /opt/open-node|/opt/open-node/*) ;;
-  *) echo "Refusing unsafe remote directory: `$REMOTE_DIR" >&2; exit 64 ;;
-esac
-
-if [ ! -d "`$REMOTE_DIR/.git" ]; then
-  rm -rf -- "`$REMOTE_DIR"
-  git clone --branch "`$BRANCH" "`$REPO_URL" "`$REMOTE_DIR"
-else
-  git -C "`$REMOTE_DIR" fetch origin "`$BRANCH"
-  git -C "`$REMOTE_DIR" reset --hard "origin/`$BRANCH"
-fi
-
-if [ "$SkipBootstrap" != "True" ]; then
-  bash "`$REMOTE_DIR/scripts/vps/bootstrap-debian.sh"
-fi
-
-bash "`$REMOTE_DIR/scripts/vps/run-tests.sh"
-"@
-
-ssh $HostName $remoteCommand
+# Structured input avoids interpolating repository/branch values into a remote shell.
+$options = @{
+  remote_dir = $RemoteDir
+  repo_url = $RepoUrl
+  branch = $Branch
+  revision = $revision.Trim()
+  skip_bootstrap = $SkipBootstrap.IsPresent
+} | ConvertTo-Json -Compress
+$encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($options))
+Get-Content -Raw -LiteralPath "$PSScriptRoot/sync-and-test.py" |
+  ssh -o BatchMode=yes -o ServerAliveInterval=15 $HostName "python3 - $encoded"
 $sshExitCode = $LASTEXITCODE
 if ($sshExitCode -ne 0) {
   exit $sshExitCode
