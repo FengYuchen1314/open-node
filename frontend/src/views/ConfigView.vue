@@ -894,8 +894,10 @@ async function repairMissingRuntimeCredentials() {
   try {
     const response = await repairMissingXrayRuntimeCredentials(selectedServerId.value, {
       queue_agent_commands: true,
+      queue_scan_after_apply: true,
     });
-    successMessage.value = `Queued ${response.planned_client_count} runtime clients in ${response.commands.length} commands.`;
+    const scanText = response.scan_command ? " Follow-up scan queued." : "";
+    successMessage.value = `Queued ${response.planned_client_count} runtime clients in ${response.commands.length} commands.${scanText}`;
     await Promise.all([refreshCommands(), refreshXrayRuntimeInventory()]);
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -919,8 +921,10 @@ async function cleanupExtraRuntimeCredentials() {
   try {
     const response = await cleanupExtraXrayRuntimeCredentials(selectedServerId.value, {
       queue_agent_commands: true,
+      queue_scan_after_apply: true,
     });
-    successMessage.value = `Queued ${response.planned_client_count} extra runtime client removals in ${response.commands.length} commands.`;
+    const scanText = response.scan_command ? " Follow-up scan queued." : "";
+    successMessage.value = `Queued ${response.planned_client_count} extra runtime client removals in ${response.commands.length} commands.${scanText}`;
     await Promise.all([refreshCommands(), refreshXrayRuntimeInventory()]);
   } catch (error) {
     errorMessage.value = readableError(error);

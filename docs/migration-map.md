@@ -94,6 +94,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: extra runtime clients can be planned or explicitly queued as
      per-email agent `remove-client` cleanup commands against matching
      inbounds.
+   - Done: runtime credential repair and cleanup can queue a follow-up
+     `/api/child/scan` command after changes, so reconciliation can refresh
+     from the next runtime snapshot.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
    - Done: compatibility wrappers for the active non-stream Xray/nginx

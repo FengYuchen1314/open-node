@@ -517,6 +517,7 @@ describe("subscriptions API client", () => {
             },
           ],
           commands: [agentCommand({ path: "/api/child/batch-apply" })],
+          scan_command: agentCommand({ path: "/api/child/scan", body: null }),
           planned_client_count: 1,
           batch_count: 1,
           warnings: [],
@@ -550,6 +551,7 @@ describe("subscriptions API client", () => {
             },
           ],
           commands: [agentCommand({ path: "/api/child/inbounds" })],
+          scan_command: agentCommand({ path: "/api/child/scan", body: null }),
           planned_client_count: 1,
           command_count: 1,
           warnings: [],
@@ -593,12 +595,17 @@ describe("subscriptions API client", () => {
     );
     const repaired = await repairMissingXrayRuntimeCredentials(
       "srv_1",
-      { queue_agent_commands: true, no_restart: false, command_timeout_ms: 75_000 },
+      {
+        queue_agent_commands: true,
+        queue_scan_after_apply: true,
+        no_restart: false,
+        command_timeout_ms: 75_000,
+      },
       fetcher,
     );
     const cleaned = await cleanupExtraXrayRuntimeCredentials(
       "srv_1",
-      { queue_agent_commands: true, command_timeout_ms: 45_000 },
+      { queue_agent_commands: true, queue_scan_after_apply: true, command_timeout_ms: 45_000 },
       fetcher,
     );
     const node = await createManagedNodeFromRuntimeInbound(
@@ -623,11 +630,13 @@ describe("subscriptions API client", () => {
     expect(reconciliation.stale_count).toBe(1);
     expect(credentialReconciliation.missing_runtime_client_count).toBe(1);
     expect(repaired.planned_client_count).toBe(1);
+    expect(repaired.scan_command?.path).toBe("/api/child/scan");
     expect(cleaned.command_previews[0].body).toEqual({
       action: "remove-client",
       tag: "vless-443",
       client: { email: "orphan@example.com" },
     });
+    expect(cleaned.scan_command?.path).toBe("/api/child/scan");
     expect(node.node.id).toBe("node_1");
     expect(imported.created_count).toBe(1);
     expect(synced.updated_fields).toEqual(["config.port"]);
@@ -650,12 +659,17 @@ describe("subscriptions API client", () => {
       {
         url: "/api/v1/servers/srv_1/xray/runtime/credentials/repair-missing",
         headers: { "Content-Type": "application/json" },
-        body: { queue_agent_commands: true, no_restart: false, command_timeout_ms: 75000 },
+        body: {
+          queue_agent_commands: true,
+          queue_scan_after_apply: true,
+          no_restart: false,
+          command_timeout_ms: 75000,
+        },
       },
       {
         url: "/api/v1/servers/srv_1/xray/runtime/credentials/cleanup-extra",
         headers: { "Content-Type": "application/json" },
-        body: { queue_agent_commands: true, command_timeout_ms: 45000 },
+        body: { queue_agent_commands: true, queue_scan_after_apply: true, command_timeout_ms: 45000 },
       },
       {
         url: "/api/v1/servers/srv_1/xray/runtime/nodes",

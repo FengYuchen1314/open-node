@@ -509,6 +509,7 @@ export interface XrayRuntimeCredentialReconciliationResponse {
 export interface XrayRuntimeCredentialRepairRequest {
   node_ids?: string[] | null;
   queue_agent_commands?: boolean;
+  queue_scan_after_apply?: boolean;
   no_restart?: boolean;
   command_timeout_ms?: number;
 }
@@ -529,6 +530,7 @@ export interface XrayRuntimeCredentialRepairResponse {
   entries: XrayRuntimeCredentialRepairEntry[];
   provisioning_batches: SubscriptionProvisionBatch[];
   commands: AgentCommand[];
+  scan_command?: AgentCommand | null;
   planned_client_count: number;
   batch_count: number;
   warnings: string[];
@@ -538,6 +540,7 @@ export interface XrayRuntimeCredentialRepairResponse {
 export interface XrayRuntimeCredentialCleanupRequest {
   node_ids?: string[] | null;
   queue_agent_commands?: boolean;
+  queue_scan_after_apply?: boolean;
   command_timeout_ms?: number;
 }
 
@@ -563,6 +566,7 @@ export interface XrayRuntimeCredentialCleanupResponse {
   entries: XrayRuntimeCredentialCleanupEntry[];
   command_previews: XrayRuntimeCredentialCleanupCommand[];
   commands: AgentCommand[];
+  scan_command?: AgentCommand | null;
   planned_client_count: number;
   command_count: number;
   warnings: string[];

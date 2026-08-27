@@ -1073,6 +1073,7 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
     assert repair_payload["planned_client_count"] == 1
     assert repair_payload["batch_count"] == 1
     assert repair_payload["commands"] == []
+    assert repair_payload["scan_command"] is None
     assert repair_payload["entries"] == [
         {
             "node_id": node["id"],
@@ -1116,6 +1117,7 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
     assert cleanup_payload["planned_client_count"] == 1
     assert cleanup_payload["command_count"] == 1
     assert cleanup_payload["commands"] == []
+    assert cleanup_payload["scan_command"] is None
     assert cleanup_payload["entries"] == [
         {
             "node_id": node["id"],
@@ -1160,27 +1162,41 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
             f"/api/v1/servers/{server_id}/xray/runtime/credentials/repair-missing",
             json={
                 "queue_agent_commands": True,
+                "queue_scan_after_apply": True,
                 "no_restart": False,
                 "command_timeout_ms": 75_000,
             },
         )
         assert queued.status_code == 200
         queued_payload = queued.json()
+        assert len(queued_payload["commands"]) == 1
         assert queued_payload["commands"][0]["status"] == "leased"
         assert queued_payload["commands"][0]["path"] == "/api/child/batch-apply"
         assert queued_payload["commands"][0]["body"]["no_restart"] is False
+        assert queued_payload["scan_command"]["status"] == "leased"
+        assert queued_payload["scan_command"]["path"] == "/api/child/scan"
         rpc_call = websocket.receive_json()
         assert rpc_call["type"] == "rpc_call"
         assert rpc_call["payload"]["path"] == "/api/child/batch-apply"
         assert rpc_call["payload"]["timeout_ms"] == 75_000
         assert rpc_call["payload"]["body"] == queued_payload["provisioning_batches"][0]["body"]
+        scan_rpc = websocket.receive_json()
+        assert scan_rpc["type"] == "rpc_call"
+        assert scan_rpc["payload"]["path"] == "/api/child/scan"
+        assert scan_rpc["payload"]["timeout_ms"] == 75_000
+        assert scan_rpc["payload"]["body"] is None
 
         cleanup_queued = client.post(
             f"/api/v1/servers/{server_id}/xray/runtime/credentials/cleanup-extra",
-            json={"queue_agent_commands": True, "command_timeout_ms": 45_000},
+            json={
+                "queue_agent_commands": True,
+                "queue_scan_after_apply": True,
+                "command_timeout_ms": 45_000,
+            },
         )
         assert cleanup_queued.status_code == 200
         cleanup_queued_payload = cleanup_queued.json()
+        assert len(cleanup_queued_payload["commands"]) == 1
         assert cleanup_queued_payload["commands"][0]["status"] == "leased"
         assert cleanup_queued_payload["commands"][0]["path"] == "/api/child/inbounds"
         assert cleanup_queued_payload["commands"][0]["body"] == {
@@ -1188,6 +1204,8 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
             "tag": "vless-443",
             "client": {"email": "orphan@example.com"},
         }
+        assert cleanup_queued_payload["scan_command"]["status"] == "leased"
+        assert cleanup_queued_payload["scan_command"]["path"] == "/api/child/scan"
         cleanup_rpc = websocket.receive_json()
         assert cleanup_rpc["type"] == "rpc_call"
         assert cleanup_rpc["payload"]["path"] == "/api/child/inbounds"
@@ -1195,6 +1213,11 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
         assert cleanup_rpc["payload"]["body"] == cleanup_queued_payload["command_previews"][0][
             "body"
         ]
+        cleanup_scan_rpc = websocket.receive_json()
+        assert cleanup_scan_rpc["type"] == "rpc_call"
+        assert cleanup_scan_rpc["payload"]["path"] == "/api/child/scan"
+        assert cleanup_scan_rpc["payload"]["timeout_ms"] == 45_000
+        assert cleanup_scan_rpc["payload"]["body"] is None
 
 
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:

@@ -375,6 +375,7 @@ class XrayRuntimeCredentialReconciliationResponse(BaseModel):
 class XrayRuntimeCredentialRepairRequest(BaseModel):
     node_ids: list[UUID] | None = Field(default=None, max_length=100)
     queue_agent_commands: bool = False
+    queue_scan_after_apply: bool = False
     no_restart: bool = True
     command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
 
@@ -723,6 +724,7 @@ class XrayRuntimeCredentialRepairResponse(BaseModel):
     entries: list[XrayRuntimeCredentialRepairEntry] = Field(default_factory=list)
     provisioning_batches: list[SubscriptionProvisionBatch] = Field(default_factory=list)
     commands: list[AgentCommandRead] = Field(default_factory=list)
+    scan_command: AgentCommandRead | None = None
     planned_client_count: int = 0
     batch_count: int = 0
     warnings: list[str] = Field(default_factory=list)
@@ -732,6 +734,7 @@ class XrayRuntimeCredentialRepairResponse(BaseModel):
 class XrayRuntimeCredentialCleanupRequest(BaseModel):
     node_ids: list[UUID] | None = Field(default=None, max_length=100)
     queue_agent_commands: bool = False
+    queue_scan_after_apply: bool = False
     command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
 
     @field_validator("node_ids")
@@ -762,6 +765,7 @@ class XrayRuntimeCredentialCleanupResponse(BaseModel):
     entries: list[XrayRuntimeCredentialCleanupEntry] = Field(default_factory=list)
     command_previews: list[XrayRuntimeCredentialCleanupCommand] = Field(default_factory=list)
     commands: list[AgentCommandRead] = Field(default_factory=list)
+    scan_command: AgentCommandRead | None = None
     planned_client_count: int = 0
     command_count: int = 0
     warnings: list[str] = Field(default_factory=list)

@@ -277,7 +277,18 @@ async def repair_missing_xray_runtime_credentials(
                 ),
             )
             commands.append(await connections.dispatch_command(store, command))
-        response = response.model_copy(update={"commands": commands})
+        scan_command = None
+        if payload.queue_scan_after_apply and commands:
+            command = store.create_command(
+                server_id,
+                AgentCommandCreate(
+                    method="POST",
+                    path="/api/child/scan",
+                    timeout_ms=payload.command_timeout_ms,
+                ),
+            )
+            scan_command = await connections.dispatch_command(store, command)
+        response = response.model_copy(update={"commands": commands, "scan_command": scan_command})
     return response
 
 
@@ -311,7 +322,18 @@ async def cleanup_extra_xray_runtime_credentials(
                 ),
             )
             commands.append(await connections.dispatch_command(store, command))
-        response = response.model_copy(update={"commands": commands})
+        scan_command = None
+        if payload.queue_scan_after_apply and commands:
+            command = store.create_command(
+                server_id,
+                AgentCommandCreate(
+                    method="POST",
+                    path="/api/child/scan",
+                    timeout_ms=payload.command_timeout_ms,
+                ),
+            )
+            scan_command = await connections.dispatch_command(store, command)
+        response = response.model_copy(update={"commands": commands, "scan_command": scan_command})
     return response
 
 
