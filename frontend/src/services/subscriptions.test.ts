@@ -10,10 +10,14 @@ import {
   assignSubscriptionPlan,
   createManagedNode,
   createProductUser,
+  createProductUserSubscriptionToken,
   createSubscriptionPlan,
+  getProductUserSubscriptionToken,
   listManagedNodes,
+  listProductUserCredentials,
   listProductUsers,
   listSubscriptionPlans,
+  resetProductUserSubscriptionToken,
 } from "./subscriptions";
 
 const timestamp = "2026-08-27T00:00:00Z";
@@ -70,6 +74,16 @@ const subscriptionPlan: SubscriptionPlan = {
   device_limit: 3,
   traffic_mode: "twoway",
   traffic_limit_bytes: 137_438_953_472,
+  created_at: timestamp,
+  updated_at: timestamp,
+};
+
+const subscriptionToken = {
+  username: "alice@example.com",
+  token: "token_1",
+  short_code: "abcd1234",
+  subscription_url: "http://testserver/api/v1/subscribe/token_1",
+  short_url: "http://testserver/api/v1/subscribe/abcd1234",
   created_at: timestamp,
   updated_at: timestamp,
 };
@@ -228,5 +242,62 @@ describe("subscriptions API client", () => {
     expect(response.license_required).toBe(false);
     expect(response.commands[0].path).toBe("/api/child/batch-apply");
     expect(response.provisioning_batches[0].body).toEqual(batchBody);
+  });
+
+  it("manages subscription tokens and user credentials through encoded user routes", async () => {
+    const calls: Array<{ method?: string; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = input.toString();
+      calls.push({ url, method: init?.method });
+      if (url.endsWith("/credentials")) {
+        return jsonResponse({
+          username: "alice@example.com",
+          credentials: [
+            {
+              id: "cred_1",
+              username: "alice@example.com",
+              node_id: "node_1",
+              server_id: "srv_1",
+              inbound_tag: "vless-443",
+              protocol: "vless",
+              email: "alice@example.com__vless-443",
+              credential: { id: "uuid", email: "alice@example.com__vless-443" },
+              created_at: timestamp,
+              updated_at: timestamp,
+            },
+          ],
+          license_required: false,
+        });
+      }
+      return jsonResponse({ subscription: subscriptionToken, license_required: false });
+    };
+
+    const getResponse = await getProductUserSubscriptionToken("alice@example.com", fetcher);
+    const createResponse = await createProductUserSubscriptionToken("alice@example.com", fetcher);
+    const resetResponse = await resetProductUserSubscriptionToken("alice@example.com", fetcher);
+    const credentialsResponse = await listProductUserCredentials("alice@example.com", fetcher);
+
+    expect(getResponse.subscription.short_code).toBe("abcd1234");
+    expect(createResponse.license_required).toBe(false);
+    expect(resetResponse.subscription.subscription_url).toContain("/subscribe/token_1");
+    expect(credentialsResponse.credentials[0].email).toBe("alice@example.com__vless-443");
+    expect(calls).toEqual([
+      {
+        url: "/api/v1/users/alice%40example.com/subscription-token",
+        method: undefined,
+      },
+      {
+        url: "/api/v1/users/alice%40example.com/subscription-token",
+        method: "POST",
+      },
+      {
+        url: "/api/v1/users/alice%40example.com/subscription-token/reset",
+        method: "POST",
+      },
+      {
+        url: "/api/v1/users/alice%40example.com/credentials",
+        method: undefined,
+      },
+    ]);
   });
 });

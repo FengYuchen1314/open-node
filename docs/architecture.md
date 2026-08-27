@@ -208,9 +208,31 @@ and dispatch persisted batch-apply commands through the existing WebSocket RPC
 and HTTP lease paths. The catalog response models all include
 `license_required=false`.
 
+Open Node also stores stable per-user, per-node credentials and public
+subscription tokens. Credential generation follows the active MMWX contract:
+`<username>__<inbound_tag>` client emails, UUID-style IDs for VLESS/VMess,
+password credentials for Trojan/AnyTLS/Hysteria, base64 Shadowsocks keys, and
+user/pass pairs for socks/http. The same credential row is reused for agent
+batch provisioning and Clash subscription rendering.
+
+Users can receive a full token URL or short-code URL at:
+
+- `GET /api/v1/users/{username}/subscription-token`
+- `POST /api/v1/users/{username}/subscription-token`
+- `POST /api/v1/users/{username}/subscription-token/reset`
+- `GET /api/v1/users/{username}/credentials`
+- `GET /api/v1/subscribe/{token_or_short_code}`
+
+The public subscription endpoint renders a minimal Clash-compatible YAML file
+from managed node proxy configs, injects the user's stored credential into each
+proxy, includes a select group, and emits the standard `subscription-userinfo`
+header from the latest telemetry available for that user's credential emails.
+This is intentionally smaller than the original MMWX template/conversion
+system, but it establishes the durable token and credential boundary.
+
 The frontend exposes this in `/subscriptions`, where operators can create users,
-catalog nodes, plans, and assignments, then inspect the last calculated batch
-before or after dispatching it.
+catalog nodes, plans, assignments, public links, and generated credentials, then
+inspect the last calculated batch before or after dispatching it.
 
 ## Public Probe API
 

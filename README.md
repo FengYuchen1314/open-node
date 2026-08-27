@@ -31,9 +31,10 @@ persisted server/agent inventory, agent telemetry and command slices, initial
 agent operation, maintenance, diagnostic, and config-preparation wrappers, and
 Xray/nginx config plus agent setting wrappers, high-level runtime/site
 operation wrappers, a subscription catalog with user-plan binding, optional
-agent `batch-apply` provisioning, and the public probe read-only surface. The
-Vue frontend now includes a config workspace, runtime/site operation payload
-workbenches, subscription catalog management, and an expandable command-result
+agent `batch-apply` provisioning, public subscription links with generated
+per-user credentials, and the public probe read-only surface. The Vue frontend
+now includes a config workspace, runtime/site operation payload workbenches,
+subscription catalog and link management, and an expandable command-result
 inspector. It does not yet replace the full MMWX product.
 
 ```text

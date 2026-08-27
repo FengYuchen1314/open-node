@@ -2,8 +2,10 @@ import type {
   ManagedNodeCreateRequest,
   ManagedNodeResponse,
   ManagedNodesResponse,
+  ProductUserCredentialsResponse,
   ProductUserCreateRequest,
   ProductUserResponse,
+  ProductUserSubscriptionTokenResponse,
   ProductUsersResponse,
   SubscriptionPlanAssignRequest,
   SubscriptionPlanAssignResponse,
@@ -39,6 +41,64 @@ export async function createProductUser(
     throw await apiError(response, "Product user create request failed");
   }
   return response.json() as Promise<ProductUserResponse>;
+}
+
+export async function getProductUserSubscriptionToken(
+  username: string,
+  fetcher = fetch,
+): Promise<ProductUserSubscriptionTokenResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-token`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Product user subscription token request failed");
+  }
+  return response.json() as Promise<ProductUserSubscriptionTokenResponse>;
+}
+
+export async function createProductUserSubscriptionToken(
+  username: string,
+  fetcher = fetch,
+): Promise<ProductUserSubscriptionTokenResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-token`,
+    {
+      method: "POST",
+    },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Product user subscription token create request failed");
+  }
+  return response.json() as Promise<ProductUserSubscriptionTokenResponse>;
+}
+
+export async function resetProductUserSubscriptionToken(
+  username: string,
+  fetcher = fetch,
+): Promise<ProductUserSubscriptionTokenResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-token/reset`,
+    {
+      method: "POST",
+    },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Product user subscription token reset request failed");
+  }
+  return response.json() as Promise<ProductUserSubscriptionTokenResponse>;
+}
+
+export async function listProductUserCredentials(
+  username: string,
+  fetcher = fetch,
+): Promise<ProductUserCredentialsResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/credentials`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Product user credentials request failed");
+  }
+  return response.json() as Promise<ProductUserCredentialsResponse>;
 }
 
 export async function listManagedNodes(fetcher = fetch): Promise<ManagedNodesResponse> {

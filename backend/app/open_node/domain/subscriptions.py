@@ -87,6 +87,21 @@ class ProductUserResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class ProductUserSubscriptionTokenRead(BaseModel):
+    username: str
+    token: str
+    short_code: str
+    subscription_url: str
+    short_url: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProductUserSubscriptionTokenResponse(BaseModel):
+    subscription: ProductUserSubscriptionTokenRead
+    license_required: Literal[False] = False
+
+
 class ManagedNodeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     server_id: UUID
@@ -142,6 +157,25 @@ class ManagedNodesResponse(BaseModel):
 
 class ManagedNodeResponse(BaseModel):
     node: ManagedNodeRead
+    license_required: Literal[False] = False
+
+
+class SubscriptionCredentialRead(BaseModel):
+    id: UUID
+    username: str
+    node_id: UUID
+    server_id: UUID
+    inbound_tag: str | None = None
+    protocol: str
+    email: str
+    credential: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProductUserCredentialsResponse(BaseModel):
+    username: str
+    credentials: list[SubscriptionCredentialRead]
     license_required: Literal[False] = False
 
 

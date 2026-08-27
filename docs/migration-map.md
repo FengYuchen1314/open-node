@@ -52,8 +52,11 @@ This document records the starting source map for the Open Node refactor.
      optional agent `batch-apply` command dispatch.
    - Done: Vue subscription workspace for catalog entry, plan assignment, and
      latest provisioning batch inspection.
-   - Next: rollback-friendly multi-server changes, generated share links, and
-     deeper subscription credential automation.
+   - Done: public subscription token/short-code links, stable per-user
+     per-node credentials, Clash YAML rendering, and subscription userinfo
+     headers from latest telemetry.
+   - Next: rollback-friendly multi-server changes plus richer subscription
+     templates, client format conversion, and traffic ledgering.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.

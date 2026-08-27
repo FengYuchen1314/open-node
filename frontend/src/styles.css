@@ -469,6 +469,20 @@ body {
   margin-top: 18px;
 }
 
+.credential-list,
+.subscription-action-row {
+  display: grid;
+  gap: 10px;
+}
+
+.subscription-action-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.subscription-action-row .v-btn {
+  min-width: 0;
+}
+
 @media (max-width: 960px) {
   .metric-grid,
   .config-layout,
@@ -498,6 +512,7 @@ body {
   .log-command-grid,
   .maintenance-command-grid,
   .service-command-grid,
+  .subscription-action-row,
   .system-config-grid,
   .settings-action-row {
     grid-template-columns: 1fr;

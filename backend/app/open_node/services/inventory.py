@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import base64
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from secrets import token_urlsafe
+from secrets import token_bytes, token_urlsafe
 from typing import Any
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
+import yaml
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -17,6 +21,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
     select,
 )
@@ -63,6 +68,7 @@ from open_node.domain.subscriptions import (
     ManagedNodeRead,
     ProductUserCreate,
     ProductUserRead,
+    SubscriptionCredentialRead,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanCreate,
     SubscriptionPlanRead,
@@ -110,11 +116,38 @@ class ManagedNodeNotFoundError(ValueError):
     """Raised when a managed node lookup targets an unknown node."""
 
 
+class SubscriptionTokenNotFoundError(ValueError):
+    """Raised when a public subscription token or short code is unknown."""
+
+
+class SubscriptionUnavailableError(ValueError):
+    """Raised when a product user has no active renderable subscription."""
+
+
 _PROBE_SERIES_RANGES = {
     "1h": (12, 300),
     "6h": (36, 600),
     "24h": (48, 1800),
 }
+
+
+@dataclass(frozen=True)
+class RenderedSubscription:
+    username: str
+    plan_name: str
+    content: str
+    filename: str
+    subscription_userinfo: str | None
+    warnings: list[str]
+
+
+@dataclass(frozen=True)
+class SubscriptionTokenRecord:
+    username: str
+    token: str
+    short_code: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class Base(DeclarativeBase):
@@ -312,6 +345,50 @@ class SubscriptionPlanModel(Base):
     speed_limit_mbps: Mapped[float] = mapped_column(Float, default=0)
     device_limit: Mapped[int] = mapped_column(Integer, default=0)
     traffic_mode: Mapped[str] = mapped_column(String(24), default="oneway")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ProductUserSubscriptionTokenModel(Base):
+    __tablename__ = "product_user_subscription_tokens"
+
+    username: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("product_users.username", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    token: Mapped[str] = mapped_column(String(96), unique=True, index=True)
+    short_code: Mapped[str] = mapped_column(String(24), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SubscriptionCredentialModel(Base):
+    __tablename__ = "subscription_credentials"
+    __table_args__ = (
+        UniqueConstraint("username", "node_id", name="uq_subscription_credential_user_node"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    username: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("product_users.username", ondelete="CASCADE"),
+        index=True,
+    )
+    node_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("managed_nodes.id", ondelete="CASCADE"),
+        index=True,
+    )
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    inbound_tag: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    protocol: Mapped[str] = mapped_column(String(40))
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    credential: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -711,6 +788,113 @@ class InventoryStore:
                 self._subscription_plan_read(plan),
                 batches,
                 warnings,
+            )
+
+    def get_or_create_subscription_token(self, username: str) -> SubscriptionTokenRecord:
+        username = username.strip()
+        if not username:
+            raise ProductUserNotFoundError("username is required")
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            user = session.get(ProductUserModel, username)
+            if not user:
+                raise ProductUserNotFoundError(f"user not found: {username}")
+            token = session.get(ProductUserSubscriptionTokenModel, username)
+            if not token:
+                token = ProductUserSubscriptionTokenModel(
+                    username=username,
+                    token=self._unique_subscription_token(session),
+                    short_code=self._unique_subscription_short_code(session),
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(token)
+                session.commit()
+                session.refresh(token)
+            return self._subscription_token_record(token)
+
+    def reset_subscription_token(self, username: str) -> SubscriptionTokenRecord:
+        username = username.strip()
+        if not username:
+            raise ProductUserNotFoundError("username is required")
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            user = session.get(ProductUserModel, username)
+            if not user:
+                raise ProductUserNotFoundError(f"user not found: {username}")
+            token = session.get(ProductUserSubscriptionTokenModel, username)
+            if not token:
+                token = ProductUserSubscriptionTokenModel(
+                    username=username,
+                    token=self._unique_subscription_token(session),
+                    short_code=self._unique_subscription_short_code(session),
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(token)
+            else:
+                token.token = self._unique_subscription_token(session)
+                token.short_code = self._unique_subscription_short_code(session)
+                token.updated_at = now
+            session.commit()
+            session.refresh(token)
+            return self._subscription_token_record(token)
+
+    def list_subscription_credentials(self, username: str) -> list[SubscriptionCredentialRead]:
+        username = username.strip()
+        if not username:
+            raise ProductUserNotFoundError("username is required")
+        with self._session() as session:
+            user = session.get(ProductUserModel, username)
+            if not user:
+                raise ProductUserNotFoundError(f"user not found: {username}")
+            credentials = session.scalars(
+                select(SubscriptionCredentialModel)
+                .where(SubscriptionCredentialModel.username == username)
+                .order_by(SubscriptionCredentialModel.created_at)
+            ).all()
+            return [self._subscription_credential_read(credential) for credential in credentials]
+
+    def render_subscription(self, subscription_key: str) -> RenderedSubscription:
+        key = subscription_key.strip()
+        if not key:
+            raise SubscriptionTokenNotFoundError("subscription key is required")
+
+        with self._session() as session:
+            token = session.scalar(
+                select(ProductUserSubscriptionTokenModel).where(
+                    (ProductUserSubscriptionTokenModel.token == key)
+                    | (ProductUserSubscriptionTokenModel.short_code == key)
+                )
+            )
+            if not token:
+                raise SubscriptionTokenNotFoundError("subscription not found")
+            user = session.get(ProductUserModel, token.username)
+            if not user or not user.is_active:
+                raise SubscriptionUnavailableError("subscription user is not active")
+            if not user.current_plan_id:
+                raise SubscriptionUnavailableError("user has no active subscription plan")
+            if user.plan_expires_at and datetime.now(tz=UTC) > self._aware_datetime(
+                user.plan_expires_at
+            ):
+                raise SubscriptionUnavailableError("subscription plan has expired")
+            plan = session.get(SubscriptionPlanModel, user.current_plan_id)
+            if not plan:
+                raise SubscriptionUnavailableError("subscription plan is missing")
+
+            proxies, warnings = self._subscription_proxy_configs(session, user, plan)
+            if not proxies:
+                raise SubscriptionUnavailableError("subscription has no renderable nodes")
+
+            content = self._render_clash_subscription(proxies)
+            filename = f"{self._safe_filename(plan.name or user.username)}.yaml"
+            return RenderedSubscription(
+                username=user.username,
+                plan_name=plan.name,
+                content=content,
+                filename=filename,
+                subscription_userinfo=self._subscription_userinfo_header(session, user, plan),
+                warnings=warnings,
             )
 
     def create_command(self, server_id: UUID, payload: AgentCommandCreate) -> AgentCommandRead:
@@ -1371,27 +1555,23 @@ class InventoryStore:
                 {"inbound_clients": [], "routing_user_additions": [], "no_restart": no_restart},
             )
             server_names[server.id] = server.name
-            email = self._default_client_email(user, node)
+            credential = self._get_or_create_subscription_credential(session, user, node, server)
+            email = credential.email
 
             if node.inbound_tag:
-                if node.client_template:
-                    context = self._template_context(user, plan, node, server, email)
-                    rendered = self._render_template(node.client_template, context)
-                    if isinstance(rendered, dict) and rendered:
-                        client = dict(rendered)
-                        client_email = str(client.get("email") or email)
-                        client["email"] = client_email
-                        inbound_key = (server.id, node.inbound_tag, client_email)
-                        if inbound_key not in seen_inbound:
-                            body["inbound_clients"].append(
-                                {"tag": node.inbound_tag, "client": client}
-                            )
-                            seen_inbound.add(inbound_key)
-                            email = client_email
-                    else:
-                        warnings.append(f"node {node.name} client_template is not usable")
-                else:
-                    warnings.append(f"node {node.name} has no client_template")
+                client = self._provisioning_client_from_credential(
+                    user,
+                    plan,
+                    node,
+                    server,
+                    credential,
+                )
+                client_email = str(client.get("email") or email)
+                inbound_key = (server.id, node.inbound_tag, client_email)
+                if inbound_key not in seen_inbound:
+                    body["inbound_clients"].append({"tag": node.inbound_tag, "client": client})
+                    seen_inbound.add(inbound_key)
+                    email = client_email
 
             if node.routed_rule_marktag or node.routed_outbound_tag:
                 route_key = (
@@ -1422,11 +1602,345 @@ class InventoryStore:
             )
         return result, warnings
 
+    def _subscription_proxy_configs(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        warnings: list[str] = []
+        if not plan.node_ids:
+            return [], warnings
+
+        nodes = session.scalars(
+            select(ManagedNodeModel).where(ManagedNodeModel.id.in_(plan.node_ids))
+        ).all()
+        nodes_by_id = {node.id: node for node in nodes}
+        proxies: list[dict[str, Any]] = []
+
+        for node_id in plan.node_ids:
+            node = nodes_by_id.get(node_id)
+            if not node:
+                warnings.append(f"node {node_id} no longer exists")
+                continue
+            if not node.enabled:
+                continue
+            if not node.config:
+                warnings.append(f"node {node.name} has no subscription proxy config")
+                continue
+            server = session.get(ServerModel, node.server_id)
+            if not server:
+                warnings.append(f"node {node.name} points to a missing server")
+                continue
+
+            credential = self._get_or_create_subscription_credential(session, user, node, server)
+            context = self._template_context(user, plan, node, server, credential)
+            rendered = self._render_template(node.config, context)
+            if not isinstance(rendered, dict) or not rendered:
+                warnings.append(f"node {node.name} subscription proxy config is not usable")
+                continue
+
+            proxy = dict(rendered)
+            proxy.setdefault("name", node.name)
+            proxy.setdefault("type", self._proxy_type_for_protocol(node.protocol))
+            self._apply_credential_to_proxy(proxy, node.protocol, credential.credential)
+            proxy["name"] = self._subscription_proxy_name(plan, node, str(proxy["name"]))
+            proxies.append(proxy)
+
+        session.flush()
+        return proxies, warnings
+
+    def _provisioning_client_from_credential(
+        self,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        node: ManagedNodeModel,
+        server: ServerModel,
+        credential: SubscriptionCredentialModel,
+    ) -> dict[str, Any]:
+        client: dict[str, Any] = {}
+        if node.client_template:
+            rendered = self._render_template(
+                node.client_template,
+                self._template_context(user, plan, node, server, credential),
+            )
+            if isinstance(rendered, dict):
+                client.update(rendered)
+        client.update(credential.credential or {})
+        client["email"] = credential.email
+        return client
+
+    def _get_or_create_subscription_credential(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        node: ManagedNodeModel,
+        server: ServerModel,
+    ) -> SubscriptionCredentialModel:
+        existing = session.scalar(
+            select(SubscriptionCredentialModel).where(
+                SubscriptionCredentialModel.username == user.username,
+                SubscriptionCredentialModel.node_id == node.id,
+            )
+        )
+        if existing:
+            existing.server_id = server.id
+            existing.inbound_tag = node.inbound_tag
+            existing.protocol = node.protocol
+            return existing
+
+        now = datetime.now(tz=UTC)
+        email = self._default_client_email(user, node)
+        credential = SubscriptionCredentialModel(
+            id=str(uuid4()),
+            username=user.username,
+            node_id=node.id,
+            server_id=server.id,
+            inbound_tag=node.inbound_tag,
+            protocol=node.protocol,
+            email=email,
+            credential=self._generate_subscription_credential(
+                protocol=node.protocol,
+                username=user.username,
+                email=email,
+                node_config=node.config or {},
+            ),
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(credential)
+        session.flush()
+        return credential
+
+    @staticmethod
+    def _generate_subscription_credential(
+        protocol: str,
+        username: str,
+        email: str,
+        node_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = protocol.strip().lower()
+        match normalized:
+            case "vless" | "vmess":
+                return {"id": str(uuid4()), "email": email, "level": 0}
+            case "trojan" | "anytls":
+                return {"password": str(uuid4()), "email": email, "level": 0}
+            case "snell":
+                return {"psk": str(uuid4()), "email": email, "level": 0}
+            case "mieru":
+                return {
+                    "username": InventoryStore._safe_credential_username(username),
+                    "password": str(uuid4()),
+                    "email": email,
+                    "level": 0,
+                }
+            case "hysteria" | "hysteria2" | "hy2":
+                return {"auth": str(uuid4()), "email": email, "level": 0}
+            case "shadowsocks" | "ss":
+                key_len = InventoryStore._shadowsocks_key_length(
+                    str(node_config.get("method") or node_config.get("cipher") or "")
+                )
+                return {
+                    "password": base64.b64encode(token_bytes(key_len)).decode("ascii"),
+                    "email": email,
+                    "level": 0,
+                }
+            case "socks" | "http":
+                return {
+                    "user": InventoryStore._safe_credential_username(username),
+                    "pass": token_urlsafe(12),
+                }
+        return {"id": str(uuid4()), "email": email, "level": 0}
+
+    @staticmethod
+    def _apply_credential_to_proxy(
+        proxy: dict[str, Any],
+        protocol: str,
+        credential: dict[str, Any],
+    ) -> None:
+        normalized = protocol.strip().lower()
+        match normalized:
+            case "vless" | "vmess":
+                if credential.get("id"):
+                    proxy["uuid"] = credential["id"]
+            case "trojan" | "anytls":
+                if credential.get("password"):
+                    proxy["password"] = credential["password"]
+            case "snell":
+                if credential.get("psk"):
+                    proxy["psk"] = credential["psk"]
+            case "mieru":
+                if credential.get("username"):
+                    proxy["username"] = credential["username"]
+                if credential.get("password"):
+                    proxy["password"] = credential["password"]
+            case "hysteria" | "hysteria2" | "hy2":
+                if credential.get("auth"):
+                    proxy["password"] = credential["auth"]
+            case "shadowsocks" | "ss":
+                password = credential.get("password")
+                if not password:
+                    return
+                cipher = str(proxy.get("cipher") or "")
+                if cipher.startswith("2022-") and isinstance(proxy.get("password"), str):
+                    master_password = str(proxy["password"]).split(":", 1)[0]
+                    proxy["password"] = f"{master_password}:{password}"
+                else:
+                    proxy["password"] = password
+            case "socks" | "http":
+                if credential.get("user"):
+                    proxy["username"] = credential["user"]
+                if credential.get("pass"):
+                    proxy["password"] = credential["pass"]
+
+    @staticmethod
+    def _proxy_type_for_protocol(protocol: str) -> str:
+        normalized = protocol.strip().lower()
+        if normalized == "shadowsocks":
+            return "ss"
+        if normalized == "socks":
+            return "socks5"
+        if normalized == "hysteria":
+            return "hysteria2"
+        if normalized == "hy2":
+            return "hysteria2"
+        return normalized or "vless"
+
+    @staticmethod
+    def _render_clash_subscription(proxies: list[dict[str, Any]]) -> str:
+        proxy_names = [str(proxy.get("name") or "proxy") for proxy in proxies]
+        payload = {
+            "mixed-port": 7890,
+            "allow-lan": False,
+            "mode": "rule",
+            "log-level": "info",
+            "proxies": proxies,
+            "proxy-groups": [
+                {
+                    "name": "Proxy",
+                    "type": "select",
+                    "proxies": proxy_names,
+                }
+            ],
+            "rules": ["MATCH,Proxy"],
+        }
+        return yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
+
+    def _subscription_userinfo_header(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+    ) -> str | None:
+        if plan.traffic_limit_bytes <= 0:
+            return None
+        upload, download = self._subscription_user_traffic(session, user.username)
+        if plan.traffic_mode == "oneway":
+            upload = 0
+        expire = (
+            int(self._aware_datetime(user.plan_expires_at).timestamp())
+            if user.plan_expires_at
+            else 4_102_444_800
+        )
+        return (
+            f"upload={upload}; download={download}; total={plan.traffic_limit_bytes}; "
+            f"expire={expire}"
+        )
+
+    def _subscription_user_traffic(self, session: Session, username: str) -> tuple[int, int]:
+        credentials = session.scalars(
+            select(SubscriptionCredentialModel).where(
+                SubscriptionCredentialModel.username == username
+            )
+        ).all()
+        emails = {credential.email for credential in credentials}
+        for credential in credentials:
+            raw_email = credential.credential.get("email")
+            if isinstance(raw_email, str) and raw_email:
+                emails.add(raw_email)
+        if not emails:
+            return 0, 0
+
+        servers = session.scalars(select(ServerModel.id)).all()
+        upload = 0
+        download = 0
+        for server_id in servers:
+            latest = self._latest_telemetry_model(session, server_id)
+            user_stats = latest.stats.get("user") if latest and latest.stats else None
+            if not isinstance(user_stats, dict):
+                continue
+            for email in emails:
+                item = user_stats.get(email)
+                if not isinstance(item, dict):
+                    continue
+                upload += int(item.get("uplink") or 0)
+                download += int(item.get("downlink") or 0)
+        return upload, download
+
+    @staticmethod
+    def _subscription_token_record(
+        token: ProductUserSubscriptionTokenModel,
+    ) -> SubscriptionTokenRecord:
+        return SubscriptionTokenRecord(
+            username=token.username,
+            token=token.token,
+            short_code=token.short_code,
+            created_at=token.created_at,
+            updated_at=token.updated_at,
+        )
+
+    @staticmethod
+    def _subscription_credential_read(
+        credential: SubscriptionCredentialModel,
+    ) -> SubscriptionCredentialRead:
+        return SubscriptionCredentialRead(
+            id=UUID(credential.id),
+            username=credential.username,
+            node_id=UUID(credential.node_id),
+            server_id=UUID(credential.server_id),
+            inbound_tag=credential.inbound_tag,
+            protocol=credential.protocol,
+            email=credential.email,
+            credential=credential.credential or {},
+            created_at=credential.created_at,
+            updated_at=credential.updated_at,
+        )
+
+    @staticmethod
+    def _unique_subscription_token(session: Session) -> str:
+        while True:
+            token = token_urlsafe(32)
+            exists = session.scalar(
+                select(ProductUserSubscriptionTokenModel).where(
+                    ProductUserSubscriptionTokenModel.token == token
+                )
+            )
+            if not exists:
+                return token
+
+    @staticmethod
+    def _unique_subscription_short_code(session: Session) -> str:
+        while True:
+            short_code = uuid4().hex[:8]
+            exists = session.scalar(
+                select(ProductUserSubscriptionTokenModel).where(
+                    ProductUserSubscriptionTokenModel.short_code == short_code
+                )
+            )
+            if not exists:
+                return short_code
+
     @staticmethod
     def _default_client_email(user: ProductUserModel, node: ManagedNodeModel) -> str:
+        label = (
+            node.inbound_tag
+            or node.routed_rule_marktag
+            or node.routed_outbound_tag
+            or node.name
+        )
         suffix = "".join(
             char if char.isalnum() or char in {"-", "_", "."} else "_"
-            for char in node.name.strip()
+            for char in label.strip()
         ).strip("_")
         return f"{user.username}__{suffix or node.protocol}"
 
@@ -1436,13 +1950,13 @@ class InventoryStore:
         plan: SubscriptionPlanModel,
         node: ManagedNodeModel,
         server: ServerModel,
-        email: str,
+        credential: SubscriptionCredentialModel,
     ) -> dict[str, str]:
-        return {
+        context = {
             "username": user.username,
             "user_email": user.email or user.username,
             "display_name": user.display_name or user.username,
-            "client_email": email,
+            "client_email": credential.email,
             "plan_id": plan.id,
             "plan_name": plan.name,
             "node_id": node.id,
@@ -1451,6 +1965,12 @@ class InventoryStore:
             "server_id": server.id,
             "server_name": server.name,
         }
+        for key, value in (credential.credential or {}).items():
+            if isinstance(value, str | int | float | bool):
+                context[f"credential_{key}"] = str(value)
+                if key in {"id", "password", "auth", "psk", "user", "pass"}:
+                    context[key] = str(value)
+        return context
 
     @classmethod
     def _render_template(cls, value: Any, context: dict[str, str]) -> Any:
@@ -1464,6 +1984,48 @@ class InventoryStore:
                 rendered = rendered.replace("{" + key + "}", replacement)
             return rendered
         return value
+
+    @staticmethod
+    def _subscription_proxy_name(
+        plan: SubscriptionPlanModel,
+        node: ManagedNodeModel,
+        name: str,
+    ) -> str:
+        multiplier = float((plan.node_multipliers or {}).get(node.id, 1))
+        if multiplier == 1:
+            return name
+        if multiplier == int(multiplier):
+            multiplier_text = str(int(multiplier))
+        else:
+            multiplier_text = f"{multiplier:g}"
+        return f"[{multiplier_text}] {name}"
+
+    @staticmethod
+    def _shadowsocks_key_length(method: str) -> int:
+        match method.strip().lower():
+            case "2022-blake3-aes-128-gcm":
+                return 16
+            case "2022-blake3-aes-256-gcm" | "2022-blake3-chacha20-poly1305":
+                return 32
+        return 16
+
+    @staticmethod
+    def _safe_credential_username(username: str) -> str:
+        cleaned = "".join(
+            char if char.isalnum() or char in {"-", "_"} else "_" for char in username
+        )
+        return cleaned.strip("_") or "user"
+
+    @staticmethod
+    def _safe_filename(name: str) -> str:
+        cleaned = "".join(
+            char if char.isalnum() or char in {"-", "_", "."} else "_" for char in name
+        )
+        return cleaned.strip("_") or "subscription"
+
+    @staticmethod
+    def subscription_content_disposition(filename: str) -> str:
+        return "attachment; filename*=UTF-8''" + quote(filename)
 
     def _session(self) -> Session:
         return self._session_factory()

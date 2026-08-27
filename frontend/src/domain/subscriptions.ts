@@ -27,6 +27,16 @@ export interface ProductUser {
   updated_at: string;
 }
 
+export interface ProductUserSubscriptionToken {
+  username: string;
+  token: string;
+  short_code: string;
+  subscription_url: string;
+  short_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ManagedNodeCreateRequest {
   name: string;
   server_id: string;
@@ -104,6 +114,19 @@ export interface SubscriptionProvisionBatch {
   body: Record<string, unknown>;
 }
 
+export interface SubscriptionCredential {
+  id: string;
+  username: string;
+  node_id: string;
+  server_id: string;
+  inbound_tag?: string | null;
+  protocol: string;
+  email: string;
+  credential: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProductUsersResponse {
   users: ProductUser[];
   license_required: false;
@@ -111,6 +134,17 @@ export interface ProductUsersResponse {
 
 export interface ProductUserResponse {
   user: ProductUser;
+  license_required: false;
+}
+
+export interface ProductUserSubscriptionTokenResponse {
+  subscription: ProductUserSubscriptionToken;
+  license_required: false;
+}
+
+export interface ProductUserCredentialsResponse {
+  username: string;
+  credentials: SubscriptionCredential[];
   license_required: false;
 }
 

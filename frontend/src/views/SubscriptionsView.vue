@@ -7,6 +7,8 @@ import type {
   ManagedNodeCreateRequest,
   ManagedNodeType,
   ProductUser,
+  ProductUserSubscriptionToken,
+  SubscriptionCredential,
   ProductUserCreateRequest,
   ProductUserRole,
   SubscriptionPlan,
@@ -20,10 +22,13 @@ import {
   assignSubscriptionPlan,
   createManagedNode,
   createProductUser,
+  createProductUserSubscriptionToken,
   createSubscriptionPlan,
+  listProductUserCredentials,
   listManagedNodes,
   listProductUsers,
   listSubscriptionPlans,
+  resetProductUserSubscriptionToken,
 } from "../services/subscriptions";
 
 const servers = ref<ServerSummary[]>([]);
@@ -31,11 +36,13 @@ const users = ref<ProductUser[]>([]);
 const nodes = ref<ManagedNode[]>([]);
 const plans = ref<SubscriptionPlan[]>([]);
 const loading = ref(false);
-const savingAction = ref<"assign" | "node" | "plan" | "user" | "">("");
+const savingAction = ref<"assign" | "credentials" | "node" | "plan" | "token" | "user" | "">("");
 const errorMessage = ref("");
 const successMessage = ref("");
 const activeTab = ref("users");
 const lastAssignment = ref<SubscriptionPlanAssignResponse | null>(null);
+const subscriptionToken = ref<ProductUserSubscriptionToken | null>(null);
+const subscriptionCredentials = ref<SubscriptionCredential[]>([]);
 
 const userForm = reactive({
   username: "",
@@ -263,7 +270,72 @@ async function submitAssignment() {
     successMessage.value = response.commands.length
       ? `Assigned ${response.plan.name} and queued ${response.commands.length} command.`
       : `Assigned ${response.plan.name}.`;
+    await loadSubscriptionCredentials(false);
     await refresh();
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+async function createToken() {
+  if (!assignForm.username) {
+    errorMessage.value = "User is required.";
+    return;
+  }
+
+  savingAction.value = "token";
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await createProductUserSubscriptionToken(assignForm.username);
+    subscriptionToken.value = response.subscription;
+    successMessage.value = `Subscription link ready for ${response.subscription.username}.`;
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+async function resetToken() {
+  if (!assignForm.username) {
+    errorMessage.value = "User is required.";
+    return;
+  }
+
+  savingAction.value = "token";
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await resetProductUserSubscriptionToken(assignForm.username);
+    subscriptionToken.value = response.subscription;
+    successMessage.value = `Subscription link reset for ${response.subscription.username}.`;
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+async function loadSubscriptionCredentials(showSuccess = true) {
+  if (!assignForm.username) {
+    errorMessage.value = "User is required.";
+    return;
+  }
+
+  savingAction.value = "credentials";
+  errorMessage.value = "";
+  if (showSuccess) {
+    successMessage.value = "";
+  }
+  try {
+    const response = await listProductUserCredentials(assignForm.username);
+    subscriptionCredentials.value = response.credentials;
+    if (showSuccess) {
+      successMessage.value = `Loaded ${response.credentials.length} credentials.`;
+    }
   } catch (error) {
     errorMessage.value = readableError(error);
   } finally {
@@ -359,6 +431,12 @@ function formatTraffic(plan: SubscriptionPlan) {
 
 function formatDate(value?: string | null) {
   return value ? value.slice(0, 10) : "Not set";
+}
+
+function credentialIdentifier(credential: SubscriptionCredential) {
+  const source = credential.credential;
+  const value = source.id ?? source.password ?? source.auth ?? source.psk ?? source.pass;
+  return typeof value === "string" ? value : credential.email;
 }
 </script>
 
@@ -772,6 +850,86 @@ function formatDate(value?: string | null) {
         </div>
 
         <div class="catalog-list">
+          <div class="section-title compact-title">Subscription link</div>
+          <v-select
+            v-model="assignForm.username"
+            :disabled="userOptions.length === 0"
+            :items="userOptions"
+            density="comfortable"
+            label="User"
+            variant="outlined"
+          />
+          <div class="subscription-action-row">
+            <v-btn
+              :disabled="!assignForm.username"
+              :loading="savingAction === 'token'"
+              color="primary"
+              prepend-icon="mdi-link-variant-plus"
+              size="small"
+              variant="tonal"
+              @click="createToken"
+            >
+              Link
+            </v-btn>
+            <v-btn
+              :disabled="!assignForm.username"
+              :loading="savingAction === 'token'"
+              color="warning"
+              prepend-icon="mdi-link-variant-off"
+              size="small"
+              variant="tonal"
+              @click="resetToken"
+            >
+              Reset
+            </v-btn>
+            <v-btn
+              :disabled="!assignForm.username"
+              :loading="savingAction === 'credentials'"
+              color="secondary"
+              prepend-icon="mdi-key-chain"
+              size="small"
+              variant="tonal"
+              @click="loadSubscriptionCredentials()"
+            >
+              Creds
+            </v-btn>
+          </div>
+          <template v-if="subscriptionToken">
+            <v-text-field
+              :model-value="subscriptionToken.subscription_url"
+              density="comfortable"
+              label="Subscription URL"
+              prepend-inner-icon="mdi-link-variant"
+              readonly
+              variant="outlined"
+            />
+            <v-text-field
+              :model-value="subscriptionToken.short_url"
+              density="comfortable"
+              label="Short URL"
+              prepend-inner-icon="mdi-link"
+              readonly
+              variant="outlined"
+            />
+          </template>
+          <div v-if="subscriptionCredentials.length > 0" class="credential-list">
+            <div
+              v-for="credential in subscriptionCredentials"
+              :key="credential.id"
+              class="catalog-item"
+            >
+              <div>
+                <div class="server-name">{{ credential.email }}</div>
+                <div class="server-subline">{{ credentialIdentifier(credential) }}</div>
+              </div>
+              <v-chip color="secondary" size="small" variant="tonal">
+                {{ credential.protocol }}
+              </v-chip>
+            </div>
+          </div>
+
+          <v-divider />
+
           <div class="section-title compact-title">Users</div>
           <div v-if="users.length === 0" class="empty-command">No users yet.</div>
           <div v-for="user in users" :key="user.username" class="catalog-item">

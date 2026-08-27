@@ -1,6 +1,7 @@
+import base64
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.inventory import AgentCommandCreate
@@ -9,8 +10,11 @@ from open_node.domain.subscriptions import (
     ManagedNodeResponse,
     ManagedNodesResponse,
     ProductUserCreate,
+    ProductUserCredentialsResponse,
     ProductUserResponse,
     ProductUsersResponse,
+    ProductUserSubscriptionTokenRead,
+    ProductUserSubscriptionTokenResponse,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanAssignResponse,
     SubscriptionPlanCreate,
@@ -26,6 +30,9 @@ from open_node.services.inventory import (
     ProductUserNotFoundError,
     ServerNotFoundError,
     SubscriptionPlanNotFoundError,
+    SubscriptionTokenNotFoundError,
+    SubscriptionTokenRecord,
+    SubscriptionUnavailableError,
 )
 
 router = APIRouter(tags=["subscriptions"])
@@ -48,6 +55,70 @@ def create_product_user(
     except DuplicateProductUserError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return ProductUserResponse(user=user)
+
+
+@router.get(
+    "/users/{username}/subscription-token",
+    response_model=ProductUserSubscriptionTokenResponse,
+)
+def get_subscription_token(
+    username: str,
+    request: Request,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ProductUserSubscriptionTokenResponse:
+    try:
+        token = store.get_or_create_subscription_token(username)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _subscription_token_response(request, token)
+
+
+@router.post(
+    "/users/{username}/subscription-token",
+    response_model=ProductUserSubscriptionTokenResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_subscription_token(
+    username: str,
+    request: Request,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ProductUserSubscriptionTokenResponse:
+    try:
+        token = store.get_or_create_subscription_token(username)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _subscription_token_response(request, token)
+
+
+@router.post(
+    "/users/{username}/subscription-token/reset",
+    response_model=ProductUserSubscriptionTokenResponse,
+)
+def reset_subscription_token(
+    username: str,
+    request: Request,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ProductUserSubscriptionTokenResponse:
+    try:
+        token = store.reset_subscription_token(username)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _subscription_token_response(request, token)
+
+
+@router.get(
+    "/users/{username}/credentials",
+    response_model=ProductUserCredentialsResponse,
+)
+def list_subscription_credentials(
+    username: str,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ProductUserCredentialsResponse:
+    try:
+        credentials = store.list_subscription_credentials(username)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return ProductUserCredentialsResponse(username=username, credentials=credentials)
 
 
 @router.get("/nodes", response_model=ManagedNodesResponse)
@@ -90,6 +161,32 @@ def create_subscription_plan(
     return SubscriptionPlanResponse(plan=plan)
 
 
+@router.get("/subscribe/{subscription_key}", name="render_user_subscription")
+def render_user_subscription(
+    subscription_key: str,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> Response:
+    try:
+        rendered = store.render_subscription(subscription_key)
+    except SubscriptionTokenNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except SubscriptionUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    headers = {
+        "Content-Disposition": InventoryStore.subscription_content_disposition(rendered.filename),
+        "profile-title": "base64:"
+        + base64.b64encode(rendered.plan_name.encode("utf-8")).decode("ascii"),
+    }
+    if rendered.subscription_userinfo:
+        headers["subscription-userinfo"] = rendered.subscription_userinfo
+    return Response(
+        content=rendered.content,
+        media_type="text/yaml; charset=utf-8",
+        headers=headers,
+    )
+
+
 @router.post("/users/{username}/plan", response_model=SubscriptionPlanAssignResponse)
 async def assign_subscription_plan(
     username: str,
@@ -124,4 +221,25 @@ async def assign_subscription_plan(
         provisioning_batches=batches,
         commands=commands,
         warnings=warnings,
+    )
+
+
+def _subscription_token_response(
+    request: Request,
+    token: SubscriptionTokenRecord,
+) -> ProductUserSubscriptionTokenResponse:
+    subscription_url = str(
+        request.url_for("render_user_subscription", subscription_key=token.token)
+    )
+    short_url = str(request.url_for("render_user_subscription", subscription_key=token.short_code))
+    return ProductUserSubscriptionTokenResponse(
+        subscription=ProductUserSubscriptionTokenRead(
+            username=token.username,
+            token=token.token,
+            short_code=token.short_code,
+            subscription_url=subscription_url,
+            short_url=short_url,
+            created_at=token.created_at,
+            updated_at=token.updated_at,
+        )
     )
