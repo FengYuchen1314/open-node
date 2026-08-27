@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from secrets import token_urlsafe
 from typing import Any
@@ -12,6 +12,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -57,6 +58,16 @@ from open_node.domain.probe import (
     ProbeServer,
     ProbeSystemSeries,
 )
+from open_node.domain.subscriptions import (
+    ManagedNodeCreate,
+    ManagedNodeRead,
+    ProductUserCreate,
+    ProductUserRead,
+    SubscriptionPlanAssignRequest,
+    SubscriptionPlanCreate,
+    SubscriptionPlanRead,
+    SubscriptionProvisionBatch,
+)
 
 
 class InvalidAgentTokenError(ValueError):
@@ -77,6 +88,26 @@ class CommandNotFoundError(ValueError):
 
 class ProbeNotFoundError(ValueError):
     """Raised when a public probe lookup targets data outside the public list."""
+
+
+class DuplicateProductUserError(ValueError):
+    """Raised when a product username is already taken."""
+
+
+class ProductUserNotFoundError(ValueError):
+    """Raised when a product user lookup targets an unknown username."""
+
+
+class DuplicateSubscriptionPlanNameError(ValueError):
+    """Raised when a subscription plan name is already taken."""
+
+
+class SubscriptionPlanNotFoundError(ValueError):
+    """Raised when a subscription plan lookup targets an unknown plan."""
+
+
+class ManagedNodeNotFoundError(ValueError):
+    """Raised when a managed node lookup targets an unknown node."""
 
 
 _PROBE_SERIES_RANGES = {
@@ -210,6 +241,79 @@ class CommandStreamFrameModel(Base):
     sequence: Mapped[int] = mapped_column(Integer, index=True)
     data: Mapped[str] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class ProductUserModel(Base):
+    __tablename__ = "product_users"
+
+    username: Mapped[str] = mapped_column(String(80), primary_key=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[str] = mapped_column(String(120))
+    role: Mapped[str] = mapped_column(String(24))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    current_plan_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("subscription_plans.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    plan_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    plan_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    is_reset: Mapped[bool] = mapped_column(Boolean, default=False)
+    reset_day: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ManagedNodeModel(Base):
+    __tablename__ = "managed_nodes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    protocol: Mapped[str] = mapped_column(String(40))
+    node_type: Mapped[str] = mapped_column(String(24), default="physical", index=True)
+    inbound_tag: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    routed_outbound_tag: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    routed_rule_marktag: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tag: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    client_template: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SubscriptionPlanModel(Base):
+    __tablename__ = "subscription_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    traffic_limit_bytes: Mapped[int] = mapped_column(BigInteger)
+    cycle_days: Mapped[int] = mapped_column(Integer)
+    is_reset: Mapped[bool] = mapped_column(Boolean, default=False)
+    reset_day: Mapped[int] = mapped_column(Integer, default=0)
+    node_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    node_multipliers: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
+    node_speed_limits: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
+    node_device_limits: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    speed_limit_mbps: Mapped[float] = mapped_column(Float, default=0)
+    device_limit: Mapped[int] = mapped_column(Integer, default=0)
+    traffic_mode: Mapped[str] = mapped_column(String(24), default="oneway")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class InventoryStore:
@@ -448,6 +552,166 @@ class InventoryStore:
                     key=lambda item: (item.label, item.key or ""),
                 )
             return response
+
+    def list_product_users(self) -> list[ProductUserRead]:
+        with self._session() as session:
+            users = session.scalars(
+                select(ProductUserModel).order_by(ProductUserModel.created_at)
+            ).all()
+            return [self._product_user_read(user) for user in users]
+
+    def create_product_user(self, payload: ProductUserCreate) -> ProductUserRead:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            if session.get(ProductUserModel, payload.username):
+                raise DuplicateProductUserError(f"username already exists: {payload.username}")
+            user = ProductUserModel(
+                username=payload.username,
+                email=payload.email,
+                display_name=payload.display_name or payload.username,
+                role=payload.role.value,
+                is_active=payload.is_active,
+                current_plan_id=None,
+                plan_started_at=None,
+                plan_expires_at=None,
+                is_reset=False,
+                reset_day=0,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            return self._product_user_read(user)
+
+    def list_managed_nodes(self) -> list[ManagedNodeRead]:
+        with self._session() as session:
+            nodes = session.scalars(
+                select(ManagedNodeModel).order_by(ManagedNodeModel.created_at)
+            ).all()
+            return [self._managed_node_read(node) for node in nodes]
+
+    def create_managed_node(self, payload: ManagedNodeCreate) -> ManagedNodeRead:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            server = session.get(ServerModel, str(payload.server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {payload.server_id}")
+            node = ManagedNodeModel(
+                id=str(uuid4()),
+                name=payload.name,
+                server_id=server.id,
+                protocol=payload.protocol.lower(),
+                node_type=payload.node_type.value,
+                inbound_tag=payload.inbound_tag,
+                routed_outbound_tag=payload.routed_outbound_tag,
+                routed_rule_marktag=payload.routed_rule_marktag,
+                tag=payload.tag,
+                tags=payload.tags,
+                enabled=payload.enabled,
+                client_template=payload.client_template,
+                config=payload.config,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(node)
+            session.commit()
+            session.refresh(node)
+            return self._managed_node_read(node)
+
+    def list_subscription_plans(self) -> list[SubscriptionPlanRead]:
+        with self._session() as session:
+            plans = session.scalars(
+                select(SubscriptionPlanModel).order_by(SubscriptionPlanModel.created_at)
+            ).all()
+            return [self._subscription_plan_read(plan) for plan in plans]
+
+    def create_subscription_plan(self, payload: SubscriptionPlanCreate) -> SubscriptionPlanRead:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            existing = session.scalar(
+                select(SubscriptionPlanModel).where(SubscriptionPlanModel.name == payload.name)
+            )
+            if existing:
+                raise DuplicateSubscriptionPlanNameError(
+                    f"subscription plan name already exists: {payload.name}"
+                )
+            self._ensure_managed_nodes_exist(session, payload.node_ids)
+            plan = SubscriptionPlanModel(
+                id=str(uuid4()),
+                name=payload.name,
+                description=payload.description,
+                traffic_limit_bytes=int(payload.traffic_limit_gb * 1024 * 1024 * 1024),
+                cycle_days=payload.cycle_days,
+                is_reset=payload.is_reset,
+                reset_day=payload.reset_day,
+                node_ids=[str(node_id) for node_id in payload.node_ids],
+                node_multipliers=self._uuid_keyed_float_map(payload.node_multipliers),
+                node_speed_limits=self._uuid_keyed_float_map(payload.node_speed_limits),
+                node_device_limits=self._uuid_keyed_int_map(payload.node_device_limits),
+                speed_limit_mbps=payload.speed_limit_mbps,
+                device_limit=payload.device_limit,
+                traffic_mode=payload.traffic_mode.value,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(plan)
+            session.commit()
+            session.refresh(plan)
+            return self._subscription_plan_read(plan)
+
+    def assign_subscription_plan(
+        self,
+        username: str,
+        payload: SubscriptionPlanAssignRequest,
+    ) -> tuple[ProductUserRead, SubscriptionPlanRead, list[SubscriptionProvisionBatch], list[str]]:
+        username = username.strip()
+        if not username:
+            raise ProductUserNotFoundError("username is required")
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            user = session.get(ProductUserModel, username)
+            if not user:
+                raise ProductUserNotFoundError(f"user not found: {username}")
+            plan = session.get(SubscriptionPlanModel, str(payload.plan_id))
+            if not plan:
+                raise SubscriptionPlanNotFoundError(
+                    f"subscription plan not found: {payload.plan_id}"
+                )
+
+            started_at = self._date_to_utc_start(payload.start_date) if payload.start_date else now
+            expires_at = (
+                self._date_to_utc_start(payload.expire_date)
+                if payload.expire_date
+                else started_at + timedelta(days=plan.cycle_days)
+            )
+            is_reset = payload.is_reset if payload.is_reset is not None else plan.is_reset
+            reset_day = payload.reset_day if payload.reset_day is not None else plan.reset_day
+            if is_reset and reset_day == 0:
+                reset_day = min(now.day, 28)
+
+            user.current_plan_id = plan.id
+            user.plan_started_at = started_at
+            user.plan_expires_at = expires_at
+            user.is_reset = is_reset
+            user.reset_day = reset_day
+            user.updated_at = now
+
+            batches, warnings = self._subscription_provision_batches(
+                session,
+                user,
+                plan,
+                no_restart=payload.no_restart,
+            )
+            session.commit()
+            session.refresh(user)
+            session.refresh(plan)
+            return (
+                self._product_user_read(user),
+                self._subscription_plan_read(plan),
+                batches,
+                warnings,
+            )
 
     def create_command(self, server_id: UUID, payload: AgentCommandCreate) -> AgentCommandRead:
         with self._session() as session:
@@ -985,6 +1249,221 @@ class InventoryStore:
             uplink += int(item.get("uplink") or 0)
             downlink += int(item.get("downlink") or 0)
         return uplink, downlink
+
+    @staticmethod
+    def _product_user_read(user: ProductUserModel) -> ProductUserRead:
+        return ProductUserRead(
+            username=user.username,
+            email=user.email,
+            display_name=user.display_name or user.username,
+            role=user.role,
+            is_active=user.is_active,
+            current_plan_id=UUID(user.current_plan_id) if user.current_plan_id else None,
+            plan_started_at=user.plan_started_at,
+            plan_expires_at=user.plan_expires_at,
+            is_reset=user.is_reset,
+            reset_day=user.reset_day,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+        )
+
+    @staticmethod
+    def _managed_node_read(node: ManagedNodeModel) -> ManagedNodeRead:
+        return ManagedNodeRead(
+            id=UUID(node.id),
+            name=node.name,
+            server_id=UUID(node.server_id),
+            protocol=node.protocol,
+            node_type=node.node_type,
+            inbound_tag=node.inbound_tag,
+            routed_outbound_tag=node.routed_outbound_tag,
+            routed_rule_marktag=node.routed_rule_marktag,
+            tag=node.tag,
+            tags=node.tags or [],
+            enabled=node.enabled,
+            client_template=node.client_template or {},
+            config=node.config or {},
+            created_at=node.created_at,
+            updated_at=node.updated_at,
+        )
+
+    @staticmethod
+    def _subscription_plan_read(plan: SubscriptionPlanModel) -> SubscriptionPlanRead:
+        return SubscriptionPlanRead(
+            id=UUID(plan.id),
+            name=plan.name,
+            description=plan.description,
+            traffic_limit_gb=plan.traffic_limit_bytes / (1024 * 1024 * 1024),
+            traffic_limit_bytes=plan.traffic_limit_bytes,
+            cycle_days=plan.cycle_days,
+            is_reset=plan.is_reset,
+            reset_day=plan.reset_day,
+            node_ids=[UUID(node_id) for node_id in (plan.node_ids or [])],
+            node_multipliers={
+                UUID(node_id): multiplier
+                for node_id, multiplier in (plan.node_multipliers or {}).items()
+            },
+            node_speed_limits={
+                UUID(node_id): limit for node_id, limit in (plan.node_speed_limits or {}).items()
+            },
+            node_device_limits={
+                UUID(node_id): limit for node_id, limit in (plan.node_device_limits or {}).items()
+            },
+            speed_limit_mbps=plan.speed_limit_mbps,
+            device_limit=plan.device_limit,
+            traffic_mode=plan.traffic_mode,
+            created_at=plan.created_at,
+            updated_at=plan.updated_at,
+        )
+
+    @staticmethod
+    def _uuid_keyed_float_map(values: dict[UUID, float]) -> dict[str, float]:
+        return {str(key): value for key, value in values.items()}
+
+    @staticmethod
+    def _uuid_keyed_int_map(values: dict[UUID, int]) -> dict[str, int]:
+        return {str(key): value for key, value in values.items()}
+
+    @staticmethod
+    def _date_to_utc_start(value: date) -> datetime:
+        return datetime(value.year, value.month, value.day, tzinfo=UTC)
+
+    @staticmethod
+    def _ensure_managed_nodes_exist(session: Session, node_ids: list[UUID]) -> None:
+        for node_id in node_ids:
+            if not session.get(ManagedNodeModel, str(node_id)):
+                raise ManagedNodeNotFoundError(f"managed node not found: {node_id}")
+
+    def _subscription_provision_batches(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        no_restart: bool,
+    ) -> tuple[list[SubscriptionProvisionBatch], list[str]]:
+        warnings: list[str] = []
+        if not plan.node_ids:
+            return [], warnings
+
+        nodes = session.scalars(
+            select(ManagedNodeModel).where(ManagedNodeModel.id.in_(plan.node_ids))
+        ).all()
+        nodes_by_id = {node.id: node for node in nodes}
+        batches: dict[str, dict[str, Any]] = {}
+        server_names: dict[str, str] = {}
+        seen_inbound: set[tuple[str, str, str]] = set()
+        seen_route: set[tuple[str, str, str, str]] = set()
+
+        for node_id in plan.node_ids:
+            node = nodes_by_id.get(node_id)
+            if not node:
+                warnings.append(f"node {node_id} no longer exists")
+                continue
+            if not node.enabled:
+                continue
+            server = session.get(ServerModel, node.server_id)
+            if not server:
+                warnings.append(f"node {node.name} points to a missing server")
+                continue
+
+            body = batches.setdefault(
+                server.id,
+                {"inbound_clients": [], "routing_user_additions": [], "no_restart": no_restart},
+            )
+            server_names[server.id] = server.name
+            email = self._default_client_email(user, node)
+
+            if node.inbound_tag:
+                if node.client_template:
+                    context = self._template_context(user, plan, node, server, email)
+                    rendered = self._render_template(node.client_template, context)
+                    if isinstance(rendered, dict) and rendered:
+                        client = dict(rendered)
+                        client_email = str(client.get("email") or email)
+                        client["email"] = client_email
+                        inbound_key = (server.id, node.inbound_tag, client_email)
+                        if inbound_key not in seen_inbound:
+                            body["inbound_clients"].append(
+                                {"tag": node.inbound_tag, "client": client}
+                            )
+                            seen_inbound.add(inbound_key)
+                            email = client_email
+                    else:
+                        warnings.append(f"node {node.name} client_template is not usable")
+                else:
+                    warnings.append(f"node {node.name} has no client_template")
+
+            if node.routed_rule_marktag or node.routed_outbound_tag:
+                route_key = (
+                    server.id,
+                    node.routed_rule_marktag or "",
+                    node.routed_outbound_tag or "",
+                    email,
+                )
+                if route_key not in seen_route:
+                    item = {"user_email": email}
+                    if node.routed_rule_marktag:
+                        item["marktag"] = node.routed_rule_marktag
+                    if node.routed_outbound_tag:
+                        item["outbound_tag"] = node.routed_outbound_tag
+                    body["routing_user_additions"].append(item)
+                    seen_route.add(route_key)
+
+        result = []
+        for server_id, body in batches.items():
+            if not body["inbound_clients"] and not body["routing_user_additions"]:
+                continue
+            result.append(
+                SubscriptionProvisionBatch(
+                    server_id=UUID(server_id),
+                    server_name=server_names[server_id],
+                    body=body,
+                )
+            )
+        return result, warnings
+
+    @staticmethod
+    def _default_client_email(user: ProductUserModel, node: ManagedNodeModel) -> str:
+        suffix = "".join(
+            char if char.isalnum() or char in {"-", "_", "."} else "_"
+            for char in node.name.strip()
+        ).strip("_")
+        return f"{user.username}__{suffix or node.protocol}"
+
+    @staticmethod
+    def _template_context(
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        node: ManagedNodeModel,
+        server: ServerModel,
+        email: str,
+    ) -> dict[str, str]:
+        return {
+            "username": user.username,
+            "user_email": user.email or user.username,
+            "display_name": user.display_name or user.username,
+            "client_email": email,
+            "plan_id": plan.id,
+            "plan_name": plan.name,
+            "node_id": node.id,
+            "node_name": node.name,
+            "protocol": node.protocol,
+            "server_id": server.id,
+            "server_name": server.name,
+        }
+
+    @classmethod
+    def _render_template(cls, value: Any, context: dict[str, str]) -> Any:
+        if isinstance(value, dict):
+            return {key: cls._render_template(item, context) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._render_template(item, context) for item in value]
+        if isinstance(value, str):
+            rendered = value
+            for key, replacement in context.items():
+                rendered = rendered.replace("{" + key + "}", replacement)
+            return rendered
+        return value
 
     def _session(self) -> Session:
         return self._session_factory()

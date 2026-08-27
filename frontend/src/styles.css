@@ -121,6 +121,12 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(340px, 480px);
 }
 
+.subscription-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 440px);
+}
+
 .section-surface {
   border-radius: 8px;
   padding: 20px;
@@ -192,7 +198,9 @@ body {
 }
 
 .config-surface,
-.config-results-surface {
+.config-results-surface,
+.catalog-surface,
+.subscription-surface {
   align-self: start;
 }
 
@@ -208,7 +216,20 @@ body {
   padding-top: 18px;
 }
 
+.subscription-tabs {
+  margin-top: 8px;
+}
+
+.subscription-window {
+  padding-top: 18px;
+}
+
 .config-form {
+  display: grid;
+  gap: 14px;
+}
+
+.subscription-form {
   display: grid;
   gap: 14px;
 }
@@ -424,10 +445,35 @@ body {
   margin-top: 14px;
 }
 
+.catalog-list {
+  display: grid;
+  gap: 14px;
+}
+
+.catalog-item {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.catalog-meta {
+  color: #596763;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.assignment-summary {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
 @media (max-width: 960px) {
   .metric-grid,
   .config-layout,
-  .inventory-layout {
+  .inventory-layout,
+  .subscription-layout {
     grid-template-columns: 1fr;
   }
 

@@ -30,14 +30,15 @@ The first milestone establishes the project skeleton, the no-license contract,
 persisted server/agent inventory, agent telemetry and command slices, initial
 agent operation, maintenance, diagnostic, and config-preparation wrappers, and
 Xray/nginx config plus agent setting wrappers, high-level runtime/site
-operation wrappers, and the public probe read-only surface. The Vue frontend
-now includes a config workspace, runtime/site operation payload workbenches, and
-an expandable command-result inspector. It does not yet replace the full MMWX
-product.
+operation wrappers, a subscription catalog with user-plan binding, optional
+agent `batch-apply` provisioning, and the public probe read-only surface. The
+Vue frontend now includes a config workspace, runtime/site operation payload
+workbenches, subscription catalog management, and an expandable command-result
+inspector. It does not yet replace the full MMWX product.
 
 ```text
-backend/   FastAPI app, no-license API, inventory, telemetry, commands, probe
-frontend/  Vue 3 + Vuetify shell, server, config, command, and probe views
+backend/   FastAPI app, no-license API, inventory, telemetry, commands, subscriptions, probe
+frontend/  Vue 3 + Vuetify shell, server, config, subscription, command, and probe views
 docs/      migration and architecture notes
 scripts/   VPS test runner
 ```

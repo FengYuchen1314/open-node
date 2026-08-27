@@ -181,6 +181,37 @@ into editors, manage config-file read/write calls, dispatch high-level runtime
 and site payloads, and inspect each command's request, result body, error, and
 stream frames.
 
+## Subscription Catalog
+
+Open Node keeps the MMWX subscription workflow as first-party product data
+without licensing or entitlement checks. The backend stores product users,
+managed nodes, and subscription plans in SQLite and exposes them through:
+
+- `GET /api/v1/users`
+- `POST /api/v1/users`
+- `GET /api/v1/nodes`
+- `POST /api/v1/nodes`
+- `GET /api/v1/plans`
+- `POST /api/v1/plans`
+- `POST /api/v1/users/{username}/plan`
+
+Managed nodes link Open Node catalog records to server inventory records. They
+can hold inbound tags, routed outbound or rule markers, tags, opaque config,
+and a JSON client template. The template supports simple placeholders such as
+`{username}`, `{node_name}`, and `{server_name}` so plan assignment can prepare
+the same `inbound_clients` and `routing_user_additions` batch body expected by
+the active `mmw-agent` `/api/child/batch-apply` route.
+
+Plan assignment always returns the calculated per-server provisioning batches.
+Callers can keep this as a preview, or set `queue_agent_commands=true` to create
+and dispatch persisted batch-apply commands through the existing WebSocket RPC
+and HTTP lease paths. The catalog response models all include
+`license_required=false`.
+
+The frontend exposes this in `/subscriptions`, where operators can create users,
+catalog nodes, plans, and assignments, then inspect the last calculated batch
+before or after dispatching it.
+
 ## Public Probe API
 
 Open Node exposes the read-only public probe surface without authentication or

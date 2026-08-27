@@ -47,8 +47,13 @@ This document records the starting source map for the Open Node refactor.
    - Done: higher-level inbound, outbound, routing, batch apply, certificate,
      nginx SSL/website, return-route, site validation, and limiter operation
      wrappers from the active agent.
-   - Next: richer guided control-plane workflows for subscriptions, user
-     binding, node provisioning, and rollback-friendly multi-server changes.
+   - Done: open subscription catalog tables and APIs for product users,
+     managed nodes, plans, user-plan binding, provisioning-batch previews, and
+     optional agent `batch-apply` command dispatch.
+   - Done: Vue subscription workspace for catalog entry, plan assignment, and
+     latest provisioning batch inspection.
+   - Next: rollback-friendly multi-server changes, generated share links, and
+     deeper subscription credential automation.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.
