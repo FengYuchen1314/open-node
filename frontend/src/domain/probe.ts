@@ -88,6 +88,8 @@ export interface ProbeServer {
 
 export interface ProbeSettings {
   enabled: boolean;
+  has_access_token?: boolean;
+  require_access_token?: boolean;
   show_globe?: boolean;
   show_daily_trend?: boolean;
   show_traffic_hotspots?: boolean;
@@ -107,6 +109,7 @@ export interface ProbeSettings {
 
 export interface ProbeSettingsUpdate {
   enabled?: boolean;
+  require_access_token?: boolean;
   show_globe?: boolean;
   show_daily_trend?: boolean;
   show_traffic_hotspots?: boolean;
@@ -124,6 +127,12 @@ export interface ProbeSettingsUpdate {
 }
 
 export interface ProbeSettingsResponse {
+  settings: ProbeSettings;
+  license_required: false;
+}
+
+export interface ProbeAccessTokenCreateResponse {
+  token: string;
   settings: ProbeSettings;
   license_required: false;
 }

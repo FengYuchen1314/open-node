@@ -20,8 +20,9 @@ intentionally out of scope for this refactor.
 
 - Backend: FastAPI on Python 3.11+.
 - Frontend: Vue 3, Vuetify, Vite, TypeScript.
-- Repository shape: one monorepo with `backend/`, `frontend/`, `docs/`, and
-  `scripts/`.
+- Probe worker: Cloudflare Worker with Workers Static Assets.
+- Repository shape: one monorepo with `backend/`, `frontend/`, `probe-worker/`,
+  `docs/`, and `scripts/`.
 - Verification target: tests are run on the VPS at `185.99.135.224` over SSH.
 
 ## Current Milestone
@@ -42,7 +43,8 @@ dispatch, domain-latency result ingestion, cross-node target comparison, and
 external Xray takeover for legacy `-config` plus `-confdir` nodes, plus latest
 agent scan-result persistence for Xray runtime status and inbound inventory,
 agent log-file listing/cleanup, nginx stream-port cleanup, and compatibility
-wrappers for non-stream Xray/nginx install/remove agent routes.
+wrappers for non-stream Xray/nginx install/remove agent routes, plus optional
+standalone probe Worker token access for hiding direct public probe endpoints.
 The Vue frontend now includes a config workspace, runtime/site operation
 payload workbenches, subscription catalog, link, format, traffic, quota,
 preset, and import/export management, probe settings, metadata, and task
@@ -56,6 +58,7 @@ does not yet replace the full MMWX product.
 ```text
 backend/   FastAPI app, no-license API, inventory, telemetry, scan results, commands, changes, subscriptions, probe
 frontend/  Vue 3 + Vuetify shell, server, config, change, subscription, command, and probe views
+probe-worker/  Cloudflare Worker for the standalone public probe surface
 docs/      migration and architecture notes
 scripts/   VPS test runner
 ```
@@ -89,4 +92,5 @@ After pushing a branch to GitHub, run all tests on the VPS:
 ```
 
 The remote runner installs backend and frontend dependencies, runs backend
-tests, runs frontend tests, and builds the frontend on the VPS.
+tests, runs frontend tests, builds the frontend, and type-checks the probe
+worker on the VPS.

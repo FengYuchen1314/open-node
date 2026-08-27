@@ -47,6 +47,8 @@ class ProbeAppearanceUpdate(BaseModel):
 
 class ProbeSettingsRead(BaseModel):
     enabled: bool = True
+    has_access_token: bool = False
+    require_access_token: bool = False
     show_globe: bool = False
     show_daily_trend: bool = False
     show_traffic_hotspots: bool = False
@@ -79,6 +81,7 @@ class ProbeSettingsRead(BaseModel):
 
 class ProbeSettingsUpdate(BaseModel):
     enabled: bool | None = None
+    require_access_token: bool | None = None
     show_globe: bool | None = None
     show_daily_trend: bool | None = None
     show_traffic_hotspots: bool | None = None
@@ -108,6 +111,12 @@ class ProbeSettingsUpdate(BaseModel):
 
 
 class ProbeSettingsResponse(BaseModel):
+    settings: ProbeSettingsRead
+    license_required: Literal[False] = False
+
+
+class ProbeAccessTokenCreateResponse(BaseModel):
+    token: str
     settings: ProbeSettingsRead
     license_required: Literal[False] = False
 

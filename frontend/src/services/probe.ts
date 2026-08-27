@@ -1,4 +1,5 @@
 import type {
+  ProbeAccessTokenCreateResponse,
   ProbePayload,
   ProbeSeriesResponse,
   ProbeSettingsResponse,
@@ -27,8 +28,14 @@ export interface ProbeSeriesOptions {
 
 export type ProbeRange = "1h" | "6h" | "24h";
 
-export async function getPublicProbePayload(fetcher = fetch): Promise<ProbePayload> {
-  const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-servers`);
+export async function getPublicProbePayload(
+  fetcher = fetch,
+  accessToken?: string,
+): Promise<ProbePayload> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/public/probe-servers`,
+    probeAccessInit(accessToken),
+  );
   if (!response.ok) {
     throw await apiError(response, "Public probe request failed");
   }
@@ -62,6 +69,7 @@ export async function getPublicProbeSeries(
   serverIndex: number,
   options: ProbeSeriesOptions = {},
   fetcher = fetch,
+  accessToken?: string,
 ): Promise<ProbeSeriesResponse> {
   const params = new URLSearchParams({
     server: serverIndex.toString(),
@@ -75,7 +83,10 @@ export async function getPublicProbeSeries(
     params.set("all", "1");
   }
 
-  const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-series?${params}`);
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/public/probe-series?${params}`,
+    probeAccessInit(accessToken),
+  );
   if (!response.ok) {
     throw await apiError(response, "Public probe series request failed");
   }
@@ -85,9 +96,13 @@ export async function getPublicProbeSeries(
 export async function getPublicProbeTargets(
   range: ProbeRange = "1h",
   fetcher = fetch,
+  accessToken?: string,
 ): Promise<ProbeTargetComparisonResponse> {
   const params = new URLSearchParams({ range });
-  const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-targets?${params}`);
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/public/probe-targets?${params}`,
+    probeAccessInit(accessToken),
+  );
   if (!response.ok) {
     throw await apiError(response, "Public probe targets request failed");
   }
@@ -145,10 +160,42 @@ export async function dispatchDueProbeTasks(
   return response.json() as Promise<ProbeTaskDispatchResponse>;
 }
 
+export async function createProbeAccessToken(
+  fetcher = fetch,
+): Promise<ProbeAccessTokenCreateResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/probe/access-token`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Probe access token create request failed");
+  }
+  return response.json() as Promise<ProbeAccessTokenCreateResponse>;
+}
+
+export async function clearProbeAccessToken(
+  fetcher = fetch,
+): Promise<ProbeSettingsResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/probe/access-token`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Probe access token clear request failed");
+  }
+  return response.json() as Promise<ProbeSettingsResponse>;
+}
+
 export function getPublicProbeStreamUrl(locationLike: BrowserLocationLike = window.location) {
   const url = new URL("/api/v1/public/probe-ws", apiBaseUrl || locationLike.origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
+}
+
+function probeAccessInit(accessToken?: string): RequestInit | undefined {
+  const token = accessToken?.trim();
+  if (!token) {
+    return undefined;
+  }
+  return { headers: { "X-MMwx-Probe-Token": token } };
 }
 
 async function apiError(response: Response, fallback: string): Promise<Error> {

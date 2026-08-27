@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 from calendar import monthrange
 from collections.abc import Iterable
@@ -78,6 +79,7 @@ from open_node.domain.inventory import (
     XrayStats,
 )
 from open_node.domain.probe import (
+    ProbeAccessTokenCreateResponse,
     ProbeAppearance,
     ProbeBucket,
     ProbeDailyTraffic,
@@ -752,6 +754,8 @@ class ProbeSettingsModel(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    access_token_hash: Mapped[str] = mapped_column(String(64), default="")
+    require_access_token: Mapped[bool] = mapped_column(Boolean, default=False)
     show_globe: Mapped[bool] = mapped_column(Boolean, default=False)
     show_daily_trend: Mapped[bool] = mapped_column(Boolean, default=False)
     show_traffic_hotspots: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -844,7 +848,11 @@ class InventoryStore:
             self._sqlite_add_missing_columns(
                 inspector,
                 "probe_settings",
-                {"show_return_route": "BOOLEAN"},
+                {
+                    "show_return_route": "BOOLEAN",
+                    "access_token_hash": "VARCHAR(64)",
+                    "require_access_token": "BOOLEAN",
+                },
             )
 
     def _sqlite_add_missing_columns(
@@ -1172,6 +1180,45 @@ class InventoryStore:
     def probe_settings(self) -> ProbeSettingsRead:
         with self._session() as session:
             return self._probe_settings_read(session)
+
+    def probe_access_allowed(self, token: str | None) -> bool:
+        with self._session() as session:
+            settings = session.get(ProbeSettingsModel, "default")
+            if not settings:
+                return True
+            if not self._stored_bool(settings.require_access_token, False):
+                return True
+            stored_hash = settings.access_token_hash or ""
+            if not stored_hash or not token:
+                return False
+            candidate_hash = self._hash_probe_access_token(token.strip())
+            return hmac.compare_digest(candidate_hash, stored_hash)
+
+    def create_probe_access_token(self) -> ProbeAccessTokenCreateResponse:
+        now = datetime.now(tz=UTC)
+        token = f"probe_{token_urlsafe(32)}"
+        with self._session() as session:
+            settings = self._probe_settings_model(session, now)
+            settings.access_token_hash = self._hash_probe_access_token(token)
+            settings.require_access_token = True
+            settings.updated_at = now
+            session.commit()
+            session.refresh(settings)
+            return ProbeAccessTokenCreateResponse(
+                token=token,
+                settings=self._probe_settings_read(session, settings),
+            )
+
+    def clear_probe_access_token(self) -> ProbeSettingsResponse:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            settings = self._probe_settings_model(session, now)
+            settings.access_token_hash = ""
+            settings.require_access_token = False
+            settings.updated_at = now
+            session.commit()
+            session.refresh(settings)
+            return ProbeSettingsResponse(settings=self._probe_settings_read(session, settings))
 
     def update_probe_settings(self, payload: ProbeSettingsUpdate) -> ProbeSettingsResponse:
         now = datetime.now(tz=UTC)
@@ -2341,6 +2388,8 @@ class InventoryStore:
         settings = ProbeSettingsModel(
             id="default",
             enabled=defaults.enabled,
+            access_token_hash="",
+            require_access_token=defaults.require_access_token,
             show_globe=defaults.show_globe,
             show_daily_trend=defaults.show_daily_trend,
             show_traffic_hotspots=defaults.show_traffic_hotspots,
@@ -2371,6 +2420,11 @@ class InventoryStore:
             return ProbeSettingsRead()
         return ProbeSettingsRead(
             enabled=settings.enabled,
+            has_access_token=bool(settings.access_token_hash),
+            require_access_token=InventoryStore._stored_bool(
+                settings.require_access_token,
+                False,
+            ),
             show_globe=InventoryStore._stored_bool(settings.show_globe, False),
             show_daily_trend=InventoryStore._stored_bool(settings.show_daily_trend, False),
             show_traffic_hotspots=InventoryStore._stored_bool(
@@ -4747,6 +4801,10 @@ class InventoryStore:
     @staticmethod
     def _hash_xray_config(config: str) -> str:
         return hashlib.sha256(config.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _hash_probe_access_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _xray_config_snapshot_read(

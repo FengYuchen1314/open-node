@@ -462,6 +462,35 @@ body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.probe-token-row {
+  align-items: center;
+  border: 1px solid rgba(45, 55, 72, 0.12);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.probe-token-status,
+.probe-token-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.probe-token-status span {
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.probe-token-field input {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.86rem;
+}
+
 .probe-task-surface {
   display: grid;
   gap: 14px;
@@ -1289,6 +1318,7 @@ body {
   .probe-insight-grid,
   .probe-task-form,
   .probe-task-row,
+  .probe-token-row,
   .probe-toggle-grid,
   .probe-trend-grid,
   .service-command-grid,
@@ -1303,6 +1333,7 @@ body {
   }
 
   .probe-target-compare-actions,
+  .probe-token-actions,
   .probe-task-actions,
   .snapshot-actions {
     align-items: stretch;

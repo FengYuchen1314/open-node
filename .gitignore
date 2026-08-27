@@ -19,6 +19,8 @@ frontend/.vite/
 .env
 .env.*
 !.env.example
+.dev.vars
+probe-worker/.dev.vars
 
 # OS and editors
 .DS_Store

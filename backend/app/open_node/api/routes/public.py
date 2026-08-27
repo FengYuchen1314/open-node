@@ -2,7 +2,7 @@ import asyncio
 from contextlib import suppress
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -27,7 +27,10 @@ router = APIRouter(prefix="/public", tags=["public"])
 )
 def public_probe_servers(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
-) -> ProbePayload:
+    probe_token: Annotated[str | None, Header(alias="X-MMwx-Probe-Token")] = None,
+) -> ProbePayload | JSONResponse:
+    if not store.probe_access_allowed(probe_token):
+        return _probe_access_denied_response()
     return store.public_probe_payload()
 
 
@@ -62,11 +65,14 @@ def update_public_probe_settings(
 def public_probe_series(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     server: Annotated[int, Query(ge=0)],
+    probe_token: Annotated[str | None, Header(alias="X-MMwx-Probe-Token")] = None,
     metric: str = "ping",
     range_name: Annotated[str, Query(alias="range")] = "1h",
     target: str = "__avg__",
     all_targets: Annotated[bool, Query(alias="all")] = False,
 ) -> ProbeSeriesResponse | JSONResponse:
+    if not store.probe_access_allowed(probe_token):
+        return _probe_access_denied_response()
     try:
         return store.public_probe_series(
             server_index=server,
@@ -90,7 +96,10 @@ def public_probe_series(
 def public_probe_targets(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     range_name: Annotated[str, Query(alias="range")] = "1h",
+    probe_token: Annotated[str | None, Header(alias="X-MMwx-Probe-Token")] = None,
 ) -> ProbeTargetComparisonResponse | JSONResponse:
+    if not store.probe_access_allowed(probe_token):
+        return _probe_access_denied_response()
     try:
         return store.public_probe_target_comparison(range_name=range_name)
     except ProbeNotFoundError:
@@ -103,6 +112,22 @@ def public_probe_targets(
 @router.websocket("/probe-ws")
 async def public_probe_websocket(websocket: WebSocket) -> None:
     streams: PublicProbeStreamManager = websocket.app.state.public_probe_streams
+    store: InventoryStore = websocket.app.state.inventory
+    if not await run_in_threadpool(
+        store.probe_access_allowed,
+        websocket.headers.get("x-mmwx-probe-token"),
+    ):
+        await websocket.accept()
+        await websocket.send_json(
+            {
+                "success": False,
+                "error": "probe access denied",
+                "license_required": False,
+            }
+        )
+        await websocket.close(code=1008)
+        return
+
     client_ip = _probe_client_ip(websocket)
 
     if not streams.try_connect(client_ip):
@@ -118,7 +143,6 @@ async def public_probe_websocket(websocket: WebSocket) -> None:
         return
 
     await websocket.accept()
-    store: InventoryStore = websocket.app.state.inventory
     reader = asyncio.create_task(_discard_probe_messages(websocket))
     writer = asyncio.create_task(_send_probe_snapshots(websocket, store, streams))
 
@@ -169,3 +193,10 @@ def _probe_client_ip(websocket: WebSocket) -> str:
     if websocket.client:
         return websocket.client.host
     return "unknown"
+
+
+def _probe_access_denied_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={"success": False, "license_required": False},
+    )

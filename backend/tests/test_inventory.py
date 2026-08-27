@@ -512,6 +512,109 @@ def test_public_probe_settings_customize_payload_and_disable_servers(tmp_path: P
     assert alias.json()["settings"]["title"] == "MMWX Public Status"
 
 
+def test_probe_access_token_gate_allows_worker_header_and_hides_direct_access(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    client.post("/api/v1/servers", json={"name": "edge-probe-token"})
+
+    defaults = client.get("/api/v1/public/probe-settings").json()["settings"]
+    assert defaults["has_access_token"] is False
+    assert defaults["require_access_token"] is False
+
+    created = client.post("/api/v1/probe/access-token")
+
+    assert created.status_code == 200
+    created_payload = created.json()
+    token = created_payload["token"]
+    assert token.startswith("probe_")
+    assert created_payload["license_required"] is False
+    assert created_payload["settings"]["has_access_token"] is True
+    assert created_payload["settings"]["require_access_token"] is True
+    assert "access_token_hash" not in created_payload["settings"]
+
+    direct = client.get("/api/v1/public/probe-servers")
+    bad_token = client.get(
+        "/api/v1/public/probe-servers",
+        headers={"X-MMwx-Probe-Token": "probe_wrong"},
+    )
+    worker = client.get(
+        "/api/v1/public/probe-servers",
+        headers={"X-MMwx-Probe-Token": token},
+    )
+    worker_alias = client.get(
+        "/api/public/probe-servers",
+        headers={"X-MMwx-Probe-Token": token},
+    )
+
+    assert direct.status_code == 404
+    assert direct.json() == {"success": False, "license_required": False}
+    assert bad_token.status_code == 404
+    assert worker.status_code == 200
+    assert worker.json()["servers"][0]["name"] == "edge-probe-token"
+    assert worker.json()["license_required"] is False
+    assert worker_alias.status_code == 200
+
+    cleared = client.delete("/api/v1/probe/access-token")
+    direct_after_clear = client.get("/api/v1/public/probe-servers")
+
+    assert cleared.status_code == 200
+    assert cleared.json()["settings"]["has_access_token"] is False
+    assert cleared.json()["settings"]["require_access_token"] is False
+    assert direct_after_clear.status_code == 200
+
+
+def test_probe_access_token_gate_protects_series_targets_and_websocket(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-token-stream"}).json()
+    client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": created["agent_token"],
+            "latency": [{"key": "ct-shanghai", "success": True, "latency_ms": 37}],
+        },
+    )
+    token = client.post("/api/v1/probe/access-token").json()["token"]
+    worker_headers = {"X-MMwx-Probe-Token": token}
+
+    direct_series = client.get("/api/v1/public/probe-series?server=0&target=ct-shanghai")
+    worker_series = client.get(
+        "/api/v1/public/probe-series?server=0&target=ct-shanghai",
+        headers=worker_headers,
+    )
+    direct_targets = client.get("/api/v1/public/probe-targets?range=1h")
+    worker_targets = client.get("/api/v1/public/probe-targets?range=1h", headers=worker_headers)
+
+    assert direct_series.status_code == 404
+    assert direct_series.json() == {"success": False, "license_required": False}
+    assert worker_series.status_code == 200
+    assert worker_series.json()["series"]["current_ms"] == 37
+    assert direct_targets.status_code == 404
+    assert worker_targets.status_code == 200
+    assert worker_targets.json()["targets"][0]["key"] == "ct-shanghai"
+
+    with client.websocket_connect("/api/v1/public/probe-ws") as websocket:
+        denied_payload = websocket.receive_json()
+
+    assert denied_payload == {
+        "success": False,
+        "error": "probe access denied",
+        "license_required": False,
+    }
+
+    with client.websocket_connect(
+        "/api/v1/public/probe-ws",
+        headers=worker_headers,
+    ) as websocket:
+        payload = websocket.receive_json()
+
+    assert payload["servers"][0]["name"] == "edge-token-stream"
+    assert payload["servers"][0]["ping"][0]["current_ms"] == 37
+    assert payload["license_required"] is False
+
+
 def test_public_probe_series_uses_public_index_and_aggregates_latency(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-probe-series"}).json()

@@ -19,3 +19,13 @@ fi
 
 npm --prefix frontend test
 npm --prefix frontend run build
+
+if [ -f probe-worker/package.json ]; then
+  if [ -f probe-worker/package-lock.json ]; then
+    npm --prefix probe-worker ci
+  else
+    npm --prefix probe-worker install
+  fi
+
+  npm --prefix probe-worker run typecheck
+fi

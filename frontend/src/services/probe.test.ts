@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  clearProbeAccessToken,
+  createProbeAccessToken,
   createProbeTask,
   dispatchDueProbeTasks,
   getPublicProbePayload,
@@ -118,6 +120,39 @@ describe("public probe API client", () => {
     expect(response.targets[0].servers[0].server_index).toBe(0);
   });
 
+  it("sends worker probe tokens only when provided", async () => {
+    const calls: Array<{ headers: HeadersInit | undefined; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      calls.push({ url: input.toString(), headers: init?.headers });
+      return jsonResponse({
+        enabled: true,
+        servers: [],
+        success: true,
+        targets: [],
+        license_required: false,
+      });
+    };
+
+    await getPublicProbePayload(fetcher, "probe_secret");
+    await getPublicProbeSeries(0, { target: "ct-shanghai" }, fetcher, "probe_secret");
+    await getPublicProbeTargets("1h", fetcher, "probe_secret");
+
+    expect(calls).toEqual([
+      {
+        url: "/api/v1/public/probe-servers",
+        headers: { "X-MMwx-Probe-Token": "probe_secret" },
+      },
+      {
+        url: "/api/v1/public/probe-series?server=0&range=1h&metric=ping&target=ct-shanghai",
+        headers: { "X-MMwx-Probe-Token": "probe_secret" },
+      },
+      {
+        url: "/api/v1/public/probe-targets?range=1h",
+        headers: { "X-MMwx-Probe-Token": "probe_secret" },
+      },
+    ]);
+  });
+
   it("loads and updates public probe settings", async () => {
     const calls: Array<{ body?: unknown; headers: HeadersInit | undefined; method?: string; url: string }> = [];
     const fetcher: typeof fetch = async (input, init) => {
@@ -137,6 +172,8 @@ describe("public probe API client", () => {
             refresh_interval_sec: 3,
             show_renewal_timeline: true,
             show_return_route: true,
+            has_access_token: true,
+            require_access_token: true,
             appearance: { theme: "compact", color_mode: "dark", revision: "probe-r2" },
           },
           license_required: false,
@@ -153,12 +190,15 @@ describe("public probe API client", () => {
         refresh_interval_sec: 3,
         show_renewal_timeline: true,
         show_return_route: true,
+        require_access_token: true,
         appearance: { theme: "compact", color_mode: "dark" },
       },
       fetcher,
     );
 
     expect(loaded.settings.title).toBe("MMWX Public Status");
+    expect(loaded.settings.has_access_token).toBe(true);
+    expect(updated.settings.require_access_token).toBe(true);
     expect(updated.license_required).toBe(false);
     expect(calls).toEqual([
       {
@@ -177,9 +217,47 @@ describe("public probe API client", () => {
           refresh_interval_sec: 3,
           show_renewal_timeline: true,
           show_return_route: true,
+          require_access_token: true,
           appearance: { theme: "compact", color_mode: "dark" },
         },
       },
+    ]);
+  });
+
+  it("manages probe worker access tokens without license headers", async () => {
+    const calls: Array<{ method?: string; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      calls.push({ url: input.toString(), method: init?.method });
+      if (init?.method === "DELETE") {
+        return jsonResponse({
+          settings: {
+            enabled: true,
+            has_access_token: false,
+            require_access_token: false,
+          },
+          license_required: false,
+        });
+      }
+      return jsonResponse({
+        token: "probe_secret",
+        settings: {
+          enabled: true,
+          has_access_token: true,
+          require_access_token: true,
+        },
+        license_required: false,
+      });
+    };
+
+    const created = await createProbeAccessToken(fetcher);
+    const cleared = await clearProbeAccessToken(fetcher);
+
+    expect(created.token).toBe("probe_secret");
+    expect(created.settings.has_access_token).toBe(true);
+    expect(cleared.settings.require_access_token).toBe(false);
+    expect(calls).toEqual([
+      { url: "/api/v1/probe/access-token", method: "POST" },
+      { url: "/api/v1/probe/access-token", method: "DELETE" },
     ]);
   });
 

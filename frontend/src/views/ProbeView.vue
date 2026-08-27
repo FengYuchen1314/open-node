@@ -7,6 +7,7 @@ import type {
   ProbePingSeries,
   ProbeServer,
   ProbeSeriesResponse,
+  ProbeSettings,
   ProbeSettingsUpdate,
   ProbeSystemSeries,
   ProbeTargetComparison,
@@ -38,10 +39,13 @@ import {
   trafficUsed,
 } from "../domain/probe-insights";
 import {
+  clearProbeAccessToken,
+  createProbeAccessToken,
   createProbeTask,
   dispatchDueProbeTasks,
   getPublicProbePayload,
   getPublicProbeSeries,
+  getPublicProbeSettings,
   getPublicProbeStreamUrl,
   getPublicProbeTargets,
   listProbeTasks,
@@ -87,6 +91,8 @@ interface ProbeTargetComparisonRow {
 const payload = ref<ProbePayload | null>(null);
 const loading = ref(false);
 const savingSettings = ref(false);
+const probeTokenSaving = ref(false);
+const generatedProbeAccessToken = ref("");
 const errorMessage = ref("");
 const successMessage = ref("");
 const streamActive = ref(false);
@@ -123,6 +129,8 @@ let probeStream: WebSocket | undefined;
 
 const settingsForm = reactive({
   enabled: true,
+  has_access_token: false,
+  require_access_token: false,
   title: "Open Node Probe",
   description: "MMWX probe-compatible node status without license gates.",
   logo: "",
@@ -294,6 +302,18 @@ const taskRows = computed(() =>
     nextRunLabel: new Date(task.next_run_at).toLocaleString(),
   })),
 );
+const probeTokenStatus = computed(() => {
+  if (settingsForm.require_access_token) {
+    return "Required";
+  }
+  return settingsForm.has_access_token ? "Ready" : "None";
+});
+const probeTokenStatusColor = computed(() => {
+  if (settingsForm.require_access_token) {
+    return "success";
+  }
+  return settingsForm.has_access_token ? "info" : "default";
+});
 const pingTrendCards = computed<ProbeTrendCard[]>(() => {
   const series = selectedPingSeries.value;
   if (!series) {
@@ -382,17 +402,21 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  probeStream?.close();
-  probeStream = undefined;
+  closeProbeStream();
 });
 
 async function refreshProbe() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    acceptProbe(await getPublicProbePayload());
+    acceptProbe(await getPublicProbePayload(fetch, activeProbeAccessToken()));
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "Probe request failed.";
+    const message = error instanceof Error ? error.message : "Probe request failed.";
+    await refreshProbeSettingsAfterDenied();
+    errorMessage.value =
+      settingsForm.require_access_token && !activeProbeAccessToken()
+        ? "Worker token required."
+        : message;
   } finally {
     loading.value = false;
   }
@@ -403,7 +427,11 @@ async function refreshProbeTargetComparisons() {
   targetComparisonLoading.value = true;
   targetComparisonError.value = "";
   try {
-    const response = await getPublicProbeTargets(targetComparisonRange.value);
+    const response = await getPublicProbeTargets(
+      targetComparisonRange.value,
+      fetch,
+      activeProbeAccessToken(),
+    );
     if (request === targetComparisonRequest) {
       targetComparisons.value = response.targets;
       targetComparisonGeneratedAt.value = response.generated_at
@@ -446,17 +474,27 @@ function acceptProbe(nextPayload: ProbePayload) {
   errorMessage.value = "";
   syncSettingsForm(nextPayload);
   syncFilters(nextPayload.servers ?? []);
+  if (settingsForm.require_access_token) {
+    closeProbeStream();
+  }
 }
 
 function probeEndpointNote() {
   if (streamActive.value) {
     return "Live stream connected";
   }
+  if (settingsForm.require_access_token) {
+    return "Worker token required";
+  }
   return payload.value?.enabled ? "Probe endpoint enabled" : "Probe endpoint disabled";
 }
 
 function openProbeStream() {
   if (typeof WebSocket === "undefined") {
+    return;
+  }
+  if (settingsForm.require_access_token) {
+    closeProbeStream();
     return;
   }
   try {
@@ -466,7 +504,10 @@ function openProbeStream() {
     };
     probeStream.onmessage = (event) => {
       try {
-        acceptProbe(JSON.parse(event.data as string) as ProbePayload);
+        const frame = JSON.parse(event.data as string) as unknown;
+        if (isProbePayload(frame)) {
+          acceptProbe(frame);
+        }
       } catch {
         // Ignore malformed stream frames; the next snapshot replaces the page state.
       }
@@ -483,18 +524,87 @@ function openProbeStream() {
   }
 }
 
+function closeProbeStream() {
+  probeStream?.close();
+  probeStream = undefined;
+  streamActive.value = false;
+}
+
+function activeProbeAccessToken() {
+  return generatedProbeAccessToken.value.trim() || undefined;
+}
+
+async function refreshProbeSettingsAfterDenied() {
+  try {
+    const response = await getPublicProbeSettings();
+    applyProbeSettings(response.settings);
+  } catch {
+    // Keep the original data-plane error visible.
+  }
+}
+
 async function saveProbeSettings() {
   savingSettings.value = true;
   errorMessage.value = "";
   successMessage.value = "";
   try {
-    await updatePublicProbeSettings(settingsPayload());
-    await refreshProbe();
+    const response = await updatePublicProbeSettings(settingsPayload());
+    applyProbeSettings(response.settings);
+    if (settingsForm.require_access_token && !activeProbeAccessToken()) {
+      closeProbeStream();
+    } else {
+      await refreshProbe();
+      if (settingsForm.require_access_token) {
+        closeProbeStream();
+      } else {
+        openProbeStream();
+      }
+    }
     successMessage.value = "Probe settings saved.";
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "Probe settings failed.";
   } finally {
     savingSettings.value = false;
+  }
+}
+
+async function generateProbeAccessToken() {
+  probeTokenSaving.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await createProbeAccessToken();
+    generatedProbeAccessToken.value = response.token;
+    applyProbeSettings(response.settings);
+    closeProbeStream();
+    await refreshProbe();
+    await refreshProbeTargetComparisons();
+    successMessage.value = "Worker token generated.";
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : "Probe access token request failed.";
+  } finally {
+    probeTokenSaving.value = false;
+  }
+}
+
+async function removeProbeAccessToken() {
+  probeTokenSaving.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await clearProbeAccessToken();
+    generatedProbeAccessToken.value = "";
+    applyProbeSettings(response.settings);
+    await refreshProbe();
+    await refreshProbeTargetComparisons();
+    openProbeStream();
+    successMessage.value = "Worker token cleared.";
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : "Probe access token request failed.";
+  } finally {
+    probeTokenSaving.value = false;
   }
 }
 
@@ -558,25 +668,38 @@ async function toggleScheduledProbeTask(task: ProbeTask) {
   }
 }
 
-function syncSettingsForm(nextPayload: ProbePayload) {
-  settingsForm.enabled = nextPayload.enabled;
-  settingsForm.title = nextPayload.title ?? "Open Node Probe";
+function applyProbeSettings(nextSettings: ProbeSettings) {
+  syncSettingsForm(nextSettings);
+  if (payload.value) {
+    payload.value = {
+      ...payload.value,
+      ...nextSettings,
+      servers: payload.value.servers,
+    };
+  }
+}
+
+function syncSettingsForm(nextSettings: ProbeSettings) {
+  settingsForm.enabled = nextSettings.enabled;
+  settingsForm.has_access_token = nextSettings.has_access_token === true;
+  settingsForm.require_access_token = nextSettings.require_access_token === true;
+  settingsForm.title = nextSettings.title ?? "Open Node Probe";
   settingsForm.description =
-    nextPayload.description ?? "MMWX probe-compatible node status without license gates.";
-  settingsForm.logo = nextPayload.logo ?? "";
-  settingsForm.refresh_interval_sec = nextPayload.refresh_interval_sec ?? 5;
-  settingsForm.theme = nextPayload.appearance?.theme ?? "open-node";
-  settingsForm.color_mode = nextPayload.appearance?.color_mode ?? "light";
-  settingsForm.revision = nextPayload.appearance?.revision ?? "open-node";
-  settingsForm.show_globe = nextPayload.show_globe === true;
-  settingsForm.show_resource_heatmap = nextPayload.show_resource_heatmap !== false;
-  settingsForm.show_traffic_quota = nextPayload.show_traffic_quota !== false;
-  settingsForm.show_daily_trend = nextPayload.show_daily_trend === true;
-  settingsForm.show_traffic_hotspots = nextPayload.show_traffic_hotspots === true;
-  settingsForm.show_traffic_7d = nextPayload.show_traffic_7d === true;
-  settingsForm.show_return_route = nextPayload.show_return_route === true;
-  settingsForm.show_renewal_timeline = nextPayload.show_renewal_timeline === true;
-  settingsForm.show_health_score = nextPayload.show_health_score !== false;
+    nextSettings.description ?? "MMWX probe-compatible node status without license gates.";
+  settingsForm.logo = nextSettings.logo ?? "";
+  settingsForm.refresh_interval_sec = nextSettings.refresh_interval_sec ?? 5;
+  settingsForm.theme = nextSettings.appearance?.theme ?? "open-node";
+  settingsForm.color_mode = nextSettings.appearance?.color_mode ?? "light";
+  settingsForm.revision = nextSettings.appearance?.revision ?? "open-node";
+  settingsForm.show_globe = nextSettings.show_globe === true;
+  settingsForm.show_resource_heatmap = nextSettings.show_resource_heatmap !== false;
+  settingsForm.show_traffic_quota = nextSettings.show_traffic_quota !== false;
+  settingsForm.show_daily_trend = nextSettings.show_daily_trend === true;
+  settingsForm.show_traffic_hotspots = nextSettings.show_traffic_hotspots === true;
+  settingsForm.show_traffic_7d = nextSettings.show_traffic_7d === true;
+  settingsForm.show_return_route = nextSettings.show_return_route === true;
+  settingsForm.show_renewal_timeline = nextSettings.show_renewal_timeline === true;
+  settingsForm.show_health_score = nextSettings.show_health_score !== false;
 }
 
 function splitTaskDomains(value: string) {
@@ -593,6 +716,7 @@ function splitTaskDomains(value: string) {
 function settingsPayload(): ProbeSettingsUpdate {
   return {
     enabled: settingsForm.enabled,
+    require_access_token: settingsForm.has_access_token && settingsForm.require_access_token,
     title: settingsForm.title,
     description: settingsForm.description,
     logo: settingsForm.logo,
@@ -653,11 +777,16 @@ async function loadSelectedSeries() {
   selectedSeriesLoading.value = true;
   selectedSeriesError.value = "";
   try {
-    const response = await getPublicProbeSeries(selectedServerIndex.value, {
-      range: selectedSeriesRange.value,
-      metric: selectedSeriesMetric.value,
-      all: selectedSeriesMetric.value === "ping",
-    });
+    const response = await getPublicProbeSeries(
+      selectedServerIndex.value,
+      {
+        range: selectedSeriesRange.value,
+        metric: selectedSeriesMetric.value,
+        all: selectedSeriesMetric.value === "ping",
+      },
+      fetch,
+      activeProbeAccessToken(),
+    );
     if (request === selectedSeriesRequest) {
       selectedSeries.value = response;
     }
@@ -680,6 +809,13 @@ function isPingSeries(series: ProbeSeriesResponse["series"]): series is ProbePin
 
 function isSystemSeries(series: ProbeSeriesResponse["series"]): series is ProbeSystemSeries {
   return !!series && "cpu_pct" in series;
+}
+
+function isProbePayload(value: unknown): value is ProbePayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  return "license_required" in value && ("enabled" in value || "servers" in value);
 }
 
 function displayName(server: ProbeServer, index: number) {
@@ -1252,6 +1388,14 @@ function formatBytes(value: number) {
             label="Enabled"
           />
           <v-switch
+            v-model="settingsForm.require_access_token"
+            :disabled="!settingsForm.has_access_token"
+            color="success"
+            density="comfortable"
+            hide-details
+            label="Worker token"
+          />
+          <v-switch
             v-model="settingsForm.show_globe"
             color="primary"
             density="comfortable"
@@ -1315,6 +1459,44 @@ function formatBytes(value: number) {
             label="Renewal"
           />
         </div>
+        <div class="probe-token-row">
+          <div class="probe-token-status">
+            <v-icon color="primary" icon="mdi-key-chain" />
+            <span>Worker access</span>
+            <v-chip :color="probeTokenStatusColor" density="comfortable" size="small" variant="tonal">
+              {{ probeTokenStatus }}
+            </v-chip>
+          </div>
+          <div class="probe-token-actions">
+            <v-btn
+              :loading="probeTokenSaving"
+              prepend-icon="mdi-key-plus"
+              variant="tonal"
+              @click="generateProbeAccessToken"
+            >
+              Generate
+            </v-btn>
+            <v-btn
+              :disabled="!settingsForm.has_access_token"
+              :loading="probeTokenSaving"
+              prepend-icon="mdi-key-remove"
+              variant="text"
+              @click="removeProbeAccessToken"
+            >
+              Clear
+            </v-btn>
+          </div>
+        </div>
+        <v-text-field
+          v-if="generatedProbeAccessToken"
+          :model-value="generatedProbeAccessToken"
+          class="probe-token-field"
+          density="comfortable"
+          label="New token"
+          prepend-inner-icon="mdi-key-variant"
+          readonly
+          variant="outlined"
+        />
         <div class="settings-action-row">
           <v-btn
             :loading="savingSettings"

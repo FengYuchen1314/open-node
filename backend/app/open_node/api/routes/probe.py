@@ -7,6 +7,8 @@ from starlette.concurrency import run_in_threadpool
 
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.probe import (
+    ProbeAccessTokenCreateResponse,
+    ProbeSettingsResponse,
     ProbeTaskCreate,
     ProbeTaskDispatchItem,
     ProbeTaskDispatchResponse,
@@ -22,6 +24,20 @@ from open_node.services.inventory import (
 )
 
 router = APIRouter(prefix="/probe", tags=["probe"])
+
+
+@router.post("/access-token", response_model=ProbeAccessTokenCreateResponse)
+def create_probe_access_token(
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ProbeAccessTokenCreateResponse:
+    return store.create_probe_access_token()
+
+
+@router.delete("/access-token", response_model=ProbeSettingsResponse)
+def clear_probe_access_token(
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ProbeSettingsResponse:
+    return store.clear_probe_access_token()
 
 
 @router.get("/tasks", response_model=ProbeTaskListResponse)

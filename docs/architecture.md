@@ -8,10 +8,11 @@ changed atomically.
 
 ```text
 open-node
-|-- backend   FastAPI application and tests
-|-- frontend  Vue 3 + Vuetify application and tests
-|-- docs      migration notes and architecture decisions
-`-- scripts   VPS bootstrap and verification helpers
+|-- backend       FastAPI application and tests
+|-- frontend      Vue 3 + Vuetify application and tests
+|-- probe-worker  Cloudflare Worker for the standalone probe surface
+|-- docs          migration notes and architecture decisions
+`-- scripts       VPS bootstrap and verification helpers
 ```
 
 ## Product Boundary
@@ -354,8 +355,11 @@ batch before or after dispatching it.
 
 ## Public Probe API
 
-Open Node exposes the read-only public probe surface without authentication or
-license gates. The primary endpoints are:
+Open Node exposes the read-only public probe surface without license gates. The
+data endpoints can optionally require the `X-MMwx-Probe-Token` header used by
+the standalone Cloudflare Worker, so direct origin access can return the same
+compact public `404` shape while Worker traffic is still served. The primary
+endpoints are:
 
 - `GET /api/v1/public/probe-servers`
 - `GET /api/v1/public/probe-settings`
@@ -367,6 +371,8 @@ license gates. The primary endpoints are:
 - `POST /api/v1/probe/tasks`
 - `PATCH /api/v1/probe/tasks/{task_id}`
 - `POST /api/v1/probe/tasks/dispatch-due`
+- `POST /api/v1/probe/access-token`
+- `DELETE /api/v1/probe/access-token`
 
 For compatibility with the `mmwx-probe` Worker route mapping, the same handlers
 are also mounted at:
@@ -399,17 +405,20 @@ server IDs and connectivity details.
 Probe settings are stored locally in SQLite and are license-free. They control
 the public title, description, logo URL, refresh interval, appearance metadata,
 and visibility flags such as traffic quota, resource, health, traffic-history,
-return-route, and renewal columns. When the probe is disabled, `/probe-servers`
-still returns a no-license JSON payload with `enabled=false`, but the public
-server list is empty so node telemetry is not exposed. The Vue `/probe` view
-can edit these settings and immediately uses the same public payload to render
-or hide table sections, status and region filters, region summaries, seven-day
-traffic bars, health chips, latency history buckets, quota meters,
-return-route badges, renewal badges, live traffic hotspot rows, and per-node
-drill-down charts. It also calls the public target comparison endpoint to rank
-latency targets across nodes. Drill-downs call the public series endpoint with
-the selected public server index, range, and metric mode, then render latency,
-loss, CPU, memory, and throughput history without revealing private server IDs.
+return-route, renewal columns, and the optional Worker token requirement. Token
+generation returns the plaintext token once and stores only a SHA-256 hash in
+SQLite; clearing the token also disables the requirement. When the probe is
+disabled, `/probe-servers` still returns a no-license JSON payload with
+`enabled=false`, but the public server list is empty so node telemetry is not
+exposed. The Vue `/probe` view can edit these settings, generate or clear the
+Worker token, and immediately uses the same public payload to render or hide
+table sections, status and region filters, region summaries, seven-day traffic
+bars, health chips, latency history buckets, quota meters, return-route badges,
+renewal badges, live traffic hotspot rows, and per-node drill-down charts. It
+also calls the public target comparison endpoint to rank latency targets across
+nodes. Drill-downs call the public series endpoint with the selected public
+server index, range, and metric mode, then render latency, loss, CPU, memory,
+and throughput history without revealing private server IDs.
 
 Probe task schedules are private management data stored in SQLite. Each task
 targets one server and one active agent child operation: system info,
@@ -421,7 +430,17 @@ converted into telemetry latency samples so the public series endpoint can show
 new probe history without exposing server IDs or agent tokens. Return-route
 results continue to use the sanitized carrier summary table.
 
-The WebSocket stream is also public and read-only. It sends the same
-`ProbePayload` structure as the HTTP list endpoint, drops any client messages,
-limits concurrent connections in memory, follows the configured refresh
-interval, and keeps the no-license response contract.
+The WebSocket stream is also read-only and honors the same optional Worker token
+header before accepting a streaming client. It sends the same `ProbePayload`
+structure as the HTTP list endpoint, drops any client messages, limits
+concurrent connections in memory, follows the configured refresh interval, and
+keeps the no-license response contract.
+
+The `probe-worker/` package is a small Cloudflare Worker that hosts the built
+Vue app from `frontend/dist` with Workers Static Assets and proxies only the
+MMWX-compatible probe routes to the origin. It maps `/api/probe`,
+`/api/series`, `/api/targets`, `/api/stream`, `/api/public/*`, and
+`/api/v1/public/*` paths onto the Open Node v1 public probe endpoints, strips
+cookies and authorization headers, sets `X-Forwarded-Host`, adds
+`X-MMwx-Probe-Token` from its `PROBE_TOKEN` secret, and returns all proxy
+responses with `Cache-Control: no-store`.
