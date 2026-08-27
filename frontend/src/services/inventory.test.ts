@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  acceptXrayConfigPendingRecovery,
+  applyXrayConfigRecovery,
   createXrayRuntimeTunnelChain,
   createServer,
   createServerCommand,
   deleteXrayRuntimeTunnel,
   deployXrayRuntimeTunnel,
+  getXrayConfigSnapshotRecovery,
   getLatestScanResult,
   getLatestTelemetry,
   getXrayRuntimeInventory,
@@ -669,6 +672,140 @@ describe("inventory API client", () => {
     expect(headers).toBeUndefined();
     expect(response.license_required).toBe(false);
     expect(response.command.path).toBe("/api/child/xray/config");
+  });
+
+  it("handles Xray config recovery status, accept, and apply requests", async () => {
+    const requests: Array<{ url: string; method: string; headers?: HeadersInit; body?: unknown }> =
+      [];
+    const fetcher: typeof fetch = async (input, init) => {
+      requests.push({
+        url: input.toString(),
+        method: init?.method ?? "GET",
+        headers: init?.headers,
+        body: init?.body ? JSON.parse(init.body.toString()) : undefined,
+      });
+      if (input.toString().endsWith("/recovery?with_config=true")) {
+        return new Response(
+          JSON.stringify({
+            server_id: "srv_1",
+            has_pending: true,
+            has_current: true,
+            pending: {
+              id: "snap_pending",
+              server_id: "srv_1",
+              config_hash: "pendinghash",
+              source: "agent_report",
+              status: "pending_recovery",
+              size_bytes: 48,
+              config: "{\"inbounds\":[]}",
+              created_at: "2026-08-27T00:01:00Z",
+            },
+            current: {
+              id: "snap_current",
+              server_id: "srv_1",
+              config_hash: "currenthash",
+              source: "master_write",
+              status: "current",
+              size_bytes: 42,
+              config: "{\"inbounds\":[{\"tag\":\"vless-443\"}]}",
+              created_at: "2026-08-27T00:00:00Z",
+            },
+            license_required: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (input.toString().endsWith("/recovery/accept")) {
+        return new Response(
+          JSON.stringify({
+            server_id: "srv_1",
+            current: {
+              id: "snap_pending",
+              server_id: "srv_1",
+              config_hash: "pendinghash",
+              source: "manual_accept",
+              status: "current",
+              size_bytes: 48,
+              created_at: "2026-08-27T00:01:00Z",
+            },
+            snapshots: [],
+            license_required: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          snapshot: {
+            id: "snap_current",
+            server_id: "srv_1",
+            config_hash: "currenthash",
+            source: "master_write",
+            status: "current",
+            size_bytes: 42,
+            created_at: "2026-08-27T00:00:00Z",
+          },
+          commands: [
+            {
+              id: "cmd_test",
+              server_id: "srv_1",
+              request_id: "srv_1-test",
+              method: "POST",
+              path: "/api/child/xray/test-config",
+              query: "",
+              body: { config: "{\"inbounds\":[{\"tag\":\"vless-443\"}]}" },
+              timeout_ms: 45000,
+              stream: false,
+              status: "pending",
+              attempts: 0,
+              created_at: "2026-08-27T00:00:00Z",
+              updated_at: "2026-08-27T00:00:00Z",
+            },
+          ],
+          command_count: 1,
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const statusResponse = await getXrayConfigSnapshotRecovery(
+      "srv_1",
+      { withConfig: true },
+      fetcher,
+    );
+    const acceptResponse = await acceptXrayConfigPendingRecovery("srv_1", fetcher);
+    const applyResponse = await applyXrayConfigRecovery(
+      "srv_1",
+      { restart_xray: true, command_timeout_ms: 45_000 },
+      fetcher,
+    );
+
+    expect(statusResponse.has_pending).toBe(true);
+    expect(statusResponse.pending?.status).toBe("pending_recovery");
+    expect(acceptResponse.current.source).toBe("manual_accept");
+    expect(applyResponse.commands[0]?.path).toBe("/api/child/xray/test-config");
+    expect(requests).toEqual([
+      {
+        url: "/api/v1/servers/srv_1/xray/config-snapshots/recovery?with_config=true",
+        method: "GET",
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/servers/srv_1/xray/config-snapshots/recovery/accept",
+        method: "POST",
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/servers/srv_1/xray/config-snapshots/recovery/apply",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { restart_xray: true, command_timeout_ms: 45_000 },
+      },
+    ]);
   });
 
   it("lists queued commands without sending license headers", async () => {

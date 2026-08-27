@@ -14,6 +14,10 @@ import type {
   ServerResponse,
   ServerSummary,
   ServerXrayConfigSnapshotsResponse,
+  XrayConfigSnapshotRecoveryAcceptResponse,
+  XrayConfigSnapshotRecoveryApplyRequest,
+  XrayConfigSnapshotRecoveryApplyResponse,
+  XrayConfigSnapshotRecoveryStatusResponse,
   XrayRuntimeTunnelChainCreateRequest,
   XrayRuntimeTunnelChainCreateResponse,
   XrayRuntimeTunnelDeployRequest,
@@ -254,6 +258,59 @@ export async function listXrayConfigSnapshots(
     throw await apiError(response, "Xray config snapshot request failed");
   }
   return response.json() as Promise<ServerXrayConfigSnapshotsResponse>;
+}
+
+export async function getXrayConfigSnapshotRecovery(
+  serverId: string,
+  options: { withConfig?: boolean } = {},
+  fetcher = fetch,
+): Promise<XrayConfigSnapshotRecoveryStatusResponse> {
+  const query = new URLSearchParams();
+  if (options.withConfig) {
+    query.set("with_config", "true");
+  }
+  const queryText = query.toString();
+  const suffix = queryText ? `?${queryText}` : "";
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots/recovery${suffix}`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray config recovery status request failed");
+  }
+  return response.json() as Promise<XrayConfigSnapshotRecoveryStatusResponse>;
+}
+
+export async function acceptXrayConfigPendingRecovery(
+  serverId: string,
+  fetcher = fetch,
+): Promise<XrayConfigSnapshotRecoveryAcceptResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots/recovery/accept`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray config pending recovery accept request failed");
+  }
+  return response.json() as Promise<XrayConfigSnapshotRecoveryAcceptResponse>;
+}
+
+export async function applyXrayConfigRecovery(
+  serverId: string,
+  payload: XrayConfigSnapshotRecoveryApplyRequest = {},
+  fetcher = fetch,
+): Promise<XrayConfigSnapshotRecoveryApplyResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots/recovery/apply`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray config recovery apply request failed");
+  }
+  return response.json() as Promise<XrayConfigSnapshotRecoveryApplyResponse>;
 }
 
 export async function listServerCommands(

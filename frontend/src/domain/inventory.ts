@@ -455,6 +455,35 @@ export interface ServerXrayConfigSnapshotsResponse {
   license_required: false;
 }
 
+export interface XrayConfigSnapshotRecoveryStatusResponse {
+  server_id: string;
+  has_pending: boolean;
+  has_current: boolean;
+  pending?: XrayConfigSnapshot | null;
+  current?: XrayConfigSnapshot | null;
+  license_required: false;
+}
+
+export interface XrayConfigSnapshotRecoveryAcceptResponse {
+  server_id: string;
+  current: XrayConfigSnapshot;
+  snapshots: XrayConfigSnapshot[];
+  license_required: false;
+}
+
+export interface XrayConfigSnapshotRecoveryApplyRequest {
+  restart_xray?: boolean;
+  command_timeout_ms?: number;
+}
+
+export interface XrayConfigSnapshotRecoveryApplyResponse {
+  server_id: string;
+  snapshot: XrayConfigSnapshot;
+  commands: AgentCommand[];
+  command_count: number;
+  license_required: false;
+}
+
 export interface AgentCommandCreateRequest {
   method: string;
   path: string;

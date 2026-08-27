@@ -51,7 +51,7 @@ tunnel-mode deployment planning/queueing for Nginx plus Xray,
 runtime/catalog
 reconciliation plus stale-node public-field sync and credential email drift
 checks plus missing-client repair and extra-client cleanup dispatch with
-follow-up runtime scans, agent
+follow-up runtime scans, Xray config pending-recovery decisions, agent
 log-file listing/cleanup, nginx stream-port cleanup, and
 compatibility wrappers for non-stream Xray/nginx install/remove agent routes,
 plus optional standalone probe Worker token access for hiding direct public
@@ -67,7 +67,8 @@ delete/create-chain/deploy controls in the config workspace, latest runtime traf
 runtime-to-managed-node
 creation, missing-node bulk import, and catalog drift status plus stale-node
 sync and credential drift controls, log-file and nginx
-stream cleanup controls, missing runtime client repair and extra runtime client
+stream cleanup controls, Xray snapshot recovery controls,
+missing runtime client repair and extra runtime client
 cleanup dispatch with follow-up scans, a change-set
 dispatch/rollback workspace with a routed-outbound planner form, and an
 expandable command-result inspector. It

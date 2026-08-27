@@ -292,6 +292,23 @@ body {
   padding-top: 10px;
 }
 
+.snapshot-recovery-row {
+  align-items: center;
+  background: #fff7e0;
+  border: 1px solid #f1c15d;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px;
+}
+
+.snapshot-recovery-title {
+  color: #7a4b00;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .snapshot-meta {
   align-items: center;
   display: flex;
@@ -1456,6 +1473,7 @@ body {
   .runtime-tunnel-deploy-grid,
   .runtime-inbound-row,
   .runtime-reconcile-row,
+  .snapshot-recovery-row,
   .snapshot-row,
   .change-action-row,
   .change-command-pair,

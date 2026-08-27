@@ -25,6 +25,8 @@ import type {
   XrayRuntimeNodeReconciliationRuntimeEntry,
 } from "../domain/subscriptions";
 import {
+  acceptXrayConfigPendingRecovery,
+  applyXrayConfigRecovery,
   createXrayRuntimeTunnelChain,
   deleteXrayRuntimeTunnel,
   deployXrayRuntimeTunnel,
@@ -72,6 +74,8 @@ const runtimeTunnelCreating = ref(false);
 const runtimeTunnelDeploying = ref(false);
 const savingOperation = ref<AgentOperationKind | "">("");
 const restoringSnapshotId = ref("");
+const acceptingSnapshotId = ref("");
+const applyingSnapshotRecovery = ref(false);
 const errorMessage = ref("");
 const successMessage = ref("");
 const activeTab = ref("xray");
@@ -150,6 +154,9 @@ const selectedServer = computed(
 const selectedCommands = computed(() => commandsByServer.value[selectedServerId.value] ?? []);
 const selectedCurrentSnapshot = computed(() =>
   xraySnapshots.value.find((snapshot) => snapshot.status === "current"),
+);
+const selectedPendingSnapshot = computed(() =>
+  xraySnapshots.value.find((snapshot) => snapshot.status === "pending_recovery"),
 );
 const runtimeProtocolEntries = computed(() =>
   Object.entries(xrayRuntimeInventory.value?.protocol_counts ?? {})
@@ -562,6 +569,52 @@ async function restoreXraySnapshot(snapshot: XrayConfigSnapshot) {
     errorMessage.value = readableError(error);
   } finally {
     restoringSnapshotId.value = "";
+  }
+}
+
+async function acceptPendingXraySnapshot(snapshot: XrayConfigSnapshot) {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  acceptingSnapshotId.value = snapshot.id;
+  errorMessage.value = "";
+  try {
+    const response = await acceptXrayConfigPendingRecovery(selectedServerId.value);
+    xraySnapshots.value = response.snapshots;
+    successMessage.value = `Accepted ${shortHash(response.current.config_hash)} as current.`;
+    await refreshXrayRuntimeInventory();
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    acceptingSnapshotId.value = "";
+  }
+}
+
+async function applyCurrentXraySnapshotRecovery() {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  if (!selectedCurrentSnapshot.value) {
+    errorMessage.value = "No current Xray config snapshot.";
+    return;
+  }
+  applyingSnapshotRecovery.value = true;
+  errorMessage.value = "";
+  try {
+    const response = await applyXrayConfigRecovery(selectedServerId.value, {
+      restart_xray: true,
+      command_timeout_ms: 60_000,
+    });
+    successMessage.value = `Queued ${response.command_count} recovery commands from ${shortHash(
+      response.snapshot.config_hash,
+    )}.`;
+    await refreshCommands();
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    applyingSnapshotRecovery.value = false;
   }
 }
 
@@ -1605,6 +1658,43 @@ function formatDateTime(value: string) {
                     </template>
                   </v-tooltip>
                 </div>
+                <div v-if="selectedPendingSnapshot" class="snapshot-recovery-row">
+                  <div class="snapshot-main">
+                    <div class="snapshot-recovery-title">Pending recovery</div>
+                    <div class="snapshot-detail">
+                      Agent {{ shortHash(selectedPendingSnapshot.config_hash) }} /
+                      Current
+                      {{
+                        selectedCurrentSnapshot
+                          ? shortHash(selectedCurrentSnapshot.config_hash)
+                          : "none"
+                      }}
+                    </div>
+                  </div>
+                  <div class="snapshot-actions">
+                    <v-btn
+                      :loading="acceptingSnapshotId === selectedPendingSnapshot.id"
+                      color="success"
+                      prepend-icon="mdi-check-circle-outline"
+                      size="small"
+                      variant="tonal"
+                      @click="acceptPendingXraySnapshot(selectedPendingSnapshot)"
+                    >
+                      Accept
+                    </v-btn>
+                    <v-btn
+                      :disabled="!selectedCurrentSnapshot"
+                      :loading="applyingSnapshotRecovery"
+                      color="warning"
+                      prepend-icon="mdi-cloud-upload-outline"
+                      size="small"
+                      variant="tonal"
+                      @click="applyCurrentXraySnapshotRecovery"
+                    >
+                      Apply current
+                    </v-btn>
+                  </div>
+                </div>
                 <div v-if="xraySnapshots.length === 0" class="snapshot-empty">
                   No snapshots.
                 </div>
@@ -1643,7 +1733,10 @@ function formatDateTime(value: string) {
                         Load
                       </v-btn>
                       <v-btn
-                        :disabled="serverOptions.length === 0"
+                        :disabled="
+                          serverOptions.length === 0 ||
+                          snapshot.status === 'pending_recovery'
+                        "
                         :loading="restoringSnapshotId === snapshot.id"
                         color="warning"
                         prepend-icon="mdi-restore"

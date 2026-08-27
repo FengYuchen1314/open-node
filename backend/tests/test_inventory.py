@@ -2511,6 +2511,158 @@ def test_xray_config_command_results_record_snapshots_and_restore(
     assert restore_command["timeout_ms"] == 60_000
 
 
+def test_xray_config_agent_drift_creates_pending_recovery_and_accepts(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-pending"}).json()
+    server_id = created["server"]["id"]
+    current_config = '{"inbounds":[{"tag":"vless-443"}],"outbounds":[]}'
+    drift_config = '{"inbounds":[{"tag":"vless-443"},{"tag":"trojan-8443"}],"outbounds":[]}'
+
+    current_command = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config/read",
+    ).json()["command"]
+    current_result = client.post(
+        f"/api/v1/agents/commands/{current_command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True, "config": current_config},
+        },
+    )
+    assert current_result.status_code == 200
+
+    drift_command = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config/read",
+    ).json()["command"]
+    drift_result = client.post(
+        f"/api/v1/agents/commands/{drift_command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True, "config": drift_config},
+        },
+    )
+    assert drift_result.status_code == 200
+
+    recovery = client.get(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery?with_config=true",
+    )
+    assert recovery.status_code == 200
+    recovery_payload = recovery.json()
+    assert recovery_payload["license_required"] is False
+    assert recovery_payload["has_current"] is True
+    assert recovery_payload["has_pending"] is True
+    assert recovery_payload["current"]["status"] == "current"
+    assert recovery_payload["current"]["config"] == current_config
+    assert recovery_payload["pending"]["status"] == "pending_recovery"
+    assert recovery_payload["pending"]["source"] == "agent_report"
+    assert recovery_payload["pending"]["source_command_id"] == drift_command["id"]
+    assert recovery_payload["pending"]["config"] == drift_config
+
+    listed = client.get(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots?with_config=true",
+    ).json()["snapshots"]
+    assert {snapshot["status"] for snapshot in listed} == {"current", "pending_recovery"}
+
+    accepted = client.post(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery/accept",
+    )
+    assert accepted.status_code == 200
+    accepted_payload = accepted.json()
+    assert accepted_payload["license_required"] is False
+    assert accepted_payload["current"]["status"] == "current"
+    assert accepted_payload["current"]["source"] == "manual_accept"
+    assert accepted_payload["current"]["config_hash"] == hashlib.sha256(
+        drift_config.encode()
+    ).hexdigest()
+    assert {snapshot["status"] for snapshot in accepted_payload["snapshots"]} == {
+        "current",
+        "old",
+    }
+
+    recovery_after_accept = client.get(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery",
+    ).json()
+    assert recovery_after_accept["has_pending"] is False
+    assert recovery_after_accept["current"]["source"] == "manual_accept"
+
+
+def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_success(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-apply"}).json()
+    server_id = created["server"]["id"]
+    current_config = '{"inbounds":[{"tag":"vless-443"}],"outbounds":[]}'
+    drift_config = '{"inbounds":[],"outbounds":[]}'
+
+    for config_text in (current_config, drift_config):
+        command = client.post(
+            f"/api/v1/servers/{server_id}/operations/xray/config/read",
+        ).json()["command"]
+        result = client.post(
+            f"/api/v1/agents/commands/{command['id']}/result",
+            json={
+                "token": created["agent_token"],
+                "status": 200,
+                "body": {"success": True, "config": config_text},
+            },
+        )
+        assert result.status_code == 200
+
+    recovery_before_apply = client.get(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery",
+    ).json()
+    assert recovery_before_apply["has_pending"] is True
+
+    applied = client.post(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery/apply",
+        json={"restart_xray": True, "command_timeout_ms": 45_000},
+    )
+    assert applied.status_code == 201
+    applied_payload = applied.json()
+    assert applied_payload["license_required"] is False
+    assert applied_payload["snapshot"]["status"] == "current"
+    assert applied_payload["snapshot"]["config"] is None
+    assert applied_payload["command_count"] == 3
+    assert [command["path"] for command in applied_payload["commands"]] == [
+        "/api/child/xray/test-config",
+        "/api/child/xray/config",
+        "/api/child/services/control",
+    ]
+    assert all(command["timeout_ms"] == 45_000 for command in applied_payload["commands"])
+    assert applied_payload["commands"][0]["body"] == {"config": current_config}
+    assert applied_payload["commands"][1]["body"] == {
+        "config": current_config,
+        "force": True,
+    }
+    assert applied_payload["commands"][2]["body"] == {
+        "service": "xray",
+        "action": "restart",
+    }
+
+    config_command = applied_payload["commands"][1]
+    config_result = client.post(
+        f"/api/v1/agents/commands/{config_command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True, "message": "Config saved successfully"},
+        },
+    )
+    assert config_result.status_code == 200
+
+    recovery_after_apply = client.get(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery",
+    ).json()
+    assert recovery_after_apply["has_pending"] is False
+    assert recovery_after_apply["current"]["config_hash"] == hashlib.sha256(
+        current_config.encode()
+    ).hexdigest()
+
+
 def test_xray_runtime_tunnel_inventory_reads_current_config_snapshot(
     tmp_path: Path,
 ) -> None:

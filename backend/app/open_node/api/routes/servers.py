@@ -49,6 +49,10 @@ from open_node.domain.inventory import (
     ServerScanResultResponse,
     ServerTelemetryResponse,
     ServerXrayConfigSnapshotsResponse,
+    XrayConfigSnapshotRecoveryAcceptResponse,
+    XrayConfigSnapshotRecoveryApplyRequest,
+    XrayConfigSnapshotRecoveryApplyResponse,
+    XrayConfigSnapshotRecoveryStatusResponse,
     XrayRuntimeInventoryResponse,
     XrayRuntimeTunnelChainCreateRequest,
     XrayRuntimeTunnelChainCreateResponse,
@@ -81,6 +85,7 @@ from open_node.services.inventory import (
     ManagedNodeNotFoundError,
     ServerNotFoundError,
     XrayConfigSnapshotNotFoundError,
+    XrayConfigSnapshotRecoveryUnavailableError,
     XrayRuntimeInboundNotFoundError,
     XrayRuntimeNodeDraftUnavailableError,
     XrayRuntimeTunnelChainUnavailableError,
@@ -525,6 +530,103 @@ def list_xray_config_snapshots(
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ServerXrayConfigSnapshotsResponse(server_id=server_id, snapshots=snapshots)
+
+
+@router.get(
+    "/{server_id}/xray/config-snapshots/recovery",
+    response_model=XrayConfigSnapshotRecoveryStatusResponse,
+)
+def get_xray_config_snapshot_recovery_status(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    with_config: bool = False,
+) -> XrayConfigSnapshotRecoveryStatusResponse:
+    try:
+        return store.get_xray_config_snapshot_recovery_status(
+            server_id,
+            include_config=with_config,
+        )
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{server_id}/xray/config-snapshots/recovery/accept",
+    response_model=XrayConfigSnapshotRecoveryAcceptResponse,
+)
+def accept_xray_config_pending_recovery(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> XrayConfigSnapshotRecoveryAcceptResponse:
+    try:
+        return store.accept_xray_config_pending_recovery(server_id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except XrayConfigSnapshotRecoveryUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{server_id}/xray/config-snapshots/recovery/apply",
+    response_model=XrayConfigSnapshotRecoveryApplyResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def apply_xray_config_snapshot_recovery(
+    server_id: UUID,
+    payload: XrayConfigSnapshotRecoveryApplyRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> XrayConfigSnapshotRecoveryApplyResponse:
+    try:
+        recovery = store.get_xray_config_snapshot_recovery_status(
+            server_id,
+            include_config=True,
+        )
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    current = recovery.current
+    if current is None or current.config is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="current Xray config snapshot body is unavailable",
+        )
+
+    command_payloads = [
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/xray/test-config",
+            body={"config": current.config},
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/xray/config",
+            body={"config": current.config, "force": True},
+            timeout_ms=payload.command_timeout_ms,
+        ),
+    ]
+    if payload.restart_xray:
+        command_payloads.append(
+            AgentCommandCreate(
+                method="POST",
+                path="/api/child/services/control",
+                body={"service": "xray", "action": "restart"},
+                timeout_ms=payload.command_timeout_ms,
+            )
+        )
+
+    commands = []
+    for command_payload in command_payloads:
+        command = store.create_command(server_id, command_payload)
+        commands.append(await connections.dispatch_command(store, command))
+
+    return XrayConfigSnapshotRecoveryApplyResponse(
+        server_id=server_id,
+        snapshot=current.model_copy(update={"config": None}),
+        commands=commands,
+        command_count=len(commands),
+    )
 
 
 @router.post(

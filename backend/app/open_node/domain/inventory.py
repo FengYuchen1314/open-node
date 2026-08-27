@@ -741,6 +741,27 @@ class ServerXrayConfigSnapshotsResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayConfigSnapshotRecoveryStatusResponse(BaseModel):
+    server_id: UUID
+    has_pending: bool
+    has_current: bool
+    pending: XrayConfigSnapshotRead | None = None
+    current: XrayConfigSnapshotRead | None = None
+    license_required: Literal[False] = False
+
+
+class XrayConfigSnapshotRecoveryAcceptResponse(BaseModel):
+    server_id: UUID
+    current: XrayConfigSnapshotRead
+    snapshots: list[XrayConfigSnapshotRead] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
+class XrayConfigSnapshotRecoveryApplyRequest(BaseModel):
+    restart_xray: bool = True
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+
 class AgentCommandCreate(BaseModel):
     method: str = Field(default="GET", max_length=12)
     path: str = Field(min_length=1, max_length=255)
@@ -799,6 +820,14 @@ class AgentCommandStreamFrameRead(BaseModel):
 
 class AgentCommandCreateResponse(BaseModel):
     command: AgentCommandRead
+    license_required: Literal[False] = False
+
+
+class XrayConfigSnapshotRecoveryApplyResponse(BaseModel):
+    server_id: UUID
+    snapshot: XrayConfigSnapshotRead
+    commands: list[AgentCommandRead] = Field(default_factory=list)
+    command_count: int = 0
     license_required: Literal[False] = False
 
 

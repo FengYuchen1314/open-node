@@ -112,6 +112,10 @@ This document records the starting source map for the Open Node refactor.
    - Done: runtime credential repair and cleanup can queue a follow-up
      `/api/child/scan` command after changes, so reconciliation can refresh
      from the next runtime snapshot.
+   - Done: Xray config snapshot recovery now keeps agent-reported drift as
+     `pending_recovery`, lets operators accept the agent config as current, or
+     queue the master current snapshot back to the agent with test/write/restart
+     commands.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
    - Done: compatibility wrappers for the active non-stream Xray/nginx

@@ -235,6 +235,9 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/xray/runtime/credentials/repair-missing`
 - `POST /api/v1/servers/{server_id}/xray/runtime/credentials/cleanup-extra`
 - `GET /api/v1/servers/{server_id}/xray/config-snapshots`
+- `GET /api/v1/servers/{server_id}/xray/config-snapshots/recovery`
+- `POST /api/v1/servers/{server_id}/xray/config-snapshots/recovery/accept`
+- `POST /api/v1/servers/{server_id}/xray/config-snapshots/recovery/apply`
 - `POST /api/v1/servers/{server_id}/xray/config-snapshots/{snapshot_id}/restore`
 
 These wrappers enqueue the active `mmw-agent` child paths and then reuse the
@@ -269,9 +272,13 @@ and preserve the agent-side write/test/reload behavior. Agent setting wrappers
 cover Xray mode, listen port, master URL probe/update, and WARP credential
 updates without changing the Open Node no-license contract.
 Successful `GET` and `POST` results for `/api/child/xray/config` are also
-stored as Xray config snapshots. New configs become `current`, the previous
-current snapshot is retained as `old`, and operators can queue a restore from
-any saved snapshot through the same command dispatch path.
+stored as Xray config snapshots. The first agent report becomes `current`.
+Later agent-reported drift is stored as `pending_recovery` so it does not
+silently replace the master snapshot. Operators can accept the pending agent
+config as the new current snapshot, queue the current master snapshot back to
+the agent through test, write, and restart commands, or restore any saved
+snapshot through the same command dispatch path. Successful master writes
+discard stale pending recovery rows.
 
 The Xray external takeover wrapper queues the active agent's
 `/api/child/external-xray/takeover` route. It lets an operator merge an

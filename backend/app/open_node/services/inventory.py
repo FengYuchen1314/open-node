@@ -75,6 +75,8 @@ from open_node.domain.inventory import (
     TrafficSource,
     TrafficStatsMode,
     XrayConfigSnapshotRead,
+    XrayConfigSnapshotRecoveryAcceptResponse,
+    XrayConfigSnapshotRecoveryStatusResponse,
     XrayConfigSnapshotSource,
     XrayConfigSnapshotStatus,
     XrayMode,
@@ -191,6 +193,10 @@ class CommandNotFoundError(ValueError):
 
 class XrayConfigSnapshotNotFoundError(ValueError):
     """Raised when an Xray config snapshot lookup targets an unknown snapshot."""
+
+
+class XrayConfigSnapshotRecoveryUnavailableError(ValueError):
+    """Raised when an Xray config recovery decision has no usable snapshot."""
 
 
 class ChangeSetNotFoundError(ValueError):
@@ -2247,6 +2253,70 @@ class InventoryStore:
                     f"xray config snapshot not found: {snapshot_id}"
                 )
             return self._xray_config_snapshot_read(snapshot, include_config=include_config)
+
+    def get_xray_config_snapshot_recovery_status(
+        self,
+        server_id: UUID,
+        include_config: bool = False,
+    ) -> XrayConfigSnapshotRecoveryStatusResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            current = self._current_xray_config_snapshot(session, server.id)
+            pending = self._pending_xray_config_snapshot(session, server.id)
+            return XrayConfigSnapshotRecoveryStatusResponse(
+                server_id=server_id,
+                has_pending=pending is not None,
+                has_current=current is not None,
+                pending=self._xray_config_snapshot_read(pending, include_config=include_config)
+                if pending
+                else None,
+                current=self._xray_config_snapshot_read(current, include_config=include_config)
+                if current
+                else None,
+            )
+
+    def accept_xray_config_pending_recovery(
+        self,
+        server_id: UUID,
+    ) -> XrayConfigSnapshotRecoveryAcceptResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            pending = self._pending_xray_config_snapshot(session, server.id)
+            if pending is None:
+                raise XrayConfigSnapshotRecoveryUnavailableError(
+                    f"no pending Xray config recovery for server: {server_id}"
+                )
+
+            current_snapshots = session.scalars(
+                select(XrayConfigSnapshotModel)
+                .where(
+                    XrayConfigSnapshotModel.server_id == server.id,
+                    XrayConfigSnapshotModel.status == XrayConfigSnapshotStatus.CURRENT.value,
+                )
+                .order_by(XrayConfigSnapshotModel.created_at.desc())
+            ).all()
+            for snapshot in current_snapshots:
+                snapshot.status = XrayConfigSnapshotStatus.OLD.value
+            pending.status = XrayConfigSnapshotStatus.CURRENT.value
+            pending.source = XrayConfigSnapshotSource.MANUAL_ACCEPT.value
+
+            session.commit()
+            session.refresh(pending)
+            snapshots = session.scalars(
+                select(XrayConfigSnapshotModel)
+                .where(XrayConfigSnapshotModel.server_id == server.id)
+                .order_by(XrayConfigSnapshotModel.created_at.desc())
+                .limit(20)
+            ).all()
+            return XrayConfigSnapshotRecoveryAcceptResponse(
+                server_id=server_id,
+                current=self._xray_config_snapshot_read(pending),
+                snapshots=[self._xray_config_snapshot_read(snapshot) for snapshot in snapshots],
+            )
 
     def public_probe_payload(self) -> ProbePayload:
         with self._session() as session:
@@ -6190,6 +6260,20 @@ class InventoryStore:
         )
 
     @staticmethod
+    def _pending_xray_config_snapshot(
+        session: Session,
+        server_id: str,
+    ) -> XrayConfigSnapshotModel | None:
+        return session.scalar(
+            select(XrayConfigSnapshotModel)
+            .where(
+                XrayConfigSnapshotModel.server_id == server_id,
+                XrayConfigSnapshotModel.status == XrayConfigSnapshotStatus.PENDING_RECOVERY.value,
+            )
+            .order_by(XrayConfigSnapshotModel.created_at.desc())
+        )
+
+    @staticmethod
     def _upsert_current_xray_config_snapshot(
         session: Session,
         server: ServerModel,
@@ -6226,6 +6310,55 @@ class InventoryStore:
         )
         session.add(snapshot)
         return snapshot
+
+    @staticmethod
+    def _upsert_agent_report_xray_config_snapshot(
+        session: Session,
+        server: ServerModel,
+        config: str,
+        source_command_id: str | None,
+        created_at: datetime,
+    ) -> XrayConfigSnapshotModel | None:
+        config_hash = InventoryStore._hash_xray_config(config)
+        current = InventoryStore._current_xray_config_snapshot(session, server.id)
+        if current is None:
+            return InventoryStore._upsert_current_xray_config_snapshot(
+                session,
+                server,
+                config=config,
+                source=XrayConfigSnapshotSource.AGENT_REPORT,
+                source_command_id=source_command_id,
+                created_at=created_at,
+            )
+        if current.config_hash == config_hash:
+            return current
+
+        InventoryStore._discard_pending_xray_recovery(session, server.id)
+        pending = XrayConfigSnapshotModel(
+            id=str(uuid4()),
+            server_id=server.id,
+            source_command_id=source_command_id,
+            config=config,
+            config_hash=config_hash,
+            source=XrayConfigSnapshotSource.AGENT_REPORT.value,
+            status=XrayConfigSnapshotStatus.PENDING_RECOVERY.value,
+            size_bytes=len(config.encode("utf-8")),
+            created_at=created_at,
+        )
+        session.add(pending)
+        return pending
+
+    @staticmethod
+    def _discard_pending_xray_recovery(session: Session, server_id: str) -> None:
+        pending_snapshots = session.scalars(
+            select(XrayConfigSnapshotModel).where(
+                XrayConfigSnapshotModel.server_id == server_id,
+                XrayConfigSnapshotModel.status
+                == XrayConfigSnapshotStatus.PENDING_RECOVERY.value,
+            )
+        ).all()
+        for snapshot in pending_snapshots:
+            session.delete(snapshot)
 
     @staticmethod
     def _xray_config_snapshot_source(
@@ -8001,6 +8134,16 @@ class InventoryStore:
         config, source = self._xray_config_snapshot_source(command, payload)
         if not config or not config.strip():
             return
+        if source == XrayConfigSnapshotSource.AGENT_REPORT:
+            self._upsert_agent_report_xray_config_snapshot(
+                session,
+                server,
+                config=config,
+                source_command_id=command.id,
+                created_at=created_at,
+            )
+            return
+
         self._upsert_current_xray_config_snapshot(
             session,
             server,
@@ -8009,6 +8152,7 @@ class InventoryStore:
             source_command_id=command.id,
             created_at=created_at,
         )
+        self._discard_pending_xray_recovery(session, server.id)
 
     def _upsert_return_route_results(
         self,
