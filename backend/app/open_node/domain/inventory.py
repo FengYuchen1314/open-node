@@ -607,6 +607,45 @@ class XrayRuntimeInventoryResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeTunnelRead(BaseModel):
+    kind: Literal["inbound", "routed"]
+    tag: str
+    listen_port: int | None = Field(default=None, ge=0, le=65535)
+    target_address: str | None = None
+    target_port: int | None = Field(default=None, ge=0, le=65535)
+    network: str | None = None
+    inbound_tag: str | None = None
+    match_domains: list[str] = Field(default_factory=list)
+    match_ips: list[str] = Field(default_factory=list)
+    rule_index: int | None = Field(default=None, ge=0)
+
+
+class XrayRuntimeTunnelHopRead(BaseModel):
+    tag: str
+    listen_port: int | None = Field(default=None, ge=0, le=65535)
+    target_address: str | None = None
+    target_port: int | None = Field(default=None, ge=0, le=65535)
+
+
+class XrayRuntimeTunnelChainRead(BaseModel):
+    label: str
+    hops: list[XrayRuntimeTunnelHopRead] = Field(default_factory=list)
+    entry_port: int | None = Field(default=None, ge=0, le=65535)
+    final_target: str | None = None
+
+
+class XrayRuntimeTunnelInventoryResponse(BaseModel):
+    server_id: UUID
+    has_config: bool = False
+    source_snapshot_id: UUID | None = None
+    tunnel_count: int = 0
+    chain_count: int = 0
+    tunnels: list[XrayRuntimeTunnelRead] = Field(default_factory=list)
+    chains: list[XrayRuntimeTunnelChainRead] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
 class XrayConfigSnapshotRead(BaseModel):
     id: UUID
     server_id: UUID

@@ -76,6 +76,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: Xray runtime inventory is enriched with latest telemetry
      `stats.inbound` and `stats.user` traffic counters, matched only by runtime
      inbound tags and already exposed client email labels.
+   - Done: current Xray config snapshots now derive sanitized runtime tunnel
+     inventory for `protocol=tunnel` inbounds, `tunnel-*` routed forwarding
+     rules, and grouped chain hops without exposing outbound secrets.
    - Done: scan-derived managed-node drafts and one-click catalog node creation
      from runtime inbounds, without importing UUIDs, passwords, PSKs, or account
      secrets from existing Xray config.

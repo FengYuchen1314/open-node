@@ -6,6 +6,7 @@ import {
   getLatestScanResult,
   getLatestTelemetry,
   getXrayRuntimeInventory,
+  getXrayRuntimeTunnelInventory,
   listCommandStreamFrames,
   listServerCommands,
   listServers,
@@ -265,6 +266,64 @@ describe("inventory API client", () => {
     expect(response.inbounds[0]?.client_count).toBe(2);
     expect(response.traffic.uplink).toBe(100);
     expect(response.inbounds[0]?.user_traffic.downlink).toBe(34);
+  });
+
+  it("gets Xray runtime tunnel inventory without license headers", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          has_config: true,
+          source_snapshot_id: "snap_1",
+          tunnel_count: 1,
+          chain_count: 1,
+          tunnels: [
+            {
+              kind: "routed",
+              tag: "tunnel-routed",
+              listen_port: 443,
+              target_address: "2001:db8::10",
+              target_port: 443,
+              network: null,
+              inbound_tag: "vless-443",
+              match_domains: ["example.com"],
+              match_ips: ["1.1.1.1"],
+              rule_index: 0,
+            },
+          ],
+          chains: [
+            {
+              label: "relay",
+              entry_port: 19000,
+              final_target: "10.0.0.3:9001",
+              hops: [
+                {
+                  tag: "tunnel-relay-h0",
+                  listen_port: 19000,
+                  target_address: "10.0.0.2",
+                  target_port: 9000,
+                },
+              ],
+            },
+          ],
+          warnings: [],
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await getXrayRuntimeTunnelInventory("srv_1", fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/xray/runtime/tunnels");
+    expect(headers).toBeUndefined();
+    expect(response.license_required).toBe(false);
+    expect(response.tunnels[0]?.target_address).toBe("2001:db8::10");
+    expect(response.chains[0]?.label).toBe("relay");
   });
 
   it("lists Xray config snapshots with optional config bodies", async () => {

@@ -12,6 +12,8 @@ import type {
   XrayConfigSnapshotStatus,
   XrayRuntimeInbound,
   XrayRuntimeInventoryResponse,
+  XrayRuntimeTunnel,
+  XrayRuntimeTunnelInventoryResponse,
 } from "../domain/inventory";
 import type {
   XrayRuntimeCredentialReconciliationEntry,
@@ -23,6 +25,7 @@ import type {
 } from "../domain/subscriptions";
 import {
   getXrayRuntimeInventory,
+  getXrayRuntimeTunnelInventory,
   listCommandStreamFrames,
   listServerCommands,
   listServers,
@@ -47,6 +50,7 @@ const commandsByServer = ref<Record<string, AgentCommand[]>>({});
 const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({});
 const xraySnapshots = ref<XrayConfigSnapshot[]>([]);
 const xrayRuntimeInventory = ref<XrayRuntimeInventoryResponse | null>(null);
+const xrayRuntimeTunnels = ref<XrayRuntimeTunnelInventoryResponse | null>(null);
 const runtimeNodeDrafts = ref<XrayRuntimeNodeDraft[]>([]);
 const runtimeNodeReconciliation = ref<XrayRuntimeNodeReconciliationResponse | null>(null);
 const runtimeCredentialReconciliation =
@@ -125,6 +129,12 @@ const runtimeProtocolEntries = computed(() =>
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([protocol, count]) => ({ protocol, count })),
 );
+const runtimeTunnelEntries = computed(() => xrayRuntimeTunnels.value?.tunnels ?? []);
+const runtimeTunnelChains = computed(() => xrayRuntimeTunnels.value?.chains ?? []);
+const runtimeTunnelHasEntries = computed(
+  () => runtimeTunnelEntries.value.length > 0 || runtimeTunnelChains.value.length > 0,
+);
+const runtimeTunnelWarnings = computed(() => xrayRuntimeTunnels.value?.warnings ?? []);
 const runtimeNodeDraftsByIndex = computed(
   () => new Map(runtimeNodeDrafts.value.map((draft) => [draft.source_index, draft])),
 );
@@ -283,6 +293,7 @@ async function refreshXraySnapshots(includeConfig = false) {
 async function refreshXrayRuntimeInventory(reportErrors = false) {
   if (!selectedServerId.value) {
     xrayRuntimeInventory.value = null;
+    xrayRuntimeTunnels.value = null;
     runtimeNodeDrafts.value = [];
     runtimeNodeReconciliation.value = null;
     runtimeCredentialReconciliation.value = null;
@@ -293,23 +304,27 @@ async function refreshXrayRuntimeInventory(reportErrors = false) {
   try {
     const [
       inventoryResponse,
+      tunnelResponse,
       draftsResponse,
       reconciliationResponse,
       credentialReconciliationResponse,
     ] = await Promise.all([
       getXrayRuntimeInventory(serverId),
+      getXrayRuntimeTunnelInventory(serverId),
       listXrayRuntimeNodeDrafts(serverId),
       getXrayRuntimeNodeReconciliation(serverId),
       getXrayRuntimeCredentialReconciliation(serverId),
     ]);
     if (serverId === selectedServerId.value) {
       xrayRuntimeInventory.value = inventoryResponse;
+      xrayRuntimeTunnels.value = tunnelResponse;
       runtimeNodeDrafts.value = draftsResponse.drafts;
       runtimeNodeReconciliation.value = reconciliationResponse;
       runtimeCredentialReconciliation.value = credentialReconciliationResponse;
     }
   } catch (error) {
     xrayRuntimeInventory.value = null;
+    xrayRuntimeTunnels.value = null;
     runtimeNodeDrafts.value = [];
     runtimeNodeReconciliation.value = null;
     runtimeCredentialReconciliation.value = null;
@@ -594,6 +609,36 @@ function inboundMeta(inbound: XrayRuntimeInbound) {
     inbound.client_container,
   ].filter(Boolean);
   return parts.join(" / ") || "No metadata";
+}
+
+function tunnelKindColor(tunnel: XrayRuntimeTunnel) {
+  return tunnel.kind === "routed" ? "info" : "secondary";
+}
+
+function tunnelEndpoint(tunnel: XrayRuntimeTunnel) {
+  const listen =
+    tunnel.listen_port === null || tunnel.listen_port === undefined
+      ? "No listen port"
+      : `:${tunnel.listen_port}`;
+  return `${listen} -> ${tunnelTarget(tunnel.target_address, tunnel.target_port)}`;
+}
+
+function tunnelTarget(address?: string | null, port?: number | null) {
+  if (!address && (port === null || port === undefined)) {
+    return "No target";
+  }
+  if (!address) {
+    return String(port);
+  }
+  if (port === null || port === undefined) {
+    return address;
+  }
+  const host = address.includes(":") && !address.startsWith("[") ? `[${address}]` : address;
+  return `${host}:${port}`;
+}
+
+function tunnelSource(tunnel: XrayRuntimeTunnel) {
+  return tunnel.inbound_tag ? `from ${tunnel.inbound_tag}` : "No inbound rule source";
 }
 
 function remarkLabel(value: string) {
@@ -1423,6 +1468,22 @@ function formatDateTime(value: string) {
                   {{ xrayRuntimeInventory?.client_count ?? 0 }} clients
                 </v-chip>
                 <v-chip
+                  v-if="xrayRuntimeTunnels?.has_config"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  {{ xrayRuntimeTunnels.tunnel_count }} tunnels
+                </v-chip>
+                <v-chip
+                  v-if="xrayRuntimeTunnels?.has_config && xrayRuntimeTunnels.chain_count > 0"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  {{ xrayRuntimeTunnels.chain_count }} chains
+                </v-chip>
+                <v-chip
                   v-if="xrayRuntimeInventory?.traffic_reported_at"
                   density="comfortable"
                   size="small"
@@ -1514,6 +1575,16 @@ function formatDateTime(value: string) {
                   variant="tonal"
                 >
                   Config repaired
+                </v-chip>
+                <v-chip
+                  v-for="warning in runtimeTunnelWarnings"
+                  :key="`tunnel-warning-${warning}`"
+                  color="warning"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  {{ remarkLabel(warning) }}
                 </v-chip>
                 <v-chip
                   v-for="entry in runtimeProtocolEntries"
@@ -1646,6 +1717,97 @@ function formatDateTime(value: string) {
                         </span>
                       </template>
                     </v-tooltip>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="xrayRuntimeTunnels?.has_config" class="runtime-reconcile-list">
+                <div class="section-title compact-title">Tunnel inventory</div>
+                <div v-if="!runtimeTunnelHasEntries" class="snapshot-empty">
+                  No runtime tunnels.
+                </div>
+                <div v-if="runtimeTunnelEntries.length > 0" class="runtime-inbound-list">
+                  <div
+                    v-for="tunnel in runtimeTunnelEntries"
+                    :key="`${tunnel.kind}-${tunnel.tag}-${tunnel.rule_index ?? 'inbound'}`"
+                    class="runtime-inbound-row"
+                  >
+                    <div class="runtime-inbound-main">
+                      <div class="runtime-inbound-title">
+                        <span>{{ tunnel.tag }}</span>
+                        <v-chip
+                          :color="tunnelKindColor(tunnel)"
+                          density="comfortable"
+                          size="small"
+                          variant="tonal"
+                        >
+                          {{ tunnel.kind }}
+                        </v-chip>
+                      </div>
+                      <div class="snapshot-detail">{{ tunnelEndpoint(tunnel) }}</div>
+                      <div v-if="tunnel.kind === 'routed'" class="snapshot-detail">
+                        {{ tunnelSource(tunnel) }} / rule {{ tunnel.rule_index ?? "-" }}
+                      </div>
+                    </div>
+                    <div class="runtime-inbound-side">
+                      <v-chip
+                        v-if="tunnel.network"
+                        density="comfortable"
+                        size="small"
+                        variant="tonal"
+                      >
+                        {{ tunnel.network }}
+                      </v-chip>
+                      <v-chip
+                        v-for="domain in tunnel.match_domains"
+                        :key="`domain-${tunnel.tag}-${domain}`"
+                        density="comfortable"
+                        size="small"
+                        variant="tonal"
+                      >
+                        domain {{ domain }}
+                      </v-chip>
+                      <v-chip
+                        v-for="ip in tunnel.match_ips"
+                        :key="`ip-${tunnel.tag}-${ip}`"
+                        density="comfortable"
+                        size="small"
+                        variant="tonal"
+                      >
+                        ip {{ ip }}
+                      </v-chip>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="runtimeTunnelChains.length > 0" class="runtime-inbound-list">
+                  <div
+                    v-for="chain in runtimeTunnelChains"
+                    :key="chain.label"
+                    class="runtime-inbound-row"
+                  >
+                    <div class="runtime-inbound-main">
+                      <div class="runtime-inbound-title">
+                        <span>{{ chain.label }}</span>
+                        <v-chip density="comfortable" size="small" variant="tonal">
+                          chain
+                        </v-chip>
+                      </div>
+                      <div class="snapshot-detail">
+                        :{{ chain.entry_port ?? "-" }} -> {{ chain.final_target ?? "No target" }}
+                      </div>
+                    </div>
+                    <div class="runtime-inbound-side">
+                      <v-chip
+                        v-for="hop in chain.hops"
+                        :key="hop.tag"
+                        density="comfortable"
+                        size="small"
+                        variant="tonal"
+                      >
+                        {{ hop.tag }} :{{ hop.listen_port ?? "-" }} ->
+                        {{ tunnelTarget(hop.target_address, hop.target_port) }}
+                      </v-chip>
+                    </div>
                   </div>
                 </div>
               </div>

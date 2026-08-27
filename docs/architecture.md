@@ -75,6 +75,11 @@ labels, sniffing state, protocol totals, and config-repair metadata without
 returning UUIDs, passwords, PSKs, or account secrets. When latest telemetry has
 Xray stats, runtime inventory also reports matched inbound traffic counters and
 per-inbound user traffic summed only from already exposed client email labels.
+The current Xray config snapshot also powers
+`/api/v1/servers/{server_id}/xray/runtime/tunnels`, a sanitized tunnel
+inventory that lists `protocol=tunnel` inbounds, `tunnel-*` routed forwarding
+rules, and grouped `tunnel-<label>-h<i>` chains without returning full outbound
+configuration or credential material.
 It can also derive managed-node drafts from those inbounds at
 `/api/v1/servers/{server_id}/xray/runtime/node-drafts` and create catalog nodes
 through `/api/v1/servers/{server_id}/xray/runtime/nodes`. Operators can also
@@ -202,6 +207,7 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/agent/upgrade`
 - `POST /api/v1/servers/{server_id}/operations/agent/uninstall`
 - `GET /api/v1/servers/{server_id}/xray/runtime`
+- `GET /api/v1/servers/{server_id}/xray/runtime/tunnels`
 - `GET /api/v1/servers/{server_id}/xray/runtime/node-drafts`
 - `POST /api/v1/servers/{server_id}/xray/runtime/nodes`
 - `POST /api/v1/servers/{server_id}/xray/runtime/nodes/import`

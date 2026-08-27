@@ -50,6 +50,7 @@ from open_node.domain.inventory import (
     ServerTelemetryResponse,
     ServerXrayConfigSnapshotsResponse,
     XrayRuntimeInventoryResponse,
+    XrayRuntimeTunnelInventoryResponse,
 )
 from open_node.domain.subscriptions import (
     ManagedNodeResponse,
@@ -145,6 +146,20 @@ def xray_runtime_inventory(
 ) -> XrayRuntimeInventoryResponse:
     try:
         return store.xray_runtime_inventory(server_id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{server_id}/xray/runtime/tunnels",
+    response_model=XrayRuntimeTunnelInventoryResponse,
+)
+def xray_runtime_tunnel_inventory(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> XrayRuntimeTunnelInventoryResponse:
+    try:
+        return store.xray_runtime_tunnel_inventory(server_id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

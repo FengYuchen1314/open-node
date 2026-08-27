@@ -280,6 +280,45 @@ export interface XrayRuntimeInventoryResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeTunnel {
+  kind: "inbound" | "routed";
+  tag: string;
+  listen_port?: number | null;
+  target_address?: string | null;
+  target_port?: number | null;
+  network?: string | null;
+  inbound_tag?: string | null;
+  match_domains: string[];
+  match_ips: string[];
+  rule_index?: number | null;
+}
+
+export interface XrayRuntimeTunnelHop {
+  tag: string;
+  listen_port?: number | null;
+  target_address?: string | null;
+  target_port?: number | null;
+}
+
+export interface XrayRuntimeTunnelChain {
+  label: string;
+  hops: XrayRuntimeTunnelHop[];
+  entry_port?: number | null;
+  final_target?: string | null;
+}
+
+export interface XrayRuntimeTunnelInventoryResponse {
+  server_id: string;
+  has_config: boolean;
+  source_snapshot_id?: string | null;
+  tunnel_count: number;
+  chain_count: number;
+  tunnels: XrayRuntimeTunnel[];
+  chains: XrayRuntimeTunnelChain[];
+  warnings: string[];
+  license_required: false;
+}
+
 export interface XrayConfigSnapshot {
   id: string;
   server_id: string;

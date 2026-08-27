@@ -15,6 +15,7 @@ import type {
   ServerSummary,
   ServerXrayConfigSnapshotsResponse,
   XrayRuntimeInventoryResponse,
+  XrayRuntimeTunnelInventoryResponse,
 } from "../domain/inventory";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -155,6 +156,17 @@ export async function getXrayRuntimeInventory(
     throw await apiError(response, "Xray runtime inventory request failed");
   }
   return response.json() as Promise<XrayRuntimeInventoryResponse>;
+}
+
+export async function getXrayRuntimeTunnelInventory(
+  serverId: string,
+  fetcher = fetch,
+): Promise<XrayRuntimeTunnelInventoryResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/tunnels`);
+  if (!response.ok) {
+    throw await apiError(response, "Xray runtime tunnel inventory request failed");
+  }
+  return response.json() as Promise<XrayRuntimeTunnelInventoryResponse>;
 }
 
 export interface XrayConfigSnapshotListOptions {

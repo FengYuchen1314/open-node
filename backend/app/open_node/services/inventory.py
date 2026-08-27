@@ -80,6 +80,10 @@ from open_node.domain.inventory import (
     XrayMode,
     XrayRuntimeInboundRead,
     XrayRuntimeInventoryResponse,
+    XrayRuntimeTunnelChainRead,
+    XrayRuntimeTunnelHopRead,
+    XrayRuntimeTunnelInventoryResponse,
+    XrayRuntimeTunnelRead,
     XrayStats,
 )
 from open_node.domain.probe import (
@@ -1275,6 +1279,17 @@ class InventoryStore:
             scan = session.get(AgentScanResultModel, str(server_id))
             latest_telemetry = self._latest_telemetry_model(session, str(server_id))
             return self._xray_runtime_inventory_response(server_id, scan, latest_telemetry)
+
+    def xray_runtime_tunnel_inventory(
+        self,
+        server_id: UUID,
+    ) -> XrayRuntimeTunnelInventoryResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            snapshot = self._current_xray_config_snapshot(session, server.id)
+            return self._xray_runtime_tunnel_inventory_response(server_id, snapshot)
 
     def list_xray_runtime_node_drafts(
         self,
@@ -5751,6 +5766,20 @@ class InventoryStore:
         return scan
 
     @staticmethod
+    def _current_xray_config_snapshot(
+        session: Session,
+        server_id: str,
+    ) -> XrayConfigSnapshotModel | None:
+        return session.scalar(
+            select(XrayConfigSnapshotModel)
+            .where(
+                XrayConfigSnapshotModel.server_id == server_id,
+                XrayConfigSnapshotModel.status == XrayConfigSnapshotStatus.CURRENT.value,
+            )
+            .order_by(XrayConfigSnapshotModel.created_at.desc())
+        )
+
+    @staticmethod
     def _upsert_current_xray_config_snapshot(
         session: Session,
         server: ServerModel,
@@ -5888,6 +5917,245 @@ class InventoryStore:
             reported_at=scan.reported_at,
             updated_at=scan.updated_at,
         )
+
+    @classmethod
+    def _xray_runtime_tunnel_inventory_response(
+        cls,
+        server_id: UUID,
+        snapshot: XrayConfigSnapshotModel | None,
+    ) -> XrayRuntimeTunnelInventoryResponse:
+        if snapshot is None:
+            return XrayRuntimeTunnelInventoryResponse(server_id=server_id)
+
+        try:
+            config = json.loads(snapshot.config)
+        except json.JSONDecodeError:
+            return XrayRuntimeTunnelInventoryResponse(
+                server_id=server_id,
+                has_config=True,
+                source_snapshot_id=UUID(snapshot.id),
+                warnings=["invalid_config_json"],
+            )
+
+        if not isinstance(config, dict):
+            return XrayRuntimeTunnelInventoryResponse(
+                server_id=server_id,
+                has_config=True,
+                source_snapshot_id=UUID(snapshot.id),
+                warnings=["invalid_config_shape"],
+            )
+
+        tunnels, chains, warnings = cls._xray_runtime_tunnels_from_config(config)
+        return XrayRuntimeTunnelInventoryResponse(
+            server_id=server_id,
+            has_config=True,
+            source_snapshot_id=UUID(snapshot.id),
+            tunnel_count=len(tunnels),
+            chain_count=len(chains),
+            tunnels=tunnels,
+            chains=chains,
+            warnings=warnings,
+        )
+
+    @classmethod
+    def _xray_runtime_tunnels_from_config(
+        cls,
+        config: dict[str, Any],
+    ) -> tuple[
+        list[XrayRuntimeTunnelRead],
+        list[XrayRuntimeTunnelChainRead],
+        list[str],
+    ]:
+        inbounds_value = config.get("inbounds")
+        outbounds_value = config.get("outbounds")
+        routing_value = cls._record_value(config.get("routing"))
+        rules_value = routing_value.get("rules")
+        inbounds = cls._list_value(inbounds_value)
+        outbounds = cls._list_value(outbounds_value)
+        rules = cls._list_value(rules_value)
+        warnings: list[str] = []
+
+        if inbounds_value is not None and not isinstance(inbounds_value, list):
+            warnings.append("invalid_inbounds")
+        if outbounds_value is not None and not isinstance(outbounds_value, list):
+            warnings.append("invalid_outbounds")
+        if rules_value is not None and not isinstance(rules_value, list):
+            warnings.append("invalid_routing_rules")
+
+        inbound_by_tag: dict[str, dict[str, Any]] = {}
+        tunnels: list[XrayRuntimeTunnelRead] = []
+        for inbound_value in inbounds:
+            inbound = cls._record_value(inbound_value)
+            if not inbound:
+                continue
+            tag = cls._text_value(inbound.get("tag"))
+            if tag:
+                inbound_by_tag[tag] = inbound
+            protocol = (cls._text_value(inbound.get("protocol")) or "").lower()
+            if protocol != "tunnel":
+                continue
+            if not tag:
+                warnings.append("tunnel_inbound_missing_tag")
+                continue
+            if tag in {"api", "tunnel-in"}:
+                continue
+            settings = cls._record_value(inbound.get("settings"))
+            tunnels.append(
+                XrayRuntimeTunnelRead(
+                    kind="inbound",
+                    tag=tag,
+                    listen_port=cls._port_value(inbound.get("port")),
+                    target_address=cls._text_value(settings.get("address")),
+                    target_port=cls._port_value(settings.get("port")),
+                    network=cls._text_value(settings.get("network")),
+                )
+            )
+
+        outbound_by_tag: dict[str, dict[str, Any]] = {}
+        for outbound_value in outbounds:
+            outbound = cls._record_value(outbound_value)
+            tag = cls._text_value(outbound.get("tag"))
+            if tag:
+                outbound_by_tag[tag] = outbound
+
+        for rule_index, rule_value in enumerate(rules):
+            rule = cls._record_value(rule_value)
+            outbound_tag = cls._text_value(rule.get("outboundTag"))
+            if not outbound_tag or not outbound_tag.startswith("tunnel-"):
+                continue
+            inbound_tag = cls._first_xray_rule_inbound_tag(rule.get("inboundTag"))
+            source_inbound = inbound_by_tag.get(inbound_tag) if inbound_tag else None
+            target_address = None
+            target_port = None
+            outbound = outbound_by_tag.get(outbound_tag)
+            if outbound is not None:
+                settings = cls._record_value(outbound.get("settings"))
+                target_address, target_port = cls._xray_redirect_target(
+                    settings.get("redirect")
+                )
+            tunnels.append(
+                XrayRuntimeTunnelRead(
+                    kind="routed",
+                    tag=outbound_tag,
+                    listen_port=cls._port_value(source_inbound.get("port"))
+                    if source_inbound
+                    else None,
+                    target_address=target_address,
+                    target_port=target_port,
+                    inbound_tag=inbound_tag,
+                    match_domains=cls._text_list_value(rule.get("domain")),
+                    match_ips=cls._text_list_value(rule.get("ip")),
+                    rule_index=rule_index,
+                )
+            )
+
+        chains, flat_tunnels = cls._group_xray_tunnel_chains(tunnels)
+        return flat_tunnels, chains, cls._dedupe_text(warnings)
+
+    @classmethod
+    def _group_xray_tunnel_chains(
+        cls,
+        tunnels: list[XrayRuntimeTunnelRead],
+    ) -> tuple[list[XrayRuntimeTunnelChainRead], list[XrayRuntimeTunnelRead]]:
+        grouped: dict[str, list[tuple[int, XrayRuntimeTunnelRead]]] = {}
+        flat: list[XrayRuntimeTunnelRead] = []
+
+        for tunnel in tunnels:
+            chain_tag = cls._xray_tunnel_chain_tag(tunnel.tag) if tunnel.kind == "inbound" else None
+            if chain_tag is None:
+                flat.append(tunnel)
+                continue
+            label, hop_index = chain_tag
+            grouped.setdefault(label, []).append((hop_index, tunnel))
+
+        chains: list[XrayRuntimeTunnelChainRead] = []
+        for label in sorted(grouped):
+            hops = [
+                XrayRuntimeTunnelHopRead(
+                    tag=tunnel.tag,
+                    listen_port=tunnel.listen_port,
+                    target_address=tunnel.target_address,
+                    target_port=tunnel.target_port,
+                )
+                for _hop_index, tunnel in sorted(grouped[label], key=lambda item: item[0])
+            ]
+            final_target = None
+            if hops:
+                last = hops[-1]
+                final_target = cls._format_host_port(last.target_address, last.target_port)
+            chains.append(
+                XrayRuntimeTunnelChainRead(
+                    label=label,
+                    hops=hops,
+                    entry_port=hops[0].listen_port if hops else None,
+                    final_target=final_target,
+                )
+            )
+        return chains, flat
+
+    @staticmethod
+    def _xray_tunnel_chain_tag(tag: str) -> tuple[str, int] | None:
+        prefix = "tunnel-"
+        if not tag.startswith(prefix):
+            return None
+        hop_marker = tag.rfind("-h")
+        if hop_marker < len(prefix):
+            return None
+        label = tag[len(prefix) : hop_marker]
+        hop_index = tag[hop_marker + 2 :]
+        if not label or not hop_index.isdigit():
+            return None
+        return label, int(hop_index)
+
+    @classmethod
+    def _first_xray_rule_inbound_tag(cls, value: Any) -> str | None:
+        if isinstance(value, str):
+            return cls._text_value(value)
+        for item in cls._list_value(value):
+            text = cls._text_value(item)
+            if text:
+                return text
+        return None
+
+    @classmethod
+    def _xray_redirect_target(cls, value: Any) -> tuple[str | None, int | None]:
+        redirect = cls._text_value(value)
+        if not redirect:
+            return None, None
+        if redirect.startswith("["):
+            end = redirect.find("]")
+            if end > 1:
+                port = (
+                    cls._port_value(redirect[end + 2 :])
+                    if redirect[end + 1 : end + 2] == ":"
+                    else None
+                )
+                return redirect[1:end], port
+        if ":" not in redirect:
+            return redirect, None
+        host, port_value = redirect.rsplit(":", 1)
+        port = cls._port_value(port_value)
+        if port is None:
+            return redirect, None
+        return host.strip() or None, port
+
+    @classmethod
+    def _format_host_port(cls, address: str | None, port: int | None) -> str | None:
+        if address is None and port is None:
+            return None
+        if address is None:
+            return str(port)
+        if port is None:
+            return address
+        host = f"[{address}]" if ":" in address and not address.startswith("[") else address
+        return f"{host}:{port}"
+
+    @classmethod
+    def _port_value(cls, value: Any) -> int | None:
+        port = cls._int_value(value)
+        if port is None or port < 0 or port > 65535:
+            return None
+        return port
 
     @classmethod
     def _xray_runtime_inbound_read(

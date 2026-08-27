@@ -2511,6 +2511,144 @@ def test_xray_config_command_results_record_snapshots_and_restore(
     assert restore_command["timeout_ms"] == 60_000
 
 
+def test_xray_runtime_tunnel_inventory_reads_current_config_snapshot(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-tunnels"}).json()
+    server_id = created["server"]["id"]
+    config_text = json.dumps(
+        {
+            "inbounds": [
+                {
+                    "tag": "tunnel-in",
+                    "protocol": "tunnel",
+                    "port": 1000,
+                    "settings": {"address": "127.0.0.1", "port": 1001},
+                },
+                {
+                    "tag": "api",
+                    "protocol": "tunnel",
+                    "port": 1002,
+                    "settings": {"address": "127.0.0.1", "port": 1003},
+                },
+                {
+                    "tag": "tunnel-web",
+                    "protocol": "tunnel",
+                    "port": 18080,
+                    "settings": {"address": "10.0.0.2", "port": 80, "network": "tcp"},
+                },
+                {
+                    "tag": "tunnel-relay-h1",
+                    "protocol": "tunnel",
+                    "port": 19001,
+                    "settings": {"address": "10.0.0.3", "port": 9001},
+                },
+                {
+                    "tag": "tunnel-relay-h0",
+                    "protocol": "tunnel",
+                    "port": 19000,
+                    "settings": {"address": "10.0.0.2", "port": 9000},
+                },
+                {"tag": "vless-443", "protocol": "vless", "port": 443},
+            ],
+            "outbounds": [
+                {
+                    "tag": "tunnel-routed",
+                    "protocol": "freedom",
+                    "settings": {"redirect": "[2001:db8::10]:443"},
+                },
+                {
+                    "tag": "direct",
+                    "protocol": "freedom",
+                    "settings": {"password": "secret-should-not-leak"},
+                },
+            ],
+            "routing": {
+                "rules": [
+                    {
+                        "type": "field",
+                        "inboundTag": ["vless-443"],
+                        "outboundTag": "tunnel-routed",
+                        "domain": ["example.com"],
+                        "ip": ["1.1.1.1"],
+                    },
+                    {"type": "field", "outboundTag": "direct", "domain": ["ignored.test"]},
+                ]
+            },
+        }
+    )
+    read_command = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config/read",
+    ).json()["command"]
+    result = client.post(
+        f"/api/v1/agents/commands/{read_command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True, "config": config_text},
+        },
+    )
+
+    assert result.status_code == 200
+    response = client.get(f"/api/v1/servers/{server_id}/xray/runtime/tunnels")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["license_required"] is False
+    assert payload["has_config"] is True
+    assert payload["source_snapshot_id"]
+    assert payload["tunnel_count"] == 2
+    assert payload["chain_count"] == 1
+    assert payload["warnings"] == []
+
+    inbound = next(item for item in payload["tunnels"] if item["kind"] == "inbound")
+    routed = next(item for item in payload["tunnels"] if item["kind"] == "routed")
+    assert inbound == {
+        "kind": "inbound",
+        "tag": "tunnel-web",
+        "listen_port": 18080,
+        "target_address": "10.0.0.2",
+        "target_port": 80,
+        "network": "tcp",
+        "inbound_tag": None,
+        "match_domains": [],
+        "match_ips": [],
+        "rule_index": None,
+    }
+    assert routed["tag"] == "tunnel-routed"
+    assert routed["listen_port"] == 443
+    assert routed["target_address"] == "2001:db8::10"
+    assert routed["target_port"] == 443
+    assert routed["inbound_tag"] == "vless-443"
+    assert routed["match_domains"] == ["example.com"]
+    assert routed["match_ips"] == ["1.1.1.1"]
+    assert routed["rule_index"] == 0
+
+    chain = payload["chains"][0]
+    assert chain["label"] == "relay"
+    assert chain["entry_port"] == 19000
+    assert chain["final_target"] == "10.0.0.3:9001"
+    assert [hop["tag"] for hop in chain["hops"]] == ["tunnel-relay-h0", "tunnel-relay-h1"]
+    assert "secret-should-not-leak" not in json.dumps(payload)
+
+
+def test_xray_runtime_tunnel_inventory_handles_missing_config_snapshot(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-no-tunnels"}).json()
+    server_id = created["server"]["id"]
+
+    response = client.get(f"/api/v1/servers/{server_id}/xray/runtime/tunnels")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["license_required"] is False
+    assert payload["has_config"] is False
+    assert payload["tunnels"] == []
+    assert payload["chains"] == []
+
+
 def test_xray_config_snapshots_ignore_empty_and_failed_results(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-xray-snapshot-empty"}).json()
