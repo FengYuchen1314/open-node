@@ -592,17 +592,28 @@ async def apply_xray_config_snapshot_recovery(
             detail="current Xray config snapshot body is unavailable",
         )
 
+    config_to_apply = current.config
+    merged_agent_only_count = 0
+    warnings: list[str] = []
+    if payload.merge_agent_only and recovery.pending and recovery.pending.config:
+        config_to_apply, merged_agent_only_count, warnings = (
+            InventoryStore.merge_agent_only_inbounds_outbounds(
+                current.config,
+                recovery.pending.config,
+            )
+        )
+
     command_payloads = [
         AgentCommandCreate(
             method="POST",
             path="/api/child/xray/test-config",
-            body={"config": current.config},
+            body={"config": config_to_apply},
             timeout_ms=payload.command_timeout_ms,
         ),
         AgentCommandCreate(
             method="POST",
             path="/api/child/xray/config",
-            body={"config": current.config, "force": True},
+            body={"config": config_to_apply, "force": True},
             timeout_ms=payload.command_timeout_ms,
         ),
     ]
@@ -626,6 +637,8 @@ async def apply_xray_config_snapshot_recovery(
         snapshot=current.model_copy(update={"config": None}),
         commands=commands,
         command_count=len(commands),
+        merged_agent_only_count=merged_agent_only_count,
+        warnings=warnings,
     )
 
 

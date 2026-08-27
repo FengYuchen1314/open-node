@@ -277,8 +277,11 @@ Later agent-reported drift is stored as `pending_recovery` so it does not
 silently replace the master snapshot. Operators can accept the pending agent
 config as the new current snapshot, queue the current master snapshot back to
 the agent through test, write, and restart commands, or restore any saved
-snapshot through the same command dispatch path. Successful master writes
-discard stale pending recovery rows.
+snapshot through the same command dispatch path. Recovery apply defaults to
+merging agent-only `inbounds` and `outbounds` from the pending config into the
+master snapshot before queuing it, but leaves routing rules untouched because
+they do not have stable tags. Successful master writes discard stale pending
+recovery rows.
 Successful mutating Xray child commands for inbounds, outbounds, routing,
 batch apply, config files, system config, direct config writes, and external
 takeover also enqueue one deduplicated `GET /api/child/xray/config` refresh.

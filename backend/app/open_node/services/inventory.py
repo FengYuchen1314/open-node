@@ -6422,6 +6422,49 @@ class InventoryStore:
         )
 
     @staticmethod
+    def merge_agent_only_inbounds_outbounds(
+        base_config: str,
+        agent_config: str,
+    ) -> tuple[str, int, list[str]]:
+        try:
+            base = json.loads(base_config)
+            agent = json.loads(agent_config)
+        except json.JSONDecodeError:
+            return base_config, 0, ["agent_only_merge_skipped_invalid_json"]
+        if not isinstance(base, dict) or not isinstance(agent, dict):
+            return base_config, 0, ["agent_only_merge_skipped_invalid_shape"]
+
+        added = 0
+        for key in ("inbounds", "outbounds"):
+            base_items = base.get(key)
+            agent_items = agent.get(key)
+            if base_items is None:
+                base_items = []
+            if not isinstance(base_items, list) or not isinstance(agent_items, list):
+                continue
+
+            base_tags = {
+                tag
+                for item in base_items
+                if isinstance(item, dict)
+                if (tag := InventoryStore._text_value(item.get("tag")))
+            }
+            for item in agent_items:
+                if not isinstance(item, dict):
+                    continue
+                tag = InventoryStore._text_value(item.get("tag"))
+                if not tag or tag in base_tags:
+                    continue
+                base_items.append(deepcopy(item))
+                base_tags.add(tag)
+                added += 1
+            base[key] = base_items
+
+        if added == 0:
+            return base_config, 0, []
+        return json.dumps(base, ensure_ascii=False, separators=(",", ":")), added, []
+
+    @staticmethod
     def _xray_config_snapshot_source(
         command: CommandModel,
         payload: AgentCommandResultRequest,

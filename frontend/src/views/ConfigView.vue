@@ -605,11 +605,19 @@ async function applyCurrentXraySnapshotRecovery() {
   try {
     const response = await applyXrayConfigRecovery(selectedServerId.value, {
       restart_xray: true,
+      merge_agent_only: true,
       command_timeout_ms: 60_000,
     });
+    const mergeText =
+      response.merged_agent_only_count > 0
+        ? ` Merged ${response.merged_agent_only_count} agent-only entries.`
+        : "";
+    const warningText = response.warnings.length
+      ? ` Warnings: ${response.warnings.join(", ")}.`
+      : "";
     successMessage.value = `Queued ${response.command_count} recovery commands from ${shortHash(
       response.snapshot.config_hash,
-    )}.`;
+    )}.${mergeText}${warningText}`;
     await refreshCommands();
   } catch (error) {
     errorMessage.value = readableError(error);

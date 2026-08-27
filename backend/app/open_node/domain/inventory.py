@@ -759,6 +759,7 @@ class XrayConfigSnapshotRecoveryAcceptResponse(BaseModel):
 
 class XrayConfigSnapshotRecoveryApplyRequest(BaseModel):
     restart_xray: bool = True
+    merge_agent_only: bool = True
     command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
 
 
@@ -828,6 +829,8 @@ class XrayConfigSnapshotRecoveryApplyResponse(BaseModel):
     snapshot: XrayConfigSnapshotRead
     commands: list[AgentCommandRead] = Field(default_factory=list)
     command_count: int = 0
+    merged_agent_only_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
     license_required: Literal[False] = False
 
 

@@ -764,6 +764,8 @@ describe("inventory API client", () => {
             },
           ],
           command_count: 1,
+          merged_agent_only_count: 1,
+          warnings: [],
           license_required: false,
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
@@ -778,7 +780,7 @@ describe("inventory API client", () => {
     const acceptResponse = await acceptXrayConfigPendingRecovery("srv_1", fetcher);
     const applyResponse = await applyXrayConfigRecovery(
       "srv_1",
-      { restart_xray: true, command_timeout_ms: 45_000 },
+      { restart_xray: true, merge_agent_only: true, command_timeout_ms: 45_000 },
       fetcher,
     );
 
@@ -803,7 +805,7 @@ describe("inventory API client", () => {
         url: "/api/v1/servers/srv_1/xray/config-snapshots/recovery/apply",
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: { restart_xray: true, command_timeout_ms: 45_000 },
+        body: { restart_xray: true, merge_agent_only: true, command_timeout_ms: 45_000 },
       },
     ]);
   });

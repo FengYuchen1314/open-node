@@ -2595,8 +2595,33 @@ def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_succe
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-xray-apply"}).json()
     server_id = created["server"]["id"]
-    current_config = '{"inbounds":[{"tag":"vless-443"}],"outbounds":[]}'
-    drift_config = '{"inbounds":[],"outbounds":[]}'
+    current_config = json.dumps(
+        {
+            "inbounds": [{"tag": "vless-443", "port": 443}],
+            "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+            "routing": {"rules": [{"outboundTag": "direct"}]},
+        },
+        separators=(",", ":"),
+    )
+    drift_config = json.dumps(
+        {
+            "inbounds": [
+                {"tag": "vless-443", "port": 443},
+                {"tag": "agent-only-inbound", "port": 8443},
+            ],
+            "outbounds": [
+                {"tag": "direct", "protocol": "freedom"},
+                {"tag": "agent-only-outbound", "protocol": "freedom"},
+            ],
+            "routing": {
+                "rules": [
+                    {"outboundTag": "direct"},
+                    {"outboundTag": "agent-only-outbound"},
+                ]
+            },
+        },
+        separators=(",", ":"),
+    )
 
     for config_text in (current_config, drift_config):
         command = client.post(
@@ -2627,15 +2652,26 @@ def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_succe
     assert applied_payload["snapshot"]["status"] == "current"
     assert applied_payload["snapshot"]["config"] is None
     assert applied_payload["command_count"] == 3
+    assert applied_payload["merged_agent_only_count"] == 2
+    assert applied_payload["warnings"] == []
     assert [command["path"] for command in applied_payload["commands"]] == [
         "/api/child/xray/test-config",
         "/api/child/xray/config",
         "/api/child/services/control",
     ]
     assert all(command["timeout_ms"] == 45_000 for command in applied_payload["commands"])
-    assert applied_payload["commands"][0]["body"] == {"config": current_config}
+    merged_config = json.loads(applied_payload["commands"][0]["body"]["config"])
+    assert [inbound["tag"] for inbound in merged_config["inbounds"]] == [
+        "vless-443",
+        "agent-only-inbound",
+    ]
+    assert [outbound["tag"] for outbound in merged_config["outbounds"]] == [
+        "direct",
+        "agent-only-outbound",
+    ]
+    assert merged_config["routing"]["rules"] == [{"outboundTag": "direct"}]
     assert applied_payload["commands"][1]["body"] == {
-        "config": current_config,
+        "config": applied_payload["commands"][0]["body"]["config"],
         "force": True,
     }
     assert applied_payload["commands"][2]["body"] == {
@@ -2659,7 +2695,7 @@ def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_succe
     ).json()
     assert recovery_after_apply["has_pending"] is False
     assert recovery_after_apply["current"]["config_hash"] == hashlib.sha256(
-        current_config.encode()
+        applied_payload["commands"][0]["body"]["config"].encode()
     ).hexdigest()
 
 

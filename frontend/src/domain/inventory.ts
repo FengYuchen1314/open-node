@@ -473,6 +473,7 @@ export interface XrayConfigSnapshotRecoveryAcceptResponse {
 
 export interface XrayConfigSnapshotRecoveryApplyRequest {
   restart_xray?: boolean;
+  merge_agent_only?: boolean;
   command_timeout_ms?: number;
 }
 
@@ -481,6 +482,8 @@ export interface XrayConfigSnapshotRecoveryApplyResponse {
   snapshot: XrayConfigSnapshot;
   commands: AgentCommand[];
   command_count: number;
+  merged_agent_only_count: number;
+  warnings: string[];
   license_required: false;
 }
 

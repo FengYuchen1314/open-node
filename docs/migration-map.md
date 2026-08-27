@@ -115,7 +115,8 @@ This document records the starting source map for the Open Node refactor.
    - Done: Xray config snapshot recovery now keeps agent-reported drift as
      `pending_recovery`, lets operators accept the agent config as current, or
      queue the master current snapshot back to the agent with test/write/restart
-     commands.
+     commands after preserving agent-only inbound/outbound entries from the
+     pending config.
    - Done: successful Xray-mutating child command results automatically queue a
      deduplicated config refresh, so snapshots and runtime inventory catch up
      after inbound, outbound, routing, batch, config-file, system-config, and
