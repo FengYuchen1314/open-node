@@ -471,6 +471,41 @@ export interface XrayRuntimeNodeSyncResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeCredentialReconciliationEntry {
+  node_id: string;
+  node_name: string;
+  protocol: string;
+  inbound_tag?: string | null;
+  enabled: boolean;
+  runtime_source_index?: number | null;
+  runtime_display_name?: string | null;
+  expected_emails: string[];
+  runtime_emails: string[];
+  missing_runtime_emails: string[];
+  extra_runtime_emails: string[];
+  status:
+    | "in_sync"
+    | "missing_runtime"
+    | "missing_runtime_clients"
+    | "extra_runtime_clients"
+    | "drift";
+}
+
+export interface XrayRuntimeCredentialReconciliationResponse {
+  server_id: string;
+  has_scan: boolean;
+  node_count: number;
+  expected_credential_count: number;
+  matched_runtime_client_count: number;
+  in_sync_count: number;
+  missing_runtime_count: number;
+  out_of_sync_count: number;
+  missing_runtime_client_count: number;
+  extra_runtime_client_count: number;
+  entries: XrayRuntimeCredentialReconciliationEntry[];
+  license_required: false;
+}
+
 export interface SubscriptionPlansResponse {
   plans: SubscriptionPlan[];
   license_required: false;

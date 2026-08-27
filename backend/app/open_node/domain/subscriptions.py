@@ -336,6 +336,42 @@ class XrayRuntimeNodeSyncResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeCredentialReconciliationEntry(BaseModel):
+    node_id: UUID
+    node_name: str
+    protocol: str
+    inbound_tag: str | None = None
+    enabled: bool
+    runtime_source_index: int | None = Field(default=None, ge=0)
+    runtime_display_name: str | None = None
+    expected_emails: list[str] = Field(default_factory=list)
+    runtime_emails: list[str] = Field(default_factory=list)
+    missing_runtime_emails: list[str] = Field(default_factory=list)
+    extra_runtime_emails: list[str] = Field(default_factory=list)
+    status: Literal[
+        "in_sync",
+        "missing_runtime",
+        "missing_runtime_clients",
+        "extra_runtime_clients",
+        "drift",
+    ]
+
+
+class XrayRuntimeCredentialReconciliationResponse(BaseModel):
+    server_id: UUID
+    has_scan: bool = False
+    node_count: int = 0
+    expected_credential_count: int = 0
+    matched_runtime_client_count: int = 0
+    in_sync_count: int = 0
+    missing_runtime_count: int = 0
+    out_of_sync_count: int = 0
+    missing_runtime_client_count: int = 0
+    extra_runtime_client_count: int = 0
+    entries: list[XrayRuntimeCredentialReconciliationEntry] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
 class SubscriptionCredentialRead(BaseModel):
     id: UUID
     username: str

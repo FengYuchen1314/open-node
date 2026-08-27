@@ -85,6 +85,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: stale physical managed nodes can sync public runtime fields back
      from scan-derived Xray inbounds, without importing existing UUIDs,
      passwords, PSKs, private keys, account emails, or other runtime secrets.
+   - Done: runtime credential reconciliation compares generated catalog client
+     emails against scan-derived runtime client labels, surfacing missing and
+     extra runtime users without exposing credential secrets.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
    - Done: compatibility wrappers for the active non-stream Xray/nginx

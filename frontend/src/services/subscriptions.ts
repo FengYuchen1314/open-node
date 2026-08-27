@@ -21,6 +21,7 @@ import type {
   SubscriptionQuotaStatusResponse,
   SubscriptionTemplatePresetApplyRequest,
   SubscriptionTemplatePresetsResponse,
+  XrayRuntimeCredentialReconciliationResponse,
   XrayRuntimeNodeCreateRequest,
   XrayRuntimeNodeDraftsResponse,
   XrayRuntimeNodeImportRequest,
@@ -337,6 +338,19 @@ export async function syncManagedNodeFromRuntime(
     throw await apiError(response, "Xray runtime node sync request failed");
   }
   return response.json() as Promise<XrayRuntimeNodeSyncResponse>;
+}
+
+export async function getXrayRuntimeCredentialReconciliation(
+  serverId: string,
+  fetcher = fetch,
+): Promise<XrayRuntimeCredentialReconciliationResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/credentials/reconciliation`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray runtime credential reconciliation request failed");
+  }
+  return response.json() as Promise<XrayRuntimeCredentialReconciliationResponse>;
 }
 
 export async function listSubscriptionPlans(

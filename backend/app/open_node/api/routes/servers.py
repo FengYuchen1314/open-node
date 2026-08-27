@@ -53,6 +53,7 @@ from open_node.domain.inventory import (
 )
 from open_node.domain.subscriptions import (
     ManagedNodeResponse,
+    XrayRuntimeCredentialReconciliationResponse,
     XrayRuntimeNodeCreateRequest,
     XrayRuntimeNodeDraftsResponse,
     XrayRuntimeNodeImportRequest,
@@ -226,6 +227,20 @@ def sync_managed_node_from_xray_runtime(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except XrayRuntimeNodeDraftUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{server_id}/xray/runtime/credentials/reconciliation",
+    response_model=XrayRuntimeCredentialReconciliationResponse,
+)
+def xray_runtime_credential_reconciliation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> XrayRuntimeCredentialReconciliationResponse:
+    try:
+        return store.xray_runtime_credential_reconciliation(server_id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/{server_id}/xray/config-snapshots", response_model=ServerXrayConfigSnapshotsResponse)

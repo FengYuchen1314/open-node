@@ -14,6 +14,8 @@ import type {
   XrayRuntimeInventoryResponse,
 } from "../domain/inventory";
 import type {
+  XrayRuntimeCredentialReconciliationEntry,
+  XrayRuntimeCredentialReconciliationResponse,
   XrayRuntimeNodeDraft,
   XrayRuntimeNodeReconciliationManagedEntry,
   XrayRuntimeNodeReconciliationResponse,
@@ -30,6 +32,7 @@ import {
 } from "../services/inventory";
 import {
   createManagedNodeFromRuntimeInbound,
+  getXrayRuntimeCredentialReconciliation,
   getXrayRuntimeNodeReconciliation,
   importManagedNodesFromRuntimeInbounds,
   listXrayRuntimeNodeDrafts,
@@ -44,6 +47,8 @@ const xraySnapshots = ref<XrayConfigSnapshot[]>([]);
 const xrayRuntimeInventory = ref<XrayRuntimeInventoryResponse | null>(null);
 const runtimeNodeDrafts = ref<XrayRuntimeNodeDraft[]>([]);
 const runtimeNodeReconciliation = ref<XrayRuntimeNodeReconciliationResponse | null>(null);
+const runtimeCredentialReconciliation =
+  ref<XrayRuntimeCredentialReconciliationResponse | null>(null);
 const loading = ref(false);
 const snapshotsLoading = ref(false);
 const runtimeInventoryLoading = ref(false);
@@ -128,6 +133,11 @@ const runtimeMissingNodeCount = computed(
 const runtimeReconciliationIssues = computed(() =>
   (runtimeNodeReconciliation.value?.managed_entries ?? []).filter((entry) =>
     ["stale", "missing_runtime"].includes(entry.status),
+  ),
+);
+const runtimeCredentialReconciliationIssues = computed(() =>
+  (runtimeCredentialReconciliation.value?.entries ?? []).filter(
+    (entry) => entry.status !== "in_sync",
   ),
 );
 const runtimeEntriesByIndex = computed(
@@ -271,25 +281,34 @@ async function refreshXrayRuntimeInventory(reportErrors = false) {
     xrayRuntimeInventory.value = null;
     runtimeNodeDrafts.value = [];
     runtimeNodeReconciliation.value = null;
+    runtimeCredentialReconciliation.value = null;
     return;
   }
   const serverId = selectedServerId.value;
   runtimeInventoryLoading.value = true;
   try {
-    const [inventoryResponse, draftsResponse, reconciliationResponse] = await Promise.all([
+    const [
+      inventoryResponse,
+      draftsResponse,
+      reconciliationResponse,
+      credentialReconciliationResponse,
+    ] = await Promise.all([
       getXrayRuntimeInventory(serverId),
       listXrayRuntimeNodeDrafts(serverId),
       getXrayRuntimeNodeReconciliation(serverId),
+      getXrayRuntimeCredentialReconciliation(serverId),
     ]);
     if (serverId === selectedServerId.value) {
       xrayRuntimeInventory.value = inventoryResponse;
       runtimeNodeDrafts.value = draftsResponse.drafts;
       runtimeNodeReconciliation.value = reconciliationResponse;
+      runtimeCredentialReconciliation.value = credentialReconciliationResponse;
     }
   } catch (error) {
     xrayRuntimeInventory.value = null;
     runtimeNodeDrafts.value = [];
     runtimeNodeReconciliation.value = null;
+    runtimeCredentialReconciliation.value = null;
     if (reportErrors) {
       errorMessage.value = readableError(error);
     }
@@ -681,6 +700,28 @@ function managedEntryStatusColor(entry: XrayRuntimeNodeReconciliationManagedEntr
     stale: "warning",
     missing_runtime: "error",
     catalog_only: "grey",
+  };
+  return colors[entry.status];
+}
+
+function credentialEntryStatusLabel(entry: XrayRuntimeCredentialReconciliationEntry) {
+  const labels = {
+    in_sync: "In sync",
+    missing_runtime: "Missing runtime",
+    missing_runtime_clients: "Missing clients",
+    extra_runtime_clients: "Extra clients",
+    drift: "Client drift",
+  };
+  return labels[entry.status];
+}
+
+function credentialEntryStatusColor(entry: XrayRuntimeCredentialReconciliationEntry) {
+  const colors = {
+    in_sync: "success",
+    missing_runtime: "error",
+    missing_runtime_clients: "warning",
+    extra_runtime_clients: "warning",
+    drift: "warning",
   };
   return colors[entry.status];
 }
@@ -1187,6 +1228,38 @@ function formatDateTime(value: string) {
                   {{ xrayRuntimeInventory?.client_count ?? 0 }} clients
                 </v-chip>
                 <v-chip
+                  v-if="runtimeCredentialReconciliation"
+                  :color="
+                    runtimeCredentialReconciliation.out_of_sync_count === 0
+                      ? 'success'
+                      : 'warning'
+                  "
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Cred issues {{ runtimeCredentialReconciliation.out_of_sync_count }}
+                </v-chip>
+                <v-chip
+                  v-if="runtimeCredentialReconciliation?.missing_runtime_client_count"
+                  color="warning"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Missing clients
+                  {{ runtimeCredentialReconciliation.missing_runtime_client_count }}
+                </v-chip>
+                <v-chip
+                  v-if="runtimeCredentialReconciliation?.extra_runtime_client_count"
+                  color="warning"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Extra clients {{ runtimeCredentialReconciliation.extra_runtime_client_count }}
+                </v-chip>
+                <v-chip
                   v-if="runtimeNodeReconciliation"
                   color="success"
                   density="comfortable"
@@ -1406,6 +1479,70 @@ function formatDateTime(value: string) {
                         </span>
                       </template>
                     </v-tooltip>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-if="runtimeCredentialReconciliationIssues.length > 0"
+                class="runtime-reconcile-list"
+              >
+                <div class="section-title compact-title">Credential reconciliation</div>
+                <div
+                  v-for="entry in runtimeCredentialReconciliationIssues"
+                  :key="entry.node_id"
+                  class="runtime-reconcile-row"
+                >
+                  <div class="runtime-inbound-main">
+                    <div class="runtime-inbound-title">
+                      <span>{{ entry.node_name }}</span>
+                      <v-chip
+                        :color="credentialEntryStatusColor(entry)"
+                        density="comfortable"
+                        size="small"
+                        variant="tonal"
+                      >
+                        {{ credentialEntryStatusLabel(entry) }}
+                      </v-chip>
+                    </div>
+                    <div class="snapshot-detail">
+                      {{ entry.protocol }} / {{ entry.inbound_tag ?? "No inbound tag" }}
+                    </div>
+                    <div v-if="entry.runtime_display_name" class="snapshot-detail">
+                      Runtime {{ entry.runtime_display_name }}
+                    </div>
+                    <div class="snapshot-detail">
+                      {{ entry.expected_emails.length }} expected /
+                      {{ entry.runtime_emails.length }} runtime clients
+                    </div>
+                    <div
+                      v-if="
+                        entry.missing_runtime_emails.length > 0 ||
+                        entry.extra_runtime_emails.length > 0
+                      "
+                      class="runtime-chip-row"
+                    >
+                      <v-chip
+                        v-for="email in entry.missing_runtime_emails"
+                        :key="`missing-${entry.node_id}-${email}`"
+                        color="warning"
+                        density="comfortable"
+                        size="x-small"
+                        variant="tonal"
+                      >
+                        Missing {{ email }}
+                      </v-chip>
+                      <v-chip
+                        v-for="email in entry.extra_runtime_emails"
+                        :key="`extra-${entry.node_id}-${email}`"
+                        color="warning"
+                        density="comfortable"
+                        size="x-small"
+                        variant="tonal"
+                      >
+                        Extra {{ email }}
+                      </v-chip>
+                    </div>
                   </div>
                 </div>
               </div>

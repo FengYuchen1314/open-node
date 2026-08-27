@@ -134,6 +134,8 @@ from open_node.domain.subscriptions import (
     SubscriptionTemplatePresetRead,
     SubscriptionTrafficEntryRead,
     SubscriptionTrafficMode,
+    XrayRuntimeCredentialReconciliationEntry,
+    XrayRuntimeCredentialReconciliationResponse,
     XrayRuntimeNodeCreateRequest,
     XrayRuntimeNodeDraft,
     XrayRuntimeNodeDraftsResponse,
@@ -1516,6 +1518,83 @@ class InventoryStore:
                 drifts_before=drifts_before,
                 drifts_after=drifts_after,
             )
+
+    def xray_runtime_credential_reconciliation(
+        self,
+        server_id: UUID,
+    ) -> XrayRuntimeCredentialReconciliationResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            scan = session.get(AgentScanResultModel, str(server_id))
+            managed_nodes = session.scalars(
+                select(ManagedNodeModel)
+                .where(
+                    ManagedNodeModel.server_id == server.id,
+                    ManagedNodeModel.node_type == ManagedNodeType.PHYSICAL.value,
+                )
+                .order_by(ManagedNodeModel.created_at)
+            ).all()
+            node_ids = [node.id for node in managed_nodes]
+            credentials_by_node_id: dict[str, list[SubscriptionCredentialModel]] = {
+                node_id: [] for node_id in node_ids
+            }
+            if node_ids:
+                credentials = session.scalars(
+                    select(SubscriptionCredentialModel)
+                    .where(
+                        SubscriptionCredentialModel.server_id == server.id,
+                        SubscriptionCredentialModel.node_id.in_(node_ids),
+                    )
+                    .order_by(SubscriptionCredentialModel.created_at)
+                ).all()
+                for credential in credentials:
+                    credentials_by_node_id.setdefault(credential.node_id, []).append(credential)
+
+            runtime_by_node_id: dict[str, XrayRuntimeInboundRead] = {}
+            if scan:
+                for index, inbound in enumerate(scan.inbounds or []):
+                    draft = self._xray_runtime_node_draft(
+                        session=session,
+                        server=server,
+                        inbound=inbound,
+                        index=index,
+                    )
+                    if not draft.existing_node_id:
+                        continue
+                    node_id = str(draft.existing_node_id)
+                    runtime_by_node_id.setdefault(
+                        node_id,
+                        self._xray_runtime_inbound_read(inbound, index),
+                    )
+
+            entries = [
+                self._runtime_credential_reconciliation_entry(
+                    node=node,
+                    runtime=runtime_by_node_id.get(node.id),
+                    credentials=credentials_by_node_id.get(node.id, []),
+                )
+                for node in managed_nodes
+            ]
+
+        return XrayRuntimeCredentialReconciliationResponse(
+            server_id=server_id,
+            has_scan=scan is not None,
+            node_count=len(entries),
+            expected_credential_count=sum(len(entry.expected_emails) for entry in entries),
+            matched_runtime_client_count=sum(len(entry.runtime_emails) for entry in entries),
+            in_sync_count=sum(1 for entry in entries if entry.status == "in_sync"),
+            missing_runtime_count=sum(
+                1 for entry in entries if entry.status == "missing_runtime"
+            ),
+            out_of_sync_count=sum(1 for entry in entries if entry.status != "in_sync"),
+            missing_runtime_client_count=sum(
+                len(entry.missing_runtime_emails) for entry in entries
+            ),
+            extra_runtime_client_count=sum(len(entry.extra_runtime_emails) for entry in entries),
+            entries=entries,
+        )
 
     def list_xray_config_snapshots(
         self,
@@ -6260,6 +6339,48 @@ class InventoryStore:
         else:
             current[key] = value
         return True
+
+    @classmethod
+    def _runtime_credential_reconciliation_entry(
+        cls,
+        node: ManagedNodeModel,
+        runtime: XrayRuntimeInboundRead | None,
+        credentials: list[SubscriptionCredentialModel],
+    ) -> XrayRuntimeCredentialReconciliationEntry:
+        expected_emails = cls._dedupe_text(credential.email for credential in credentials)
+        runtime_emails = cls._dedupe_text(runtime.user_emails if runtime else [])
+        expected_keys = {email.lower() for email in expected_emails}
+        runtime_keys = {email.lower() for email in runtime_emails}
+        missing_runtime_emails = [
+            email for email in expected_emails if email.lower() not in runtime_keys
+        ]
+        extra_runtime_emails = [
+            email for email in runtime_emails if email.lower() not in expected_keys
+        ]
+        if runtime is None:
+            status = "missing_runtime"
+        elif missing_runtime_emails and extra_runtime_emails:
+            status = "drift"
+        elif missing_runtime_emails:
+            status = "missing_runtime_clients"
+        elif extra_runtime_emails:
+            status = "extra_runtime_clients"
+        else:
+            status = "in_sync"
+        return XrayRuntimeCredentialReconciliationEntry(
+            node_id=UUID(node.id),
+            node_name=node.name,
+            protocol=node.protocol,
+            inbound_tag=node.inbound_tag,
+            enabled=node.enabled,
+            runtime_source_index=runtime.source_index if runtime else None,
+            runtime_display_name=runtime.display_name if runtime else None,
+            expected_emails=expected_emails,
+            runtime_emails=runtime_emails,
+            missing_runtime_emails=missing_runtime_emails,
+            extra_runtime_emails=extra_runtime_emails,
+            status=status,
+        )
 
     @staticmethod
     def _nested_config_value(config: dict[str, Any], *keys: str) -> Any:

@@ -17,6 +17,7 @@ import {
   createProductUserSubscriptionToken,
   createSubscriptionPlan,
   exportSubscriptionCatalog,
+  getXrayRuntimeCredentialReconciliation,
   getProductUserQuota,
   getProductUserSubscriptionToken,
   getProductUserTraffic,
@@ -451,6 +452,37 @@ describe("subscriptions API client", () => {
           license_required: false,
         });
       }
+      if (url.endsWith("/xray/runtime/credentials/reconciliation")) {
+        return jsonResponse({
+          server_id: "srv_1",
+          has_scan: true,
+          node_count: 1,
+          expected_credential_count: 2,
+          matched_runtime_client_count: 2,
+          in_sync_count: 0,
+          missing_runtime_count: 0,
+          out_of_sync_count: 1,
+          missing_runtime_client_count: 1,
+          extra_runtime_client_count: 1,
+          entries: [
+            {
+              node_id: "node_1",
+              node_name: "Tokyo vless",
+              protocol: "vless",
+              inbound_tag: "vless-443",
+              enabled: true,
+              runtime_source_index: 0,
+              runtime_display_name: "vless-443",
+              expected_emails: ["alice__vless-443", "bob__vless-443"],
+              runtime_emails: ["alice__vless-443", "orphan@example.com"],
+              missing_runtime_emails: ["bob__vless-443"],
+              extra_runtime_emails: ["orphan@example.com"],
+              status: "drift",
+            },
+          ],
+          license_required: false,
+        });
+      }
       if (url.endsWith("/xray/runtime/nodes/import")) {
         return jsonResponse({
           server_id: "srv_1",
@@ -482,6 +514,10 @@ describe("subscriptions API client", () => {
 
     const drafts = await listXrayRuntimeNodeDrafts("srv_1", fetcher);
     const reconciliation = await getXrayRuntimeNodeReconciliation("srv_1", fetcher);
+    const credentialReconciliation = await getXrayRuntimeCredentialReconciliation(
+      "srv_1",
+      fetcher,
+    );
     const node = await createManagedNodeFromRuntimeInbound(
       "srv_1",
       { source_index: 0, host: "public.example.com" },
@@ -502,6 +538,7 @@ describe("subscriptions API client", () => {
     expect(drafts.license_required).toBe(false);
     expect(drafts.drafts[0].draft.inbound_tag).toBe("vless-443");
     expect(reconciliation.stale_count).toBe(1);
+    expect(credentialReconciliation.missing_runtime_client_count).toBe(1);
     expect(node.node.id).toBe("node_1");
     expect(imported.created_count).toBe(1);
     expect(synced.updated_fields).toEqual(["config.port"]);
@@ -513,6 +550,11 @@ describe("subscriptions API client", () => {
       },
       {
         url: "/api/v1/servers/srv_1/xray/runtime/nodes/reconciliation",
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/servers/srv_1/xray/runtime/credentials/reconciliation",
         headers: undefined,
         body: undefined,
       },

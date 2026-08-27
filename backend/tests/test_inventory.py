@@ -956,6 +956,112 @@ def test_xray_runtime_node_sync_updates_public_fields_without_runtime_secrets(
     )
 
 
+def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-runtime-credentials", "domain": "edge.example.com"},
+    ).json()
+    server_id = created["server"]["id"]
+    command = client.post(f"/api/v1/servers/{server_id}/operations/scan").json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                **scan_result_payload(),
+                "inbounds": [
+                    {
+                        "tag": "vless-443",
+                        "port": 443,
+                        "protocol": "vless",
+                        "settings": {
+                            "clients": [
+                                {
+                                    "id": "secret-runtime-client-id",
+                                    "email": "alice__vless-443",
+                                },
+                                {
+                                    "id": "secret-orphan-client-id",
+                                    "email": "orphan@example.com",
+                                },
+                            ]
+                        },
+                        "streamSettings": {"network": "tcp", "security": "tls"},
+                    }
+                ],
+            },
+        },
+    )
+    assert result.status_code == 200
+    node = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes",
+        json={"source_index": 0},
+    ).json()["node"]
+    for username in ["alice", "bob"]:
+        assert (
+            client.post(
+                "/api/v1/users",
+                json={"username": username, "display_name": username.title()},
+            ).status_code
+            == 201
+        )
+    plan = client.post(
+        "/api/v1/plans",
+        json={
+            "name": "Runtime users",
+            "traffic_limit_gb": 64,
+            "node_ids": [node["id"]],
+        },
+    ).json()["plan"]
+    alice = client.post("/api/v1/users/alice/plan", json={"plan_id": plan["id"]}).json()
+    bob = client.post("/api/v1/users/bob/plan", json={"plan_id": plan["id"]}).json()
+    alice_id = alice["provisioning_batches"][0]["body"]["inbound_clients"][0]["client"]["id"]
+    bob_id = bob["provisioning_batches"][0]["body"]["inbound_clients"][0]["client"]["id"]
+
+    response = client.get(
+        f"/api/v1/servers/{server_id}/xray/runtime/credentials/reconciliation"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["license_required"] is False
+    assert payload["has_scan"] is True
+    assert payload["node_count"] == 1
+    assert payload["expected_credential_count"] == 2
+    assert payload["matched_runtime_client_count"] == 2
+    assert payload["in_sync_count"] == 0
+    assert payload["missing_runtime_count"] == 0
+    assert payload["out_of_sync_count"] == 1
+    assert payload["missing_runtime_client_count"] == 1
+    assert payload["extra_runtime_client_count"] == 1
+    assert payload["entries"] == [
+        {
+            "node_id": node["id"],
+            "node_name": "edge-runtime-credentials vless-443",
+            "protocol": "vless",
+            "inbound_tag": "vless-443",
+            "enabled": True,
+            "runtime_source_index": 0,
+            "runtime_display_name": "vless-443",
+            "expected_emails": ["alice__vless-443", "bob__vless-443"],
+            "runtime_emails": ["alice__vless-443", "orphan@example.com"],
+            "missing_runtime_emails": ["bob__vless-443"],
+            "extra_runtime_emails": ["orphan@example.com"],
+            "status": "drift",
+        }
+    ]
+    serialized = json.dumps(payload)
+    assert alice_id not in serialized
+    assert bob_id not in serialized
+    assert "secret-runtime-client-id" not in serialized
+    assert "secret-orphan-client-id" not in serialized
+
+
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-traffic"}).json()

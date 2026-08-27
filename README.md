@@ -45,8 +45,8 @@ dispatch, domain-latency result ingestion, cross-node target comparison, and
 external Xray takeover for legacy `-config` plus `-confdir` nodes, plus latest
 agent scan-result persistence for Xray runtime status and inbound inventory
 with sanitized runtime summaries, managed-node drafts, and runtime/catalog
-reconciliation plus stale-node public-field sync, agent log-file listing/cleanup,
-nginx stream-port cleanup, and
+reconciliation plus stale-node public-field sync and credential email drift
+checks, agent log-file listing/cleanup, nginx stream-port cleanup, and
 compatibility wrappers for non-stream Xray/nginx install/remove agent routes,
 plus optional standalone probe Worker token access for hiding direct public
 probe endpoints.
@@ -58,7 +58,8 @@ traffic hotspots, three-carrier route badges, probe network drill-down charts,
 target comparison rows, external Xray takeover controls, Xray scan status in
 the inventory table, runtime inventory summaries in the config workspace,
 runtime-to-managed-node creation, missing-node bulk import, and catalog drift
-status plus stale-node sync controls, log-file and nginx stream cleanup controls, a change-set
+status plus stale-node sync and credential drift controls, log-file and nginx
+stream cleanup controls, a change-set
 dispatch/rollback workspace with a routed-outbound planner form, and an
 expandable command-result inspector. It
 does not yet replace the full MMWX product.
