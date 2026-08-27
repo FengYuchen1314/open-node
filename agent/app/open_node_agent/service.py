@@ -435,17 +435,27 @@ WantedBy=multi-user.target
         config = json.loads(self.config.read_text())
         if config.get("nginx_binary"):
             command("runuser", "-u", self.user, "--", config["nginx_binary"], "-V")
-        command(
-            "runuser",
-            "-u",
-            self.user,
-            "--",
-            self.root / "runtime/xray",
-            "run",
-            "-test",
-            "-config",
-            self.root / "config/xray.json",
-        )
+        script = """
+import importlib.util
+import subprocess
+import sys
+from pathlib import Path
+from open_node_agent.config import load_config
+config = load_config(Path(sys.argv[1]))
+if (config.state_dir / 'xray-release-transaction.json').exists():
+    raise SystemExit('Xray release recovery must finish before Agent deployment')
+if importlib.util.find_spec('open_node_agent.xray_releases') is None:
+    if (config.state_dir / 'xray-release.json').exists():
+        raise SystemExit('This Agent release cannot read managed Xray selections')
+    binary = config.xray_binary
+else:
+    from open_node_agent.xray_releases import read_state, selected_binary
+    if not read_state(config.state_dir).current.enabled:
+        raise SystemExit(0)
+    binary = selected_binary(config)
+subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)], check=True)
+"""
+        command("runuser", "-u", self.user, "--", python, "-c", script, self.config)
 
     def set_current(self, release):
         current = self.root / "current"

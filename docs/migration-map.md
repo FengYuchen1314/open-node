@@ -210,9 +210,12 @@ This document records the starting source map for the Open Node refactor.
 
 These passing command and snapshot checks do not prove a complete replacement:
 
-- Complete remote upgrade/uninstall command handlers and Xray binary upgrade
-  automation. The host CLI's managed systemd install/upgrade/rollback/removal
-  path is implemented and tested; it is not a remote lifecycle handler.
+- Complete remote Agent upgrade/uninstall command handlers. The host CLI's
+  managed systemd install/upgrade/rollback/removal path is implemented; it is
+  not a remote lifecycle handler. Independent managed Xray package installation,
+  version switching, explicit rollback, durable failure recovery and
+  data-preserving removal are implemented separately in
+  [xray-releases.md](xray-releases.md), without changing root-owned bootstrap files.
 - Legacy `securechan-v1` WebSocket compatibility is implemented and verified
   with the unmodified pinned Agent. Legacy HTTP/pull callbacks remain distinct
   from the independent HTTP lease API and require the explicit migration in

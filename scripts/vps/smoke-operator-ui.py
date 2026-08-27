@@ -202,6 +202,23 @@ def exercise(
             flush=True,
         )
 
+        page.set_viewport_size({"width": 320, "height": 740})
+        title = page.locator(".v-app-bar-title")
+        page.wait_for_function(
+            """el => {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const text = range.getBoundingClientRect();
+            const box = el.getBoundingClientRect();
+            return text.left >= box.left - 1 && text.right <= box.right + 1;
+        }""",
+            arg=title.element_handle(),
+            timeout=5000,
+        )
+        check_layout(page)
+        page.screenshot(path=output / "overview-narrow.png", full_page=True)
+        page.set_viewport_size({"width": 1440, "height": 900})
+
         page.goto(f"{url}/config")
         page.get_by_role("tab", name="Files", exact=True).click()
         nginx_form = page.locator("form").filter(

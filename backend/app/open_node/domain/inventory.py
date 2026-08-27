@@ -196,6 +196,8 @@ class AgentOperationKind(StrEnum):
     XRAY_INSTALL_LEGACY = "xray_install_legacy"
     XRAY_REMOVE_LEGACY = "xray_remove_legacy"
     XRAY_INSTALL = "xray_install"
+    XRAY_RELEASE = "xray_release"
+    XRAY_ROLLBACK = "xray_rollback"
     XRAY_REMOVE = "xray_remove"
     NGINX_CONFIG_READ = "nginx_config_read"
     NGINX_CONFIG_WRITE = "nginx_config_write"
@@ -1022,6 +1024,13 @@ class AgentDomainLatencyProbeRequest(BaseModel):
         if value.startswith("[") and value.endswith("]"):
             value = value[1:-1]
         return value
+
+
+class AgentXrayInstallOperationRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    version: str = Field(default="v26.3.27", pattern=r"^v[0-9]{1,4}\.[0-9]{1,2}\.[0-9]{1,2}$")
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    start: bool | None = None
 
 
 class AgentNginxInstallOperationRequest(BaseModel):

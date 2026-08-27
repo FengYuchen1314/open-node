@@ -57,10 +57,14 @@ including newly provisioned users, failed-restart rollback, and restart-safe
 command deduplication. The [host deployment CLI](docs/agent-deployment.md) adds
 a dedicated systemd account, per-release environments, upgrade rollback,
 interrupted-switch recovery, and data-preserving uninstall/reinstall.
+Managed [Xray release operations](docs/xray-releases.md) add checksum-pinned
+installation, version switching, explicit rollback and data-preserving removal.
+They preserve the root-owned bootstrap binary and recover the prior runtime
+after a failed start, command timeout or interrupted switch.
 Optional [Nginx and certificate management](docs/nginx-management.md) supports
 owned HTTP/TLS sites, supplied certificate rotation, and atomic Nginx/Xray
-tunnel deployment with configurable listeners and failure recovery. Remote lifecycle
-handlers, WARP, and fork-specific runtime workflows are
+tunnel deployment with configurable listeners and failure recovery. Remote Agent
+upgrade/uninstall handlers, WARP, and fork-specific runtime workflows are
 still incomplete; control-plane wrappers
 for those operations do not imply the independent agent implements them.
 

@@ -38,6 +38,7 @@ from open_node.domain.inventory import (
     AgentXrayConfigFileReadOperationRequest,
     AgentXrayConfigFileWriteOperationRequest,
     AgentXrayConfigOperationRequest,
+    AgentXrayInstallOperationRequest,
     AgentXraySystemConfigOperationRequest,
     AgentXrayTakeoverExternalOperationRequest,
     AgentXrayTestConfigOperationRequest,
@@ -1539,10 +1540,48 @@ async def queue_xray_install_operation(
     server_id: UUID,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+    payload: AgentXrayInstallOperationRequest | None = None,
 ) -> AgentCommandCreateResponse:
-    return await _queue_maintenance_command(
+    return await _queue_server_command(
         server_id,
-        "/api/child/xray/install-stream",
+        AgentCommandCreate(
+            method="POST", path="/api/child/xray/install-stream", stream=True,
+            timeout_ms=300_000, body=payload.model_dump(exclude_none=True) if payload else None,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/release",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_release_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id, AgentCommandCreate(method="GET", path="/api/child/xray/release"),
+        store, connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/rollback",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_rollback_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="POST", path="/api/child/xray/rollback", timeout_ms=300_000),
         store,
         connections,
     )

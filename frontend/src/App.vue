@@ -64,8 +64,9 @@ async function logout() {
       <v-app-bar-nav-icon v-if="mobile" aria-label="Toggle navigation" @click="drawer = !drawer" />
       <v-app-bar-title>Open Node</v-app-bar-title>
       <template #append>
-        <v-chip color="success" variant="tonal" prepend-icon="mdi-lock-open-check-outline">
-          Free edition
+        <v-chip class="edition-badge" color="success" variant="tonal" prepend-icon="mdi-lock-open-check-outline"
+          title="Free edition" aria-label="Free edition">
+          <span class="edition-label">Free edition</span>
         </v-chip>
         <v-btn icon="mdi-logout" title="Sign out" aria-label="Sign out" @click="logout" />
       </template>
@@ -83,3 +84,10 @@ async function logout() {
     </v-main>
   </v-app>
 </template>
+
+<style scoped>
+@media (max-width: 400px) {
+  .edition-label { display: none; }
+  .edition-badge :deep(.v-chip__prepend) { margin-inline: 0; }
+}
+</style>

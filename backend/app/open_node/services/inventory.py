@@ -433,6 +433,9 @@ _XRAY_SNAPSHOT_REFRESH_QUERY = "snapshot_source=master_write"
 _XRAY_SNAPSHOT_REFRESH_TIMEOUT_MS = 60_000
 _XRAY_RECONNECT_SYNC_TIMEOUT_MS = 60_000
 _XRAY_MUTATING_PATH_PREFIXES = (
+    "/api/child/xray/install",
+    "/api/child/xray/install-stream",
+    "/api/child/xray/rollback",
     "/api/child/tunnel/deploy",
     "/api/child/inbounds",
     "/api/child/outbounds",

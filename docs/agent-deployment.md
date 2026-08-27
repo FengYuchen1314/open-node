@@ -72,10 +72,17 @@ sudo python3 agent/app/open_node_agent/service.py \
 The installer creates a matching non-login service account. It restricts
 writes to the Agent's configuration/state directories and gives the service
 only the capability needed for low-numbered listener ports. `KillMode=control-group`
-contains the owned Xray child if the Agent exits abruptly. Program files and
-installation metadata remain root-owned; tokens, config files, and the execution
-journal remain private. Service definitions or external systemd overrides that
+contains the owned Xray child if the Agent exits abruptly. Agent program files,
+the bootstrap runtime and installation metadata remain root-owned; tokens,
+config files, and the execution journal remain private. Service definitions or
+external systemd overrides that
 do not match the recorded installation cause updates/removal to stop for review.
+
+Remote [Xray release management](xray-releases.md) retains that root-owned
+bootstrap binary and uses a separate checksum-verified release cache in the
+Agent-owned state directory. It does not make the Agent package or installation
+metadata writable by the Agent. Host upgrade preflight validates the selected
+runtime and rejects unresolved runtime switches or incompatible older packages.
 
 Before enabling the service, the installer validates the Agent configuration
 and Xray config as the service account. Readiness then checks the systemd PID,
@@ -160,9 +167,10 @@ cover path/ownership guards, stale health reports, and stopped-service behavior.
 
 This installer uses `runtime_mode: managed` only. Control of an independently
 managed external Xray systemd unit, broader OS/architecture coverage, remote
-Agent-upgrade/uninstall command handlers, Xray binary upgrade automation,
-WARP, and full control-plane release packaging remain
-separate work. See [the migration map](migration-map.md) for the remaining scope.
+Agent-upgrade/uninstall command handlers and WARP remain separate work.
+Managed Xray package installation, rollback and data-preserving removal now
+have their own [release workflow](xray-releases.md) and real runtime smoke.
+See [the migration map](migration-map.md) for the remaining scope.
 Owned Nginx operation and certificate deployment are covered by their separate
 runtime smokes; [central certificate issuance/renewal](certificates.md) does not
 require adding an ACME client to the Agent installation.

@@ -35,13 +35,15 @@ runtime = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runtime)
 
 
-def variant_wheel(source, work, variant):
+def variant_wheel(source, work, variant, *, runtime_suffix=None):
     directory = work / variant
     directory.mkdir()
     target = directory / source.name
     with zipfile.ZipFile(source) as archive:
         files = {name: archive.read(name) for name in archive.namelist()}
-    if variant == "good":
+    if runtime_suffix is not None:
+        files["open_node_agent/runtime.py"] += runtime_suffix.encode()
+    elif variant == "good":
         files["open_node_agent/__init__.py"] += b"\nDEPLOYMENT_SMOKE_VARIANT = True\n"
     else:
         condition = (

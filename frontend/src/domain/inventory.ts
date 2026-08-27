@@ -47,6 +47,8 @@ export type AgentOperationKind =
   | "xray_install_legacy"
   | "xray_remove_legacy"
   | "xray_install"
+  | "xray_release"
+  | "xray_rollback"
   | "xray_remove"
   | "nginx_config_read"
   | "nginx_config_write"
@@ -557,6 +559,12 @@ export interface AgentDomainLatencyProbeRequest {
   command_timeout_ms?: number;
 }
 
+export interface AgentXrayInstallOperationRequest {
+  version?: string;
+  sha256?: string;
+  start?: boolean;
+}
+
 export interface AgentNginxInstallOperationRequest {
   domain?: string | null;
   command_timeout_ms?: number;
@@ -757,6 +765,7 @@ export interface AgentUpdateMasterURLOperationRequest {
 }
 
 export type AgentOperationPayload =
+  | AgentXrayInstallOperationRequest
   | AgentDomainLatencyProbeRequest
   | AgentNginxInstallOperationRequest
   | AgentServiceControlOperationRequest

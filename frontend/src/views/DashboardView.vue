@@ -89,6 +89,17 @@ const logFilesForm = reactive({
 const nginxToolsForm = reactive({
   stream_port: 443,
 });
+const xrayInstallOpen = ref(false);
+const xrayAction = ref<"xray_remove" | "xray_rollback" | "">("");
+const xrayTarget = ref("");
+const xrayConfirmed = ref(false);
+const xrayReleaseForm = reactive({ version: "v26.3.27", sha256: "", state: "preserve" });
+const xrayReleaseValid = computed(() => {
+  const version = (xrayReleaseForm.version ?? "").trim();
+  const checksum = xrayReleaseForm.sha256.trim();
+  return /^v[0-9]{1,4}\.[0-9]{1,2}\.[0-9]{1,2}$/.test(version)
+    && (checksum ? /^[0-9a-f]{64}$/.test(checksum) : ["v26.3.27", "v26.2.6"].includes(version));
+});
 
 const connectionModes: Array<{ title: string; value: ConnectionMode }> = [
   { title: "Auto", value: "auto" },
@@ -166,6 +177,8 @@ const maintenanceOperations: Array<{
     color: "secondary",
   },
   { title: "Remove Xray", icon: "mdi-delete-outline", kind: "xray_remove", color: "error" },
+  { title: "Xray release", icon: "mdi-information-outline", kind: "xray_release", color: "info" },
+  { title: "Roll back Xray", icon: "mdi-restore", kind: "xray_rollback", color: "warning" },
   {
     title: "Install Nginx",
     icon: "mdi-server-plus",
@@ -500,6 +513,20 @@ async function queueQuickOperation(kind: SimpleAgentOperation) {
     return;
   }
 
+  if (kind === "xray_install") {
+    xrayTarget.value = commandForm.server_id;
+    errorMessage.value = "";
+    xrayInstallOpen.value = true;
+    return;
+  }
+  if (kind === "xray_remove" || kind === "xray_rollback") {
+    xrayTarget.value = commandForm.server_id;
+    xrayConfirmed.value = false;
+    errorMessage.value = "";
+    xrayAction.value = kind;
+    return;
+  }
+
   savingOperation.value = kind;
   errorMessage.value = "";
   try {
@@ -513,10 +540,11 @@ async function queueQuickOperation(kind: SimpleAgentOperation) {
 }
 
 async function queuePayloadOperation(
-  kind: PayloadAgentOperation,
+  kind: PayloadAgentOperation | "xray_install" | "xray_remove" | "xray_rollback",
   payload: AgentOperationPayload,
+  serverId = commandForm.server_id,
 ) {
-  if (!commandForm.server_id) {
+  if (!serverId) {
     errorMessage.value = "Target server is required.";
     return false;
   }
@@ -524,7 +552,7 @@ async function queuePayloadOperation(
   savingOperation.value = kind;
   errorMessage.value = "";
   try {
-    await queueAgentOperation(commandForm.server_id, kind, payload);
+    await queueAgentOperation(serverId, kind, payload);
     await refreshCommands(servers.value);
     return true;
   } catch (error) {
@@ -533,6 +561,21 @@ async function queuePayloadOperation(
   } finally {
     savingOperation.value = "";
   }
+}
+
+async function installXrayRelease() {
+  if (!xrayReleaseValid.value || savingOperation.value) return;
+  const queued = await queuePayloadOperation("xray_install", {
+    version: xrayReleaseForm.version.trim(),
+    sha256: xrayReleaseForm.sha256.trim() || undefined,
+    start: xrayReleaseForm.state === "preserve" ? undefined : xrayReleaseForm.state === "start",
+  }, xrayTarget.value);
+  if (queued) xrayInstallOpen.value = false;
+}
+
+async function confirmXrayAction() {
+  if (!xrayAction.value || !xrayConfirmed.value || savingOperation.value) return;
+  if (await queuePayloadOperation(xrayAction.value, {}, xrayTarget.value)) xrayAction.value = "";
 }
 
 async function queueServiceRestart(service: AgentServiceName) {
@@ -1635,5 +1678,53 @@ function truncateText(value: string, maxLength: number) {
         />
       </v-sheet>
     </section>
+    <v-dialog v-model="xrayInstallOpen" max-width="560" :persistent="Boolean(savingOperation)">
+      <v-card title="Install / Upgrade Xray" class="xray-release-dialog">
+        <v-form @submit.prevent="installXrayRelease">
+          <v-card-text>
+            <p class="mb-4">{{ servers.find(server => server.id === xrayTarget)?.name }}</p>
+            <v-alert v-if="errorMessage" type="error" variant="tonal" class="mb-4">{{ errorMessage }}</v-alert>
+            <v-combobox v-model="xrayReleaseForm.version" :items="['v26.3.27', 'v26.2.6']"
+              label="Xray version" variant="outlined" :disabled="Boolean(savingOperation)" />
+            <v-textarea v-model="xrayReleaseForm.sha256" label="Archive SHA-256"
+              class="xray-checksum" rows="2" auto-grow no-resize variant="outlined" maxlength="64"
+              :disabled="Boolean(savingOperation)" />
+            <v-select v-model="xrayReleaseForm.state" label="Runtime state"
+              :items="[{ title: 'Keep current state', value: 'preserve' }, { title: 'Running', value: 'start' }, { title: 'Stopped', value: 'stop' }]"
+              variant="outlined" :disabled="Boolean(savingOperation)" />
+          </v-card-text>
+          <v-card-actions>
+            <v-btn :disabled="Boolean(savingOperation)" @click="xrayInstallOpen = false">Cancel</v-btn>
+            <v-spacer />
+            <v-btn type="submit" color="primary" prepend-icon="mdi-download-network-outline"
+              :disabled="!xrayReleaseValid || Boolean(savingOperation)" :loading="savingOperation === 'xray_install'">Install</v-btn>
+          </v-card-actions>
+        </v-form>
+      </v-card>
+    </v-dialog>
+    <v-dialog :model-value="Boolean(xrayAction)" max-width="480" :persistent="Boolean(savingOperation)"
+      @update:model-value="value => { if (!value) xrayAction = ''; }">
+      <v-card :title="xrayAction === 'xray_remove' ? 'Remove Xray' : 'Roll back Xray'" class="xray-release-dialog">
+        <v-card-text>
+          <v-alert v-if="errorMessage" type="error" variant="tonal">{{ errorMessage }}</v-alert>
+          <p>{{ servers.find(server => server.id === xrayTarget)?.name }}</p>
+          <v-checkbox v-model="xrayConfirmed" label="Confirm runtime change" hide-details :disabled="Boolean(savingOperation)" />
+        </v-card-text>
+        <v-card-actions>
+          <v-btn :disabled="Boolean(savingOperation)" @click="xrayAction = ''">Cancel</v-btn>
+          <v-spacer />
+          <v-btn :color="xrayAction === 'xray_remove' ? 'error' : 'warning'"
+            :prepend-icon="xrayAction === 'xray_remove' ? 'mdi-delete-outline' : 'mdi-restore'"
+            :disabled="!xrayConfirmed || Boolean(savingOperation)" :loading="Boolean(savingOperation)" @click="confirmXrayAction">Confirm</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
+
+<style scoped>
+.xray-release-dialog :deep(*) { letter-spacing: 0; }
+.xray-release-dialog :deep(.v-card-title) { white-space: normal; overflow-wrap: anywhere; }
+.xray-release-dialog p { overflow-wrap: anywhere; }
+.xray-checksum :deep(textarea) { font-family: monospace; font-size: 13px; overflow-wrap: anywhere; }
+</style>

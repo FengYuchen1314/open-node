@@ -333,6 +333,36 @@ The reference-agent smoke also creates a temporary administrator and signs in
 as the operator; the reference agent still authenticates only with its own
 bootstrap token. No test disables management authentication.
 
+## Managed Xray Release Smoke
+
+With the backend's browser extra/Chromium and a built Agent wheel on the VPS:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-xray-releases.py \
+  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --output /tmp/open-node-xray-release-shots < /dev/null
+```
+
+This root-only fixture installs dedicated non-root systemd Agents and uses
+official Xray `v26.2.6` and `v26.3.27` archives. Each transport verifies real
+version changes, process executable paths, actual VLESS forwarding, checksum
+rejection, validation before stopping the old runtime, and geodata discovery.
+It checks untouched root-owned bootstrap binaries and unchanged user config.
+
+The ordinary wheel is exercised first. A separate fixture-only wheel then
+supplies deterministic occupied-port and interruption faults while retaining
+the real Xray binaries. The smoke verifies failed-start rollback, timeout
+recovery, process-group crash recovery, an explicit interrupted-command result,
+and restoration of the ordinary Agent wheel. Removal/reinstallation preserve
+configuration and stopped intentions. Desktop/mobile browser checks submit
+real version/checksum requests and require acknowledgment before rollback.
+Temporary installations/accounts are purged; requested screenshots remain.
+
+Unit coverage also checks archive/path/size boundaries, cached file integrity,
+version mismatch, initial missing config, no-op reinstall preserving rollback,
+unresolved transaction rejection and removal with a damaged config. See
+[xray-releases.md](xray-releases.md) for ownership and recovery semantics.
+
 ## Multi-Node Change-Set Smoke
 
 On the designated VPS, build the frontend, install the backend's `browser`
@@ -363,6 +393,41 @@ lease races, overlapping reservations, draining earlier sequences, late
 rollback rejection, restart persistence and missing-column SQLite migration.
 
 ## Latest Verification
+
+The managed Xray release worktree passed on the designated VPS:
+
+- Backend: 252 tests; Agent: 110 tests; frontend: 87 tests and production build.
+- Ruff and Probe Worker TypeScript checks passed.
+- Real non-root systemd Agents changed between official Xray v26.2.6 and
+  v26.3.27 over WebSocket and HTTP. Tests checked actual executable paths,
+  VLESS forwarding, archive geodata, untouched root-owned bootstrap files,
+  unchanged user configuration and checksum/validation failures.
+- Fixture-only faults verified occupied-port rollback, command timeout,
+  process-group crash recovery and an explicit interrupted-command result.
+  Agent wheel rollback retained the selected runtime. Removal, stopped
+  reinstallation and explicit service start preserved configuration.
+- Installed-Agent forwarding, provisioning, revocation, failed-start recovery,
+  journal deduplication and stop-intent checks passed again on both transports.
+- Host service upgrade/rollback/removal, real Nginx HTTP/TLS and certificate
+  rotation, atomic tunnel recovery and all three multi-node transport pairings
+  passed again. Fixture installations and accounts were removed afterward.
+- Desktop 1440x900, mobile 390x844 and narrow 320x740 release dialogs submitted
+  real version/checksum requests, displayed the complete checksum and required
+  acknowledgment before rollback. Each change was followed by real forwarding.
+- The production image passed HTTPS/WSS, installed-Agent forwarding, private
+  identity and session persistence, volume backup/restore and image rollback.
+  Its operator flow also verified the complete product name at 320px after
+  compacting the edition badge; desktop/mobile screenshots were inspected.
+- The unmodified pinned reference Agent passed encrypted authentication,
+  controller restart, config refresh, drift acceptance and validation-gated
+  recovery again.
+
+These results do not close the remaining gates in
+[migration-map.md](migration-map.md), including remote Agent lifecycle
+handlers and broader protocol/host coverage. Existing Starlette/httpx
+deprecation and frontend bundle-size warnings remain.
+
+## Earlier Encrypted-Agent Verification
 
 The encrypted-Agent and safe-sync worktree passed on the designated VPS:
 

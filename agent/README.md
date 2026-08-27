@@ -84,6 +84,12 @@ batch client provisioning, host metrics/NICs, network speed, Xray stats, and
 bounded Xray logs. Network speed is bytes per second between successive speed
 requests; the first sample returns zero and counter resets never produce
 negative rates.
+Managed [Xray release operations](../docs/xray-releases.md) install explicit
+official versions using archive SHA-256 pins, validate existing configuration,
+retain a previous selection and recover failed/interrupted switches. Remote
+removal disables the owned child while preserving config and release cache.
+These commands do not overwrite the root-owned bootstrap runtime or external
+systemd services.
 Optional [owned Nginx management](../docs/nginx-management.md) includes service
 control, configuration/site files, HTTP/TLS sites, reverse proxies, stream-port
 cleanup, logs, and supplied certificate deployment/rotation with rollback.

@@ -75,6 +75,8 @@ const operationPaths: Record<AgentOperationKind, string> = {
   xray_install_legacy: "xray/install-legacy",
   xray_remove_legacy: "xray/remove-legacy",
   xray_install: "xray/install",
+  xray_release: "xray/release",
+  xray_rollback: "xray/rollback",
   xray_remove: "xray/remove",
   nginx_config_read: "nginx/config/read",
   nginx_config_write: "nginx/config/write",

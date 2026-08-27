@@ -11,6 +11,7 @@ from open_node_agent import __version__
 from open_node_agent.journal import CommandJournal
 from open_node_agent.nginx import NginxRuntime
 from open_node_agent.runtime import RuntimeFailure, XrayRuntime
+from open_node_agent.xray_releases import XrayReleases
 
 
 def telemetry() -> dict:
@@ -168,11 +169,16 @@ class Operations:
         self.runtime = runtime
         self.journal = journal
         self.nginx = NginxRuntime(runtime, journal)
+        self.releases = XrayReleases(runtime, journal)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
 
     async def scan(self) -> dict:
-        return {**await self.runtime.scan(), "nginx": await self.nginx.status()}
+        return {
+            **await self.runtime.scan(),
+            "nginx": await self.nginx.status(),
+            "runtime_release": self.releases.status(),
+        }
 
     def network_speed(self) -> dict:
         current = telemetry()["system"]
@@ -198,6 +204,20 @@ class Operations:
             raise RuntimeFailure("Command body must be an object")
         query = parse_qs(command.get("query") or "")
         async with self.runtime.lock:
+            if (
+                path in {"/api/child/xray/install", "/api/child/xray/install-stream"}
+                and method == "POST"
+            ):
+                return await self.releases.install(body)
+            if (
+                path in {"/api/child/xray/remove", "/api/child/xray/remove-stream"}
+                and method == "POST"
+            ):
+                return await self.releases.remove()
+            if path == "/api/child/xray/rollback" and method == "POST":
+                return await self.releases.rollback()
+            if path == "/api/child/xray/release" and method == "GET":
+                return self.releases.status()
             if path == "/api/child/tunnel/deploy" and method == "POST":
                 return await self.nginx.deploy_tunnel(body)
             if path.startswith("/api/child/nginx/") or path in {

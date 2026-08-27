@@ -4452,7 +4452,12 @@ def test_online_agent_websocket_persists_stream_data_until_reply(tmp_path: Path)
     assert all(frame["request_id"] == command["request_id"] for frame in payload["frames"])
 
     commands = client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"]
-    assert commands[0]["status"] == "succeeded"
+    assert next(row for row in commands if row["id"] == command["id"])["status"] == "succeeded"
+    assert any(
+        row["path"] == "/api/child/xray/config"
+        and row["query"] == "snapshot_source=master_write"
+        for row in commands
+    )
 
 
 def test_stream_command_stays_queued_when_agent_lacks_stream_capability(tmp_path: Path) -> None:

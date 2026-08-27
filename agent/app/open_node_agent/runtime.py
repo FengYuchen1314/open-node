@@ -76,6 +76,8 @@ def decode_config(raw: str | dict) -> dict:
 class XrayRuntime:
     def __init__(self, config: AgentConfig):
         self.config = config
+        self.binary = config.xray_binary
+        self.enabled = True
         self.process: asyncio.subprocess.Process | None = None
         self.log_task: asyncio.Task | None = None
         self.log = logging.Logger("open-node-xray")
@@ -94,7 +96,9 @@ class XrayRuntime:
             raise RuntimeFailure("Xray configuration exceeds 2 MiB")
         return decode_config(raw.decode())
 
-    async def validate(self, content: str | dict) -> tuple[bool, str]:
+    async def validate(
+        self, content: str | dict, *, binary: Path | None = None
+    ) -> tuple[bool, str]:
         config = decode_config(content)
         self.config.xray_config.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         fd, path = tempfile.mkstemp(
@@ -104,7 +108,7 @@ class XrayRuntime:
             with os.fdopen(fd, "w") as stream:
                 json.dump(config, stream)
             code, output = await run_command(
-                str(self.config.xray_binary), "run", "-test", "-config", path
+                str(binary or self.binary), "run", "-test", "-config", path
             )
             return code == 0, output[-8192:]
         finally:
@@ -119,6 +123,8 @@ class XrayRuntime:
         return self.process is not None and self.process.returncode is None
 
     async def start(self) -> None:
+        if not self.enabled:
+            raise RuntimeFailure("Xray is removed; install a runtime before starting it")
         if await self.running():
             return
         ok, output = await self.validate(self.read())
@@ -130,7 +136,7 @@ class XrayRuntime:
                 raise RuntimeFailure(f"Xray start failed: {output[-8192:]}")
         else:
             self.process = await asyncio.create_subprocess_exec(
-                str(self.config.xray_binary),
+                str(self.binary),
                 "run",
                 "-config",
                 str(self.config.xray_config),
@@ -194,7 +200,7 @@ class XrayRuntime:
         except (OSError, ValueError):
             config = {}
         try:
-            _, output = await run_command(str(self.config.xray_binary), "version", timeout=5)
+            _, output = await run_command(str(self.binary), "version", timeout=5)
             version = output.splitlines()[0][:120] if output else None
         except (OSError, ValueError, TimeoutError):
             version = None
@@ -227,7 +233,7 @@ class XrayRuntime:
         if not endpoint or not await self.running():
             return None
         code, output = await run_command(
-            str(self.config.xray_binary),
+            str(self.binary),
             "api",
             "statsquery",
             "--server=" + endpoint,

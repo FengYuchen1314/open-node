@@ -24,6 +24,17 @@ import {
 } from "./inventory";
 
 describe("inventory API client", () => {
+  it.each(["xray_install", "xray_release", "xray_rollback"] as const)("queues %s with version pins", async (operation) => {
+    const payload = operation === "xray_install" ? { version: "v26.2.6", sha256: "a".repeat(64), start: false } : undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      expect(input.toString()).toBe(`/api/v1/servers/srv_1/operations/xray/${operation.slice(5)}`);
+      expect(init?.method).toBe("POST");
+      expect(init?.body ? JSON.parse(init.body.toString()) : undefined).toEqual(payload);
+      return new Response(JSON.stringify({ command: { id: "release-command" } }), { status: 201 });
+    };
+    expect((await queueAgentOperation("srv_1", operation, payload, fetcher)).command.id).toBe("release-command");
+  });
+
   it("reads only public Agent identity metadata", async () => {
     const identity = { enabled: true, protocol: "securechan-v1", public_key: "public-key",
       fingerprint: "fingerprint", license_required: false };
