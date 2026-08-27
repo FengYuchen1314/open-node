@@ -30,7 +30,8 @@ This document records the starting source map for the Open Node refactor.
      agent leasing, and agent result submission.
    - Done: WebSocket agent auth, heartbeat, traffic ingestion, immediate
      `rpc_call` dispatch, and `rpc_reply` command completion.
-   - Next: streaming `rpc_stream_data` persistence and specialized child
-     command workflows.
+   - Done: streaming `rpc_stream_data` frame persistence for `stream=true`
+     WebSocket RPC commands.
+   - Next: specialized child command workflows.
 4. Port probe read-only API and public status UI.
 5. Revisit Xray integration once the agent protocol surface is stable.

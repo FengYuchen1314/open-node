@@ -1,6 +1,7 @@
 import type {
   AgentCommandCreateRequest,
   AgentCommandCreateResponse,
+  AgentCommandStreamFramesResponse,
   ServerCommandsResponse,
   ServerTelemetryResponse,
   ServerCreateRequest,
@@ -73,6 +74,20 @@ export async function createServerCommand(
     throw await apiError(response, "Server command create request failed");
   }
   return response.json() as Promise<AgentCommandCreateResponse>;
+}
+
+export async function listCommandStreamFrames(
+  serverId: string,
+  commandId: string,
+  fetcher = fetch,
+): Promise<AgentCommandStreamFramesResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/commands/${commandId}/stream`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Command stream frame request failed");
+  }
+  return response.json() as Promise<AgentCommandStreamFramesResponse>;
 }
 
 async function apiError(response: Response, fallback: string): Promise<Error> {

@@ -137,6 +137,16 @@ export interface AgentCommand {
   updated_at: string;
 }
 
+export interface AgentCommandStreamFrame {
+  id: string;
+  command_id: string;
+  server_id: string;
+  request_id: string;
+  sequence: number;
+  data: string;
+  received_at: string;
+}
+
 export interface AgentCommandCreateResponse {
   command: AgentCommand;
   license_required: false;
@@ -145,6 +155,13 @@ export interface AgentCommandCreateResponse {
 export interface ServerCommandsResponse {
   server_id: string;
   commands: AgentCommand[];
+  license_required: false;
+}
+
+export interface AgentCommandStreamFramesResponse {
+  server_id: string;
+  command_id: string;
+  frames: AgentCommandStreamFrame[];
   license_required: false;
 }
 

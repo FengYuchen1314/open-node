@@ -48,6 +48,8 @@ class AgentConnectionManager:
         connection = self._connections.get(command.server_id)
         if not connection or not connection.capabilities.rpc:
             return command
+        if command.stream and not connection.capabilities.stream:
+            return command
 
         try:
             leased = store.lease_command_for_push(command.id)

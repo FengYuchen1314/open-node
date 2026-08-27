@@ -4,6 +4,7 @@ import {
   createServer,
   createServerCommand,
   getLatestTelemetry,
+  listCommandStreamFrames,
   listServerCommands,
   listServers,
 } from "./inventory";
@@ -156,5 +157,39 @@ describe("inventory API client", () => {
 
     expect(response.command.status).toBe("pending");
     expect(headers).toEqual({ "Content-Type": "application/json" });
+  });
+
+  it("lists command stream frames without sending license headers", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          command_id: "cmd_1",
+          frames: [
+            {
+              id: "frame_1",
+              command_id: "cmd_1",
+              server_id: "srv_1",
+              request_id: "srv_1-abc",
+              sequence: 1,
+              data: "data: installing\n\n",
+              received_at: "2026-08-27T00:00:00Z",
+            },
+          ],
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await listCommandStreamFrames("srv_1", "cmd_1", fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/commands/cmd_1/stream");
+    expect(response.frames[0].data).toBe("data: installing\n\n");
+    expect(headers).toBeUndefined();
   });
 });

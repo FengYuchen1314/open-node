@@ -467,6 +467,121 @@ def test_online_agent_websocket_receives_rpc_call_and_completes_command(tmp_path
     assert commands[0]["result_body"] == {"hostname": "edge-ws-rpc-host"}
 
 
+def test_online_agent_websocket_persists_stream_data_until_reply(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-stream"}).json()
+    server_id = created["server"]["id"]
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-stream-host",
+                    "capabilities": {"rpc": True, "stream": True},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+
+        queued = client.post(
+            f"/api/v1/servers/{server_id}/commands",
+            json={
+                "method": "POST",
+                "path": "/api/child/xray/install-stream",
+                "timeout_ms": 5000,
+                "stream": True,
+            },
+        )
+        assert queued.status_code == 201
+        command = queued.json()["command"]
+        assert command["status"] == "leased"
+        assert command["stream"] is True
+
+        rpc_call = websocket.receive_json()
+        assert rpc_call["type"] == "rpc_call"
+        assert rpc_call["payload"]["request_id"] == command["request_id"]
+        assert rpc_call["payload"]["stream"] is True
+
+        websocket.send_json(
+            {
+                "type": "rpc_stream_data",
+                "payload": {
+                    "request_id": command["request_id"],
+                    "data": "data: installing xray\n\n",
+                },
+            }
+        )
+        websocket.send_json(
+            {
+                "type": "rpc_stream_data",
+                "payload": {
+                    "request_id": command["request_id"],
+                    "data": "data: xray started\n\n",
+                },
+            }
+        )
+        websocket.send_json(
+            {
+                "type": "rpc_reply",
+                "payload": {"request_id": command["request_id"], "status": 200},
+            }
+        )
+        assert websocket.receive_json()["type"] == "rpc_reply_ack"
+
+    stream_response = client.get(
+        f"/api/v1/servers/{server_id}/commands/{command['id']}/stream"
+    )
+    assert stream_response.status_code == 200
+    payload = stream_response.json()
+    assert payload["license_required"] is False
+    assert payload["server_id"] == server_id
+    assert payload["command_id"] == command["id"]
+    assert [frame["sequence"] for frame in payload["frames"]] == [1, 2]
+    assert [frame["data"] for frame in payload["frames"]] == [
+        "data: installing xray\n\n",
+        "data: xray started\n\n",
+    ]
+    assert all(frame["request_id"] == command["request_id"] for frame in payload["frames"])
+
+    commands = client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"]
+    assert commands[0]["status"] == "succeeded"
+
+
+def test_stream_command_stays_queued_when_agent_lacks_stream_capability(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-no-stream"}).json()
+    server_id = created["server"]["id"]
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-no-stream-host",
+                    "capabilities": {"rpc": True, "stream": False},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+
+        queued = client.post(
+            f"/api/v1/servers/{server_id}/commands",
+            json={
+                "method": "POST",
+                "path": "/api/child/xray/install-stream",
+                "stream": True,
+            },
+        )
+
+    assert queued.status_code == 201
+    command = queued.json()["command"]
+    assert command["status"] == "pending"
+    assert command["attempts"] == 0
+
+
 def test_agent_websocket_invalid_token_returns_auth_failure(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 

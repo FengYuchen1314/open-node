@@ -4,6 +4,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import {
   defaultServerCreateRequest,
   type AgentCommand,
+  type AgentCommandStreamFrame,
   type AgentTelemetry,
   type ConnectionMode,
   type ServerCreateRequest,
@@ -15,6 +16,7 @@ import {
   createServer,
   createServerCommand,
   getLatestTelemetry,
+  listCommandStreamFrames,
   listServerCommands,
   listServers,
 } from "../services/inventory";
@@ -22,6 +24,7 @@ import {
 const servers = ref<ServerSummary[]>([]);
 const telemetryByServer = ref<Record<string, AgentTelemetry | null>>({});
 const commandsByServer = ref<Record<string, AgentCommand[]>>({});
+const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({});
 const loading = ref(false);
 const saving = ref(false);
 const savingCommand = ref(false);
@@ -147,7 +150,24 @@ async function refreshCommands(nextServers: ServerSummary[]) {
       }
     }),
   );
-  commandsByServer.value = Object.fromEntries(entries);
+  const nextCommandsByServer: Record<string, AgentCommand[]> = Object.fromEntries(entries);
+  commandsByServer.value = nextCommandsByServer;
+  await refreshStreamFrames(Object.values(nextCommandsByServer).flat());
+}
+
+async function refreshStreamFrames(commands: AgentCommand[]) {
+  const streamCommands = commands.filter((command) => command.stream);
+  const entries = await Promise.all(
+    streamCommands.map(async (command) => {
+      try {
+        const response = await listCommandStreamFrames(command.server_id, command.id);
+        return [command.id, response.frames] as const;
+      } catch {
+        return [command.id, []] as const;
+      }
+    }),
+  );
+  streamFramesByCommand.value = Object.fromEntries(entries);
 }
 
 function syncCommandTarget(nextServers: ServerSummary[]) {
@@ -302,7 +322,18 @@ function formatPercent(used: number, total: number) {
 
 function commandSubtitle(command: AgentCommand) {
   const status = command.result_status ? `status ${command.result_status}` : "waiting";
-  return `${command.attempts} attempts, ${status}`;
+  const frames = streamFramesByCommand.value[command.id] ?? [];
+  const stream = command.stream ? `, ${frames.length} stream frames` : "";
+  return `${command.attempts} attempts, ${status}${stream}`;
+}
+
+function latestStreamData(command: AgentCommand) {
+  const frames = streamFramesByCommand.value[command.id] ?? [];
+  const latest = frames[frames.length - 1]?.data.trim();
+  if (!latest) {
+    return "";
+  }
+  return latest.length > 180 ? `${latest.slice(0, 177)}...` : latest;
 }
 </script>
 
@@ -593,6 +624,9 @@ function commandSubtitle(command: AgentCommand) {
                 :icon="commandStatusMeta[command.status].icon"
               />
             </template>
+            <div v-if="latestStreamData(command)" class="command-stream-snippet">
+              {{ latestStreamData(command) }}
+            </div>
           </v-list-item>
         </v-list>
         <div v-else class="empty-command">No commands queued.</div>

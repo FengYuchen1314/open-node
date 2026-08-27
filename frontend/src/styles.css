@@ -227,6 +227,20 @@ body {
   margin-top: 14px;
 }
 
+.command-stream-snippet {
+  background: #eef3f1;
+  border-radius: 6px;
+  color: #263532;
+  font-family:
+    "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+}
+
 .empty-command {
   color: #66736f;
   font-size: 13px;

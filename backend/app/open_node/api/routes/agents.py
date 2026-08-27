@@ -11,6 +11,7 @@ from open_node.domain.inventory import (
     AgentCommandLeaseResponse,
     AgentCommandResultRequest,
     AgentCommandResultResponse,
+    AgentCommandStreamDataRequest,
     AgentHeartbeatRequest,
     AgentHeartbeatResponse,
     AgentRead,
@@ -241,6 +242,15 @@ async def _handle_agent_ws_message(
                 "payload": {"request_id": command.request_id, "status": command.status},
             }
         )
+        return
+
+    if message_type == "rpc_stream_data":
+        try:
+            store.append_command_stream_frame(
+                AgentCommandStreamDataRequest.model_validate({**payload, "token": token})
+            )
+        except (CommandNotFoundError, InvalidAgentTokenError, ValidationError) as exc:
+            await _send_ws_error(websocket, str(exc))
         return
 
     await _send_ws_error(websocket, f"unsupported message type: {message_type}")

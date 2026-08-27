@@ -82,3 +82,8 @@ When a command is created for a server with an active RPC-capable socket, Open
 Node leases that persisted command and immediately sends an MMWX-compatible
 `rpc_call` payload. The agent can complete it over the socket with `rpc_reply`;
 offline or non-RPC agents still use the HTTP lease/result endpoints.
+
+Stream-capable agents can also receive `rpc_call` payloads with `stream=true`.
+They may send any number of MMWX-compatible `rpc_stream_data` text frames before
+the final `rpc_reply`. Open Node persists each frame in command sequence order
+and exposes them at `/api/v1/servers/{server_id}/commands/{command_id}/stream`.

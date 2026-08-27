@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     create_engine,
     select,
 )
@@ -26,6 +27,8 @@ from open_node.domain.inventory import (
     AgentCommandRead,
     AgentCommandResultRequest,
     AgentCommandStatus,
+    AgentCommandStreamDataRequest,
+    AgentCommandStreamFrameRead,
     AgentHeartbeatRequest,
     AgentRead,
     AgentRegistrationRequest,
@@ -167,6 +170,25 @@ class CommandModel(Base):
     leased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CommandStreamFrameModel(Base):
+    __tablename__ = "agent_command_stream_frames"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    command_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agent_commands.id", ondelete="CASCADE"),
+        index=True,
+    )
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, index=True)
+    data: Mapped[str] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class InventoryStore:
@@ -385,6 +407,27 @@ class InventoryStore:
             ).all()
             return [self._command_read(command) for command in commands]
 
+    def list_command_stream_frames(
+        self,
+        server_id: UUID,
+        command_id: UUID,
+    ) -> list[AgentCommandStreamFrameRead]:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+
+            command = session.get(CommandModel, str(command_id))
+            if not command or command.server_id != server.id:
+                raise CommandNotFoundError(f"command not found: {command_id}")
+
+            frames = session.scalars(
+                select(CommandStreamFrameModel)
+                .where(CommandStreamFrameModel.command_id == command.id)
+                .order_by(CommandStreamFrameModel.sequence)
+            ).all()
+            return [self._stream_frame_read(frame, command) for frame in frames]
+
     def lease_commands(
         self,
         token: str,
@@ -464,6 +507,56 @@ class InventoryStore:
             session.commit()
             session.refresh(command)
             return self._command_read(command)
+
+    def append_command_stream_frame(
+        self,
+        payload: AgentCommandStreamDataRequest,
+    ) -> AgentCommandStreamFrameRead:
+        with self._session() as session:
+            server = self._server_by_token(session, payload.token)
+            command = session.scalar(
+                select(CommandModel).where(
+                    CommandModel.request_id == payload.request_id,
+                    CommandModel.server_id == server.id,
+                )
+            )
+            completed_statuses = {
+                AgentCommandStatus.SUCCEEDED.value,
+                AgentCommandStatus.FAILED.value,
+            }
+            if not command or not command.stream or command.status in completed_statuses:
+                raise CommandNotFoundError(f"stream command not found: {payload.request_id}")
+
+            last_sequence = (
+                session.scalar(
+                    select(CommandStreamFrameModel.sequence)
+                    .where(CommandStreamFrameModel.command_id == command.id)
+                    .order_by(CommandStreamFrameModel.sequence.desc())
+                    .limit(1)
+                )
+                or 0
+            )
+            now = datetime.now(tz=UTC)
+            frame = CommandStreamFrameModel(
+                id=str(uuid4()),
+                command_id=command.id,
+                server_id=server.id,
+                sequence=last_sequence + 1,
+                data=payload.data,
+                received_at=now,
+            )
+            session.add(frame)
+            command.updated_at = now
+            server.status = ServerStatus.CONNECTED.value
+            server.last_heartbeat = now
+            server.updated_at = now
+            agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
+            if agent:
+                agent.last_seen_at = now
+            session.commit()
+            session.refresh(frame)
+            session.refresh(command)
+            return self._stream_frame_read(frame, command)
 
     def lease_command_for_push(self, command_id: UUID) -> AgentCommandRead:
         with self._session() as session:
@@ -597,6 +690,21 @@ class InventoryStore:
             leased_at=command.leased_at,
             completed_at=command.completed_at,
             updated_at=command.updated_at,
+        )
+
+    @staticmethod
+    def _stream_frame_read(
+        frame: CommandStreamFrameModel,
+        command: CommandModel,
+    ) -> AgentCommandStreamFrameRead:
+        return AgentCommandStreamFrameRead(
+            id=UUID(frame.id),
+            command_id=UUID(frame.command_id),
+            server_id=UUID(frame.server_id),
+            request_id=command.request_id,
+            sequence=frame.sequence,
+            data=frame.data,
+            received_at=frame.received_at,
         )
 
     @staticmethod

@@ -7,6 +7,7 @@ from open_node.api.dependencies import get_agent_connection_manager, get_invento
 from open_node.domain.inventory import (
     AgentCommandCreate,
     AgentCommandCreateResponse,
+    AgentCommandStreamFramesResponse,
     ServerCommandsResponse,
     ServerCreate,
     ServerCreateResponse,
@@ -15,6 +16,7 @@ from open_node.domain.inventory import (
 )
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
+    CommandNotFoundError,
     DuplicateServerNameError,
     InventoryStore,
     ServerNotFoundError,
@@ -65,6 +67,28 @@ def list_server_commands(
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ServerCommandsResponse(server_id=server_id, commands=commands)
+
+
+@router.get(
+    "/{server_id}/commands/{command_id}/stream",
+    response_model=AgentCommandStreamFramesResponse,
+)
+def list_server_command_stream_frames(
+    server_id: UUID,
+    command_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> AgentCommandStreamFramesResponse:
+    try:
+        frames = store.list_command_stream_frames(server_id, command_id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except CommandNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return AgentCommandStreamFramesResponse(
+        server_id=server_id,
+        command_id=command_id,
+        frames=frames,
+    )
 
 
 @router.post(

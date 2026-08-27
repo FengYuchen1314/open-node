@@ -281,6 +281,16 @@ class AgentCommandRead(BaseModel):
     updated_at: datetime
 
 
+class AgentCommandStreamFrameRead(BaseModel):
+    id: UUID
+    command_id: UUID
+    server_id: UUID
+    request_id: str
+    sequence: int
+    data: str
+    received_at: datetime
+
+
 class AgentCommandCreateResponse(BaseModel):
     command: AgentCommandRead
     license_required: Literal[False] = False
@@ -289,6 +299,13 @@ class AgentCommandCreateResponse(BaseModel):
 class ServerCommandsResponse(BaseModel):
     server_id: UUID
     commands: list[AgentCommandRead]
+    license_required: Literal[False] = False
+
+
+class AgentCommandStreamFramesResponse(BaseModel):
+    server_id: UUID
+    command_id: UUID
+    frames: list[AgentCommandStreamFrameRead]
     license_required: Literal[False] = False
 
 
@@ -308,6 +325,12 @@ class AgentCommandResultRequest(BaseModel):
     status: int = Field(ge=100, le=599)
     body: Any = None
     error: str | None = Field(default=None, max_length=2048)
+
+
+class AgentCommandStreamDataRequest(BaseModel):
+    token: str = Field(min_length=1)
+    request_id: str = Field(min_length=1, max_length=120)
+    data: str
 
 
 class AgentCommandResultResponse(BaseModel):
