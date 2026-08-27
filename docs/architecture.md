@@ -258,9 +258,9 @@ current state machine is intentionally small: `planned`, `dispatched`, and
 `rollback_queued`. Automatic failure detection can be layered on later without
 changing the command transport.
 
-The frontend exposes this in `/changes`, where operators can create JSON step
-plans, dispatch them, queue reverse rollback, and inspect each step's forward
-and rollback command status.
+The frontend exposes this in `/changes`, where operators can use the guided
+routed-outbound form or raw JSON step plans, dispatch them, queue reverse
+rollback, and inspect each step's forward and rollback command status.
 
 ## Subscription Catalog
 

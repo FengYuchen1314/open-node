@@ -54,7 +54,8 @@ controls, probe status/region filters, health scoring, latency buckets,
 traffic hotspots, three-carrier route badges, probe network drill-down charts,
 target comparison rows, external Xray takeover controls, Xray scan status in
 the inventory table, log-file and nginx stream cleanup controls, a change-set
-dispatch/rollback workspace, and an expandable command-result inspector. It
+dispatch/rollback workspace with a routed-outbound planner form, and an
+expandable command-result inspector. It
 does not yet replace the full MMWX product.
 
 ```text
