@@ -82,6 +82,13 @@ const agentSettingsForm = reactive({
   only_if_recovery: true,
   warp_license: "",
 });
+const logFilesForm = reactive({
+  name: "",
+  all: false,
+});
+const nginxToolsForm = reactive({
+  stream_port: 443,
+});
 
 const connectionModes: Array<{ title: string; value: ConnectionMode }> = [
   { title: "Auto", value: "auto" },
@@ -111,6 +118,7 @@ type PayloadAgentOperation =
   | "domain_latency"
   | "service_control"
   | "logs"
+  | "log_files_delete"
   | "xray_test_config"
   | "xray_config_write"
   | "xray_system_config_write"
@@ -119,6 +127,7 @@ type PayloadAgentOperation =
   | "nginx_config_write"
   | "nginx_config_file_read"
   | "nginx_config_file_write"
+  | "nginx_clear_stream_port"
   | "warp_license"
   | "agent_switch_xray_mode"
   | "agent_switch_listen_port"
@@ -142,6 +151,7 @@ const diagnosticOperations: Array<{
   { title: "Services", icon: "mdi-list-status", kind: "services_status" },
   { title: "NICs", icon: "mdi-ethernet", kind: "system_nics" },
   { title: "Scan", icon: "mdi-radar", kind: "scan" },
+  { title: "Log files", icon: "mdi-file-document-multiple-outline", kind: "log_files_list" },
 ];
 const maintenanceOperations: Array<{
   title: string;
@@ -531,6 +541,31 @@ async function queueServiceRestart(service: AgentServiceName) {
 
 async function queueLogs(service: AgentLogService) {
   await queuePayloadOperation("logs", { service, lines: 200 });
+}
+
+async function purgeLogFiles() {
+  const name = logFilesForm.name.trim();
+  if (!logFilesForm.all && !name) {
+    errorMessage.value = "Log file name is required.";
+    return;
+  }
+
+  const queued = await queuePayloadOperation(
+    "log_files_delete",
+    logFilesForm.all ? { all: true } : { name },
+  );
+  if (queued && !logFilesForm.all) {
+    logFilesForm.name = "";
+  }
+}
+
+async function clearNginxStreamPort() {
+  const port = Number(nginxToolsForm.stream_port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    errorMessage.value = "Stream port must be between 1 and 65535.";
+    return;
+  }
+  await queuePayloadOperation("nginx_clear_stream_port", { port });
 }
 
 async function submitWarpLicense() {
@@ -1274,6 +1309,32 @@ function truncateText(value: string, maxLength: number) {
             {{ operation.title }}
           </v-btn>
         </div>
+        <div class="section-subtitle operation-subtitle">Nginx stream cleanup</div>
+        <v-form class="server-form compact-form" @submit.prevent="clearNginxStreamPort">
+          <div class="form-row">
+            <v-text-field
+              v-model.number="nginxToolsForm.stream_port"
+              density="comfortable"
+              label="Stream port"
+              min="1"
+              max="65535"
+              prepend-inner-icon="mdi-lan"
+              type="number"
+              variant="outlined"
+            />
+            <v-btn
+              :disabled="serverOptions.length === 0"
+              :loading="savingOperation === 'nginx_clear_stream_port'"
+              color="warning"
+              prepend-icon="mdi-broom"
+              size="small"
+              type="submit"
+              variant="tonal"
+            >
+              Clear stream
+            </v-btn>
+          </div>
+        </v-form>
         <div class="section-subtitle operation-subtitle">Service control</div>
         <div class="service-command-grid">
           <v-btn
@@ -1306,6 +1367,35 @@ function truncateText(value: string, maxLength: number) {
             {{ operation.title }}
           </v-btn>
         </div>
+        <v-form class="server-form compact-form" @submit.prevent="purgeLogFiles">
+          <div class="form-row">
+            <v-text-field
+              v-model="logFilesForm.name"
+              :disabled="logFilesForm.all"
+              density="comfortable"
+              label="Log file"
+              prepend-inner-icon="mdi-file-document-outline"
+              variant="outlined"
+            />
+            <v-switch
+              v-model="logFilesForm.all"
+              color="error"
+              density="comfortable"
+              hide-details
+              label="All files"
+            />
+          </div>
+          <v-btn
+            :disabled="serverOptions.length === 0"
+            :loading="savingOperation === 'log_files_delete'"
+            color="error"
+            prepend-icon="mdi-delete-sweep-outline"
+            type="submit"
+            variant="tonal"
+          >
+            Purge logs
+          </v-btn>
+        </v-form>
         <div class="section-subtitle operation-subtitle">Config reads</div>
         <div class="config-command-grid">
           <v-btn

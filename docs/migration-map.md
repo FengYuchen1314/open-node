@@ -67,6 +67,8 @@ This document records the starting source map for the Open Node refactor.
    - Done: latest agent scan-result persistence from WebSocket `scan_result`
      and successful `/api/child/scan` command results, exposed to the Vue
      inventory table as Xray runtime status.
+   - Done: active agent log-file list/delete wrappers and nginx stream-port
+     cleanup wrapper, with Vue command controls and path/port validation.
    - Next: deeper Xray runtime integration.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
@@ -96,5 +98,7 @@ This document records the starting source map for the Open Node refactor.
      that still run multi-file external Xray configs.
    - Done: latest agent scan-result ingestion for Xray running state, version,
      API port, inbound inventory, and config-repair metadata.
+   - Done: log-file management and nginx stream-port cleanup wrappers for
+     parity with the active agent operational surface.
    - Next: deeper Xray runtime integration.
 5. Revisit Xray integration once the agent protocol surface is stable.

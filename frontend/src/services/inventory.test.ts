@@ -550,6 +550,79 @@ describe("inventory API client", () => {
     expect(JSON.parse(body)).toEqual({ service: "xray", lines: 500 });
   });
 
+  it("queues log file list and delete operations", async () => {
+    const requestUrls: string[] = [];
+    const bodies: string[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrls.push(input.toString());
+      bodies.push(init?.body?.toString() ?? "");
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_8a",
+            server_id: "srv_1",
+            request_id: "srv_1-log-files",
+            method: init?.body ? "DELETE" : "GET",
+            path: "/api/child/logs/files",
+            query: "",
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "log_files_list", undefined, fetcher);
+    await queueAgentOperation("srv_1", "log_files_delete", { name: "mmw-agent.log.1" }, fetcher);
+
+    expect(requestUrls).toEqual([
+      "/api/v1/servers/srv_1/operations/logs/files/list",
+      "/api/v1/servers/srv_1/operations/logs/files/delete",
+    ]);
+    expect(bodies).toEqual(["", JSON.stringify({ name: "mmw-agent.log.1" })]);
+  });
+
+  it("queues nginx stream-port cleanup with JSON body", async () => {
+    let requestUrl = "";
+    let body = "";
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      body = init?.body?.toString() ?? "";
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_8b",
+            server_id: "srv_1",
+            request_id: "srv_1-clear-stream",
+            method: "POST",
+            path: "/api/child/nginx/clear-stream-port",
+            query: "",
+            body: JSON.parse(body) as unknown,
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "nginx_clear_stream_port", { port: 443 }, fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/nginx/clear-stream-port");
+    expect(JSON.parse(body)).toEqual({ port: 443 });
+  });
+
   it("queues config read operations with preset routes", async () => {
     let requestUrl = "";
     let headers: HeadersInit | undefined;

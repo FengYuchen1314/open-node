@@ -15,7 +15,9 @@ from open_node.domain.inventory import (
     AgentDomainLatencyProbeRequest,
     AgentInboundsManageOperationRequest,
     AgentLimiterOperationRequest,
+    AgentLogFilesDeleteOperationRequest,
     AgentLogsOperationRequest,
+    AgentNginxClearStreamPortOperationRequest,
     AgentNginxConfigFileReadOperationRequest,
     AgentNginxConfigFileWriteOperationRequest,
     AgentNginxConfigOperationRequest,
@@ -696,6 +698,49 @@ async def queue_logs_operation(
 
 
 @router.post(
+    "/{server_id}/operations/logs/files/list",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_log_files_list_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/logs/files"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/logs/files/delete",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_log_files_delete_operation(
+    server_id: UUID,
+    payload: AgentLogFilesDeleteOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    query = _query_from_params({"all": "1"} if payload.all else {"name": payload.name})
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="DELETE",
+            path="/api/child/logs/files",
+            query=query,
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
     "/{server_id}/operations/scan",
     response_model=AgentCommandCreateResponse,
     status_code=status.HTTP_201_CREATED,
@@ -989,6 +1034,30 @@ async def queue_nginx_remove_operation(
     return await _queue_maintenance_command(
         server_id,
         "/api/child/nginx/remove-stream",
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/clear-stream-port",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_clear_stream_port_operation(
+    server_id: UUID,
+    payload: AgentNginxClearStreamPortOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/nginx/clear-stream-port",
+            body={"port": payload.port},
+            timeout_ms=payload.command_timeout_ms,
+        ),
         store,
         connections,
     )

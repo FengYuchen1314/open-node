@@ -121,6 +121,8 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/services/control`
 - `POST /api/v1/servers/{server_id}/operations/system/nics`
 - `POST /api/v1/servers/{server_id}/operations/logs`
+- `POST /api/v1/servers/{server_id}/operations/logs/files/list`
+- `POST /api/v1/servers/{server_id}/operations/logs/files/delete`
 - `POST /api/v1/servers/{server_id}/operations/scan`
 - `POST /api/v1/servers/{server_id}/operations/xray/test-config`
 - `POST /api/v1/servers/{server_id}/operations/xray/config/read`
@@ -144,6 +146,7 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/nginx/websites/delete`
 - `POST /api/v1/servers/{server_id}/operations/nginx/install`
 - `POST /api/v1/servers/{server_id}/operations/nginx/remove`
+- `POST /api/v1/servers/{server_id}/operations/nginx/clear-stream-port`
 - `POST /api/v1/servers/{server_id}/operations/network/return-route-test`
 - `POST /api/v1/servers/{server_id}/operations/validate-site`
 - `POST /api/v1/servers/{server_id}/operations/limiter`
@@ -170,10 +173,12 @@ install, status, and remove wrappers target the active non-stream WARP child
 endpoints and remain normal command queue entries.
 
 Diagnostic and config-preparation wrappers cover service status/control, system
-NIC enumeration, service logs, agent-side scan, and Xray config validation. The
-service-control wrapper only accepts the active agent's `xray` and `nginx`
-targets with `start`, `stop`, or `restart`; the logs wrapper clamps requests to
-the agent-supported `1..2000` line range before building the child query.
+NIC enumeration, service logs, agent log-file listing/cleanup, agent-side scan,
+and Xray config validation. The service-control wrapper only accepts the active
+agent's `xray` and `nginx` targets with `start`, `stop`, or `restart`; the logs
+wrapper clamps requests to the agent-supported `1..2000` line range before
+building the child query. Log-file cleanup rejects path-like names before
+queuing the active agent's `DELETE /api/child/logs/files` query.
 Successful scan command results update the same latest scan-result record used
 by WebSocket `scan_result` messages, so dashboard runtime status stays
 transport-neutral.
@@ -199,7 +204,9 @@ local latest-result table keyed by server and carrier; public probe output only
 exposes the carrier, region, route type, and timestamp, leaving hop evidence
 and diagnostic reasons private. Routing manage requests preserve the agent's
 camel-case `burstObservatory` field while keeping the Open Node API typed and
-explicit.
+explicit. The nginx stream-port cleanup wrapper queues
+`/api/child/nginx/clear-stream-port` with an explicit port for removing stale
+stream server configs after migration or proxy mode changes.
 
 The frontend exposes these wrappers in a dedicated `/config` workspace. It can
 queue Xray and nginx read/write operations, load completed read results back

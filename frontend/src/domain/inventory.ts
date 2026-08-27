@@ -30,6 +30,8 @@ export type AgentOperationKind =
   | "service_control"
   | "system_nics"
   | "logs"
+  | "log_files_list"
+  | "log_files_delete"
   | "scan"
   | "xray_test_config"
   | "xray_config_read"
@@ -49,6 +51,7 @@ export type AgentOperationKind =
   | "nginx_config_file_write"
   | "nginx_install"
   | "nginx_remove"
+  | "nginx_clear_stream_port"
   | "warp_install"
   | "warp_status"
   | "warp_license"
@@ -296,6 +299,12 @@ export interface AgentLogsOperationRequest {
   lines?: number;
 }
 
+export interface AgentLogFilesDeleteOperationRequest {
+  name?: string | null;
+  all?: boolean;
+  command_timeout_ms?: number;
+}
+
 export interface AgentInboundsManageOperationRequest {
   action?: "add" | "remove" | "replace" | "add-client" | "remove-client" | "add-sniffing-exclude";
   inbound?: Record<string, unknown> | null;
@@ -356,6 +365,11 @@ export interface AgentNginxSetupSSLOperationRequest {
 
 export interface AgentNginxWebsiteDeleteOperationRequest {
   domain: string;
+  command_timeout_ms?: number;
+}
+
+export interface AgentNginxClearStreamPortOperationRequest {
+  port: number;
   command_timeout_ms?: number;
 }
 
@@ -474,6 +488,7 @@ export type AgentOperationPayload =
   | AgentNginxInstallOperationRequest
   | AgentServiceControlOperationRequest
   | AgentLogsOperationRequest
+  | AgentLogFilesDeleteOperationRequest
   | AgentInboundsManageOperationRequest
   | AgentOutboundsManageOperationRequest
   | AgentRoutingManageOperationRequest
@@ -481,6 +496,7 @@ export type AgentOperationPayload =
   | AgentCertDeployOperationRequest
   | AgentNginxSetupSSLOperationRequest
   | AgentNginxWebsiteDeleteOperationRequest
+  | AgentNginxClearStreamPortOperationRequest
   | AgentReturnRouteTestOperationRequest
   | AgentValidateSiteOperationRequest
   | AgentLimiterOperationRequest

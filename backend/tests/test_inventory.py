@@ -1081,6 +1081,7 @@ def test_diagnostic_operations_queue_mmwx_child_commands(tmp_path: Path) -> None
     operations = [
         ("services/status", "GET", "/api/child/services/status"),
         ("system/nics", "GET", "/api/child/system/nics"),
+        ("logs/files/list", "GET", "/api/child/logs/files"),
         ("scan", "POST", "/api/child/scan"),
     ]
     responses = [
@@ -1137,6 +1138,40 @@ def test_logs_operation_builds_safe_query(tmp_path: Path) -> None:
     assert command["method"] == "GET"
     assert command["path"] == "/api/child/logs"
     assert command["query"] == "service=xray&lines=500"
+
+
+def test_log_file_delete_operation_builds_safe_agent_query(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-log-files"}).json()
+    server_id = created["server"]["id"]
+
+    single = client.post(
+        f"/api/v1/servers/{server_id}/operations/logs/files/delete",
+        json={"name": "mmw-agent.log.1", "command_timeout_ms": 15_000},
+    )
+    all_files = client.post(
+        f"/api/v1/servers/{server_id}/operations/logs/files/delete",
+        json={"all": True},
+    )
+    missing_target = client.post(
+        f"/api/v1/servers/{server_id}/operations/logs/files/delete",
+        json={},
+    )
+    invalid_name = client.post(
+        f"/api/v1/servers/{server_id}/operations/logs/files/delete",
+        json={"name": "../mmw-agent.log"},
+    )
+
+    assert single.status_code == 201
+    command = single.json()["command"]
+    assert command["method"] == "DELETE"
+    assert command["path"] == "/api/child/logs/files"
+    assert command["query"] == "name=mmw-agent.log.1"
+    assert command["timeout_ms"] == 15_000
+    assert all_files.status_code == 201
+    assert all_files.json()["command"]["query"] == "all=1"
+    assert missing_target.status_code == 422
+    assert invalid_name.status_code == 422
 
 
 def test_xray_test_config_operation_serializes_structured_config(tmp_path: Path) -> None:
@@ -1597,6 +1632,30 @@ def test_nginx_install_operation_accepts_optional_domain_query(tmp_path: Path) -
     assert command["query"] == "domain=panel.example.com"
     assert command["stream"] is True
     assert command["timeout_ms"] == 180_000
+
+
+def test_nginx_clear_stream_port_operation_queues_agent_schema(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-nginx-stream"}).json()
+    server_id = created["server"]["id"]
+
+    response = client.post(
+        f"/api/v1/servers/{server_id}/operations/nginx/clear-stream-port",
+        json={"port": 443, "command_timeout_ms": 20_000},
+    )
+    invalid = client.post(
+        f"/api/v1/servers/{server_id}/operations/nginx/clear-stream-port",
+        json={"port": 0},
+    )
+
+    assert response.status_code == 201
+    command = response.json()["command"]
+    assert response.json()["license_required"] is False
+    assert command["method"] == "POST"
+    assert command["path"] == "/api/child/nginx/clear-stream-port"
+    assert command["body"] == {"port": 443}
+    assert command["timeout_ms"] == 20_000
+    assert invalid.status_code == 422
 
 
 def test_warp_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:

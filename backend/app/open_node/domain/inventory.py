@@ -1,11 +1,11 @@
 import json
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _strip_required_text(value: str, field_name: str) -> str:
@@ -47,6 +47,18 @@ def _validate_xray_config_file(value: str) -> str:
     normalized = _strip_required_text(value, "file")
     if "/" in normalized or "\\" in normalized or normalized in {".", ".."}:
         raise ValueError("file must be a config filename, not a path")
+    return normalized
+
+
+def _validate_log_file_name(value: str) -> str:
+    normalized = _strip_required_text(value, "name")
+    if (
+        "/" in normalized
+        or "\\" in normalized
+        or ".." in normalized
+        or normalized in {".", ".."}
+    ):
+        raise ValueError("name must be a log filename, not a path")
     return normalized
 
 
@@ -148,6 +160,8 @@ class AgentOperationKind(StrEnum):
     SERVICE_CONTROL = "service_control"
     SYSTEM_NICS = "system_nics"
     LOGS = "logs"
+    LOG_FILES_LIST = "log_files_list"
+    LOG_FILES_DELETE = "log_files_delete"
     SCAN = "scan"
     XRAY_TEST_CONFIG = "xray_test_config"
     XRAY_CONFIG_READ = "xray_config_read"
@@ -167,6 +181,7 @@ class AgentOperationKind(StrEnum):
     NGINX_CONFIG_FILE_WRITE = "nginx_config_file_write"
     NGINX_INSTALL = "nginx_install"
     NGINX_REMOVE = "nginx_remove"
+    NGINX_CLEAR_STREAM_PORT = "nginx_clear_stream_port"
     WARP_INSTALL = "warp_install"
     WARP_STATUS = "warp_status"
     WARP_LICENSE = "warp_license"
@@ -655,6 +670,25 @@ class AgentLogsOperationRequest(BaseModel):
     lines: int = Field(default=200, ge=1, le=2000)
 
 
+class AgentLogFilesDeleteOperationRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    all: bool = False
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_log_file_name(value)
+
+    @model_validator(mode="after")
+    def require_name_or_all(self) -> Self:
+        if not self.all and not self.name:
+            raise ValueError("name is required unless all is true")
+        return self
+
+
 class AgentInboundsManageOperationRequest(BaseModel):
     action: Literal[
         "add",
@@ -869,6 +903,11 @@ class AgentNginxWebsiteDeleteOperationRequest(BaseModel):
             AgentDomainLatencyProbeRequest._normalize_domain(value).lower(),
             "domain",
         )
+
+
+class AgentNginxClearStreamPortOperationRequest(BaseModel):
+    port: int = Field(ge=1, le=65_535)
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
 
 
 class AgentReturnRouteTarget(BaseModel):
