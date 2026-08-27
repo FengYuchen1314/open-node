@@ -68,8 +68,12 @@ per server in SQLite, including Xray running state, version, API port, config
 path, inbound objects, device kick counters, and config-repair metadata.
 
 The control plane exposes that latest snapshot at
-`/api/v1/servers/{server_id}/scan/latest`. Scan records are operational health
-data only; they do not contain or imply licensing state.
+`/api/v1/servers/{server_id}/scan/latest`. It also derives a sanitized runtime
+inventory at `/api/v1/servers/{server_id}/xray/runtime`, summarizing inbound
+tags, protocols, ports, transport/security names, client counts, client email
+labels, sniffing state, protocol totals, and config-repair metadata without
+returning UUIDs, passwords, PSKs, or account secrets. Scan records are
+operational health data only; they do not contain or imply licensing state.
 
 ## Agent Commands
 
@@ -165,6 +169,7 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/agent/update-master-url`
 - `POST /api/v1/servers/{server_id}/operations/agent/upgrade`
 - `POST /api/v1/servers/{server_id}/operations/agent/uninstall`
+- `GET /api/v1/servers/{server_id}/xray/runtime`
 - `GET /api/v1/servers/{server_id}/xray/config-snapshots`
 - `POST /api/v1/servers/{server_id}/xray/config-snapshots/{snapshot_id}/restore`
 

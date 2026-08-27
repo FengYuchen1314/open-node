@@ -10,8 +10,11 @@ import type {
   ServerSummary,
   XrayConfigSnapshot,
   XrayConfigSnapshotStatus,
+  XrayRuntimeInbound,
+  XrayRuntimeInventoryResponse,
 } from "../domain/inventory";
 import {
+  getXrayRuntimeInventory,
   listCommandStreamFrames,
   listServerCommands,
   listServers,
@@ -25,8 +28,10 @@ const selectedServerId = ref("");
 const commandsByServer = ref<Record<string, AgentCommand[]>>({});
 const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({});
 const xraySnapshots = ref<XrayConfigSnapshot[]>([]);
+const xrayRuntimeInventory = ref<XrayRuntimeInventoryResponse | null>(null);
 const loading = ref(false);
 const snapshotsLoading = ref(false);
+const runtimeInventoryLoading = ref(false);
 const savingOperation = ref<AgentOperationKind | "">("");
 const restoringSnapshotId = ref("");
 const errorMessage = ref("");
@@ -87,6 +92,43 @@ const selectedCommands = computed(() => commandsByServer.value[selectedServerId.
 const selectedCurrentSnapshot = computed(() =>
   xraySnapshots.value.find((snapshot) => snapshot.status === "current"),
 );
+const runtimeProtocolEntries = computed(() =>
+  Object.entries(xrayRuntimeInventory.value?.protocol_counts ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([protocol, count]) => ({ protocol, count })),
+);
+const runtimeStatusLabel = computed(() => {
+  if (!xrayRuntimeInventory.value?.has_scan) {
+    return "No scan";
+  }
+  return xrayRuntimeInventory.value.xray_running ? "Running" : "Stopped";
+});
+const runtimeStatusColor = computed(() => {
+  if (!xrayRuntimeInventory.value?.has_scan) {
+    return "grey";
+  }
+  return xrayRuntimeInventory.value.xray_running ? "success" : "warning";
+});
+const runtimeStatusIcon = computed(() => {
+  if (!xrayRuntimeInventory.value?.has_scan) {
+    return "mdi-radar";
+  }
+  return xrayRuntimeInventory.value.xray_running
+    ? "mdi-check-network-outline"
+    : "mdi-alert-circle-outline";
+});
+const runtimeSummary = computed(() => {
+  const inventory = xrayRuntimeInventory.value;
+  if (!inventory?.has_scan) {
+    return "No runtime scan reported";
+  }
+  const parts = [
+    inventory.xray_version,
+    inventory.api_port ? `api ${inventory.api_port}` : "",
+    inventory.updated_at ? formatDateTime(inventory.updated_at) : "",
+  ].filter(Boolean);
+  return parts.join(" / ") || inventory.message || "Runtime scan ready";
+});
 
 const snapshotStatusColor: Record<XrayConfigSnapshotStatus, string> = {
   current: "success",
@@ -100,6 +142,7 @@ onMounted(() => {
 
 watch(selectedServerId, () => {
   void refreshXraySnapshots();
+  void refreshXrayRuntimeInventory();
 });
 
 async function refresh() {
@@ -111,7 +154,7 @@ async function refresh() {
       selectedServerId.value = servers.value[0].id;
     }
     await refreshCommands();
-    await refreshXraySnapshots();
+    await Promise.all([refreshXraySnapshots(), refreshXrayRuntimeInventory()]);
   } catch (error) {
     errorMessage.value = readableError(error);
   } finally {
@@ -177,6 +220,28 @@ async function refreshXraySnapshots(includeConfig = false) {
     }
   } finally {
     snapshotsLoading.value = false;
+  }
+}
+
+async function refreshXrayRuntimeInventory(reportErrors = false) {
+  if (!selectedServerId.value) {
+    xrayRuntimeInventory.value = null;
+    return;
+  }
+  const serverId = selectedServerId.value;
+  runtimeInventoryLoading.value = true;
+  try {
+    const response = await getXrayRuntimeInventory(serverId);
+    if (serverId === selectedServerId.value) {
+      xrayRuntimeInventory.value = response;
+    }
+  } catch (error) {
+    xrayRuntimeInventory.value = null;
+    if (reportErrors) {
+      errorMessage.value = readableError(error);
+    }
+  } finally {
+    runtimeInventoryLoading.value = false;
   }
 }
 
@@ -438,6 +503,25 @@ function snapshotStatusLabel(status: XrayConfigSnapshotStatus) {
     pending_recovery: "Pending",
   };
   return labels[status];
+}
+
+function inboundEndpoint(inbound: XrayRuntimeInbound) {
+  const endpoint = [inbound.listen, inbound.port ? String(inbound.port) : ""].filter(Boolean);
+  return endpoint.join(":") || "No endpoint";
+}
+
+function inboundMeta(inbound: XrayRuntimeInbound) {
+  const parts = [
+    inbound.protocol,
+    inbound.network,
+    inbound.security,
+    inbound.client_container,
+  ].filter(Boolean);
+  return parts.join(" / ") || "No metadata";
+}
+
+function remarkLabel(value: string) {
+  return value.replace(/_/g, " ");
 }
 
 function shortHash(value: string) {
@@ -758,6 +842,137 @@ function formatDateTime(value: string) {
           </v-window-item>
 
           <v-window-item value="runtime">
+            <div class="runtime-inventory-panel">
+              <div class="snapshot-head">
+                <div>
+                  <div class="section-title compact-title">Runtime inventory</div>
+                  <div class="section-subtitle">{{ runtimeSummary }}</div>
+                </div>
+                <v-tooltip text="Refresh runtime inventory">
+                  <template #activator="{ props }">
+                    <v-btn
+                      v-bind="props"
+                      :loading="runtimeInventoryLoading"
+                      icon="mdi-refresh"
+                      size="small"
+                      variant="text"
+                      @click="refreshXrayRuntimeInventory(true)"
+                    />
+                  </template>
+                </v-tooltip>
+              </div>
+
+              <div class="runtime-summary-row">
+                <v-chip
+                  :color="runtimeStatusColor"
+                  :prepend-icon="runtimeStatusIcon"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  {{ runtimeStatusLabel }}
+                </v-chip>
+                <v-chip density="comfortable" size="small" variant="tonal">
+                  {{ xrayRuntimeInventory?.inbound_count ?? 0 }} inbounds
+                </v-chip>
+                <v-chip density="comfortable" size="small" variant="tonal">
+                  {{ xrayRuntimeInventory?.client_count ?? 0 }} clients
+                </v-chip>
+                <v-chip
+                  v-if="xrayRuntimeInventory?.config_modified"
+                  color="warning"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Config repaired
+                </v-chip>
+                <v-chip
+                  v-for="entry in runtimeProtocolEntries"
+                  :key="entry.protocol"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  {{ entry.protocol }} {{ entry.count }}
+                </v-chip>
+              </div>
+
+              <div v-if="!xrayRuntimeInventory?.has_scan" class="snapshot-empty">
+                No scan inventory.
+              </div>
+              <div v-else-if="xrayRuntimeInventory.inbounds.length === 0" class="snapshot-empty">
+                No runtime inbounds.
+              </div>
+              <div v-else class="runtime-inbound-list">
+                <div
+                  v-for="(inbound, index) in xrayRuntimeInventory.inbounds"
+                  :key="`${inbound.display_name}-${index}`"
+                  class="runtime-inbound-row"
+                >
+                  <div class="runtime-inbound-main">
+                    <div class="runtime-inbound-title">
+                      <span>{{ inbound.display_name }}</span>
+                      <v-chip density="comfortable" size="small" variant="tonal">
+                        {{ inbound.client_count }}
+                      </v-chip>
+                    </div>
+                    <div class="snapshot-detail">{{ inboundMeta(inbound) }}</div>
+                    <div class="snapshot-detail">{{ inboundEndpoint(inbound) }}</div>
+                    <div v-if="inbound.user_emails.length > 0" class="runtime-chip-row">
+                      <v-chip
+                        v-for="email in inbound.user_emails"
+                        :key="email"
+                        density="comfortable"
+                        size="x-small"
+                        variant="tonal"
+                      >
+                        {{ email }}
+                      </v-chip>
+                    </div>
+                  </div>
+                  <div class="runtime-inbound-side">
+                    <v-chip
+                      :color="inbound.sniffing_enabled ? 'success' : 'grey'"
+                      density="comfortable"
+                      size="small"
+                      variant="tonal"
+                    >
+                      {{ inbound.sniffing_enabled ? "Sniffing" : "No sniffing" }}
+                    </v-chip>
+                    <v-chip
+                      v-for="value in inbound.sniffing_dest_override"
+                      :key="`dest-${value}`"
+                      density="comfortable"
+                      size="small"
+                      variant="tonal"
+                    >
+                      dest {{ value }}
+                    </v-chip>
+                    <v-chip
+                      v-for="value in inbound.sniffing_exclude_domains"
+                      :key="`exclude-${value}`"
+                      density="comfortable"
+                      size="small"
+                      variant="tonal"
+                    >
+                      exclude {{ value }}
+                    </v-chip>
+                    <v-chip
+                      v-for="remark in inbound.remarks"
+                      :key="remark"
+                      color="warning"
+                      density="comfortable"
+                      size="small"
+                      variant="tonal"
+                    >
+                      {{ remarkLabel(remark) }}
+                    </v-chip>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <v-form class="config-form" @submit.prevent="queueRuntimePayload">
               <div class="config-action-row">
                 <v-btn

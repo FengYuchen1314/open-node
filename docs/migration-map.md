@@ -70,6 +70,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: latest agent scan-result persistence from WebSocket `scan_result`
      and successful `/api/child/scan` command results, exposed to the Vue
      inventory table as Xray runtime status.
+   - Done: scan-derived Xray runtime inventory summaries with protocol/client
+     counts, sanitized user labels, sniffing state, and Vue Runtime tab
+     display.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
    - Done: compatibility wrappers for the active non-stream Xray/nginx

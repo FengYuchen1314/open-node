@@ -5,6 +5,7 @@ import {
   createServerCommand,
   getLatestScanResult,
   getLatestTelemetry,
+  getXrayRuntimeInventory,
   listCommandStreamFrames,
   listServerCommands,
   listServers,
@@ -204,6 +205,58 @@ describe("inventory API client", () => {
     expect(response.scan?.xray_running).toBe(true);
     expect(response.scan?.inbounds[0]?.tag).toBe("vless-443");
     expect(headers).toBeUndefined();
+  });
+
+  it("reads Xray runtime inventory without sending license headers", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          has_scan: true,
+          xray_running: true,
+          xray_version: "Xray 1.8.24",
+          api_port: 46736,
+          config_path: "/usr/local/etc/xray/config.json",
+          config_modified: false,
+          config_added_sections: [],
+          inbound_count: 1,
+          client_count: 2,
+          protocol_counts: { vless: 1 },
+          inbounds: [
+            {
+              tag: "vless-443",
+              display_name: "vless-443",
+              protocol: "vless",
+              port: 443,
+              network: "tcp",
+              security: "reality",
+              client_container: "clients",
+              client_count: 2,
+              user_emails: ["alice@example.com"],
+              sniffing_enabled: true,
+              sniffing_dest_override: ["http", "tls"],
+              sniffing_exclude_domains: ["example.com"],
+              remarks: [],
+            },
+          ],
+          reported_at: "2026-08-27T00:00:00Z",
+          updated_at: "2026-08-27T00:00:01Z",
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await getXrayRuntimeInventory("srv_1", fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/xray/runtime");
+    expect(headers).toBeUndefined();
+    expect(response.license_required).toBe(false);
+    expect(response.inbounds[0]?.client_count).toBe(2);
   });
 
   it("lists Xray config snapshots with optional config bodies", async () => {

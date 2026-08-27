@@ -565,6 +565,42 @@ class ServerScanResultResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeInboundRead(BaseModel):
+    tag: str | None = None
+    display_name: str
+    protocol: str
+    port: int | None = None
+    listen: str | None = None
+    network: str | None = None
+    security: str | None = None
+    client_container: str | None = None
+    client_count: int = 0
+    user_emails: list[str] = Field(default_factory=list)
+    sniffing_enabled: bool = False
+    sniffing_dest_override: list[str] = Field(default_factory=list)
+    sniffing_exclude_domains: list[str] = Field(default_factory=list)
+    remarks: list[str] = Field(default_factory=list)
+
+
+class XrayRuntimeInventoryResponse(BaseModel):
+    server_id: UUID
+    has_scan: bool = False
+    xray_running: bool = False
+    xray_version: str | None = None
+    api_port: int | None = None
+    config_path: str | None = None
+    config_modified: bool = False
+    config_added_sections: list[str] = Field(default_factory=list)
+    message: str | None = None
+    inbound_count: int = 0
+    client_count: int = 0
+    protocol_counts: dict[str, int] = Field(default_factory=dict)
+    inbounds: list[XrayRuntimeInboundRead] = Field(default_factory=list)
+    reported_at: datetime | None = None
+    updated_at: datetime | None = None
+    license_required: Literal[False] = False
+
+
 class XrayConfigSnapshotRead(BaseModel):
     id: UUID
     server_id: UUID

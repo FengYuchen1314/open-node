@@ -43,19 +43,21 @@ region/provider/renewal metadata, daily traffic aggregation, and public insight
 views plus return-route summaries from agent test results, scheduled probe task
 dispatch, domain-latency result ingestion, cross-node target comparison, and
 external Xray takeover for legacy `-config` plus `-confdir` nodes, plus latest
-agent scan-result persistence for Xray runtime status and inbound inventory,
-agent log-file listing/cleanup, nginx stream-port cleanup, and compatibility
-wrappers for non-stream Xray/nginx install/remove agent routes, plus optional
-standalone probe Worker token access for hiding direct public probe endpoints.
+agent scan-result persistence for Xray runtime status and inbound inventory
+with sanitized runtime summaries, agent log-file listing/cleanup, nginx
+stream-port cleanup, and compatibility wrappers for non-stream Xray/nginx
+install/remove agent routes, plus optional standalone probe Worker token access
+for hiding direct public probe endpoints.
 The Vue frontend now includes a config workspace, runtime/site operation
 payload workbenches, subscription catalog, link, format, traffic, quota,
 preset, and import/export management, probe settings, metadata, and task
 controls, probe status/region filters, health scoring, latency buckets,
 traffic hotspots, three-carrier route badges, probe network drill-down charts,
 target comparison rows, external Xray takeover controls, Xray scan status in
-the inventory table, log-file and nginx stream cleanup controls, a change-set
-dispatch/rollback workspace with a routed-outbound planner form, and an
-expandable command-result inspector. It
+the inventory table, runtime inventory summaries in the config workspace,
+log-file and nginx stream cleanup controls, a change-set dispatch/rollback
+workspace with a routed-outbound planner form, and an expandable
+command-result inspector. It
 does not yet replace the full MMWX product.
 
 ```text

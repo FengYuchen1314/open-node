@@ -322,6 +322,133 @@ def test_scan_command_result_updates_latest_scan_without_license(tmp_path: Path)
     assert payload["scan"]["config_added_sections"] == ["api", "stats"]
 
 
+def test_xray_runtime_inventory_returns_empty_summary_without_scan(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-runtime-empty"}).json()
+
+    response = client.get(f"/api/v1/servers/{created['server']['id']}/xray/runtime")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["license_required"] is False
+    assert payload["has_scan"] is False
+    assert payload["inbound_count"] == 0
+    assert payload["client_count"] == 0
+    assert payload["protocol_counts"] == {}
+    assert payload["inbounds"] == []
+
+
+def test_xray_runtime_inventory_summarizes_scan_inbounds_without_secrets(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-runtime-summary"}).json()
+    server_id = created["server"]["id"]
+
+    command = client.post(f"/api/v1/servers/{server_id}/operations/scan").json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                **scan_result_payload(),
+                "inbounds": [
+                    {
+                        "tag": "vless-443",
+                        "listen": "0.0.0.0",
+                        "port": 443,
+                        "protocol": "vless",
+                        "settings": {
+                            "clients": [
+                                {"id": "secret-id-1", "email": "alice@example.com"},
+                                {"id": "secret-id-2", "email": "ALICE@example.com"},
+                                {"id": "secret-id-3"},
+                            ]
+                        },
+                        "streamSettings": {"network": "tcp", "security": "reality"},
+                        "sniffing": {
+                            "enabled": True,
+                            "destOverride": ["http", "tls", "http"],
+                            "excludeDomains": ["Example.com", "example.com", "foo.test"],
+                        },
+                    },
+                    {
+                        "port": 8443,
+                        "protocol": "anytls",
+                        "settings": {
+                            "users": [{"password": "hidden-password", "email": "bob@example.com"}]
+                        },
+                    },
+                    {
+                        "tag": "socks-in",
+                        "protocol": "socks",
+                        "settings": {"accounts": [{"user": "root", "pass": "secret-pass"}]},
+                    },
+                ],
+            },
+        },
+    )
+
+    assert result.status_code == 200
+
+    response = client.get(f"/api/v1/servers/{server_id}/xray/runtime")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["license_required"] is False
+    assert payload["has_scan"] is True
+    assert payload["xray_running"] is True
+    assert payload["xray_version"] == "Xray 1.8.24"
+    assert payload["api_port"] == 46736
+    assert payload["config_modified"] is True
+    assert payload["config_added_sections"] == ["api", "stats"]
+    assert payload["inbound_count"] == 3
+    assert payload["client_count"] == 5
+    assert payload["protocol_counts"] == {"anytls": 1, "socks": 1, "vless": 1}
+
+    vless = payload["inbounds"][0]
+    assert vless["tag"] == "vless-443"
+    assert vless["display_name"] == "vless-443"
+    assert vless["client_container"] == "clients"
+    assert vless["client_count"] == 3
+    assert vless["user_emails"] == ["alice@example.com"]
+    assert vless["network"] == "tcp"
+    assert vless["security"] == "reality"
+    assert vless["sniffing_enabled"] is True
+    assert vless["sniffing_dest_override"] == ["http", "tls"]
+    assert vless["sniffing_exclude_domains"] == ["Example.com", "foo.test"]
+    assert vless["remarks"] == []
+
+    anytls = payload["inbounds"][1]
+    assert anytls["tag"] is None
+    assert anytls["display_name"] == "anytls-8443"
+    assert anytls["client_container"] == "users"
+    assert anytls["client_count"] == 1
+    assert anytls["user_emails"] == ["bob@example.com"]
+    assert anytls["remarks"] == ["missing_tag"]
+
+    socks = payload["inbounds"][2]
+    assert socks["client_container"] == "accounts"
+    assert socks["client_count"] == 1
+    assert socks["user_emails"] == []
+
+    serialized = json.dumps(payload)
+    assert "secret-id" not in serialized
+    assert "hidden-password" not in serialized
+    assert "secret-pass" not in serialized
+
+
+def test_xray_runtime_inventory_for_unknown_server_returns_404(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/api/v1/servers/00000000-0000-0000-0000-000000000000/xray/runtime")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "server not found: 00000000-0000-0000-0000-000000000000"
+
+
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-traffic"}).json()

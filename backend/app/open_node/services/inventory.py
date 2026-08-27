@@ -77,6 +77,8 @@ from open_node.domain.inventory import (
     XrayConfigSnapshotSource,
     XrayConfigSnapshotStatus,
     XrayMode,
+    XrayRuntimeInboundRead,
+    XrayRuntimeInventoryResponse,
     XrayStats,
 )
 from open_node.domain.probe import (
@@ -203,6 +205,19 @@ _PROBE_SERIES_RANGES = {
     "1h": (12, 300),
     "6h": (36, 600),
     "24h": (48, 1800),
+}
+
+_XRAY_CLIENT_CONTAINER_BY_PROTOCOL = {
+    "vless": "clients",
+    "vmess": "clients",
+    "trojan": "clients",
+    "shadowsocks": "clients",
+    "hysteria": "clients",
+    "anytls": "users",
+    "snell": "users",
+    "mieru": "users",
+    "socks": "accounts",
+    "http": "accounts",
 }
 
 _SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
@@ -1196,6 +1211,14 @@ class InventoryStore:
                 raise ServerNotFoundError(f"server not found: {server_id}")
             scan = session.get(AgentScanResultModel, str(server_id))
             return self._scan_result_read(scan) if scan else None
+
+    def xray_runtime_inventory(self, server_id: UUID) -> XrayRuntimeInventoryResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            scan = session.get(AgentScanResultModel, str(server_id))
+            return self._xray_runtime_inventory_response(server_id, scan)
 
     def list_xray_config_snapshots(
         self,
@@ -5216,6 +5239,155 @@ class InventoryStore:
             config=snapshot.config if include_config else None,
             created_at=snapshot.created_at,
         )
+
+    @classmethod
+    def _xray_runtime_inventory_response(
+        cls,
+        server_id: UUID,
+        scan: AgentScanResultModel | None,
+    ) -> XrayRuntimeInventoryResponse:
+        if scan is None:
+            return XrayRuntimeInventoryResponse(server_id=server_id)
+
+        inbounds = [
+            cls._xray_runtime_inbound_read(inbound, index)
+            for index, inbound in enumerate(scan.inbounds or [])
+        ]
+        protocol_counts: dict[str, int] = {}
+        for inbound in inbounds:
+            protocol_counts[inbound.protocol] = protocol_counts.get(inbound.protocol, 0) + 1
+
+        return XrayRuntimeInventoryResponse(
+            server_id=server_id,
+            has_scan=True,
+            xray_running=scan.xray_running,
+            xray_version=scan.xray_version,
+            api_port=scan.api_port,
+            config_path=scan.config_path,
+            config_modified=scan.config_modified,
+            config_added_sections=scan.config_added_sections or [],
+            message=scan.message,
+            inbound_count=len(inbounds),
+            client_count=sum(inbound.client_count for inbound in inbounds),
+            protocol_counts=protocol_counts,
+            inbounds=inbounds,
+            reported_at=scan.reported_at,
+            updated_at=scan.updated_at,
+        )
+
+    @classmethod
+    def _xray_runtime_inbound_read(
+        cls,
+        inbound: dict[str, Any],
+        index: int,
+    ) -> XrayRuntimeInboundRead:
+        protocol = (cls._text_value(inbound.get("protocol")) or "unknown").lower()
+        tag = cls._text_value(inbound.get("tag"))
+        port = cls._int_value(inbound.get("port"))
+        listen = cls._text_value(inbound.get("listen"))
+        settings = cls._record_value(inbound.get("settings"))
+        stream_settings = cls._record_value(inbound.get("streamSettings"))
+        sniffing = cls._record_value(inbound.get("sniffing"))
+        client_container = _XRAY_CLIENT_CONTAINER_BY_PROTOCOL.get(protocol)
+        client_values = cls._list_value(settings.get(client_container)) if client_container else []
+        client_records = [item for item in client_values if isinstance(item, dict)]
+        remarks: list[str] = []
+
+        if not tag:
+            remarks.append("missing_tag")
+        if protocol == "unknown":
+            remarks.append("missing_protocol")
+        elif client_container is None:
+            remarks.append("unsupported_protocol")
+
+        return XrayRuntimeInboundRead(
+            tag=tag,
+            display_name=tag or cls._generated_inbound_name(protocol, port, index),
+            protocol=protocol,
+            port=port,
+            listen=listen,
+            network=cls._text_value(stream_settings.get("network")),
+            security=cls._text_value(stream_settings.get("security")),
+            client_container=client_container,
+            client_count=len(client_values),
+            user_emails=cls._client_email_list(client_records),
+            sniffing_enabled=cls._bool_value(sniffing.get("enabled")),
+            sniffing_dest_override=cls._text_list_value(sniffing.get("destOverride")),
+            sniffing_exclude_domains=cls._text_list_value(sniffing.get("excludeDomains")),
+            remarks=remarks,
+        )
+
+    @staticmethod
+    def _generated_inbound_name(protocol: str, port: int | None, index: int) -> str:
+        if protocol != "unknown" and port is not None:
+            return f"{protocol}-{port}"
+        if protocol != "unknown":
+            return protocol
+        return f"inbound-{index + 1}"
+
+    @staticmethod
+    def _record_value(value: Any) -> dict[str, Any]:
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _list_value(value: Any) -> list[Any]:
+        return value if isinstance(value, list) else []
+
+    @staticmethod
+    def _text_value(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @staticmethod
+    def _int_value(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized.isdigit():
+                return int(normalized)
+        return None
+
+    @staticmethod
+    def _bool_value(value: Any) -> bool:
+        return value if isinstance(value, bool) else False
+
+    @classmethod
+    def _text_list_value(cls, value: Any) -> list[str]:
+        items = value if isinstance(value, list) else []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            text = cls._text_value(item)
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(text)
+        return normalized
+
+    @classmethod
+    def _client_email_list(cls, clients: list[dict[str, Any]]) -> list[str]:
+        emails: list[str] = []
+        seen: set[str] = set()
+        for client in clients:
+            email = cls._text_value(client.get("email"))
+            if not email:
+                continue
+            key = email.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            emails.append(email)
+        return emails
 
     @staticmethod
     def _scan_result_read(scan: AgentScanResultModel) -> AgentScanResultRead:

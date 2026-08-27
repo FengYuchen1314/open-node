@@ -317,6 +317,62 @@ body {
   gap: 8px;
 }
 
+.runtime-inventory-panel {
+  border: 1px solid #dbe5e0;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.runtime-summary-row,
+.runtime-chip-row,
+.runtime-inbound-side {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runtime-inbound-list {
+  display: grid;
+  gap: 10px;
+}
+
+.runtime-inbound-row {
+  align-items: start;
+  border-top: 1px solid #edf2ef;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-top: 10px;
+}
+
+.runtime-inbound-main {
+  min-width: 0;
+}
+
+.runtime-inbound-title {
+  align-items: center;
+  display: flex;
+  font-weight: 720;
+  gap: 8px;
+  min-width: 0;
+}
+
+.runtime-inbound-title span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-inbound-side {
+  justify-content: flex-end;
+}
+
+.runtime-chip-row {
+  margin-top: 8px;
+}
+
 .subscription-form {
   display: grid;
   gap: 14px;
@@ -1310,6 +1366,7 @@ body {
 
   .config-action-row,
   .config-file-grid,
+  .runtime-inbound-row,
   .snapshot-row,
   .change-action-row,
   .change-command-pair,
@@ -1347,6 +1404,7 @@ body {
   .probe-target-compare-actions,
   .probe-token-actions,
   .probe-task-actions,
+  .runtime-inbound-side,
   .snapshot-actions {
     align-items: stretch;
     flex-direction: column;

@@ -49,6 +49,7 @@ from open_node.domain.inventory import (
     ServerScanResultResponse,
     ServerTelemetryResponse,
     ServerXrayConfigSnapshotsResponse,
+    XrayRuntimeInventoryResponse,
 )
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
@@ -117,6 +118,17 @@ def latest_server_scan(
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ServerScanResultResponse(server_id=server_id, scan=scan)
+
+
+@router.get("/{server_id}/xray/runtime", response_model=XrayRuntimeInventoryResponse)
+def xray_runtime_inventory(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> XrayRuntimeInventoryResponse:
+    try:
+        return store.xray_runtime_inventory(server_id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/{server_id}/xray/config-snapshots", response_model=ServerXrayConfigSnapshotsResponse)

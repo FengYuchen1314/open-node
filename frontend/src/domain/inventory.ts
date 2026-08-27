@@ -238,6 +238,42 @@ export interface ServerScanResultResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeInbound {
+  tag?: string | null;
+  display_name: string;
+  protocol: string;
+  port?: number | null;
+  listen?: string | null;
+  network?: string | null;
+  security?: string | null;
+  client_container?: string | null;
+  client_count: number;
+  user_emails: string[];
+  sniffing_enabled: boolean;
+  sniffing_dest_override: string[];
+  sniffing_exclude_domains: string[];
+  remarks: string[];
+}
+
+export interface XrayRuntimeInventoryResponse {
+  server_id: string;
+  has_scan: boolean;
+  xray_running: boolean;
+  xray_version?: string | null;
+  api_port?: number | null;
+  config_path?: string | null;
+  config_modified: boolean;
+  config_added_sections: string[];
+  message?: string | null;
+  inbound_count: number;
+  client_count: number;
+  protocol_counts: Record<string, number>;
+  inbounds: XrayRuntimeInbound[];
+  reported_at?: string | null;
+  updated_at?: string | null;
+  license_required: false;
+}
+
 export interface XrayConfigSnapshot {
   id: string;
   server_id: string;
