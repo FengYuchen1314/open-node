@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 
+import CommandInspector from "../components/CommandInspector.vue";
 import {
   defaultServerCreateRequest,
   type AgentCommand,
@@ -190,13 +191,6 @@ const statusMeta: Record<ServerStatus, { color: string; icon: string; label: str
   connected: { color: "success", icon: "mdi-lan-connect", label: "Connected" },
   offline: { color: "error", icon: "mdi-lan-disconnect", label: "Offline" },
 };
-
-const commandStatusMeta = {
-  pending: { color: "warning", icon: "mdi-clock-outline" },
-  leased: { color: "info", icon: "mdi-progress-clock" },
-  succeeded: { color: "success", icon: "mdi-check-circle-outline" },
-  failed: { color: "error", icon: "mdi-alert-circle-outline" },
-} as const;
 
 const totalUpload = computed(() =>
   servers.value.reduce((sum, server) => sum + server.current_upload_speed, 0),
@@ -580,21 +574,6 @@ function formatPercent(used: number, total: number) {
   return `${((used / total) * 100).toFixed(0)}%`;
 }
 
-function commandSubtitle(command: AgentCommand) {
-  const status = command.result_status ? `status ${command.result_status}` : "waiting";
-  const frames = streamFramesByCommand.value[command.id] ?? [];
-  const stream = command.stream ? `, ${frames.length} stream frames` : "";
-  return `${command.attempts} attempts, ${status}${stream}`;
-}
-
-function latestStreamData(command: AgentCommand) {
-  const frames = streamFramesByCommand.value[command.id] ?? [];
-  const latest = frames[frames.length - 1]?.data.trim();
-  if (!latest) {
-    return "";
-  }
-  return latest.length > 180 ? `${latest.slice(0, 177)}...` : latest;
-}
 </script>
 
 <template>
@@ -1112,25 +1091,11 @@ function latestStreamData(command: AgentCommand) {
           </v-btn>
         </v-form>
 
-        <v-list v-if="selectedCommands.length > 0" class="command-list" density="compact">
-          <v-list-item
-            v-for="command in selectedCommands"
-            :key="command.id"
-            :subtitle="commandSubtitle(command)"
-            :title="`${command.method} ${command.path}`"
-          >
-            <template #prepend>
-              <v-icon
-                :color="commandStatusMeta[command.status].color"
-                :icon="commandStatusMeta[command.status].icon"
-              />
-            </template>
-            <div v-if="latestStreamData(command)" class="command-stream-snippet">
-              {{ latestStreamData(command) }}
-            </div>
-          </v-list-item>
-        </v-list>
-        <div v-else class="empty-command">No commands queued.</div>
+        <CommandInspector
+          class="command-list"
+          :commands="selectedCommands"
+          :stream-frames-by-command="streamFramesByCommand"
+        />
       </v-sheet>
     </section>
   </div>

@@ -115,6 +115,12 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
 }
 
+.config-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 480px);
+}
+
 .section-surface {
   border-radius: 8px;
   padding: 20px;
@@ -183,6 +189,61 @@ body {
 
 .create-panel {
   align-self: start;
+}
+
+.config-surface,
+.config-results-surface {
+  align-self: start;
+}
+
+.config-server-select {
+  max-width: 300px;
+}
+
+.config-tabs {
+  margin-top: 8px;
+}
+
+.config-window {
+  padding-top: 18px;
+}
+
+.config-form {
+  display: grid;
+  gap: 14px;
+}
+
+.config-action-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.config-action-row .v-btn {
+  min-width: 0;
+}
+
+.config-editor textarea {
+  font-family:
+    "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+.system-config-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.config-file-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compact-title {
+  font-size: 15px;
 }
 
 .server-form {
@@ -289,7 +350,56 @@ body {
   margin-top: 14px;
 }
 
-.command-stream-snippet {
+.command-inspector {
+  display: grid;
+  gap: 10px;
+}
+
+.command-title-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  width: 100%;
+}
+
+.command-title-text {
+  min-width: 0;
+}
+
+.command-title {
+  font-size: 13px;
+  font-weight: 720;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-subtitle {
+  color: #66736f;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.command-detail-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-label {
+  color: #66736f;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.detail-value {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.command-json,
+.command-stream-block {
   background: #eef3f1;
   border-radius: 6px;
   color: #263532;
@@ -297,10 +407,15 @@ body {
     "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.45;
-  margin-top: 8px;
-  overflow-wrap: anywhere;
-  padding: 8px 10px;
+  margin: 12px 0 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 10px 12px;
   white-space: pre-wrap;
+}
+
+.command-result-alert {
+  margin-top: 12px;
 }
 
 .empty-command {
@@ -311,6 +426,7 @@ body {
 
 @media (max-width: 960px) {
   .metric-grid,
+  .config-layout,
   .inventory-layout {
     grid-template-columns: 1fr;
   }
@@ -323,12 +439,20 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .config-server-select {
+    max-width: none;
+  }
+
+  .config-action-row,
+  .config-file-grid,
+  .command-detail-grid,
   .diagnostic-command-grid,
   .config-command-grid,
   .quick-command-grid,
   .log-command-grid,
   .maintenance-command-grid,
   .service-command-grid,
+  .system-config-grid,
   .settings-action-row {
     grid-template-columns: 1fr;
   }

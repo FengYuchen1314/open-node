@@ -41,7 +41,11 @@ This document records the starting source map for the Open Node refactor.
    - Done: control-plane wrappers and frontend client mappings for Xray/nginx
      config read/write, config-file list/read/write, WARP credential updates,
      and agent xray-mode/listen-port/master-URL setting updates.
-   - Next: dedicated config editing views and richer command-result rendering.
+   - Done: dedicated Vue config workspace plus expandable command-result
+     rendering for request bodies, agent result bodies, errors, and stream
+     frames.
+   - Next: higher-level inbound, outbound, routing, certificate, and website
+     workflows from the active control plane.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.

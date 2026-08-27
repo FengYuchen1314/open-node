@@ -154,6 +154,11 @@ and preserve the agent-side write/test/reload behavior. Agent setting wrappers
 cover Xray mode, listen port, master URL probe/update, and WARP credential
 updates without changing the Open Node no-license contract.
 
+The frontend exposes these wrappers in a dedicated `/config` workspace. It can
+queue Xray and nginx read/write operations, load completed read results back
+into editors, manage config-file read/write calls, and inspect each command's
+request, result body, error, and stream frames.
+
 ## Public Probe API
 
 Open Node exposes the read-only public probe surface without authentication or

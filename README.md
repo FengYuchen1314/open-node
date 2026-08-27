@@ -30,11 +30,12 @@ The first milestone establishes the project skeleton, the no-license contract,
 persisted server/agent inventory, agent telemetry and command slices, initial
 agent operation, maintenance, diagnostic, and config-preparation wrappers, and
 Xray/nginx config plus agent setting wrappers, and the public probe read-only
-surface. It does not yet replace the full MMWX product.
+surface. The Vue frontend now includes a config workspace and expandable
+command-result inspector. It does not yet replace the full MMWX product.
 
 ```text
 backend/   FastAPI app, no-license API, inventory, telemetry, commands, probe
-frontend/  Vue 3 + Vuetify shell, server, telemetry, command, and probe views
+frontend/  Vue 3 + Vuetify shell, server, config, command, and probe views
 docs/      migration and architecture notes
 scripts/   VPS test runner
 ```
