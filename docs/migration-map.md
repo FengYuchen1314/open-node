@@ -34,8 +34,10 @@ This document records the starting source map for the Open Node refactor.
      WebSocket RPC commands.
    - Done: specialized child operation wrappers for system info, traffic,
      speed, and domain latency probes.
-   - Next: install/remove/config child workflows for Xray, nginx, WARP, and
-     agent lifecycle tasks.
+   - Done: maintenance wrappers for Xray/nginx install and remove, WARP
+     install/status/remove, and agent upgrade/uninstall.
+   - Next: config child workflows for Xray, nginx, services, logs, WARP
+     credentials, and agent connection settings.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.

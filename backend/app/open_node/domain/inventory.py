@@ -47,6 +47,15 @@ class AgentOperationKind(StrEnum):
     TRAFFIC = "traffic"
     SPEED = "speed"
     DOMAIN_LATENCY = "domain_latency"
+    XRAY_INSTALL = "xray_install"
+    XRAY_REMOVE = "xray_remove"
+    NGINX_INSTALL = "nginx_install"
+    NGINX_REMOVE = "nginx_remove"
+    WARP_INSTALL = "warp_install"
+    WARP_STATUS = "warp_status"
+    WARP_REMOVE = "warp_remove"
+    AGENT_UPGRADE = "agent_upgrade"
+    AGENT_UNINSTALL = "agent_uninstall"
 
 
 class AgentCapabilities(BaseModel):
@@ -338,6 +347,19 @@ class AgentDomainLatencyProbeRequest(BaseModel):
         if value.startswith("[") and value.endswith("]"):
             value = value[1:-1]
         return value
+
+
+class AgentNginxInstallOperationRequest(BaseModel):
+    domain: str | None = Field(default=None, max_length=255)
+    command_timeout_ms: int = Field(default=300_000, ge=1_000, le=300_000)
+
+    @field_validator("domain")
+    @classmethod
+    def normalize_domain(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = AgentDomainLatencyProbeRequest._normalize_domain(value)
+        return normalized or None
 
 
 class ServerCommandsResponse(BaseModel):

@@ -581,6 +581,75 @@ def test_domain_latency_operation_normalizes_probe_targets(tmp_path: Path) -> No
     }
 
 
+def test_stream_maintenance_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-maintenance"}).json()
+    server_id = created["server"]["id"]
+
+    operations = [
+        ("xray/install", "/api/child/xray/install-stream"),
+        ("xray/remove", "/api/child/xray/remove-stream"),
+        ("nginx/remove", "/api/child/nginx/remove-stream"),
+        ("agent/upgrade", "/api/child/agent/upgrade-stream"),
+        ("agent/uninstall", "/api/child/agent/uninstall-stream"),
+    ]
+    responses = [
+        client.post(f"/api/v1/servers/{server_id}/operations/{operation}")
+        for operation, _path in operations
+    ]
+
+    assert all(response.status_code == 201 for response in responses)
+    for response, (_operation, expected_path) in zip(responses, operations, strict=True):
+        command = response.json()["command"]
+        assert response.json()["license_required"] is False
+        assert command["method"] == "POST"
+        assert command["path"] == expected_path
+        assert command["stream"] is True
+        assert command["timeout_ms"] == 300_000
+
+
+def test_nginx_install_operation_accepts_optional_domain_query(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-nginx-install"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/nginx/install",
+        json={
+            "domain": "https://panel.example.com/path",
+            "command_timeout_ms": 180_000,
+        },
+    )
+
+    assert response.status_code == 201
+    command = response.json()["command"]
+    assert command["path"] == "/api/child/nginx/install-stream"
+    assert command["query"] == "domain=panel.example.com"
+    assert command["stream"] is True
+    assert command["timeout_ms"] == 180_000
+
+
+def test_warp_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-warp-ops"}).json()
+    server_id = created["server"]["id"]
+
+    install = client.post(f"/api/v1/servers/{server_id}/operations/warp/install")
+    status = client.post(f"/api/v1/servers/{server_id}/operations/warp/status")
+    remove = client.post(f"/api/v1/servers/{server_id}/operations/warp/remove")
+
+    assert install.status_code == 201
+    assert status.status_code == 201
+    assert remove.status_code == 201
+    assert install.json()["command"]["method"] == "POST"
+    assert install.json()["command"]["path"] == "/api/child/warp/install"
+    assert status.json()["command"]["method"] == "GET"
+    assert status.json()["command"]["path"] == "/api/child/warp/status"
+    assert remove.json()["command"]["method"] == "POST"
+    assert remove.json()["command"]["path"] == "/api/child/warp/remove"
+    assert install.json()["command"]["stream"] is False
+    assert status.json()["license_required"] is False
+
+
 def test_agent_command_rejects_non_child_paths(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-command-path"}).json()
@@ -738,6 +807,35 @@ def test_online_agent_websocket_receives_specialized_operation(tmp_path: Path) -
         assert rpc_call["type"] == "rpc_call"
         assert rpc_call["payload"]["path"] == "/api/child/speed"
         assert rpc_call["payload"]["method"] == "GET"
+
+
+def test_online_agent_websocket_receives_stream_maintenance_operation(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-maintenance"}).json()
+    server_id = created["server"]["id"]
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-maintenance-host",
+                    "capabilities": {"rpc": True, "stream": True},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+
+        queued = client.post(f"/api/v1/servers/{server_id}/operations/xray/install")
+
+        assert queued.status_code == 201
+        assert queued.json()["command"]["status"] == "leased"
+        rpc_call = websocket.receive_json()
+        assert rpc_call["type"] == "rpc_call"
+        assert rpc_call["payload"]["path"] == "/api/child/xray/install-stream"
+        assert rpc_call["payload"]["method"] == "POST"
+        assert rpc_call["payload"]["stream"] is True
 
 
 def test_online_agent_websocket_persists_stream_data_until_reply(tmp_path: Path) -> None:

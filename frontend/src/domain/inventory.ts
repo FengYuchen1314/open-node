@@ -2,7 +2,20 @@ export type ConnectionMode = "auto" | "websocket" | "http" | "pull";
 export type ServerStatus = "pending" | "connected" | "offline";
 export type XrayMode = "external" | "embedded";
 export type AgentCommandStatus = "pending" | "leased" | "succeeded" | "failed";
-export type AgentOperationKind = "system_info" | "traffic" | "speed" | "domain_latency";
+export type AgentOperationKind =
+  | "system_info"
+  | "traffic"
+  | "speed"
+  | "domain_latency"
+  | "xray_install"
+  | "xray_remove"
+  | "nginx_install"
+  | "nginx_remove"
+  | "warp_install"
+  | "warp_status"
+  | "warp_remove"
+  | "agent_upgrade"
+  | "agent_uninstall";
 
 export interface ServerCreateRequest {
   name: string;
@@ -159,6 +172,15 @@ export interface AgentDomainLatencyProbeRequest {
   allow_icmp?: boolean;
   command_timeout_ms?: number;
 }
+
+export interface AgentNginxInstallOperationRequest {
+  domain?: string | null;
+  command_timeout_ms?: number;
+}
+
+export type AgentOperationPayload =
+  | AgentDomainLatencyProbeRequest
+  | AgentNginxInstallOperationRequest;
 
 export interface ServerCommandsResponse {
   server_id: string;

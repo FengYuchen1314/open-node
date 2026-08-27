@@ -3,6 +3,7 @@ import type {
   AgentCommandCreateResponse,
   AgentCommandStreamFramesResponse,
   AgentDomainLatencyProbeRequest,
+  AgentOperationPayload,
   AgentOperationKind,
   ServerCommandsResponse,
   ServerTelemetryResponse,
@@ -22,6 +23,15 @@ const operationPaths: Record<AgentOperationKind, string> = {
   traffic: "traffic",
   speed: "speed",
   domain_latency: "domain-latency",
+  xray_install: "xray/install",
+  xray_remove: "xray/remove",
+  nginx_install: "nginx/install",
+  nginx_remove: "nginx/remove",
+  warp_install: "warp/install",
+  warp_status: "warp/status",
+  warp_remove: "warp/remove",
+  agent_upgrade: "agent/upgrade",
+  agent_uninstall: "agent/uninstall",
 };
 
 export async function listServers(fetcher = fetch): Promise<ServerSummary[]> {
@@ -88,7 +98,7 @@ export async function createServerCommand(
 export async function queueAgentOperation(
   serverId: string,
   operation: AgentOperationKind,
-  payload?: AgentDomainLatencyProbeRequest,
+  payload?: AgentOperationPayload,
   fetcher = fetch,
 ): Promise<AgentCommandCreateResponse> {
   const request: RequestInit = { method: "POST" };

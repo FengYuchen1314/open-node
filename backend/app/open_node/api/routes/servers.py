@@ -1,4 +1,5 @@
 from typing import Annotated
+from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,6 +10,7 @@ from open_node.domain.inventory import (
     AgentCommandCreateResponse,
     AgentCommandStreamFramesResponse,
     AgentDomainLatencyProbeRequest,
+    AgentNginxInstallOperationRequest,
     ServerCommandsResponse,
     ServerCreate,
     ServerCreateResponse,
@@ -187,6 +189,172 @@ async def queue_domain_latency_operation(
     )
 
 
+@router.post(
+    "/{server_id}/operations/xray/install",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_install_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_maintenance_command(
+        server_id,
+        "/api/child/xray/install-stream",
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/remove",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_remove_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_maintenance_command(
+        server_id,
+        "/api/child/xray/remove-stream",
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/install",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_install_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+    payload: AgentNginxInstallOperationRequest | None = None,
+) -> AgentCommandCreateResponse:
+    request = payload or AgentNginxInstallOperationRequest()
+    return await _queue_maintenance_command(
+        server_id,
+        "/api/child/nginx/install-stream",
+        store,
+        connections,
+        query=_query_from_params({"domain": request.domain}),
+        timeout_ms=request.command_timeout_ms,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/remove",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_remove_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_maintenance_command(
+        server_id,
+        "/api/child/nginx/remove-stream",
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/agent/upgrade",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_agent_upgrade_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_maintenance_command(
+        server_id,
+        "/api/child/agent/upgrade-stream",
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/agent/uninstall",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_agent_uninstall_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_maintenance_command(
+        server_id,
+        "/api/child/agent/uninstall-stream",
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/warp/install",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_warp_install_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="POST", path="/api/child/warp/install", timeout_ms=60_000),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/warp/status",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_warp_status_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/warp/status"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/warp/remove",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_warp_remove_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="POST", path="/api/child/warp/remove", timeout_ms=60_000),
+        store,
+        connections,
+    )
+
+
 async def _queue_server_command(
     server_id: UUID,
     payload: AgentCommandCreate,
@@ -199,3 +367,29 @@ async def _queue_server_command(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     command = await connections.dispatch_command(store, command)
     return AgentCommandCreateResponse(command=command)
+
+
+async def _queue_maintenance_command(
+    server_id: UUID,
+    path: str,
+    store: InventoryStore,
+    connections: AgentConnectionManager,
+    query: str = "",
+    timeout_ms: int = 300_000,
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path=path,
+            query=query,
+            timeout_ms=timeout_ms,
+            stream=True,
+        ),
+        store,
+        connections,
+    )
+
+
+def _query_from_params(params: dict[str, str | None]) -> str:
+    return urlencode({key: value for key, value in params.items() if value})

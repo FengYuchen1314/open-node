@@ -272,4 +272,70 @@ describe("inventory API client", () => {
       allow_icmp: true,
     });
   });
+
+  it("queues stream maintenance operations with preset routes", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_4",
+            server_id: "srv_1",
+            request_id: "srv_1-maintenance",
+            method: "POST",
+            path: "/api/child/xray/install-stream",
+            query: "",
+            timeout_ms: 300000,
+            stream: true,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await queueAgentOperation("srv_1", "xray_install", undefined, fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/xray/install");
+    expect(response.command.stream).toBe(true);
+    expect(headers).toBeUndefined();
+  });
+
+  it("queues WARP operations with preset routes", async () => {
+    let requestUrl = "";
+    const fetcher: typeof fetch = async (input) => {
+      requestUrl = input.toString();
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_5",
+            server_id: "srv_1",
+            request_id: "srv_1-warp",
+            method: "GET",
+            path: "/api/child/warp/status",
+            query: "",
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "warp_status", undefined, fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/warp/status");
+  });
 });

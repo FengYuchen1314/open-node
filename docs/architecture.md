@@ -97,12 +97,27 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/traffic`
 - `POST /api/v1/servers/{server_id}/operations/speed`
 - `POST /api/v1/servers/{server_id}/operations/domain-latency`
+- `POST /api/v1/servers/{server_id}/operations/xray/install`
+- `POST /api/v1/servers/{server_id}/operations/xray/remove`
+- `POST /api/v1/servers/{server_id}/operations/nginx/install`
+- `POST /api/v1/servers/{server_id}/operations/nginx/remove`
+- `POST /api/v1/servers/{server_id}/operations/warp/install`
+- `POST /api/v1/servers/{server_id}/operations/warp/status`
+- `POST /api/v1/servers/{server_id}/operations/warp/remove`
+- `POST /api/v1/servers/{server_id}/operations/agent/upgrade`
+- `POST /api/v1/servers/{server_id}/operations/agent/uninstall`
 
 These wrappers enqueue the active `mmw-agent` child paths
 (`/api/child/system/info`, `/api/child/traffic`, `/api/child/speed`, and
 `/api/child/domains/latency`) and then reuse the same WebSocket RPC dispatch,
 HTTP lease, result, and stream-frame persistence contracts as generic commands.
 They do not introduce separate execution state or license checks.
+
+Maintenance wrappers for Xray, nginx, and agent lifecycle tasks target the
+active `*-stream` child endpoints with `stream=true`, so install, remove,
+upgrade, and uninstall output is preserved as command stream frames. WARP
+install, status, and remove wrappers target the active non-stream WARP child
+endpoints and remain normal command queue entries.
 
 ## Public Probe API
 

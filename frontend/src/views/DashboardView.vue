@@ -62,14 +62,51 @@ const xrayModes: Array<{ title: string; value: XrayMode }> = [
 ];
 
 const commandMethods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+type SimpleAgentOperation = Exclude<AgentOperationKind, "domain_latency">;
 const quickOperations: Array<{
   title: string;
   icon: string;
-  kind: Exclude<AgentOperationKind, "domain_latency">;
+  kind: SimpleAgentOperation;
 }> = [
   { title: "System info", icon: "mdi-monitor-dashboard", kind: "system_info" },
   { title: "Traffic", icon: "mdi-swap-vertical", kind: "traffic" },
   { title: "Speed", icon: "mdi-speedometer", kind: "speed" },
+];
+const maintenanceOperations: Array<{
+  title: string;
+  icon: string;
+  kind: SimpleAgentOperation;
+  color: string;
+}> = [
+  {
+    title: "Install Xray",
+    icon: "mdi-download-network-outline",
+    kind: "xray_install",
+    color: "secondary",
+  },
+  { title: "Remove Xray", icon: "mdi-delete-outline", kind: "xray_remove", color: "error" },
+  {
+    title: "Install Nginx",
+    icon: "mdi-server-plus",
+    kind: "nginx_install",
+    color: "secondary",
+  },
+  { title: "Remove Nginx", icon: "mdi-server-minus", kind: "nginx_remove", color: "error" },
+  {
+    title: "Install WARP",
+    icon: "mdi-cloud-download-outline",
+    kind: "warp_install",
+    color: "info",
+  },
+  { title: "WARP status", icon: "mdi-cloud-check-outline", kind: "warp_status", color: "info" },
+  { title: "Remove WARP", icon: "mdi-cloud-remove-outline", kind: "warp_remove", color: "error" },
+  { title: "Upgrade Agent", icon: "mdi-update", kind: "agent_upgrade", color: "warning" },
+  {
+    title: "Uninstall Agent",
+    icon: "mdi-power-plug-off-outline",
+    kind: "agent_uninstall",
+    color: "error",
+  },
 ];
 
 const statusMeta: Record<ServerStatus, { color: string; icon: string; label: string }> = {
@@ -271,7 +308,7 @@ async function submitCommand() {
   }
 }
 
-async function queueQuickOperation(kind: Exclude<AgentOperationKind, "domain_latency">) {
+async function queueQuickOperation(kind: SimpleAgentOperation) {
   if (!commandForm.server_id) {
     errorMessage.value = "Target server is required.";
     return;
@@ -620,6 +657,22 @@ function latestStreamData(command: AgentCommand) {
             :loading="savingOperation === operation.kind"
             :prepend-icon="operation.icon"
             color="primary"
+            size="small"
+            variant="tonal"
+            @click="queueQuickOperation(operation.kind)"
+          >
+            {{ operation.title }}
+          </v-btn>
+        </div>
+        <div class="section-subtitle operation-subtitle">Maintenance workflows</div>
+        <div class="maintenance-command-grid">
+          <v-btn
+            v-for="operation in maintenanceOperations"
+            :key="operation.kind"
+            :color="operation.color"
+            :disabled="serverOptions.length === 0"
+            :loading="savingOperation === operation.kind"
+            :prepend-icon="operation.icon"
             size="small"
             variant="tonal"
             @click="queueQuickOperation(operation.kind)"
