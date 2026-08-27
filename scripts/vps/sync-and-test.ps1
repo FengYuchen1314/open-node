@@ -2,7 +2,8 @@ param(
   [string]$HostName = "root@185.99.135.224",
   [string]$RepoUrl = "https://github.com/FengYuchen1314/open-node.git",
   [string]$Branch = "main",
-  [string]$RemoteDir = "/opt/open-node"
+  [string]$RemoteDir = "/opt/open-node",
+  [switch]$SkipBootstrap
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +32,11 @@ else
   git -C "`$REMOTE_DIR" fetch origin "`$BRANCH"
   git -C "`$REMOTE_DIR" reset --hard "origin/`$BRANCH"
 fi
+
+if [ "$SkipBootstrap" != "True" ]; then
+  bash "`$REMOTE_DIR/scripts/vps/bootstrap-debian.sh"
+fi
+
 bash "`$REMOTE_DIR/scripts/vps/run-tests.sh"
 "@
 

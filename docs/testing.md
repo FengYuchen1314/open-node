@@ -12,13 +12,15 @@ From Windows PowerShell in the repository root:
 ```
 
 The script uses the default SSH key for `root@185.99.135.224`, checks out the
-GitHub repository into `/opt/open-node`, and runs:
+GitHub repository into `/opt/open-node`, bootstraps the Debian test host, and
+runs:
 
-1. backend dependency installation;
-2. backend pytest suite;
-3. frontend dependency installation;
-4. frontend Vitest suite;
-5. frontend production build.
+1. Python venv and Node.js bootstrap;
+2. backend dependency installation;
+3. backend pytest suite;
+4. frontend dependency installation;
+5. frontend Vitest suite;
+6. frontend production build.
 
 ## Direct VPS Command
 
