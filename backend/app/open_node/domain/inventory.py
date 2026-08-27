@@ -58,6 +58,12 @@ def _validate_agent_url(value: str) -> str:
     return normalized
 
 
+def _strip_lower_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip().lower()
+    return value
+
+
 class ConnectionMode(StrEnum):
     AUTO = "auto"
     WEBSOCKET = "websocket"
@@ -116,6 +122,21 @@ class AgentOperationKind(StrEnum):
     TRAFFIC = "traffic"
     SPEED = "speed"
     DOMAIN_LATENCY = "domain_latency"
+    INBOUNDS_LIST = "inbounds_list"
+    INBOUNDS_MANAGE = "inbounds_manage"
+    OUTBOUNDS_LIST = "outbounds_list"
+    OUTBOUNDS_MANAGE = "outbounds_manage"
+    ROUTING_READ = "routing_read"
+    ROUTING_MANAGE = "routing_manage"
+    BATCH_APPLY = "batch_apply"
+    CERT_DEPLOY = "cert_deploy"
+    NGINX_SETUP_SSL = "nginx_setup_ssl"
+    NGINX_SERVERS_LIST = "nginx_servers_list"
+    NGINX_WEBSITES_LIST = "nginx_websites_list"
+    NGINX_WEBSITE_DELETE = "nginx_website_delete"
+    RETURN_ROUTE_TEST = "return_route_test"
+    VALIDATE_SITE = "validate_site"
+    LIMITER = "limiter"
     SERVICES_STATUS = "services_status"
     SERVICE_CONTROL = "service_control"
     SYSTEM_NICS = "system_nics"
@@ -462,6 +483,297 @@ class AgentServiceControlOperationRequest(BaseModel):
 class AgentLogsOperationRequest(BaseModel):
     service: AgentLogService = AgentLogService.AGENT
     lines: int = Field(default=200, ge=1, le=2000)
+
+
+class AgentInboundsManageOperationRequest(BaseModel):
+    action: Literal[
+        "add",
+        "remove",
+        "replace",
+        "add-client",
+        "remove-client",
+        "add-sniffing-exclude",
+    ] = "add"
+    inbound: dict[str, Any] | None = None
+    tag: str | None = Field(default=None, max_length=255)
+    client: dict[str, Any] | None = None
+    domains: list[str] = Field(default_factory=list, max_length=200)
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_action(cls, value: Any) -> Any:
+        return _strip_lower_value(value)
+
+    @field_validator("inbound", "client")
+    @classmethod
+    def validate_optional_json(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _ensure_json_serializable_config(value, "payload")
+
+    @field_validator("tag")
+    @classmethod
+    def validate_tag(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "tag")
+
+    @field_validator("domains")
+    @classmethod
+    def normalize_domains(cls, value: list[str]) -> list[str]:
+        domains: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            domain = AgentDomainLatencyProbeRequest._normalize_domain(raw).lower()
+            if domain and domain not in seen:
+                seen.add(domain)
+                domains.append(domain)
+        return domains
+
+
+class AgentOutboundsManageOperationRequest(BaseModel):
+    action: Literal["add", "remove", "update", "reorder"] = "add"
+    outbound: dict[str, Any] | None = None
+    tag: str | None = Field(default=None, max_length=255)
+    tags: list[str] = Field(default_factory=list, max_length=500)
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_action(cls, value: Any) -> Any:
+        return _strip_lower_value(value)
+
+    @field_validator("outbound")
+    @classmethod
+    def validate_outbound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _ensure_json_serializable_config(value, "outbound")
+
+    @field_validator("tag")
+    @classmethod
+    def validate_tag(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "tag")
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: list[str]) -> list[str]:
+        return [_strip_required_text(item, "tags") for item in value]
+
+
+class AgentRoutingManageOperationRequest(BaseModel):
+    action: Literal[
+        "set",
+        "add_rule",
+        "remove_rule",
+        "add_user_to_rule",
+        "remove_user_from_rule",
+    ] = "set"
+    routing: dict[str, Any] | None = None
+    rule: dict[str, Any] | None = None
+    index: int = Field(default=0, ge=0)
+    observatory: Any | None = None
+    burst_observatory: Any | None = None
+    marktag: str | None = Field(default=None, max_length=255)
+    user_email: str | None = Field(default=None, max_length=255)
+    no_restart: bool = False
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_action(cls, value: Any) -> Any:
+        return _strip_lower_value(value)
+
+    @field_validator("routing", "rule")
+    @classmethod
+    def validate_optional_json(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _ensure_json_serializable_config(value, "payload")
+
+    @field_validator("observatory", "burst_observatory")
+    @classmethod
+    def validate_observatory(cls, value: Any | None) -> Any | None:
+        if value is None:
+            return None
+        return _ensure_json_serializable_config(value, "observatory")
+
+    @field_validator("marktag", "user_email")
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "routing field")
+
+
+class AgentBatchInboundClient(BaseModel):
+    tag: str = Field(min_length=1, max_length=255)
+    client: dict[str, Any]
+
+    @field_validator("tag")
+    @classmethod
+    def validate_tag(cls, value: str) -> str:
+        return _strip_required_text(value, "tag")
+
+    @field_validator("client")
+    @classmethod
+    def validate_client(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _ensure_json_serializable_config(value, "client")
+
+
+class AgentBatchRoutingAddition(BaseModel):
+    marktag: str | None = Field(default=None, max_length=255)
+    outbound_tag: str | None = Field(default=None, max_length=255)
+    user_email: str = Field(min_length=1, max_length=255)
+
+    @field_validator("marktag", "outbound_tag")
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "routing tag")
+
+    @field_validator("user_email")
+    @classmethod
+    def validate_user_email(cls, value: str) -> str:
+        return _strip_required_text(value, "user_email")
+
+
+class AgentBatchApplyOperationRequest(BaseModel):
+    inbound_clients: list[AgentBatchInboundClient] = Field(default_factory=list, max_length=500)
+    routing_user_additions: list[AgentBatchRoutingAddition] = Field(
+        default_factory=list,
+        max_length=500,
+    )
+    no_restart: bool = False
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+
+class AgentCertDeployOperationRequest(BaseModel):
+    domain: str = Field(min_length=1, max_length=255)
+    cert_pem: str = Field(min_length=1)
+    key_pem: str = Field(min_length=1)
+    cert_path: str = Field(min_length=1, max_length=512)
+    key_path: str = Field(min_length=1, max_length=512)
+    reload: Literal["nginx", "xray", "both", "none"] = "none"
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @field_validator("reload", mode="before")
+    @classmethod
+    def normalize_reload(cls, value: Any) -> Any:
+        return _strip_lower_value(value)
+
+    @field_validator("domain", "cert_path", "key_path")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        return _strip_required_text(value, "cert field")
+
+    @field_validator("cert_pem", "key_pem")
+    @classmethod
+    def validate_pem(cls, value: str) -> str:
+        return _validate_required_content(value, "pem")
+
+
+class AgentNginxSetupSSLOperationRequest(BaseModel):
+    domain: str = Field(min_length=1, max_length=255)
+    nginx_config: str | None = None
+    domain_config: str | None = None
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @field_validator("domain")
+    @classmethod
+    def validate_domain(cls, value: str) -> str:
+        return _strip_required_text(value, "domain").lower()
+
+    @field_validator("nginx_config", "domain_config")
+    @classmethod
+    def validate_optional_config(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_required_content(value, "config")
+
+
+class AgentNginxWebsiteDeleteOperationRequest(BaseModel):
+    domain: str = Field(min_length=1, max_length=255)
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("domain")
+    @classmethod
+    def normalize_domain(cls, value: str) -> str:
+        return _strip_required_text(
+            AgentDomainLatencyProbeRequest._normalize_domain(value).lower(),
+            "domain",
+        )
+
+
+class AgentReturnRouteTarget(BaseModel):
+    carrier: Literal["telecom", "unicom", "mobile"]
+    region: str = Field(default="", max_length=120)
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=80, ge=1, le=65_535)
+
+    @field_validator("carrier", mode="before")
+    @classmethod
+    def normalize_carrier(cls, value: Any) -> Any:
+        return _strip_lower_value(value)
+
+    @field_validator("region")
+    @classmethod
+    def validate_region(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("host")
+    @classmethod
+    def validate_host(cls, value: str) -> str:
+        return _strip_required_text(value, "host")
+
+
+class AgentReturnRouteTestOperationRequest(BaseModel):
+    ip_version: Literal[4, 6] = 4
+    timeout_seconds: int = Field(default=25, ge=10, le=45)
+    targets: list[AgentReturnRouteTarget] = Field(min_length=1, max_length=3)
+    command_timeout_ms: int = Field(default=90_000, ge=1_000, le=300_000)
+
+
+class AgentValidateSiteOperationRequest(BaseModel):
+    site_type: Literal["static", "proxy"]
+    site_value: str = Field(min_length=1, max_length=512)
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("site_type", mode="before")
+    @classmethod
+    def normalize_site_type(cls, value: Any) -> Any:
+        return _strip_lower_value(value)
+
+    @field_validator("site_value")
+    @classmethod
+    def validate_site_value(cls, value: str) -> str:
+        return _strip_required_text(value, "site_value")
+
+
+class AgentLimiterUser(BaseModel):
+    uid: int = Field(ge=0)
+    email: str = Field(min_length=1, max_length=255)
+    speed_limit: int = Field(default=0, ge=0)
+    device_limit: int = Field(default=0, ge=0)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return _strip_required_text(value, "email")
+
+
+class AgentLimiterOperationRequest(BaseModel):
+    inbound_tag: str = Field(min_length=1, max_length=255)
+    node_limit: int = Field(default=0, ge=0)
+    users: list[AgentLimiterUser] = Field(default_factory=list, max_length=1000)
+    auto_speed_rules: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("inbound_tag")
+    @classmethod
+    def validate_inbound_tag(cls, value: str) -> str:
+        return _strip_required_text(value, "inbound_tag")
+
+    @field_validator("auto_speed_rules")
+    @classmethod
+    def validate_auto_speed_rules(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return _ensure_json_serializable_config(value, "auto_speed_rules")
 
 
 class AgentXrayTestConfigOperationRequest(BaseModel):

@@ -7,20 +7,30 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.inventory import (
+    AgentBatchApplyOperationRequest,
+    AgentCertDeployOperationRequest,
     AgentCommandCreate,
     AgentCommandCreateResponse,
     AgentCommandStreamFramesResponse,
     AgentDomainLatencyProbeRequest,
+    AgentInboundsManageOperationRequest,
+    AgentLimiterOperationRequest,
     AgentLogsOperationRequest,
     AgentNginxConfigFileReadOperationRequest,
     AgentNginxConfigFileWriteOperationRequest,
     AgentNginxConfigOperationRequest,
     AgentNginxInstallOperationRequest,
+    AgentNginxSetupSSLOperationRequest,
+    AgentNginxWebsiteDeleteOperationRequest,
+    AgentOutboundsManageOperationRequest,
     AgentProbeMasterURLOperationRequest,
+    AgentReturnRouteTestOperationRequest,
+    AgentRoutingManageOperationRequest,
     AgentServiceControlOperationRequest,
     AgentSwitchListenPortOperationRequest,
     AgentSwitchXrayModeOperationRequest,
     AgentUpdateMasterURLOperationRequest,
+    AgentValidateSiteOperationRequest,
     AgentWarpLicenseOperationRequest,
     AgentXrayConfigFileReadOperationRequest,
     AgentXrayConfigFileWriteOperationRequest,
@@ -198,6 +208,370 @@ async def queue_domain_latency_operation(
                 mode="json",
                 include={"domains", "timeout_ms", "allow_icmp"},
             ),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/inbounds/list",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_inbounds_list_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/inbounds"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/inbounds/manage",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_inbounds_manage_operation(
+    server_id: UUID,
+    payload: AgentInboundsManageOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/inbounds",
+            body=_compact_body(
+                {
+                    "action": payload.action,
+                    "inbound": payload.inbound,
+                    "tag": payload.tag,
+                    "client": payload.client,
+                    "domains": payload.domains,
+                }
+            ),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/outbounds/list",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_outbounds_list_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/outbounds"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/outbounds/manage",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_outbounds_manage_operation(
+    server_id: UUID,
+    payload: AgentOutboundsManageOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/outbounds",
+            body=_compact_body(
+                {
+                    "action": payload.action,
+                    "outbound": payload.outbound,
+                    "tag": payload.tag,
+                    "tags": payload.tags,
+                }
+            ),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/routing/read",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_routing_read_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/routing"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/routing/manage",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_routing_manage_operation(
+    server_id: UUID,
+    payload: AgentRoutingManageOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    body = _compact_body(
+        {
+            "action": payload.action,
+            "routing": payload.routing,
+            "rule": payload.rule,
+            "index": payload.index,
+            "marktag": payload.marktag,
+            "user_email": payload.user_email,
+            "no_restart": payload.no_restart,
+        }
+    )
+    if "observatory" in payload.model_fields_set:
+        body["observatory"] = payload.observatory
+    if "burst_observatory" in payload.model_fields_set:
+        body["burstObservatory"] = payload.burst_observatory
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/routing",
+            body=body,
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/batch-apply",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_batch_apply_operation(
+    server_id: UUID,
+    payload: AgentBatchApplyOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/batch-apply",
+            body=payload.model_dump(mode="json", exclude={"command_timeout_ms"}),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/cert/deploy",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_cert_deploy_operation(
+    server_id: UUID,
+    payload: AgentCertDeployOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/cert/deploy",
+            body=payload.model_dump(mode="json", exclude={"command_timeout_ms"}),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/setup-ssl",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_setup_ssl_operation(
+    server_id: UUID,
+    payload: AgentNginxSetupSSLOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/nginx/setup-ssl",
+            body=payload.model_dump(
+                mode="json",
+                exclude={"command_timeout_ms"},
+                exclude_none=True,
+            ),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/servers-list",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_servers_list_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/nginx/servers-list"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/websites/list",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_websites_list_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/nginx/websites"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/websites/delete",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_website_delete_operation(
+    server_id: UUID,
+    payload: AgentNginxWebsiteDeleteOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="DELETE",
+            path="/api/child/nginx/websites",
+            body={"domain": payload.domain},
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/network/return-route-test",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_return_route_test_operation(
+    server_id: UUID,
+    payload: AgentReturnRouteTestOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/network/return-route-test",
+            body=payload.model_dump(mode="json", exclude={"command_timeout_ms"}),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/validate-site",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_validate_site_operation(
+    server_id: UUID,
+    payload: AgentValidateSiteOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/validate-site",
+            body=payload.model_dump(mode="json", exclude={"command_timeout_ms"}),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/limiter",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_limiter_operation(
+    server_id: UUID,
+    payload: AgentLimiterOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/limiter",
+            body=payload.model_dump(mode="json", exclude={"command_timeout_ms"}),
             timeout_ms=payload.command_timeout_ms,
         ),
         store,
@@ -925,6 +1299,10 @@ async def _queue_maintenance_command(
 
 def _query_from_params(params: dict[str, str | None]) -> str:
     return urlencode({key: value for key, value in params.items() if value})
+
+
+def _compact_body(params: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in params.items() if value is not None and value != []}
 
 
 def _config_to_text(value: object) -> str:

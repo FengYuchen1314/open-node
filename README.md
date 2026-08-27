@@ -29,9 +29,11 @@ intentionally out of scope for this refactor.
 The first milestone establishes the project skeleton, the no-license contract,
 persisted server/agent inventory, agent telemetry and command slices, initial
 agent operation, maintenance, diagnostic, and config-preparation wrappers, and
-Xray/nginx config plus agent setting wrappers, and the public probe read-only
-surface. The Vue frontend now includes a config workspace and expandable
-command-result inspector. It does not yet replace the full MMWX product.
+Xray/nginx config plus agent setting wrappers, high-level runtime/site
+operation wrappers, and the public probe read-only surface. The Vue frontend
+now includes a config workspace, runtime/site operation payload workbenches, and
+an expandable command-result inspector. It does not yet replace the full MMWX
+product.
 
 ```text
 backend/   FastAPI app, no-license API, inventory, telemetry, commands, probe

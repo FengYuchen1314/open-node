@@ -10,6 +10,21 @@ export type AgentOperationKind =
   | "traffic"
   | "speed"
   | "domain_latency"
+  | "inbounds_list"
+  | "inbounds_manage"
+  | "outbounds_list"
+  | "outbounds_manage"
+  | "routing_read"
+  | "routing_manage"
+  | "batch_apply"
+  | "cert_deploy"
+  | "nginx_setup_ssl"
+  | "nginx_servers_list"
+  | "nginx_websites_list"
+  | "nginx_website_delete"
+  | "return_route_test"
+  | "validate_site"
+  | "limiter"
   | "services_status"
   | "service_control"
   | "system_nics"
@@ -214,6 +229,102 @@ export interface AgentLogsOperationRequest {
   lines?: number;
 }
 
+export interface AgentInboundsManageOperationRequest {
+  action?: "add" | "remove" | "replace" | "add-client" | "remove-client" | "add-sniffing-exclude";
+  inbound?: Record<string, unknown> | null;
+  tag?: string | null;
+  client?: Record<string, unknown> | null;
+  domains?: string[];
+  command_timeout_ms?: number;
+}
+
+export interface AgentOutboundsManageOperationRequest {
+  action?: "add" | "remove" | "update" | "reorder";
+  outbound?: Record<string, unknown> | null;
+  tag?: string | null;
+  tags?: string[];
+  command_timeout_ms?: number;
+}
+
+export interface AgentRoutingManageOperationRequest {
+  action?: "set" | "add_rule" | "remove_rule" | "add_user_to_rule" | "remove_user_from_rule";
+  routing?: Record<string, unknown> | null;
+  rule?: Record<string, unknown> | null;
+  index?: number;
+  observatory?: unknown;
+  burst_observatory?: unknown;
+  marktag?: string | null;
+  user_email?: string | null;
+  no_restart?: boolean;
+  command_timeout_ms?: number;
+}
+
+export interface AgentBatchApplyOperationRequest {
+  inbound_clients?: Array<{ tag: string; client: Record<string, unknown> }>;
+  routing_user_additions?: Array<{
+    marktag?: string | null;
+    outbound_tag?: string | null;
+    user_email: string;
+  }>;
+  no_restart?: boolean;
+  command_timeout_ms?: number;
+}
+
+export interface AgentCertDeployOperationRequest {
+  domain: string;
+  cert_pem: string;
+  key_pem: string;
+  cert_path: string;
+  key_path: string;
+  reload?: "nginx" | "xray" | "both" | "none";
+  command_timeout_ms?: number;
+}
+
+export interface AgentNginxSetupSSLOperationRequest {
+  domain: string;
+  nginx_config?: string | null;
+  domain_config?: string | null;
+  command_timeout_ms?: number;
+}
+
+export interface AgentNginxWebsiteDeleteOperationRequest {
+  domain: string;
+  command_timeout_ms?: number;
+}
+
+export interface AgentReturnRouteTarget {
+  carrier: "telecom" | "unicom" | "mobile";
+  region?: string;
+  host: string;
+  port?: number;
+}
+
+export interface AgentReturnRouteTestOperationRequest {
+  ip_version?: 4 | 6;
+  timeout_seconds?: number;
+  targets: AgentReturnRouteTarget[];
+  command_timeout_ms?: number;
+}
+
+export interface AgentValidateSiteOperationRequest {
+  site_type: "static" | "proxy";
+  site_value: string;
+  command_timeout_ms?: number;
+}
+
+export interface AgentLimiterOperationRequest {
+  inbound_tag: string;
+  node_limit?: number;
+  users?: Array<{
+    uid: number;
+    email: string;
+    speed_limit?: number;
+    device_limit?: number;
+  }>;
+  auto_speed_rules?: Record<string, unknown>[];
+  command_timeout_ms?: number;
+}
+
 export interface AgentXrayTestConfigOperationRequest {
   config: unknown;
   command_timeout_ms?: number;
@@ -292,6 +403,16 @@ export type AgentOperationPayload =
   | AgentNginxInstallOperationRequest
   | AgentServiceControlOperationRequest
   | AgentLogsOperationRequest
+  | AgentInboundsManageOperationRequest
+  | AgentOutboundsManageOperationRequest
+  | AgentRoutingManageOperationRequest
+  | AgentBatchApplyOperationRequest
+  | AgentCertDeployOperationRequest
+  | AgentNginxSetupSSLOperationRequest
+  | AgentNginxWebsiteDeleteOperationRequest
+  | AgentReturnRouteTestOperationRequest
+  | AgentValidateSiteOperationRequest
+  | AgentLimiterOperationRequest
   | AgentXrayTestConfigOperationRequest
   | AgentXrayConfigOperationRequest
   | AgentXraySystemConfigOperationRequest

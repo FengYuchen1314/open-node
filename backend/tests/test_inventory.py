@@ -677,8 +677,13 @@ def test_config_read_operations_queue_mmwx_child_commands(tmp_path: Path) -> Non
         ("xray/config/read", "/api/child/xray/config"),
         ("xray/system-config/read", "/api/child/xray/system-config"),
         ("xray/config-files/list", "/api/child/xray/config-files"),
+        ("inbounds/list", "/api/child/inbounds"),
+        ("outbounds/list", "/api/child/outbounds"),
+        ("routing/read", "/api/child/routing"),
         ("nginx/config/read", "/api/child/nginx/config"),
         ("nginx/config-files/list", "/api/child/nginx/config-files"),
+        ("nginx/servers-list", "/api/child/nginx/servers-list"),
+        ("nginx/websites/list", "/api/child/nginx/websites"),
     ]
     responses = [
         client.post(f"/api/v1/servers/{server_id}/operations/{operation}")
@@ -691,6 +696,164 @@ def test_config_read_operations_queue_mmwx_child_commands(tmp_path: Path) -> Non
         assert response.json()["license_required"] is False
         assert command["method"] == "GET"
         assert command["path"] == expected_path
+
+
+def test_xray_runtime_manage_operations_queue_agent_schemas(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-runtime-manage"}).json()
+    server_id = created["server"]["id"]
+
+    inbound = client.post(
+        f"/api/v1/servers/{server_id}/operations/inbounds/manage",
+        json={
+            "action": "ADD-CLIENT",
+            "tag": "vless-443",
+            "client": {"id": "uuid-1", "email": "user@example.com"},
+            "domains": ["https://Example.COM/path"],
+            "command_timeout_ms": 40_000,
+        },
+    )
+    outbound = client.post(
+        f"/api/v1/servers/{server_id}/operations/outbounds/manage",
+        json={"action": "reorder", "tags": ["direct", "proxy"]},
+    )
+    routing = client.post(
+        f"/api/v1/servers/{server_id}/operations/routing/manage",
+        json={
+            "action": "set",
+            "routing": {"rules": []},
+            "observatory": None,
+            "burst_observatory": {"subjectSelector": ["proxy"]},
+            "no_restart": True,
+            "command_timeout_ms": 45_000,
+        },
+    )
+
+    assert inbound.status_code == 201
+    assert outbound.status_code == 201
+    assert routing.status_code == 201
+    assert inbound.json()["command"]["path"] == "/api/child/inbounds"
+    assert inbound.json()["command"]["body"] == {
+        "action": "add-client",
+        "tag": "vless-443",
+        "client": {"id": "uuid-1", "email": "user@example.com"},
+        "domains": ["example.com"],
+    }
+    assert inbound.json()["command"]["timeout_ms"] == 40_000
+    assert outbound.json()["command"]["path"] == "/api/child/outbounds"
+    assert outbound.json()["command"]["body"] == {
+        "action": "reorder",
+        "tags": ["direct", "proxy"],
+    }
+    assert routing.json()["command"]["path"] == "/api/child/routing"
+    assert routing.json()["command"]["body"] == {
+        "action": "set",
+        "routing": {"rules": []},
+        "index": 0,
+        "no_restart": True,
+        "observatory": None,
+        "burstObservatory": {"subjectSelector": ["proxy"]},
+    }
+    assert routing.json()["command"]["timeout_ms"] == 45_000
+
+
+def test_batch_cert_site_route_limiter_operations_queue_agent_schemas(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-high-level"}).json()
+    server_id = created["server"]["id"]
+
+    batch = client.post(
+        f"/api/v1/servers/{server_id}/operations/batch-apply",
+        json={
+            "inbound_clients": [
+                {"tag": "vless-443", "client": {"id": "uuid-1", "email": "u@example.com"}}
+            ],
+            "routing_user_additions": [
+                {"marktag": "route-proxy", "outbound_tag": "proxy", "user_email": "u@example.com"}
+            ],
+            "no_restart": True,
+        },
+    )
+    cert = client.post(
+        f"/api/v1/servers/{server_id}/operations/cert/deploy",
+        json={
+            "domain": "example.com",
+            "cert_pem": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+            "key_pem": "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----",
+            "cert_path": "/etc/nginx/cert/example.com.pem",
+            "key_path": "/etc/nginx/cert/example.com.key",
+            "reload": "nginx",
+            "command_timeout_ms": 70_000,
+        },
+    )
+    setup_ssl = client.post(
+        f"/api/v1/servers/{server_id}/operations/nginx/setup-ssl",
+        json={"domain": "EXAMPLE.com", "domain_config": "server { listen 443 ssl; }"},
+    )
+    delete_site = client.post(
+        f"/api/v1/servers/{server_id}/operations/nginx/websites/delete",
+        json={"domain": "https://example.com/path"},
+    )
+    return_route = client.post(
+        f"/api/v1/servers/{server_id}/operations/network/return-route-test",
+        json={
+            "ip_version": 4,
+            "timeout_seconds": 20,
+            "targets": [{"carrier": "TELECOM", "region": "gz", "host": "1.1.1.1"}],
+        },
+    )
+    validate_site = client.post(
+        f"/api/v1/servers/{server_id}/operations/validate-site",
+        json={"site_type": "proxy", "site_value": "https://example.com"},
+    )
+    limiter = client.post(
+        f"/api/v1/servers/{server_id}/operations/limiter",
+        json={
+            "inbound_tag": "vless-443",
+            "node_limit": 1048576,
+            "users": [
+                {
+                    "uid": 1001,
+                    "email": "u@example.com",
+                    "speed_limit": 1024,
+                    "device_limit": 2,
+                }
+            ],
+            "auto_speed_rules": [{"threshold": 10}],
+        },
+    )
+
+    assert batch.status_code == 201
+    assert cert.status_code == 201
+    assert setup_ssl.status_code == 201
+    assert delete_site.status_code == 201
+    assert return_route.status_code == 201
+    assert validate_site.status_code == 201
+    assert limiter.status_code == 201
+    assert batch.json()["command"]["path"] == "/api/child/batch-apply"
+    assert batch.json()["command"]["body"]["no_restart"] is True
+    assert cert.json()["command"]["path"] == "/api/child/cert/deploy"
+    assert cert.json()["command"]["body"]["reload"] == "nginx"
+    assert cert.json()["command"]["timeout_ms"] == 70_000
+    assert setup_ssl.json()["command"]["path"] == "/api/child/nginx/setup-ssl"
+    assert setup_ssl.json()["command"]["body"] == {
+        "domain": "example.com",
+        "domain_config": "server { listen 443 ssl; }",
+    }
+    assert delete_site.json()["command"]["method"] == "DELETE"
+    assert delete_site.json()["command"]["path"] == "/api/child/nginx/websites"
+    assert delete_site.json()["command"]["body"] == {"domain": "example.com"}
+    assert return_route.json()["command"]["path"] == "/api/child/network/return-route-test"
+    assert return_route.json()["command"]["body"]["targets"][0]["carrier"] == "telecom"
+    assert validate_site.json()["command"]["path"] == "/api/child/validate-site"
+    assert validate_site.json()["command"]["body"] == {
+        "site_type": "proxy",
+        "site_value": "https://example.com",
+    }
+    assert limiter.json()["command"]["path"] == "/api/child/limiter"
+    assert limiter.json()["command"]["body"]["users"][0]["device_limit"] == 2
 
 
 def test_xray_config_write_operation_serializes_structured_config(tmp_path: Path) -> None:
@@ -1161,6 +1324,49 @@ def test_online_agent_websocket_receives_agent_setting_operation(tmp_path: Path)
         assert rpc_call["payload"]["body"] == {
             "master_url": "https://panel.example.com",
             "only_if_recovery": True,
+        }
+
+
+def test_online_agent_websocket_receives_high_level_operation(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-high-level"}).json()
+    server_id = created["server"]["id"]
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-high-level-host",
+                    "capabilities": {"rpc": True},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+
+        queued = client.post(
+            f"/api/v1/servers/{server_id}/operations/routing/manage",
+            json={
+                "action": "add_user_to_rule",
+                "marktag": "route-proxy",
+                "user_email": "user@example.com",
+                "no_restart": True,
+            },
+        )
+
+        assert queued.status_code == 201
+        assert queued.json()["command"]["status"] == "leased"
+        rpc_call = websocket.receive_json()
+        assert rpc_call["type"] == "rpc_call"
+        assert rpc_call["payload"]["path"] == "/api/child/routing"
+        assert rpc_call["payload"]["method"] == "POST"
+        assert rpc_call["payload"]["body"] == {
+            "action": "add_user_to_rule",
+            "index": 0,
+            "marktag": "route-proxy",
+            "user_email": "user@example.com",
+            "no_restart": True,
         }
 
 

@@ -97,6 +97,14 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/traffic`
 - `POST /api/v1/servers/{server_id}/operations/speed`
 - `POST /api/v1/servers/{server_id}/operations/domain-latency`
+- `POST /api/v1/servers/{server_id}/operations/inbounds/list`
+- `POST /api/v1/servers/{server_id}/operations/inbounds/manage`
+- `POST /api/v1/servers/{server_id}/operations/outbounds/list`
+- `POST /api/v1/servers/{server_id}/operations/outbounds/manage`
+- `POST /api/v1/servers/{server_id}/operations/routing/read`
+- `POST /api/v1/servers/{server_id}/operations/routing/manage`
+- `POST /api/v1/servers/{server_id}/operations/batch-apply`
+- `POST /api/v1/servers/{server_id}/operations/cert/deploy`
 - `POST /api/v1/servers/{server_id}/operations/services/status`
 - `POST /api/v1/servers/{server_id}/operations/services/control`
 - `POST /api/v1/servers/{server_id}/operations/system/nics`
@@ -117,8 +125,15 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/nginx/config-files/list`
 - `POST /api/v1/servers/{server_id}/operations/nginx/config-files/read`
 - `POST /api/v1/servers/{server_id}/operations/nginx/config-files/write`
+- `POST /api/v1/servers/{server_id}/operations/nginx/setup-ssl`
+- `POST /api/v1/servers/{server_id}/operations/nginx/servers-list`
+- `POST /api/v1/servers/{server_id}/operations/nginx/websites/list`
+- `POST /api/v1/servers/{server_id}/operations/nginx/websites/delete`
 - `POST /api/v1/servers/{server_id}/operations/nginx/install`
 - `POST /api/v1/servers/{server_id}/operations/nginx/remove`
+- `POST /api/v1/servers/{server_id}/operations/network/return-route-test`
+- `POST /api/v1/servers/{server_id}/operations/validate-site`
+- `POST /api/v1/servers/{server_id}/operations/limiter`
 - `POST /api/v1/servers/{server_id}/operations/warp/install`
 - `POST /api/v1/servers/{server_id}/operations/warp/status`
 - `POST /api/v1/servers/{server_id}/operations/warp/license`
@@ -154,10 +169,17 @@ and preserve the agent-side write/test/reload behavior. Agent setting wrappers
 cover Xray mode, listen port, master URL probe/update, and WARP credential
 updates without changing the Open Node no-license contract.
 
+High-level workflow wrappers cover active agent inbound, outbound, routing,
+batch apply, certificate deployment, nginx SSL setup, nginx website inventory
+and deletion, return-route testing, website validation, and embedded limiter
+configuration. Routing manage requests preserve the agent's camel-case
+`burstObservatory` field while keeping the Open Node API typed and explicit.
+
 The frontend exposes these wrappers in a dedicated `/config` workspace. It can
 queue Xray and nginx read/write operations, load completed read results back
-into editors, manage config-file read/write calls, and inspect each command's
-request, result body, error, and stream frames.
+into editors, manage config-file read/write calls, dispatch high-level runtime
+and site payloads, and inspect each command's request, result body, error, and
+stream frames.
 
 ## Public Probe API
 

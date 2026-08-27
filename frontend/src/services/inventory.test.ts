@@ -484,6 +484,47 @@ describe("inventory API client", () => {
     expect(headers).toBeUndefined();
   });
 
+  it("queues high-level agent operations with preset routes", async () => {
+    const requestUrls: string[] = [];
+    const fetcher: typeof fetch = async (input) => {
+      requestUrls.push(input.toString());
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: `cmd_${requestUrls.length}`,
+            server_id: "srv_1",
+            request_id: `srv_1-${requestUrls.length}`,
+            method: "GET",
+            path: "/api/child/inbounds",
+            query: "",
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "inbounds_list", undefined, fetcher);
+    await queueAgentOperation("srv_1", "outbounds_list", undefined, fetcher);
+    await queueAgentOperation("srv_1", "routing_read", undefined, fetcher);
+    await queueAgentOperation("srv_1", "nginx_servers_list", undefined, fetcher);
+    await queueAgentOperation("srv_1", "nginx_websites_list", undefined, fetcher);
+
+    expect(requestUrls).toEqual([
+      "/api/v1/servers/srv_1/operations/inbounds/list",
+      "/api/v1/servers/srv_1/operations/outbounds/list",
+      "/api/v1/servers/srv_1/operations/routing/read",
+      "/api/v1/servers/srv_1/operations/nginx/servers-list",
+      "/api/v1/servers/srv_1/operations/nginx/websites/list",
+    ]);
+  });
+
   it("queues Xray config write operations with JSON body", async () => {
     let requestUrl = "";
     let body = "";
@@ -524,6 +565,56 @@ describe("inventory API client", () => {
     expect(JSON.parse(body)).toEqual({
       config: { inbounds: [], outbounds: [] },
       force: true,
+    });
+  });
+
+  it("queues high-level agent operations with JSON bodies", async () => {
+    let requestUrl = "";
+    let body = "";
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      body = init?.body?.toString() ?? "";
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_10b",
+            server_id: "srv_1",
+            request_id: "srv_1-routing",
+            method: "POST",
+            path: "/api/child/routing",
+            query: "",
+            body: JSON.parse(body) as unknown,
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation(
+      "srv_1",
+      "routing_manage",
+      {
+        action: "add_user_to_rule",
+        marktag: "route-proxy",
+        user_email: "user@example.com",
+        no_restart: true,
+      },
+      fetcher,
+    );
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/routing/manage");
+    expect(JSON.parse(body)).toEqual({
+      action: "add_user_to_rule",
+      marktag: "route-proxy",
+      user_email: "user@example.com",
+      no_restart: true,
     });
   });
 

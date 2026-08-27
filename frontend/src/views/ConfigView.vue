@@ -50,6 +50,28 @@ const nginxFileForm = reactive({
   path: "/etc/nginx/conf.d/site.conf",
   content: "server {\n    listen 80;\n}\n",
 });
+const runtimeOperation = ref<AgentOperationKind>("inbounds_manage");
+const runtimePayloadText = ref(
+  '{\n  "action": "add-client",\n  "tag": "vless-443",\n  "client": {\n    "id": "uuid",\n    "email": "user@example.com"\n  }\n}',
+);
+const siteOperation = ref<AgentOperationKind>("nginx_setup_ssl");
+const sitePayloadText = ref(
+  '{\n  "domain": "example.com",\n  "domain_config": "server {\\n    listen 443 ssl;\\n}"\n}',
+);
+const runtimeOperationOptions: Array<{ title: string; value: AgentOperationKind }> = [
+  { title: "Manage inbounds", value: "inbounds_manage" },
+  { title: "Manage outbounds", value: "outbounds_manage" },
+  { title: "Manage routing", value: "routing_manage" },
+  { title: "Batch apply", value: "batch_apply" },
+  { title: "Limiter", value: "limiter" },
+  { title: "Return route test", value: "return_route_test" },
+];
+const siteOperationOptions: Array<{ title: string; value: AgentOperationKind }> = [
+  { title: "Setup SSL", value: "nginx_setup_ssl" },
+  { title: "Delete website", value: "nginx_website_delete" },
+  { title: "Deploy cert", value: "cert_deploy" },
+  { title: "Validate site", value: "validate_site" },
+];
 
 const serverOptions = computed(() =>
   servers.value.map((server) => ({ title: server.name, value: server.id })),
@@ -179,6 +201,23 @@ async function writeNginxFile() {
   });
 }
 
+async function queueRuntimePayload() {
+  await queueJsonOperation(runtimeOperation.value, runtimePayloadText.value);
+}
+
+async function queueSitePayload() {
+  await queueJsonOperation(siteOperation.value, sitePayloadText.value);
+}
+
+async function queueJsonOperation(kind: AgentOperationKind, payloadText: string) {
+  try {
+    const payload = parseOperationPayload(payloadText);
+    await queueOperation(kind, payload);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  }
+}
+
 function useLatestXrayConfig() {
   const body = latestResultRecord("/api/child/xray/config");
   if (!body || typeof body.config !== "string") {
@@ -278,6 +317,18 @@ function blankToNull(value: string) {
   return trimmed ? trimmed : null;
 }
 
+function parseOperationPayload(value: string): AgentOperationPayload | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = JSON.parse(trimmed) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Payload must be a JSON object.");
+  }
+  return parsed as AgentOperationPayload;
+}
+
 function readableError(error: unknown) {
   return error instanceof Error ? error.message : "Request failed.";
 }
@@ -335,7 +386,9 @@ function readableError(error: unknown) {
         <v-tabs v-model="activeTab" class="config-tabs" density="comfortable">
           <v-tab prepend-icon="mdi-alpha-x-circle-outline" value="xray">Xray</v-tab>
           <v-tab prepend-icon="mdi-tune-variant" value="system">System</v-tab>
+          <v-tab prepend-icon="mdi-routes" value="runtime">Runtime</v-tab>
           <v-tab prepend-icon="mdi-alpha-n-circle-outline" value="nginx">Nginx</v-tab>
+          <v-tab prepend-icon="mdi-web" value="sites">Sites</v-tab>
           <v-tab prepend-icon="mdi-folder-cog-outline" value="files">Files</v-tab>
         </v-tabs>
 
@@ -489,6 +542,74 @@ function readableError(error: unknown) {
             </v-form>
           </v-window-item>
 
+          <v-window-item value="runtime">
+            <v-form class="config-form" @submit.prevent="queueRuntimePayload">
+              <div class="config-action-row">
+                <v-btn
+                  :disabled="serverOptions.length === 0"
+                  :loading="savingOperation === 'inbounds_list'"
+                  color="secondary"
+                  prepend-icon="mdi-format-list-bulleted"
+                  size="small"
+                  variant="tonal"
+                  @click="queueOperation('inbounds_list')"
+                >
+                  Inbounds
+                </v-btn>
+                <v-btn
+                  :disabled="serverOptions.length === 0"
+                  :loading="savingOperation === 'outbounds_list'"
+                  color="secondary"
+                  prepend-icon="mdi-format-list-bulleted-square"
+                  size="small"
+                  variant="tonal"
+                  @click="queueOperation('outbounds_list')"
+                >
+                  Outbounds
+                </v-btn>
+                <v-btn
+                  :disabled="serverOptions.length === 0"
+                  :loading="savingOperation === 'routing_read'"
+                  color="secondary"
+                  prepend-icon="mdi-source-branch"
+                  size="small"
+                  variant="tonal"
+                  @click="queueOperation('routing_read')"
+                >
+                  Routing
+                </v-btn>
+              </div>
+              <div class="form-row">
+                <v-select
+                  v-model="runtimeOperation"
+                  :items="runtimeOperationOptions"
+                  density="comfortable"
+                  label="Operation"
+                  variant="outlined"
+                />
+                <v-btn
+                  :disabled="serverOptions.length === 0"
+                  :loading="savingOperation === runtimeOperation"
+                  color="primary"
+                  prepend-icon="mdi-send-outline"
+                  size="small"
+                  type="submit"
+                  variant="flat"
+                >
+                  Queue
+                </v-btn>
+              </div>
+              <v-textarea
+                v-model="runtimePayloadText"
+                class="config-editor"
+                density="comfortable"
+                label="Payload"
+                rows="14"
+                variant="outlined"
+              />
+            </v-form>
+          </v-window-item>
+
           <v-window-item value="nginx">
             <v-form class="config-form" @submit.prevent="writeNginxConfig">
               <div class="config-action-row">
@@ -537,6 +658,63 @@ function readableError(error: unknown) {
                 density="comfortable"
                 label="Nginx config"
                 rows="16"
+                variant="outlined"
+              />
+            </v-form>
+          </v-window-item>
+
+          <v-window-item value="sites">
+            <v-form class="config-form" @submit.prevent="queueSitePayload">
+              <div class="config-action-row">
+                <v-btn
+                  :disabled="serverOptions.length === 0"
+                  :loading="savingOperation === 'nginx_servers_list'"
+                  color="secondary"
+                  prepend-icon="mdi-server"
+                  size="small"
+                  variant="tonal"
+                  @click="queueOperation('nginx_servers_list')"
+                >
+                  Servers
+                </v-btn>
+                <v-btn
+                  :disabled="serverOptions.length === 0"
+                  :loading="savingOperation === 'nginx_websites_list'"
+                  color="secondary"
+                  prepend-icon="mdi-web-box"
+                  size="small"
+                  variant="tonal"
+                  @click="queueOperation('nginx_websites_list')"
+                >
+                  Websites
+                </v-btn>
+              </div>
+              <div class="form-row">
+                <v-select
+                  v-model="siteOperation"
+                  :items="siteOperationOptions"
+                  density="comfortable"
+                  label="Operation"
+                  variant="outlined"
+                />
+                <v-btn
+                  :disabled="serverOptions.length === 0"
+                  :loading="savingOperation === siteOperation"
+                  color="primary"
+                  prepend-icon="mdi-send-outline"
+                  size="small"
+                  type="submit"
+                  variant="flat"
+                >
+                  Queue
+                </v-btn>
+              </div>
+              <v-textarea
+                v-model="sitePayloadText"
+                class="config-editor"
+                density="comfortable"
+                label="Payload"
+                rows="14"
                 variant="outlined"
               />
             </v-form>

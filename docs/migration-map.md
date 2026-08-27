@@ -44,8 +44,11 @@ This document records the starting source map for the Open Node refactor.
    - Done: dedicated Vue config workspace plus expandable command-result
      rendering for request bodies, agent result bodies, errors, and stream
      frames.
-   - Next: higher-level inbound, outbound, routing, certificate, and website
-     workflows from the active control plane.
+   - Done: higher-level inbound, outbound, routing, batch apply, certificate,
+     nginx SSL/website, return-route, site validation, and limiter operation
+     wrappers from the active agent.
+   - Next: richer guided control-plane workflows for subscriptions, user
+     binding, node provisioning, and rollback-friendly multi-server changes.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.
