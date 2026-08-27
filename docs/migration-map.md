@@ -69,6 +69,9 @@ This document records the starting source map for the Open Node refactor.
      inventory table as Xray runtime status.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
+   - Done: compatibility wrappers for the active non-stream Xray/nginx
+     install/remove child endpoints while keeping stream wrappers as the
+     default UI operations.
    - Next: deeper Xray runtime integration.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
@@ -100,5 +103,7 @@ This document records the starting source map for the Open Node refactor.
      API port, inbound inventory, and config-repair metadata.
    - Done: log-file management and nginx stream-port cleanup wrappers for
      parity with the active agent operational surface.
+   - Done: all active `mmw-agent` child route constants now have an Open Node
+     command wrapper or documented stream/default equivalent.
    - Next: deeper Xray runtime integration.
 5. Revisit Xray integration once the agent protocol surface is stable.

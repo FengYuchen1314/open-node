@@ -982,6 +982,28 @@ async def queue_xray_install_operation(
 
 
 @router.post(
+    "/{server_id}/operations/xray/install-legacy",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_install_legacy_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/xray/install",
+            timeout_ms=300_000,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
     "/{server_id}/operations/xray/remove",
     response_model=AgentCommandCreateResponse,
     status_code=status.HTTP_201_CREATED,
@@ -994,6 +1016,28 @@ async def queue_xray_remove_operation(
     return await _queue_maintenance_command(
         server_id,
         "/api/child/xray/remove-stream",
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/remove-legacy",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_remove_legacy_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/xray/remove",
+            timeout_ms=300_000,
+        ),
         store,
         connections,
     )
@@ -1022,6 +1066,31 @@ async def queue_nginx_install_operation(
 
 
 @router.post(
+    "/{server_id}/operations/nginx/install-legacy",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_install_legacy_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+    payload: AgentNginxInstallOperationRequest | None = None,
+) -> AgentCommandCreateResponse:
+    request = payload or AgentNginxInstallOperationRequest()
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/nginx/install",
+            body=_compact_body({"domain": request.domain}),
+            timeout_ms=request.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
     "/{server_id}/operations/nginx/remove",
     response_model=AgentCommandCreateResponse,
     status_code=status.HTTP_201_CREATED,
@@ -1034,6 +1103,28 @@ async def queue_nginx_remove_operation(
     return await _queue_maintenance_command(
         server_id,
         "/api/child/nginx/remove-stream",
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/remove-legacy",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_remove_legacy_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/nginx/remove",
+            timeout_ms=300_000,
+        ),
         store,
         connections,
     )

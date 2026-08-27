@@ -41,7 +41,8 @@ views plus return-route summaries from agent test results, scheduled probe task
 dispatch, domain-latency result ingestion, cross-node target comparison, and
 external Xray takeover for legacy `-config` plus `-confdir` nodes, plus latest
 agent scan-result persistence for Xray runtime status and inbound inventory,
-agent log-file listing/cleanup, and nginx stream-port cleanup.
+agent log-file listing/cleanup, nginx stream-port cleanup, and compatibility
+wrappers for non-stream Xray/nginx install/remove agent routes.
 The Vue frontend now includes a config workspace, runtime/site operation
 payload workbenches, subscription catalog, link, format, traffic, quota,
 preset, and import/export management, probe settings, metadata, and task

@@ -134,7 +134,9 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/xray/config-files/write`
 - `POST /api/v1/servers/{server_id}/operations/xray/takeover-external`
 - `POST /api/v1/servers/{server_id}/operations/xray/install`
+- `POST /api/v1/servers/{server_id}/operations/xray/install-legacy`
 - `POST /api/v1/servers/{server_id}/operations/xray/remove`
+- `POST /api/v1/servers/{server_id}/operations/xray/remove-legacy`
 - `POST /api/v1/servers/{server_id}/operations/nginx/config/read`
 - `POST /api/v1/servers/{server_id}/operations/nginx/config/write`
 - `POST /api/v1/servers/{server_id}/operations/nginx/config-files/list`
@@ -145,7 +147,9 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/nginx/websites/list`
 - `POST /api/v1/servers/{server_id}/operations/nginx/websites/delete`
 - `POST /api/v1/servers/{server_id}/operations/nginx/install`
+- `POST /api/v1/servers/{server_id}/operations/nginx/install-legacy`
 - `POST /api/v1/servers/{server_id}/operations/nginx/remove`
+- `POST /api/v1/servers/{server_id}/operations/nginx/remove-legacy`
 - `POST /api/v1/servers/{server_id}/operations/nginx/clear-stream-port`
 - `POST /api/v1/servers/{server_id}/operations/network/return-route-test`
 - `POST /api/v1/servers/{server_id}/operations/validate-site`
@@ -171,6 +175,9 @@ active `*-stream` child endpoints with `stream=true`, so install, remove,
 upgrade, and uninstall output is preserved as command stream frames. WARP
 install, status, and remove wrappers target the active non-stream WARP child
 endpoints and remain normal command queue entries.
+Compatibility wrappers with the `-legacy` suffix target the active non-stream
+Xray/nginx install and remove child endpoints for automation that still expects
+one final JSON result instead of stream frames.
 
 Diagnostic and config-preparation wrappers cover service status/control, system
 NIC enumeration, service logs, agent log-file listing/cleanup, agent-side scan,

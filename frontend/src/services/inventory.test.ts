@@ -408,6 +408,53 @@ describe("inventory API client", () => {
     expect(headers).toBeUndefined();
   });
 
+  it("queues legacy maintenance operations with preset routes", async () => {
+    const requestUrls: string[] = [];
+    const bodies: string[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrls.push(input.toString());
+      bodies.push(init?.body?.toString() ?? "");
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: `cmd_legacy_${requestUrls.length}`,
+            server_id: "srv_1",
+            request_id: `srv_1-legacy-${requestUrls.length}`,
+            method: "POST",
+            path: "/api/child/xray/install",
+            query: "",
+            timeout_ms: 300000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "xray_install_legacy", undefined, fetcher);
+    await queueAgentOperation("srv_1", "xray_remove_legacy", undefined, fetcher);
+    await queueAgentOperation(
+      "srv_1",
+      "nginx_install_legacy",
+      { domain: "panel.example.com" },
+      fetcher,
+    );
+    await queueAgentOperation("srv_1", "nginx_remove_legacy", undefined, fetcher);
+
+    expect(requestUrls).toEqual([
+      "/api/v1/servers/srv_1/operations/xray/install-legacy",
+      "/api/v1/servers/srv_1/operations/xray/remove-legacy",
+      "/api/v1/servers/srv_1/operations/nginx/install-legacy",
+      "/api/v1/servers/srv_1/operations/nginx/remove-legacy",
+    ]);
+    expect(bodies).toEqual(["", "", JSON.stringify({ domain: "panel.example.com" }), ""]);
+  });
+
   it("queues WARP operations with preset routes", async () => {
     let requestUrl = "";
     const fetcher: typeof fetch = async (input) => {

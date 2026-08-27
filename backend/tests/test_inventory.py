@@ -1614,6 +1614,39 @@ def test_stream_maintenance_operations_queue_mmwx_child_commands(tmp_path: Path)
         assert command["timeout_ms"] == 300_000
 
 
+def test_legacy_maintenance_operations_queue_active_agent_paths(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-legacy-maintenance"}).json()
+    server_id = created["server"]["id"]
+
+    xray_install = client.post(f"/api/v1/servers/{server_id}/operations/xray/install-legacy")
+    xray_remove = client.post(f"/api/v1/servers/{server_id}/operations/xray/remove-legacy")
+    nginx_install = client.post(
+        f"/api/v1/servers/{server_id}/operations/nginx/install-legacy",
+        json={
+            "domain": "https://panel.example.com/path",
+            "command_timeout_ms": 180_000,
+        },
+    )
+    nginx_remove = client.post(f"/api/v1/servers/{server_id}/operations/nginx/remove-legacy")
+
+    assert xray_install.status_code == 201
+    assert xray_remove.status_code == 201
+    assert nginx_install.status_code == 201
+    assert nginx_remove.status_code == 201
+    assert xray_install.json()["command"]["path"] == "/api/child/xray/install"
+    assert xray_remove.json()["command"]["path"] == "/api/child/xray/remove"
+    assert nginx_install.json()["command"]["path"] == "/api/child/nginx/install"
+    assert nginx_install.json()["command"]["body"] == {"domain": "panel.example.com"}
+    assert nginx_install.json()["command"]["timeout_ms"] == 180_000
+    assert nginx_remove.json()["command"]["path"] == "/api/child/nginx/remove"
+    for response in [xray_install, xray_remove, nginx_install, nginx_remove]:
+        command = response.json()["command"]
+        assert response.json()["license_required"] is False
+        assert command["method"] == "POST"
+        assert command["stream"] is False
+
+
 def test_nginx_install_operation_accepts_optional_domain_query(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-nginx-install"}).json()
