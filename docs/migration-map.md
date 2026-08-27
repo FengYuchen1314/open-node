@@ -57,6 +57,8 @@ This document records the starting source map for the Open Node refactor.
      headers from latest telemetry.
    - Done: rollback-friendly multi-server change sets with forward command
      dispatch, reverse rollback command queuing, and a Vue change workspace.
+   - Done: routed-outbound change-set planner that recreates the active MMWX
+     add-client, add-outbound, add-rule workflow without license checks.
    - Done: Clash, sing-box, URI-list, and base64 subscription rendering plus
      durable per-user traffic ledgering from agent telemetry.
    - Done: richer subscription template presets and import/export workflows.

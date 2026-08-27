@@ -3,6 +3,7 @@ import type {
   AgentChangeSetResponse,
   AgentChangeSetsResponse,
   AgentChangeSetRollbackRequest,
+  AgentRoutedOutboundChangeSetCreateRequest,
 } from "../domain/changes";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -41,6 +42,21 @@ export async function createChangeSet(
   });
   if (!response.ok) {
     throw await apiError(response, "Change set create request failed");
+  }
+  return response.json() as Promise<AgentChangeSetResponse>;
+}
+
+export async function createRoutedOutboundChangeSet(
+  payload: AgentRoutedOutboundChangeSetCreateRequest,
+  fetcher = fetch,
+): Promise<AgentChangeSetResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/routed-outbound`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Routed outbound change set create request failed");
   }
   return response.json() as Promise<AgentChangeSetResponse>;
 }

@@ -43,6 +43,7 @@ from open_node.domain.changes import (
     AgentChangeSetStatus,
     AgentChangeSetStepCreate,
     AgentChangeSetStepRead,
+    AgentRoutedOutboundChangeSetCreate,
 )
 from open_node.domain.inventory import (
     AgentCapabilities,
@@ -2152,6 +2153,204 @@ class InventoryStore:
             if not payload.dry_run:
                 session.commit()
         return SubscriptionDueTrafficResetResponse(summary=summary)
+
+    @classmethod
+    def build_routed_outbound_change_set(
+        cls,
+        payload: AgentRoutedOutboundChangeSetCreate,
+    ) -> AgentChangeSetCreate:
+        label_slug = payload.label.lower()
+        parent_ref = (payload.parent_ref or f"s{payload.server_id.hex[:8]}").lower()
+        outbound_tag = payload.outbound_tag or f"routed:{parent_ref}:{label_slug}"
+        marktag = payload.marktag or outbound_tag
+        admin_username = cls._safe_credential_username(payload.admin_username)
+        admin_email = payload.admin_email or f"{admin_username}__{parent_ref}__{label_slug}"
+        timeout_ms = payload.command_timeout_ms
+
+        outbound = deepcopy(payload.outbound)
+        outbound["tag"] = outbound_tag
+        client = cls._routed_admin_client(payload, admin_username, admin_email)
+
+        steps = [
+            AgentChangeSetStepCreate(
+                server_id=payload.server_id,
+                label=f"Add routed admin client to {payload.inbound_tag}",
+                forward=AgentCommandCreate(
+                    method="POST",
+                    path="/api/child/inbounds",
+                    body={
+                        "action": "add-client",
+                        "tag": payload.inbound_tag,
+                        "client": client,
+                    },
+                    timeout_ms=timeout_ms,
+                ),
+                rollback=AgentCommandCreate(
+                    method="POST",
+                    path="/api/child/inbounds",
+                    body={
+                        "action": "remove-client",
+                        "tag": payload.inbound_tag,
+                        "client": {"email": admin_email},
+                    },
+                    timeout_ms=timeout_ms,
+                ),
+            ),
+        ]
+
+        sniffing_excludes = cls._routed_sniffing_exclude_domains(payload, outbound)
+        if sniffing_excludes:
+            steps.append(
+                AgentChangeSetStepCreate(
+                    server_id=payload.server_id,
+                    label=f"Add sniffing excludes to {payload.inbound_tag}",
+                    forward=AgentCommandCreate(
+                        method="POST",
+                        path="/api/child/inbounds",
+                        body={
+                            "action": "add-sniffing-exclude",
+                            "tag": payload.inbound_tag,
+                            "domains": sniffing_excludes,
+                        },
+                        timeout_ms=timeout_ms,
+                    ),
+                )
+            )
+
+        steps.extend(
+            [
+                AgentChangeSetStepCreate(
+                    server_id=payload.server_id,
+                    label=f"Add routed outbound {outbound_tag}",
+                    forward=AgentCommandCreate(
+                        method="POST",
+                        path="/api/child/outbounds",
+                        body={"action": "add", "outbound": outbound},
+                        timeout_ms=timeout_ms,
+                    ),
+                    rollback=AgentCommandCreate(
+                        method="POST",
+                        path="/api/child/outbounds",
+                        body={"action": "remove", "tag": outbound_tag},
+                        timeout_ms=timeout_ms,
+                    ),
+                ),
+                AgentChangeSetStepCreate(
+                    server_id=payload.server_id,
+                    label=f"Add routed rule {marktag}",
+                    forward=AgentCommandCreate(
+                        method="POST",
+                        path="/api/child/routing",
+                        body={
+                            "action": "add_rule",
+                            "rule": {
+                                "type": "field",
+                                "marktag": marktag,
+                                "user": [admin_email],
+                                "inboundTag": [payload.inbound_tag],
+                                "outboundTag": outbound_tag,
+                            },
+                        },
+                        timeout_ms=timeout_ms,
+                    ),
+                    rollback=AgentCommandCreate(
+                        method="POST",
+                        path="/api/child/routing",
+                        body={
+                            "action": "remove_user_from_rule",
+                            "marktag": marktag,
+                            "user_email": admin_email,
+                        },
+                        timeout_ms=timeout_ms,
+                    ),
+                ),
+            ]
+        )
+
+        note = (
+            "Rollback removes the routed admin user from the rule, removes the outbound, "
+            "and removes the admin client. Sniffing excludes are additive on the agent "
+            "and are intentionally left in place when planned."
+        )
+        return AgentChangeSetCreate(
+            name=f"Create routed outbound {payload.node_name or payload.label}",
+            description=(
+                f"Plan routed outbound {outbound_tag} for inbound {payload.inbound_tag}. {note}"
+            ),
+            rollback_on_failure=payload.rollback_on_failure,
+            dispatch=payload.dispatch,
+            steps=steps,
+        )
+
+    @classmethod
+    def _routed_admin_client(
+        cls,
+        payload: AgentRoutedOutboundChangeSetCreate,
+        admin_username: str,
+        admin_email: str,
+    ) -> dict[str, Any]:
+        if payload.client is not None:
+            client = deepcopy(payload.client)
+        else:
+            client = cls._generate_subscription_credential(
+                protocol=payload.inbound_protocol,
+                username=admin_username,
+                email=admin_email,
+                node_config=payload.outbound,
+            )
+        client["email"] = admin_email
+        client.setdefault("level", 0)
+        return client
+
+    @classmethod
+    def _routed_sniffing_exclude_domains(
+        cls,
+        payload: AgentRoutedOutboundChangeSetCreate,
+        outbound: dict[str, Any],
+    ) -> list[str]:
+        domains: list[str] = []
+        seen: set[str] = set()
+
+        def append_domain(value: str) -> None:
+            domain = value.strip().lower()
+            if domain and domain not in seen:
+                seen.add(domain)
+                domains.append(domain)
+
+        for domain in payload.sniffing_exclude_domains:
+            append_domain(domain)
+        if payload.add_reality_sniffing_excludes:
+            for domain in cls._extract_reality_sni_domains(outbound):
+                append_domain(domain)
+        return domains
+
+    @staticmethod
+    def _extract_reality_sni_domains(outbound: dict[str, Any]) -> list[str]:
+        protocol = str(outbound.get("protocol") or "").strip().lower()
+        if protocol != "vless":
+            return []
+
+        stream = outbound.get("streamSettings") or outbound.get("stream_settings")
+        if not isinstance(stream, dict):
+            return []
+        if str(stream.get("security") or "").strip().lower() != "reality":
+            return []
+
+        reality = stream.get("realitySettings") or stream.get("reality_settings")
+        if not isinstance(reality, dict):
+            return []
+
+        def collect(value: Any) -> list[str]:
+            if isinstance(value, str):
+                return [value]
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, str)]
+            return []
+
+        domains = collect(reality.get("serverName"))
+        if domains:
+            return domains
+        return collect(reality.get("serverNames"))
 
     def list_change_sets(self) -> list[AgentChangeSetRead]:
         with self._session() as session:

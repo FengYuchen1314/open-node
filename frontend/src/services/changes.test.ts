@@ -4,6 +4,7 @@ import type { AgentChangeSet } from "../domain/changes";
 import type { AgentCommand } from "../domain/inventory";
 import {
   createChangeSet,
+  createRoutedOutboundChangeSet,
   dispatchChangeSet,
   getChangeSet,
   listChangeSets,
@@ -144,6 +145,37 @@ describe("change set API client", () => {
       ],
     });
     expect(response.commands[0].path).toBe("/api/child/xray/config");
+  });
+
+  it("creates routed outbound change sets with JSON body", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    let requestBody: unknown;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      requestBody = JSON.parse(init?.body?.toString() ?? "{}") as unknown;
+      return jsonResponse(
+        { change_set: changeSet, commands: [], warnings: [], license_required: false },
+        201,
+      );
+    };
+
+    const payload = {
+      server_id: "srv_1",
+      inbound_tag: "vless-443",
+      inbound_protocol: "vless",
+      label: "HK-T4",
+      parent_ref: "p42",
+      outbound: { protocol: "vless", settings: {} },
+      dispatch: true,
+    };
+    const response = await createRoutedOutboundChangeSet(payload, fetcher);
+
+    expect(requestUrl).toBe("/api/v1/change-sets/routed-outbound");
+    expect(headers).toEqual({ "Content-Type": "application/json" });
+    expect(requestBody).toEqual(payload);
+    expect(response.license_required).toBe(false);
   });
 
   it("dispatches change sets without a JSON body", async () => {

@@ -240,6 +240,17 @@ creates one persisted `agent_commands` row per forward step and reuses the same
 WebSocket RPC and HTTP lease/result paths as ordinary commands. Repeated
 dispatch calls only create missing forward commands.
 
+`POST /api/v1/change-sets/routed-outbound` builds an MMWX-compatible routed
+outbound plan for one inventory server. The planner generates the routed
+outbound tag, admin user email, admin inbound credential, optional Reality SNI
+sniffing excludes, outbound add command, and routing `add_rule` command while
+leaving dispatch optional. If callers pass `parent_ref` such as `p42`, generated
+tags follow the legacy `routed:p42:<label>` shape; otherwise the server ID
+prefix is used as a stable fallback. Rollback avoids the agent's index-based
+`remove_rule` path and instead removes the admin user from the marked rule,
+then removes the outbound and admin client. Additive sniffing excludes are left
+in place by design because the active agent has no remove-exclude operation.
+
 Rollback queues rollback commands in reverse step order, again through
 `agent_commands`, and records the operator-provided reason on the change set.
 Steps without rollback payloads are skipped and returned as warnings. The

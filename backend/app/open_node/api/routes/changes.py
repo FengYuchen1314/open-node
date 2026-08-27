@@ -9,6 +9,7 @@ from open_node.domain.changes import (
     AgentChangeSetResponse,
     AgentChangeSetRollbackRequest,
     AgentChangeSetsResponse,
+    AgentRoutedOutboundChangeSetCreate,
 )
 from open_node.domain.inventory import AgentCommandRead
 from open_node.services.agent_ws import AgentConnectionManager
@@ -47,6 +48,34 @@ async def create_change_set(
             change_set = store.get_change_set(change_set.id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return AgentChangeSetResponse(change_set=change_set, commands=commands)
+
+
+@router.post(
+    "/routed-outbound",
+    response_model=AgentChangeSetResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_routed_outbound_change_set(
+    payload: AgentRoutedOutboundChangeSetCreate,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentChangeSetResponse:
+    try:
+        change_set_payload = store.build_routed_outbound_change_set(payload)
+        change_set = store.create_change_set(change_set_payload)
+        commands: list[AgentCommandRead] = []
+        if payload.dispatch:
+            change_set, commands = store.dispatch_change_set(change_set.id)
+            commands = await _dispatch_commands(commands, store, connections)
+            change_set = store.get_change_set(change_set.id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     return AgentChangeSetResponse(change_set=change_set, commands=commands)
 
 
