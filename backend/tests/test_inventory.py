@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -581,6 +582,92 @@ def test_domain_latency_operation_normalizes_probe_targets(tmp_path: Path) -> No
     }
 
 
+def test_diagnostic_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-diagnostics"}).json()
+    server_id = created["server"]["id"]
+
+    operations = [
+        ("services/status", "GET", "/api/child/services/status"),
+        ("system/nics", "GET", "/api/child/system/nics"),
+        ("scan", "POST", "/api/child/scan"),
+    ]
+    responses = [
+        client.post(f"/api/v1/servers/{server_id}/operations/{operation}")
+        for operation, _method, _path in operations
+    ]
+
+    assert all(response.status_code == 201 for response in responses)
+    for response, (_operation, expected_method, expected_path) in zip(
+        responses,
+        operations,
+        strict=True,
+    ):
+        command = response.json()["command"]
+        assert response.json()["license_required"] is False
+        assert command["method"] == expected_method
+        assert command["path"] == expected_path
+        assert command["stream"] is False
+
+
+def test_service_control_operation_queues_valid_body(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-service-control"}).json()
+    server_id = created["server"]["id"]
+
+    response = client.post(
+        f"/api/v1/servers/{server_id}/operations/services/control",
+        json={"service": "nginx", "action": "restart"},
+    )
+    invalid = client.post(
+        f"/api/v1/servers/{server_id}/operations/services/control",
+        json={"service": "agent", "action": "restart"},
+    )
+
+    assert response.status_code == 201
+    command = response.json()["command"]
+    assert command["method"] == "POST"
+    assert command["path"] == "/api/child/services/control"
+    assert command["body"] == {"service": "nginx", "action": "restart"}
+    assert invalid.status_code == 422
+
+
+def test_logs_operation_builds_safe_query(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-logs"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/logs",
+        json={"service": "xray", "lines": 500},
+    )
+
+    assert response.status_code == 201
+    command = response.json()["command"]
+    assert command["method"] == "GET"
+    assert command["path"] == "/api/child/logs"
+    assert command["query"] == "service=xray&lines=500"
+
+
+def test_xray_test_config_operation_serializes_structured_config(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-test-config"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/xray/test-config",
+        json={
+            "config": {"log": {"loglevel": "warning"}},
+            "command_timeout_ms": 15_000,
+        },
+    )
+
+    assert response.status_code == 201
+    command = response.json()["command"]
+    assert command["method"] == "POST"
+    assert command["path"] == "/api/child/xray/test-config"
+    assert command["timeout_ms"] == 15_000
+    assert json.loads(command["body"]["config"]) == {"log": {"loglevel": "warning"}}
+
+
 def test_stream_maintenance_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-maintenance"}).json()
@@ -806,6 +893,34 @@ def test_online_agent_websocket_receives_specialized_operation(tmp_path: Path) -
         rpc_call = websocket.receive_json()
         assert rpc_call["type"] == "rpc_call"
         assert rpc_call["payload"]["path"] == "/api/child/speed"
+        assert rpc_call["payload"]["method"] == "GET"
+
+
+def test_online_agent_websocket_receives_diagnostic_operation(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-diagnostics"}).json()
+    server_id = created["server"]["id"]
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-diagnostics-host",
+                    "capabilities": {"rpc": True},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+
+        queued = client.post(f"/api/v1/servers/{server_id}/operations/services/status")
+
+        assert queued.status_code == 201
+        assert queued.json()["command"]["status"] == "leased"
+        rpc_call = websocket.receive_json()
+        assert rpc_call["type"] == "rpc_call"
+        assert rpc_call["payload"]["path"] == "/api/child/services/status"
         assert rpc_call["payload"]["method"] == "GET"
 
 

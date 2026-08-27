@@ -1,12 +1,21 @@
 export type ConnectionMode = "auto" | "websocket" | "http" | "pull";
 export type ServerStatus = "pending" | "connected" | "offline";
 export type XrayMode = "external" | "embedded";
+export type AgentServiceName = "xray" | "nginx";
+export type AgentServiceAction = "start" | "stop" | "restart";
+export type AgentLogService = "agent" | "xray" | "nginx";
 export type AgentCommandStatus = "pending" | "leased" | "succeeded" | "failed";
 export type AgentOperationKind =
   | "system_info"
   | "traffic"
   | "speed"
   | "domain_latency"
+  | "services_status"
+  | "service_control"
+  | "system_nics"
+  | "logs"
+  | "scan"
+  | "xray_test_config"
   | "xray_install"
   | "xray_remove"
   | "nginx_install"
@@ -178,9 +187,27 @@ export interface AgentNginxInstallOperationRequest {
   command_timeout_ms?: number;
 }
 
+export interface AgentServiceControlOperationRequest {
+  service: AgentServiceName;
+  action: AgentServiceAction;
+}
+
+export interface AgentLogsOperationRequest {
+  service?: AgentLogService;
+  lines?: number;
+}
+
+export interface AgentXrayTestConfigOperationRequest {
+  config: unknown;
+  command_timeout_ms?: number;
+}
+
 export type AgentOperationPayload =
   | AgentDomainLatencyProbeRequest
-  | AgentNginxInstallOperationRequest;
+  | AgentNginxInstallOperationRequest
+  | AgentServiceControlOperationRequest
+  | AgentLogsOperationRequest
+  | AgentXrayTestConfigOperationRequest;
 
 export interface ServerCommandsResponse {
   server_id: string;

@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
@@ -35,6 +36,23 @@ class XrayMode(StrEnum):
     EMBEDDED = "embedded"
 
 
+class AgentServiceName(StrEnum):
+    XRAY = "xray"
+    NGINX = "nginx"
+
+
+class AgentServiceAction(StrEnum):
+    START = "start"
+    STOP = "stop"
+    RESTART = "restart"
+
+
+class AgentLogService(StrEnum):
+    AGENT = "agent"
+    XRAY = "xray"
+    NGINX = "nginx"
+
+
 class AgentCommandStatus(StrEnum):
     PENDING = "pending"
     LEASED = "leased"
@@ -47,6 +65,12 @@ class AgentOperationKind(StrEnum):
     TRAFFIC = "traffic"
     SPEED = "speed"
     DOMAIN_LATENCY = "domain_latency"
+    SERVICES_STATUS = "services_status"
+    SERVICE_CONTROL = "service_control"
+    SYSTEM_NICS = "system_nics"
+    LOGS = "logs"
+    SCAN = "scan"
+    XRAY_TEST_CONFIG = "xray_test_config"
     XRAY_INSTALL = "xray_install"
     XRAY_REMOVE = "xray_remove"
     NGINX_INSTALL = "nginx_install"
@@ -360,6 +384,35 @@ class AgentNginxInstallOperationRequest(BaseModel):
             return None
         normalized = AgentDomainLatencyProbeRequest._normalize_domain(value)
         return normalized or None
+
+
+class AgentServiceControlOperationRequest(BaseModel):
+    service: AgentServiceName
+    action: AgentServiceAction
+
+
+class AgentLogsOperationRequest(BaseModel):
+    service: AgentLogService = AgentLogService.AGENT
+    lines: int = Field(default=200, ge=1, le=2000)
+
+
+class AgentXrayTestConfigOperationRequest(BaseModel):
+    config: Any
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            if not value.strip():
+                raise ValueError("config is empty")
+            return value
+
+        try:
+            json.dumps(value, ensure_ascii=False)
+        except TypeError as exc:
+            raise ValueError("config must be JSON serializable") from exc
+        return value
 
 
 class ServerCommandsResponse(BaseModel):

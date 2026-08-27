@@ -338,4 +338,115 @@ describe("inventory API client", () => {
 
     expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/warp/status");
   });
+
+  it("queues service status diagnostics without sending license headers", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_6",
+            server_id: "srv_1",
+            request_id: "srv_1-services",
+            method: "GET",
+            path: "/api/child/services/status",
+            query: "",
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "services_status", undefined, fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/services/status");
+    expect(headers).toBeUndefined();
+  });
+
+  it("queues service control operations with JSON body", async () => {
+    let requestUrl = "";
+    let body = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      body = init?.body?.toString() ?? "";
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_7",
+            server_id: "srv_1",
+            request_id: "srv_1-control",
+            method: "POST",
+            path: "/api/child/services/control",
+            query: "",
+            body: JSON.parse(body) as unknown,
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation(
+      "srv_1",
+      "service_control",
+      { service: "nginx", action: "restart" },
+      fetcher,
+    );
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/services/control");
+    expect(headers).toEqual({ "Content-Type": "application/json" });
+    expect(JSON.parse(body)).toEqual({ service: "nginx", action: "restart" });
+  });
+
+  it("queues log operations with JSON body", async () => {
+    let requestUrl = "";
+    let body = "";
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      body = init?.body?.toString() ?? "";
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_8",
+            server_id: "srv_1",
+            request_id: "srv_1-logs",
+            method: "GET",
+            path: "/api/child/logs",
+            query: "service=xray&lines=500",
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "logs", { service: "xray", lines: 500 }, fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/logs");
+    expect(JSON.parse(body)).toEqual({ service: "xray", lines: 500 });
+  });
 });

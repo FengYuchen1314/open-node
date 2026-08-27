@@ -5,7 +5,9 @@ import {
   defaultServerCreateRequest,
   type AgentCommand,
   type AgentCommandStreamFrame,
+  type AgentLogService,
   type AgentOperationKind,
+  type AgentServiceName,
   type AgentTelemetry,
   type ConnectionMode,
   type ServerCreateRequest,
@@ -62,7 +64,10 @@ const xrayModes: Array<{ title: string; value: XrayMode }> = [
 ];
 
 const commandMethods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
-type SimpleAgentOperation = Exclude<AgentOperationKind, "domain_latency">;
+type SimpleAgentOperation = Exclude<
+  AgentOperationKind,
+  "domain_latency" | "service_control" | "logs" | "xray_test_config"
+>;
 const quickOperations: Array<{
   title: string;
   icon: string;
@@ -71,6 +76,15 @@ const quickOperations: Array<{
   { title: "System info", icon: "mdi-monitor-dashboard", kind: "system_info" },
   { title: "Traffic", icon: "mdi-swap-vertical", kind: "traffic" },
   { title: "Speed", icon: "mdi-speedometer", kind: "speed" },
+];
+const diagnosticOperations: Array<{
+  title: string;
+  icon: string;
+  kind: SimpleAgentOperation;
+}> = [
+  { title: "Services", icon: "mdi-list-status", kind: "services_status" },
+  { title: "NICs", icon: "mdi-ethernet", kind: "system_nics" },
+  { title: "Scan", icon: "mdi-radar", kind: "scan" },
 ];
 const maintenanceOperations: Array<{
   title: string;
@@ -107,6 +121,23 @@ const maintenanceOperations: Array<{
     kind: "agent_uninstall",
     color: "error",
   },
+];
+const serviceControlOperations: Array<{
+  title: string;
+  icon: string;
+  service: AgentServiceName;
+}> = [
+  { title: "Restart Xray", icon: "mdi-restart", service: "xray" },
+  { title: "Restart Nginx", icon: "mdi-restart", service: "nginx" },
+];
+const logOperations: Array<{
+  title: string;
+  icon: string;
+  service: AgentLogService;
+}> = [
+  { title: "Agent", icon: "mdi-text-box-search-outline", service: "agent" },
+  { title: "Xray", icon: "mdi-text-box-search-outline", service: "xray" },
+  { title: "Nginx", icon: "mdi-text-box-search-outline", service: "nginx" },
 ];
 
 const statusMeta: Record<ServerStatus, { color: string; icon: string; label: string }> = {
@@ -318,6 +349,45 @@ async function queueQuickOperation(kind: SimpleAgentOperation) {
   errorMessage.value = "";
   try {
     await queueAgentOperation(commandForm.server_id, kind);
+    await refreshCommands(servers.value);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingOperation.value = "";
+  }
+}
+
+async function queueServiceRestart(service: AgentServiceName) {
+  if (!commandForm.server_id) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+
+  savingOperation.value = "service_control";
+  errorMessage.value = "";
+  try {
+    await queueAgentOperation(commandForm.server_id, "service_control", {
+      service,
+      action: "restart",
+    });
+    await refreshCommands(servers.value);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingOperation.value = "";
+  }
+}
+
+async function queueLogs(service: AgentLogService) {
+  if (!commandForm.server_id) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+
+  savingOperation.value = "logs";
+  errorMessage.value = "";
+  try {
+    await queueAgentOperation(commandForm.server_id, "logs", { service, lines: 200 });
     await refreshCommands(servers.value);
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -664,6 +734,22 @@ function latestStreamData(command: AgentCommand) {
             {{ operation.title }}
           </v-btn>
         </div>
+        <div class="section-subtitle operation-subtitle">Diagnostics</div>
+        <div class="diagnostic-command-grid">
+          <v-btn
+            v-for="operation in diagnosticOperations"
+            :key="operation.kind"
+            :disabled="serverOptions.length === 0"
+            :loading="savingOperation === operation.kind"
+            :prepend-icon="operation.icon"
+            color="info"
+            size="small"
+            variant="tonal"
+            @click="queueQuickOperation(operation.kind)"
+          >
+            {{ operation.title }}
+          </v-btn>
+        </div>
         <div class="section-subtitle operation-subtitle">Maintenance workflows</div>
         <div class="maintenance-command-grid">
           <v-btn
@@ -676,6 +762,38 @@ function latestStreamData(command: AgentCommand) {
             size="small"
             variant="tonal"
             @click="queueQuickOperation(operation.kind)"
+          >
+            {{ operation.title }}
+          </v-btn>
+        </div>
+        <div class="section-subtitle operation-subtitle">Service control</div>
+        <div class="service-command-grid">
+          <v-btn
+            v-for="operation in serviceControlOperations"
+            :key="operation.service"
+            :disabled="serverOptions.length === 0"
+            :loading="savingOperation === 'service_control'"
+            :prepend-icon="operation.icon"
+            color="warning"
+            size="small"
+            variant="tonal"
+            @click="queueServiceRestart(operation.service)"
+          >
+            {{ operation.title }}
+          </v-btn>
+        </div>
+        <div class="section-subtitle operation-subtitle">Logs</div>
+        <div class="log-command-grid">
+          <v-btn
+            v-for="operation in logOperations"
+            :key="operation.service"
+            :disabled="serverOptions.length === 0"
+            :loading="savingOperation === 'logs'"
+            :prepend-icon="operation.icon"
+            color="info"
+            size="small"
+            variant="tonal"
+            @click="queueLogs(operation.service)"
           >
             {{ operation.title }}
           </v-btn>

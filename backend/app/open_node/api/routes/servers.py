@@ -1,3 +1,4 @@
+import json
 from typing import Annotated
 from urllib.parse import urlencode
 from uuid import UUID
@@ -10,7 +11,10 @@ from open_node.domain.inventory import (
     AgentCommandCreateResponse,
     AgentCommandStreamFramesResponse,
     AgentDomainLatencyProbeRequest,
+    AgentLogsOperationRequest,
     AgentNginxInstallOperationRequest,
+    AgentServiceControlOperationRequest,
+    AgentXrayTestConfigOperationRequest,
     ServerCommandsResponse,
     ServerCreate,
     ServerCreateResponse,
@@ -182,6 +186,138 @@ async def queue_domain_latency_operation(
                 mode="json",
                 include={"domains", "timeout_ms", "allow_icmp"},
             ),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/services/status",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_services_status_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/services/status"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/services/control",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_service_control_operation(
+    server_id: UUID,
+    payload: AgentServiceControlOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/services/control",
+            body=payload.model_dump(mode="json"),
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/system/nics",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_system_nics_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/system/nics"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/logs",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_logs_operation(
+    server_id: UUID,
+    payload: AgentLogsOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="GET",
+            path="/api/child/logs",
+            query=_query_from_params(
+                {
+                    "service": payload.service.value,
+                    "lines": str(payload.lines),
+                }
+            ),
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/scan",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_scan_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="POST", path="/api/child/scan"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/test-config",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_test_config_operation(
+    server_id: UUID,
+    payload: AgentXrayTestConfigOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    config = payload.config
+    if not isinstance(config, str):
+        config = _json_dumps(config)
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/xray/test-config",
+            body={"config": config},
             timeout_ms=payload.command_timeout_ms,
         ),
         store,
@@ -393,3 +529,7 @@ async def _queue_maintenance_command(
 
 def _query_from_params(params: dict[str, str | None]) -> str:
     return urlencode({key: value for key, value in params.items() if value})
+
+
+def _json_dumps(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))

@@ -36,8 +36,10 @@ This document records the starting source map for the Open Node refactor.
      speed, and domain latency probes.
    - Done: maintenance wrappers for Xray/nginx install and remove, WARP
      install/status/remove, and agent upgrade/uninstall.
-   - Next: config child workflows for Xray, nginx, services, logs, WARP
-     credentials, and agent connection settings.
+   - Done: diagnostic/config-preparation wrappers for service status/control,
+     service logs, system NICs, agent-side scan, and Xray config validation.
+   - Next: full Xray/nginx config read-write workflows, WARP credential
+     management, and agent connection setting updates.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.
