@@ -1,0 +1,27 @@
+# Migration Map
+
+This document records the starting source map for the Open Node refactor.
+
+## Included Sources
+
+| Source repository | Role in Open Node |
+| --- | --- |
+| `FengYuchen1314/miaomiaowuX` | Control plane behavior and product workflows |
+| `FengYuchen1314/mmw-agent` | Remote agent protocol and host-management workflows |
+| `FengYuchen1314/mmwx-probe` | Public probe API and UI behavior |
+| `FengYuchen1314/Xray-core-mmwx` | Runtime integration details used by the agent |
+
+## Excluded Sources
+
+| Source repository | Reason |
+| --- | --- |
+| `FengYuchen1314/miaomiaowu` | Older base project, outside the current MMWX refactor line |
+| `FengYuchen1314/NodeControll` | Archived rebuild/research branch, explicitly out of scope |
+
+## First Migration Slices
+
+1. Keep the no-license contract permanent and test-covered.
+2. Port control-plane identity, server inventory, and agent registration models.
+3. Port agent heartbeat, telemetry, and command execution contracts.
+4. Port probe read-only API and public status UI.
+5. Revisit Xray integration once the agent protocol surface is stable.
