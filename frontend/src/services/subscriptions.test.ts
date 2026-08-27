@@ -11,6 +11,7 @@ import type {
 import {
   assignSubscriptionPlan,
   createManagedNode,
+  createManagedNodeFromRuntimeInbound,
   createManagedNodeFromPreset,
   createProductUser,
   createProductUserSubscriptionToken,
@@ -20,6 +21,7 @@ import {
   getProductUserSubscriptionToken,
   getProductUserTraffic,
   importSubscriptionCatalog,
+  listXrayRuntimeNodeDrafts,
   listSubscriptionTemplatePresets,
   listManagedNodes,
   listProductUserCredentials,
@@ -362,6 +364,70 @@ describe("subscriptions API client", () => {
           host: "tokyo.example.com",
           port: 443,
         },
+      },
+    ]);
+  });
+
+  it("bridges Xray runtime node drafts into managed nodes", async () => {
+    const calls: Array<{ body?: unknown; headers: HeadersInit | undefined; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = input.toString();
+      calls.push({
+        url,
+        headers: init?.headers,
+        body: init?.body ? JSON.parse(init.body.toString()) : undefined,
+      });
+      if (url.endsWith("/xray/runtime/node-drafts")) {
+        return jsonResponse({
+          server_id: "srv_1",
+          has_scan: true,
+          drafts: [
+            {
+              source_index: 0,
+              source_tag: "vless-443",
+              source_display_name: "vless-443",
+              draft: {
+                name: "Edge vless-443",
+                server_id: "srv_1",
+                protocol: "vless",
+                node_type: "physical",
+                inbound_tag: "vless-443",
+                tags: ["runtime", "vless"],
+                enabled: true,
+                client_template: { email: "{username}__vless-443" },
+                config: { type: "vless", server: "edge.example.com", port: 443 },
+              },
+              create_available: true,
+              existing_node_id: null,
+              warnings: [],
+            },
+          ],
+          license_required: false,
+        });
+      }
+      return jsonResponse({ node: managedNode, license_required: false }, 201);
+    };
+
+    const drafts = await listXrayRuntimeNodeDrafts("srv_1", fetcher);
+    const node = await createManagedNodeFromRuntimeInbound(
+      "srv_1",
+      { source_index: 0, host: "public.example.com" },
+      fetcher,
+    );
+
+    expect(drafts.license_required).toBe(false);
+    expect(drafts.drafts[0].draft.inbound_tag).toBe("vless-443");
+    expect(node.node.id).toBe("node_1");
+    expect(calls).toEqual([
+      {
+        url: "/api/v1/servers/srv_1/xray/runtime/node-drafts",
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/servers/srv_1/xray/runtime/nodes",
+        headers: { "Content-Type": "application/json" },
+        body: { source_index: 0, host: "public.example.com" },
       },
     ]);
   });

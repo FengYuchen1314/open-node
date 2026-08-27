@@ -566,6 +566,7 @@ class ServerScanResultResponse(BaseModel):
 
 
 class XrayRuntimeInboundRead(BaseModel):
+    source_index: int = Field(ge=0)
     tag: str | None = None
     display_name: str
     protocol: str

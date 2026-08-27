@@ -134,6 +134,9 @@ from open_node.domain.subscriptions import (
     SubscriptionTemplatePresetRead,
     SubscriptionTrafficEntryRead,
     SubscriptionTrafficMode,
+    XrayRuntimeNodeCreateRequest,
+    XrayRuntimeNodeDraft,
+    XrayRuntimeNodeDraftsResponse,
 )
 
 
@@ -201,6 +204,14 @@ class SubscriptionTemplatePresetNotFoundError(ValueError):
     """Raised when a subscription node preset lookup targets an unknown preset."""
 
 
+class XrayRuntimeInboundNotFoundError(ValueError):
+    """Raised when no scan-derived Xray inbound matches a runtime node request."""
+
+
+class XrayRuntimeNodeDraftUnavailableError(ValueError):
+    """Raised when a scan-derived inbound cannot become a managed node."""
+
+
 _PROBE_SERIES_RANGES = {
     "1h": (12, 300),
     "6h": (36, 600),
@@ -218,6 +229,22 @@ _XRAY_CLIENT_CONTAINER_BY_PROTOCOL = {
     "mieru": "users",
     "socks": "accounts",
     "http": "accounts",
+}
+
+_XRAY_MANAGED_NODE_PROTOCOLS = {
+    "vless": "vless",
+    "vmess": "vmess",
+    "trojan": "trojan",
+    "shadowsocks": "shadowsocks",
+    "ss": "shadowsocks",
+    "hysteria": "hysteria2",
+    "hysteria2": "hysteria2",
+    "hy2": "hysteria2",
+    "anytls": "anytls",
+    "snell": "snell",
+    "mieru": "mieru",
+    "socks": "socks",
+    "http": "http",
 }
 
 _SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
@@ -1220,6 +1247,74 @@ class InventoryStore:
             scan = session.get(AgentScanResultModel, str(server_id))
             return self._xray_runtime_inventory_response(server_id, scan)
 
+    def list_xray_runtime_node_drafts(
+        self,
+        server_id: UUID,
+        host: str | None = None,
+    ) -> XrayRuntimeNodeDraftsResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            scan = session.get(AgentScanResultModel, str(server_id))
+            if scan is None:
+                return XrayRuntimeNodeDraftsResponse(server_id=server_id)
+            drafts = [
+                self._xray_runtime_node_draft(
+                    session=session,
+                    server=server,
+                    inbound=inbound,
+                    index=index,
+                    host=host,
+                )
+                for index, inbound in enumerate(scan.inbounds or [])
+            ]
+            return XrayRuntimeNodeDraftsResponse(
+                server_id=server_id,
+                has_scan=True,
+                drafts=drafts,
+            )
+
+    def create_managed_node_from_xray_runtime(
+        self,
+        server_id: UUID,
+        payload: XrayRuntimeNodeCreateRequest,
+    ) -> ManagedNodeRead:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            scan = session.get(AgentScanResultModel, str(server_id))
+            if scan is None:
+                raise XrayRuntimeInboundNotFoundError(f"runtime scan not found: {server_id}")
+            inbound, index = self._select_xray_runtime_inbound(scan.inbounds or [], payload)
+            draft = self._xray_runtime_node_draft(
+                session=session,
+                server=server,
+                inbound=inbound,
+                index=index,
+                host=payload.host,
+                payload=payload,
+            )
+            if not draft.create_available:
+                warnings = ", ".join(draft.warnings) or "draft unavailable"
+                raise XrayRuntimeNodeDraftUnavailableError(warnings)
+            existing = self._existing_xray_runtime_node(
+                session,
+                server=server,
+                source_tag=draft.source_tag,
+                source_display_name=draft.source_display_name,
+                protocol=draft.draft.protocol,
+            )
+            if existing:
+                return self._managed_node_read(existing)
+            node = self._new_managed_node_model(server, draft.draft, now)
+            session.add(node)
+            session.commit()
+            session.refresh(node)
+            return self._managed_node_read(node)
+
     def list_xray_config_snapshots(
         self,
         server_id: UUID,
@@ -1609,23 +1704,7 @@ class InventoryStore:
             server = session.get(ServerModel, str(payload.server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {payload.server_id}")
-            node = ManagedNodeModel(
-                id=str(uuid4()),
-                name=payload.name,
-                server_id=server.id,
-                protocol=payload.protocol.lower(),
-                node_type=payload.node_type.value,
-                inbound_tag=payload.inbound_tag,
-                routed_outbound_tag=payload.routed_outbound_tag,
-                routed_rule_marktag=payload.routed_rule_marktag,
-                tag=payload.tag,
-                tags=payload.tags,
-                enabled=payload.enabled,
-                client_template=payload.client_template,
-                config=payload.config,
-                created_at=now,
-                updated_at=now,
-            )
+            node = self._new_managed_node_model(server, payload, now)
             session.add(node)
             session.commit()
             session.refresh(node)
@@ -3461,6 +3540,30 @@ class InventoryStore:
         )
 
     @staticmethod
+    def _new_managed_node_model(
+        server: ServerModel,
+        payload: ManagedNodeCreate,
+        now: datetime,
+    ) -> ManagedNodeModel:
+        return ManagedNodeModel(
+            id=str(uuid4()),
+            name=payload.name,
+            server_id=server.id,
+            protocol=payload.protocol.lower(),
+            node_type=payload.node_type.value,
+            inbound_tag=payload.inbound_tag,
+            routed_outbound_tag=payload.routed_outbound_tag,
+            routed_rule_marktag=payload.routed_rule_marktag,
+            tag=payload.tag,
+            tags=payload.tags,
+            enabled=payload.enabled,
+            client_template=payload.client_template,
+            config=payload.config,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @staticmethod
     def _managed_node_read(node: ManagedNodeModel) -> ManagedNodeRead:
         return ManagedNodeRead(
             id=UUID(node.id),
@@ -5278,9 +5381,10 @@ class InventoryStore:
     @classmethod
     def _xray_runtime_inbound_read(
         cls,
-        inbound: dict[str, Any],
+        inbound: Any,
         index: int,
     ) -> XrayRuntimeInboundRead:
+        inbound = cls._record_value(inbound)
         protocol = (cls._text_value(inbound.get("protocol")) or "unknown").lower()
         tag = cls._text_value(inbound.get("tag"))
         port = cls._int_value(inbound.get("port"))
@@ -5301,6 +5405,7 @@ class InventoryStore:
             remarks.append("unsupported_protocol")
 
         return XrayRuntimeInboundRead(
+            source_index=index,
             tag=tag,
             display_name=tag or cls._generated_inbound_name(protocol, port, index),
             protocol=protocol,
@@ -5316,6 +5421,386 @@ class InventoryStore:
             sniffing_exclude_domains=cls._text_list_value(sniffing.get("excludeDomains")),
             remarks=remarks,
         )
+
+    @classmethod
+    def _xray_runtime_node_draft(
+        cls,
+        session: Session,
+        server: ServerModel,
+        inbound: Any,
+        index: int,
+        host: str | None = None,
+        payload: XrayRuntimeNodeCreateRequest | None = None,
+    ) -> XrayRuntimeNodeDraft:
+        runtime = cls._xray_runtime_inbound_read(inbound, index)
+        inbound = cls._record_value(inbound)
+        settings = cls._record_value(inbound.get("settings"))
+        stream_settings = cls._record_value(inbound.get("streamSettings"))
+        managed_protocol = _XRAY_MANAGED_NODE_PROTOCOLS.get(runtime.protocol)
+        warnings = list(runtime.remarks)
+        create_available = managed_protocol is not None
+
+        if managed_protocol is None and "unsupported_protocol" not in warnings:
+            warnings.append("unsupported_protocol")
+        if runtime.port is None:
+            create_available = False
+            warnings.append("missing_port")
+
+        protocol = managed_protocol or runtime.protocol
+        node_name = cls._runtime_node_name(server, runtime, payload.name if payload else None)
+        draft = ManagedNodeCreate(
+            name=node_name,
+            server_id=UUID(server.id),
+            protocol=protocol,
+            node_type=ManagedNodeType.PHYSICAL,
+            inbound_tag=runtime.tag,
+            routed_outbound_tag=None,
+            routed_rule_marktag=None,
+            tag=runtime.protocol if runtime.protocol != "unknown" else None,
+            tags=payload.tags
+            if payload and payload.tags is not None
+            else cls._runtime_node_tags(runtime, protocol),
+            enabled=payload.enabled if payload else True,
+            client_template=cls._runtime_node_client_template(runtime, settings, protocol),
+            config=cls._runtime_node_config(
+                server=server,
+                runtime=runtime,
+                settings=settings,
+                stream_settings=stream_settings,
+                protocol=protocol,
+                node_name=node_name,
+                host=(payload.host if payload else host),
+                warnings=warnings,
+            ),
+        )
+        existing = cls._existing_xray_runtime_node(
+            session,
+            server=server,
+            source_tag=runtime.tag,
+            source_display_name=runtime.display_name,
+            protocol=protocol,
+        )
+        return XrayRuntimeNodeDraft(
+            source_index=index,
+            source_tag=runtime.tag,
+            source_display_name=runtime.display_name,
+            draft=draft,
+            create_available=create_available,
+            existing_node_id=UUID(existing.id) if existing else None,
+            warnings=cls._dedupe_text(warnings),
+        )
+
+    @classmethod
+    def _select_xray_runtime_inbound(
+        cls,
+        inbounds: list[Any],
+        payload: XrayRuntimeNodeCreateRequest,
+    ) -> tuple[Any, int]:
+        if payload.source_index is not None:
+            if payload.source_index < len(inbounds):
+                return inbounds[payload.source_index], payload.source_index
+            raise XrayRuntimeInboundNotFoundError(
+                f"runtime inbound not found at index {payload.source_index}"
+            )
+
+        for index, inbound in enumerate(inbounds):
+            runtime = cls._xray_runtime_inbound_read(inbound, index)
+            if payload.inbound_tag and runtime.tag == payload.inbound_tag:
+                return inbound, index
+            if payload.display_name and runtime.display_name == payload.display_name:
+                return inbound, index
+
+        if payload.inbound_tag:
+            raise XrayRuntimeInboundNotFoundError(
+                f"runtime inbound not found: {payload.inbound_tag}"
+            )
+        if payload.display_name:
+            raise XrayRuntimeInboundNotFoundError(
+                f"runtime inbound not found: {payload.display_name}"
+            )
+        if len(inbounds) == 1:
+            return inbounds[0], 0
+        raise XrayRuntimeInboundNotFoundError("runtime inbound selector is required")
+
+    @classmethod
+    def _runtime_node_config(
+        cls,
+        server: ServerModel,
+        runtime: XrayRuntimeInboundRead,
+        settings: dict[str, Any],
+        stream_settings: dict[str, Any],
+        protocol: str,
+        node_name: str,
+        host: str | None,
+        warnings: list[str],
+    ) -> dict[str, Any]:
+        config: dict[str, Any] = {
+            "name": node_name,
+            "type": cls._proxy_type_for_protocol(protocol),
+            "server": cls._text_value(host) or cls._server_subscription_host(server),
+        }
+        if runtime.port is not None:
+            config["port"] = runtime.port
+        network = cls._runtime_subscription_network(runtime.network)
+        if network:
+            config["network"] = network
+        security = (runtime.security or "").lower()
+        if security in {"tls", "reality"}:
+            config["tls"] = True
+        server_name = cls._runtime_server_name(stream_settings)
+        if server_name:
+            config["sni"] = server_name
+        alpn = cls._runtime_alpn(stream_settings)
+        if alpn:
+            config["alpn"] = alpn
+        if security == "reality":
+            reality_options = cls._runtime_reality_options(stream_settings)
+            if reality_options:
+                config["reality-opts"] = reality_options
+            else:
+                warnings.append("missing_reality_public_key")
+        cls._add_runtime_transport_options(config, stream_settings)
+        cls._add_protocol_runtime_options(config, settings, protocol)
+        return config
+
+    @classmethod
+    def _runtime_node_client_template(
+        cls,
+        runtime: XrayRuntimeInboundRead,
+        settings: dict[str, Any],
+        protocol: str,
+    ) -> dict[str, Any]:
+        suffix = cls._safe_runtime_suffix(runtime.tag or runtime.display_name or protocol)
+        template: dict[str, Any] = {"email": f"{{username}}__{suffix}"}
+        container = _XRAY_CLIENT_CONTAINER_BY_PROTOCOL.get(runtime.protocol)
+        clients = cls._list_value(settings.get(container)) if container else []
+        client_records = [item for item in clients if isinstance(item, dict)]
+        if protocol == "vless":
+            flow = cls._first_text_client_value(client_records, "flow")
+            if flow:
+                template["flow"] = flow
+        if protocol == "snell":
+            version = cls._int_value(settings.get("version"))
+            if version:
+                template["version"] = version
+            obfs_mode = cls._text_value(settings.get("obfsMode") or settings.get("obfs_mode"))
+            if obfs_mode:
+                template["obfsMode"] = obfs_mode
+            obfs_host = cls._text_value(settings.get("obfsHost") or settings.get("obfs_host"))
+            if obfs_host:
+                template["obfsHost"] = obfs_host
+        return template
+
+    @classmethod
+    def _add_protocol_runtime_options(
+        cls,
+        config: dict[str, Any],
+        settings: dict[str, Any],
+        protocol: str,
+    ) -> None:
+        if protocol == "shadowsocks":
+            cipher = cls._text_value(settings.get("method") or settings.get("security"))
+            if cipher:
+                config["cipher"] = cipher
+            return
+        if protocol == "snell":
+            version = cls._int_value(settings.get("version"))
+            if version:
+                config["version"] = version
+            mode = cls._text_value(settings.get("mode"))
+            if mode:
+                config["mode"] = mode
+            obfs_mode = cls._text_value(settings.get("obfsMode") or settings.get("obfs_mode"))
+            obfs_host = cls._text_value(settings.get("obfsHost") or settings.get("obfs_host"))
+            if obfs_mode or obfs_host:
+                config["obfs-opts"] = {}
+                if obfs_mode:
+                    config["obfs-opts"]["mode"] = obfs_mode
+                if obfs_host:
+                    config["obfs-opts"]["host"] = obfs_host
+            return
+        if protocol == "mieru":
+            transport = cls._text_value(settings.get("transport"))
+            if transport:
+                config["transport"] = transport
+            return
+        if protocol in {"anytls", "hysteria2"}:
+            config.setdefault("udp", True)
+
+    @classmethod
+    def _add_runtime_transport_options(
+        cls,
+        config: dict[str, Any],
+        stream_settings: dict[str, Any],
+    ) -> None:
+        ws_settings = cls._record_value(
+            stream_settings.get("wsSettings") or stream_settings.get("websocketSettings")
+        )
+        if ws_settings:
+            ws_options: dict[str, Any] = {}
+            path = cls._text_value(ws_settings.get("path"))
+            if path:
+                ws_options["path"] = path
+            headers = cls._record_value(ws_settings.get("headers"))
+            host = cls._text_value(headers.get("Host") or headers.get("host"))
+            if host:
+                ws_options["headers"] = {"Host": host}
+            if ws_options:
+                config["ws-opts"] = ws_options
+
+        grpc_settings = cls._record_value(stream_settings.get("grpcSettings"))
+        service_name = cls._text_value(grpc_settings.get("serviceName"))
+        if service_name:
+            config["grpc-opts"] = {"grpc-service-name": service_name}
+
+        http_settings = cls._record_value(
+            stream_settings.get("httpSettings") or stream_settings.get("httpupgradeSettings")
+        )
+        hosts = cls._text_list_value(http_settings.get("host"))
+        path = cls._text_value(http_settings.get("path"))
+        if hosts or path:
+            config["http-opts"] = {}
+            if hosts:
+                config["http-opts"]["headers"] = {"Host": hosts}
+            if path:
+                config["http-opts"]["path"] = path
+
+    @classmethod
+    def _runtime_reality_options(cls, stream_settings: dict[str, Any]) -> dict[str, Any]:
+        reality = cls._record_value(stream_settings.get("realitySettings"))
+        options: dict[str, Any] = {}
+        public_key = cls._text_value(reality.get("publicKey") or reality.get("public_key"))
+        if public_key:
+            options["public-key"] = public_key
+        short_id = cls._text_value(reality.get("shortId") or reality.get("short_id"))
+        if not short_id:
+            short_ids = cls._text_list_value(reality.get("shortIds") or reality.get("short_ids"))
+            short_id = short_ids[0] if short_ids else None
+        if short_id:
+            options["short-id"] = short_id
+        fingerprint = cls._text_value(reality.get("fingerprint"))
+        if fingerprint:
+            options["fingerprint"] = fingerprint
+        spider_x = cls._text_value(reality.get("spiderX") or reality.get("spider_x"))
+        if spider_x:
+            options["spider-x"] = spider_x
+        return options
+
+    @classmethod
+    def _runtime_server_name(cls, stream_settings: dict[str, Any]) -> str | None:
+        tls = cls._record_value(stream_settings.get("tlsSettings"))
+        reality = cls._record_value(stream_settings.get("realitySettings"))
+        server_name = cls._text_value(
+            tls.get("serverName")
+            or tls.get("server_name")
+            or reality.get("serverName")
+            or reality.get("server_name")
+        )
+        if server_name:
+            return server_name
+        server_names = cls._text_list_value(
+            tls.get("serverNames")
+            or tls.get("server_names")
+            or reality.get("serverNames")
+            or reality.get("server_names")
+        )
+        return server_names[0] if server_names else None
+
+    @classmethod
+    def _runtime_alpn(cls, stream_settings: dict[str, Any]) -> list[str]:
+        tls = cls._record_value(stream_settings.get("tlsSettings"))
+        reality = cls._record_value(stream_settings.get("realitySettings"))
+        return cls._text_list_value(tls.get("alpn") or reality.get("alpn"))
+
+    @staticmethod
+    def _runtime_subscription_network(network: str | None) -> str | None:
+        if not network:
+            return None
+        normalized = network.lower()
+        if normalized == "websocket":
+            return "ws"
+        if normalized == "httpupgrade":
+            return "httpupgrade"
+        return normalized
+
+    @staticmethod
+    def _runtime_node_name(
+        server: ServerModel,
+        runtime: XrayRuntimeInboundRead,
+        override: str | None,
+    ) -> str:
+        value = override or f"{server.name} {runtime.display_name}"
+        return value[:120].rstrip() or runtime.display_name[:120] or "Runtime node"
+
+    @classmethod
+    def _runtime_node_tags(
+        cls,
+        runtime: XrayRuntimeInboundRead,
+        protocol: str,
+    ) -> list[str]:
+        return cls._dedupe_text(
+            [
+                "runtime",
+                protocol,
+                runtime.protocol,
+                runtime.network,
+                runtime.security,
+            ]
+        )[:24]
+
+    @staticmethod
+    def _safe_runtime_suffix(value: str) -> str:
+        suffix = "".join(
+            char if char.isalnum() or char in {"-", "_", "."} else "_"
+            for char in value
+        )
+        return suffix.strip("_")[:80] or "runtime"
+
+    @classmethod
+    def _first_text_client_value(cls, clients: list[dict[str, Any]], key: str) -> str | None:
+        for client in clients:
+            value = cls._text_value(client.get(key))
+            if value:
+                return value
+        return None
+
+    @staticmethod
+    def _dedupe_text(values: Iterable[str | None]) -> list[str]:
+        items: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if not value:
+                continue
+            normalized = value.strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(normalized)
+        return items
+
+    @staticmethod
+    def _existing_xray_runtime_node(
+        session: Session,
+        server: ServerModel,
+        source_tag: str | None,
+        source_display_name: str,
+        protocol: str,
+    ) -> ManagedNodeModel | None:
+        statement = select(ManagedNodeModel).where(
+            ManagedNodeModel.server_id == server.id,
+            ManagedNodeModel.protocol == protocol,
+        )
+        if source_tag:
+            statement = statement.where(ManagedNodeModel.inbound_tag == source_tag)
+        else:
+            statement = statement.where(
+                ManagedNodeModel.inbound_tag.is_(None),
+                ManagedNodeModel.name == f"{server.name} {source_display_name}"[:120].rstrip(),
+            )
+        return session.scalar(statement.order_by(ManagedNodeModel.created_at))
 
     @staticmethod
     def _generated_inbound_name(protocol: str, port: int | None, index: int) -> str:

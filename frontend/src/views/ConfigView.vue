@@ -13,6 +13,7 @@ import type {
   XrayRuntimeInbound,
   XrayRuntimeInventoryResponse,
 } from "../domain/inventory";
+import type { XrayRuntimeNodeDraft } from "../domain/subscriptions";
 import {
   getXrayRuntimeInventory,
   listCommandStreamFrames,
@@ -22,6 +23,10 @@ import {
   queueAgentOperation,
   restoreXrayConfigSnapshot,
 } from "../services/inventory";
+import {
+  createManagedNodeFromRuntimeInbound,
+  listXrayRuntimeNodeDrafts,
+} from "../services/subscriptions";
 
 const servers = ref<ServerSummary[]>([]);
 const selectedServerId = ref("");
@@ -29,12 +34,15 @@ const commandsByServer = ref<Record<string, AgentCommand[]>>({});
 const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({});
 const xraySnapshots = ref<XrayConfigSnapshot[]>([]);
 const xrayRuntimeInventory = ref<XrayRuntimeInventoryResponse | null>(null);
+const runtimeNodeDrafts = ref<XrayRuntimeNodeDraft[]>([]);
 const loading = ref(false);
 const snapshotsLoading = ref(false);
 const runtimeInventoryLoading = ref(false);
+const runtimeNodeSavingKey = ref("");
 const savingOperation = ref<AgentOperationKind | "">("");
 const restoringSnapshotId = ref("");
 const errorMessage = ref("");
+const successMessage = ref("");
 const activeTab = ref("xray");
 
 const xrayConfigForm = reactive({
@@ -97,6 +105,9 @@ const runtimeProtocolEntries = computed(() =>
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([protocol, count]) => ({ protocol, count })),
 );
+const runtimeNodeDraftsByIndex = computed(
+  () => new Map(runtimeNodeDrafts.value.map((draft) => [draft.source_index, draft])),
+);
 const runtimeStatusLabel = computed(() => {
   if (!xrayRuntimeInventory.value?.has_scan) {
     return "No scan";
@@ -141,6 +152,7 @@ onMounted(() => {
 });
 
 watch(selectedServerId, () => {
+  successMessage.value = "";
   void refreshXraySnapshots();
   void refreshXrayRuntimeInventory();
 });
@@ -226,17 +238,23 @@ async function refreshXraySnapshots(includeConfig = false) {
 async function refreshXrayRuntimeInventory(reportErrors = false) {
   if (!selectedServerId.value) {
     xrayRuntimeInventory.value = null;
+    runtimeNodeDrafts.value = [];
     return;
   }
   const serverId = selectedServerId.value;
   runtimeInventoryLoading.value = true;
   try {
-    const response = await getXrayRuntimeInventory(serverId);
+    const [inventoryResponse, draftsResponse] = await Promise.all([
+      getXrayRuntimeInventory(serverId),
+      listXrayRuntimeNodeDrafts(serverId),
+    ]);
     if (serverId === selectedServerId.value) {
-      xrayRuntimeInventory.value = response;
+      xrayRuntimeInventory.value = inventoryResponse;
+      runtimeNodeDrafts.value = draftsResponse.drafts;
     }
   } catch (error) {
     xrayRuntimeInventory.value = null;
+    runtimeNodeDrafts.value = [];
     if (reportErrors) {
       errorMessage.value = readableError(error);
     }
@@ -524,6 +542,73 @@ function remarkLabel(value: string) {
   return value.replace(/_/g, " ");
 }
 
+function runtimeNodeDraftFor(inbound: XrayRuntimeInbound) {
+  return runtimeNodeDraftsByIndex.value.get(inbound.source_index) ?? null;
+}
+
+function runtimeNodeSavingId(inbound: XrayRuntimeInbound) {
+  return String(inbound.source_index);
+}
+
+function runtimeNodeWarnings(inbound: XrayRuntimeInbound) {
+  return runtimeNodeDraftFor(inbound)?.warnings ?? inbound.remarks;
+}
+
+function runtimeNodeActionLabel(inbound: XrayRuntimeInbound) {
+  const draft = runtimeNodeDraftFor(inbound);
+  if (draft?.existing_node_id) {
+    return "Node exists";
+  }
+  return "Create node";
+}
+
+function runtimeNodeActionTooltip(inbound: XrayRuntimeInbound) {
+  const draft = runtimeNodeDraftFor(inbound);
+  if (!draft) {
+    return "Runtime node draft is unavailable";
+  }
+  if (draft.existing_node_id) {
+    return "Managed node already exists";
+  }
+  if (!draft.create_available) {
+    return draft.warnings.map(remarkLabel).join(", ") || "Runtime node cannot be created";
+  }
+  return `Create managed node ${draft.draft.name}`;
+}
+
+function runtimeNodeCreateDisabled(inbound: XrayRuntimeInbound) {
+  const draft = runtimeNodeDraftFor(inbound);
+  return (
+    !draft ||
+    !draft.create_available ||
+    Boolean(draft.existing_node_id) ||
+    (Boolean(runtimeNodeSavingKey.value) &&
+      runtimeNodeSavingKey.value !== runtimeNodeSavingId(inbound))
+  );
+}
+
+async function createRuntimeManagedNode(inbound: XrayRuntimeInbound) {
+  const draft = runtimeNodeDraftFor(inbound);
+  if (!selectedServerId.value || !draft) {
+    errorMessage.value = "Runtime node draft is unavailable.";
+    return;
+  }
+  runtimeNodeSavingKey.value = runtimeNodeSavingId(inbound);
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await createManagedNodeFromRuntimeInbound(selectedServerId.value, {
+      source_index: inbound.source_index,
+    });
+    successMessage.value = `Created managed node ${response.node.name}.`;
+    await refreshXrayRuntimeInventory();
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    runtimeNodeSavingKey.value = "";
+  }
+}
+
 function shortHash(value: string) {
   return value.slice(0, 12);
 }
@@ -574,6 +659,16 @@ function formatDateTime(value: string) {
       variant="tonal"
     >
       {{ errorMessage }}
+    </v-alert>
+
+    <v-alert
+      v-if="successMessage"
+      class="status-alert"
+      density="comfortable"
+      type="success"
+      variant="tonal"
+    >
+      {{ successMessage }}
     </v-alert>
 
     <section class="config-layout">
@@ -959,7 +1054,16 @@ function formatDateTime(value: string) {
                       exclude {{ value }}
                     </v-chip>
                     <v-chip
-                      v-for="remark in inbound.remarks"
+                      v-if="runtimeNodeDraftFor(inbound)?.existing_node_id"
+                      color="success"
+                      density="comfortable"
+                      size="small"
+                      variant="tonal"
+                    >
+                      Managed
+                    </v-chip>
+                    <v-chip
+                      v-for="remark in runtimeNodeWarnings(inbound)"
                       :key="remark"
                       color="warning"
                       density="comfortable"
@@ -968,6 +1072,23 @@ function formatDateTime(value: string) {
                     >
                       {{ remarkLabel(remark) }}
                     </v-chip>
+                    <v-tooltip :text="runtimeNodeActionTooltip(inbound)">
+                      <template #activator="{ props }">
+                        <span v-bind="props" class="runtime-node-action">
+                          <v-btn
+                            :disabled="runtimeNodeCreateDisabled(inbound)"
+                            :loading="runtimeNodeSavingKey === runtimeNodeSavingId(inbound)"
+                            color="primary"
+                            prepend-icon="mdi-plus-circle-outline"
+                            size="small"
+                            variant="tonal"
+                            @click="createRuntimeManagedNode(inbound)"
+                          >
+                            {{ runtimeNodeActionLabel(inbound) }}
+                          </v-btn>
+                        </span>
+                      </template>
+                    </v-tooltip>
                   </div>
                 </div>
               </div>

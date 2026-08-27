@@ -239,6 +239,7 @@ export interface ServerScanResultResponse {
 }
 
 export interface XrayRuntimeInbound {
+  source_index: number;
   tag?: string | null;
   display_name: string;
   protocol: string;

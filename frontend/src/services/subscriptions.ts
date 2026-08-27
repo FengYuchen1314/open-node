@@ -21,6 +21,8 @@ import type {
   SubscriptionQuotaStatusResponse,
   SubscriptionTemplatePresetApplyRequest,
   SubscriptionTemplatePresetsResponse,
+  XrayRuntimeNodeCreateRequest,
+  XrayRuntimeNodeDraftsResponse,
 } from "../domain/subscriptions";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -247,6 +249,35 @@ export async function createManagedNode(
   });
   if (!response.ok) {
     throw await apiError(response, "Managed node create request failed");
+  }
+  return response.json() as Promise<ManagedNodeResponse>;
+}
+
+export async function listXrayRuntimeNodeDrafts(
+  serverId: string,
+  fetcher = fetch,
+): Promise<XrayRuntimeNodeDraftsResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/node-drafts`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray runtime node drafts request failed");
+  }
+  return response.json() as Promise<XrayRuntimeNodeDraftsResponse>;
+}
+
+export async function createManagedNodeFromRuntimeInbound(
+  serverId: string,
+  payload: XrayRuntimeNodeCreateRequest,
+  fetcher = fetch,
+): Promise<ManagedNodeResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/nodes`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Xray runtime node create request failed");
   }
   return response.json() as Promise<ManagedNodeResponse>;
 }

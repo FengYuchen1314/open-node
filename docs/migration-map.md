@@ -73,6 +73,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: scan-derived Xray runtime inventory summaries with protocol/client
      counts, sanitized user labels, sniffing state, and Vue Runtime tab
      display.
+   - Done: scan-derived managed-node drafts and one-click catalog node creation
+     from runtime inbounds, without importing UUIDs, passwords, PSKs, or account
+     secrets from existing Xray config.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
    - Done: compatibility wrappers for the active non-stream Xray/nginx

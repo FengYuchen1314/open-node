@@ -228,6 +228,7 @@ describe("inventory API client", () => {
           protocol_counts: { vless: 1 },
           inbounds: [
             {
+              source_index: 0,
               tag: "vless-443",
               display_name: "vless-443",
               protocol: "vless",

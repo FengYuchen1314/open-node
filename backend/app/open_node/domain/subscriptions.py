@@ -168,6 +168,52 @@ class ManagedNodeResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeNodeDraft(BaseModel):
+    source_index: int = Field(ge=0)
+    source_tag: str | None = None
+    source_display_name: str
+    draft: ManagedNodeCreate
+    create_available: bool = True
+    existing_node_id: UUID | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class XrayRuntimeNodeDraftsResponse(BaseModel):
+    server_id: UUID
+    has_scan: bool = False
+    drafts: list[XrayRuntimeNodeDraft] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
+class XrayRuntimeNodeCreateRequest(BaseModel):
+    source_index: int | None = Field(default=None, ge=0)
+    inbound_tag: str | None = Field(default=None, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=120)
+    host: str | None = Field(default=None, max_length=255)
+    tags: list[str] | None = Field(default=None, max_length=24)
+    enabled: bool = True
+
+    @field_validator("inbound_tag", "display_name", "name", "host")
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "runtime node field")
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        tags: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            tag = _strip_required_text(raw, "tag")
+            if tag not in seen:
+                tags.append(tag)
+                seen.add(tag)
+        return tags
+
+
 class SubscriptionCredentialRead(BaseModel):
     id: UUID
     username: str

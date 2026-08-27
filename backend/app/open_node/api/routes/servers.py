@@ -51,6 +51,11 @@ from open_node.domain.inventory import (
     ServerXrayConfigSnapshotsResponse,
     XrayRuntimeInventoryResponse,
 )
+from open_node.domain.subscriptions import (
+    ManagedNodeResponse,
+    XrayRuntimeNodeCreateRequest,
+    XrayRuntimeNodeDraftsResponse,
+)
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
     CommandNotFoundError,
@@ -58,6 +63,8 @@ from open_node.services.inventory import (
     InventoryStore,
     ServerNotFoundError,
     XrayConfigSnapshotNotFoundError,
+    XrayRuntimeInboundNotFoundError,
+    XrayRuntimeNodeDraftUnavailableError,
 )
 
 router = APIRouter(prefix="/servers", tags=["servers"])
@@ -129,6 +136,39 @@ def xray_runtime_inventory(
         return store.xray_runtime_inventory(server_id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get("/{server_id}/xray/runtime/node-drafts", response_model=XrayRuntimeNodeDraftsResponse)
+def list_xray_runtime_node_drafts(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    host: Annotated[str | None, Query(max_length=255)] = None,
+) -> XrayRuntimeNodeDraftsResponse:
+    try:
+        return store.list_xray_runtime_node_drafts(server_id, host=host)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{server_id}/xray/runtime/nodes",
+    response_model=ManagedNodeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_managed_node_from_xray_runtime(
+    server_id: UUID,
+    payload: XrayRuntimeNodeCreateRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ManagedNodeResponse:
+    try:
+        node = store.create_managed_node_from_xray_runtime(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except XrayRuntimeInboundNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except XrayRuntimeNodeDraftUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return ManagedNodeResponse(node=node)
 
 
 @router.get("/{server_id}/xray/config-snapshots", response_model=ServerXrayConfigSnapshotsResponse)

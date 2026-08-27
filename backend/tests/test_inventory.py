@@ -449,6 +449,172 @@ def test_xray_runtime_inventory_for_unknown_server_returns_404(tmp_path: Path) -
     assert response.json()["detail"] == "server not found: 00000000-0000-0000-0000-000000000000"
 
 
+def test_xray_runtime_node_drafts_create_managed_nodes_without_secrets(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-runtime-node", "domain": "edge.example.com"},
+    ).json()
+    server_id = created["server"]["id"]
+    command = client.post(f"/api/v1/servers/{server_id}/operations/scan").json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                **scan_result_payload(),
+                "inbounds": [
+                    {
+                        "tag": "vless-443",
+                        "listen": "0.0.0.0",
+                        "port": 443,
+                        "protocol": "vless",
+                        "settings": {
+                            "clients": [
+                                {
+                                    "id": "secret-runtime-client-id",
+                                    "email": "old@example.com",
+                                    "flow": "xtls-rprx-vision",
+                                }
+                            ]
+                        },
+                        "streamSettings": {
+                            "network": "ws",
+                            "security": "reality",
+                            "wsSettings": {
+                                "path": "/edge",
+                                "headers": {"Host": "cdn.example.com"},
+                            },
+                            "realitySettings": {
+                                "serverNames": ["www.example.com"],
+                                "publicKey": "public-reality-key",
+                                "privateKey": "secret-reality-private-key",
+                                "shortIds": ["abcd"],
+                            },
+                        },
+                    },
+                    {
+                        "tag": "ss-2022",
+                        "port": 8388,
+                        "protocol": "shadowsocks",
+                        "settings": {
+                            "method": "2022-blake3-aes-256-gcm",
+                            "password": "secret-shared-password",
+                            "clients": [{"email": "ss@example.com"}],
+                        },
+                    },
+                ],
+            },
+        },
+    )
+    assert result.status_code == 200
+
+    drafts_response = client.get(f"/api/v1/servers/{server_id}/xray/runtime/node-drafts")
+
+    assert drafts_response.status_code == 200
+    drafts_payload = drafts_response.json()
+    assert drafts_payload["license_required"] is False
+    assert drafts_payload["has_scan"] is True
+    assert len(drafts_payload["drafts"]) == 2
+    vless_draft = drafts_payload["drafts"][0]
+    assert vless_draft["source_index"] == 0
+    assert vless_draft["create_available"] is True
+    assert vless_draft["existing_node_id"] is None
+    assert vless_draft["draft"]["name"] == "edge-runtime-node vless-443"
+    assert vless_draft["draft"]["server_id"] == server_id
+    assert vless_draft["draft"]["protocol"] == "vless"
+    assert vless_draft["draft"]["inbound_tag"] == "vless-443"
+    assert vless_draft["draft"]["tags"] == ["runtime", "vless", "ws", "reality"]
+    assert vless_draft["draft"]["client_template"] == {
+        "email": "{username}__vless-443",
+        "flow": "xtls-rprx-vision",
+    }
+    assert vless_draft["draft"]["config"] == {
+        "name": "edge-runtime-node vless-443",
+        "type": "vless",
+        "server": "edge.example.com",
+        "port": 443,
+        "network": "ws",
+        "tls": True,
+        "sni": "www.example.com",
+        "reality-opts": {"public-key": "public-reality-key", "short-id": "abcd"},
+        "ws-opts": {"path": "/edge", "headers": {"Host": "cdn.example.com"}},
+    }
+    assert drafts_payload["drafts"][1]["draft"]["config"]["cipher"] == "2022-blake3-aes-256-gcm"
+    serialized_drafts = json.dumps(drafts_payload)
+    assert "secret-runtime-client-id" not in serialized_drafts
+    assert "secret-reality-private-key" not in serialized_drafts
+    assert "secret-shared-password" not in serialized_drafts
+
+    create_response = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes",
+        json={"source_index": 0, "host": "public.example.com"},
+    )
+
+    assert create_response.status_code == 201
+    node = create_response.json()["node"]
+    assert node["name"] == "edge-runtime-node vless-443"
+    assert node["config"]["server"] == "public.example.com"
+    assert node["client_template"]["flow"] == "xtls-rprx-vision"
+    assert "secret" not in json.dumps(node)
+
+    repeated = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes",
+        json={"source_index": 0, "host": "other.example.com"},
+    )
+
+    assert repeated.status_code == 201
+    assert repeated.json()["node"]["id"] == node["id"]
+    assert repeated.json()["node"]["config"]["server"] == "public.example.com"
+    refreshed = client.get(f"/api/v1/servers/{server_id}/xray/runtime/node-drafts").json()
+    assert refreshed["drafts"][0]["existing_node_id"] == node["id"]
+
+
+def test_xray_runtime_node_drafts_handle_missing_scan_and_unavailable_inbound(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-runtime-unavailable"}).json()
+    server_id = created["server"]["id"]
+
+    empty = client.get(f"/api/v1/servers/{server_id}/xray/runtime/node-drafts")
+
+    assert empty.status_code == 200
+    assert empty.json()["license_required"] is False
+    assert empty.json()["has_scan"] is False
+    assert empty.json()["drafts"] == []
+
+    command = client.post(f"/api/v1/servers/{server_id}/operations/scan").json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+    client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                **scan_result_payload(),
+                "inbounds": [{"tag": "dokodemo", "protocol": "dokodemo-door"}],
+            },
+        },
+    )
+
+    drafts = client.get(f"/api/v1/servers/{server_id}/xray/runtime/node-drafts").json()["drafts"]
+    assert drafts[0]["create_available"] is False
+    assert drafts[0]["warnings"] == ["unsupported_protocol", "missing_port"]
+
+    create_response = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes",
+        json={"source_index": 0},
+    )
+
+    assert create_response.status_code == 400
+    assert create_response.json()["detail"] == "unsupported_protocol, missing_port"
+
+
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-traffic"}).json()

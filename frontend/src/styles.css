@@ -369,6 +369,10 @@ body {
   justify-content: flex-end;
 }
 
+.runtime-node-action {
+  display: inline-flex;
+}
+
 .runtime-chip-row {
   margin-top: 8px;
 }

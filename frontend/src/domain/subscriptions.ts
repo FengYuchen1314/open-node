@@ -354,6 +354,33 @@ export interface ManagedNodeResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeNodeDraft {
+  source_index: number;
+  source_tag?: string | null;
+  source_display_name: string;
+  draft: ManagedNodeCreateRequest;
+  create_available: boolean;
+  existing_node_id?: string | null;
+  warnings: string[];
+}
+
+export interface XrayRuntimeNodeDraftsResponse {
+  server_id: string;
+  has_scan: boolean;
+  drafts: XrayRuntimeNodeDraft[];
+  license_required: false;
+}
+
+export interface XrayRuntimeNodeCreateRequest {
+  source_index?: number | null;
+  inbound_tag?: string | null;
+  display_name?: string | null;
+  name?: string | null;
+  host?: string | null;
+  tags?: string[] | null;
+  enabled?: boolean;
+}
+
 export interface SubscriptionPlansResponse {
   plans: SubscriptionPlan[];
   license_required: false;
