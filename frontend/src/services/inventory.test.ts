@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createXrayRuntimeTunnelChain,
   createServer,
   createServerCommand,
   deleteXrayRuntimeTunnel,
@@ -407,6 +408,106 @@ describe("inventory API client", () => {
     expect(response.command_previews[1]?.body).toEqual({
       action: "remove",
       tag: "tunnel-routed",
+    });
+  });
+
+  it("queues Xray runtime tunnel chain creates with cross-server previews", async () => {
+    let requestUrl = "";
+    let method = "";
+    let headers: HeadersInit | undefined;
+    let body: unknown;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      method = init?.method ?? "";
+      headers = init?.headers;
+      body = JSON.parse(init?.body?.toString() ?? "{}") as unknown;
+      return new Response(
+        JSON.stringify({
+          label: "relay",
+          entry_server_id: "srv_1",
+          entry_host: "198.51.100.10",
+          entry_port: 19000,
+          final_target: "service.internal:443",
+          hops: [
+            {
+              server_id: "srv_1",
+              server_name: "entry",
+              tag: "tunnel-relay-h0",
+              listen_port: 19000,
+              target_address: "middle.example.com",
+              target_port: 20000,
+            },
+          ],
+          command_previews: [
+            {
+              server_id: "srv_1",
+              server_name: "entry",
+              hop_index: 0,
+              method: "POST",
+              path: "/api/child/inbounds",
+              body: {
+                action: "add",
+                inbound: {
+                  tag: "tunnel-relay-h0",
+                  protocol: "tunnel",
+                  port: 19000,
+                  settings: {
+                    address: "middle.example.com",
+                    port: 20000,
+                    network: "tcp,udp",
+                  },
+                },
+              },
+            },
+          ],
+          commands: [],
+          scan_commands: [],
+          command_count: 1,
+          warnings: [],
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await createXrayRuntimeTunnelChain(
+      {
+        label: "relay",
+        server_ids: ["srv_1", "srv_2"],
+        entry_port: 19000,
+        target_address: "service.internal",
+        target_port: 443,
+        queue_agent_commands: true,
+        queue_scan_after_apply: true,
+      },
+      fetcher,
+    );
+
+    expect(requestUrl).toBe("/api/v1/servers/xray/runtime/tunnel-chains");
+    expect(method).toBe("POST");
+    expect(headers).toEqual({ "Content-Type": "application/json" });
+    expect(body).toEqual({
+      label: "relay",
+      server_ids: ["srv_1", "srv_2"],
+      entry_port: 19000,
+      target_address: "service.internal",
+      target_port: 443,
+      queue_agent_commands: true,
+      queue_scan_after_apply: true,
+    });
+    expect(response.license_required).toBe(false);
+    expect(response.command_previews[0]?.body).toEqual({
+      action: "add",
+      inbound: {
+        tag: "tunnel-relay-h0",
+        protocol: "tunnel",
+        port: 19000,
+        settings: {
+          address: "middle.example.com",
+          port: 20000,
+          network: "tcp,udp",
+        },
+      },
     });
   });
 

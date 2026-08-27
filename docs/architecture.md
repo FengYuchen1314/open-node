@@ -83,7 +83,11 @@ configuration or credential material. Operators can then use
 `/api/v1/servers/{server_id}/xray/runtime/tunnels/delete` to preview or queue
 the matching agent cleanup commands: inbound/chain deletes use
 `/api/child/inbounds`, while routed tunnel deletes remove the routing rule and
-then the matching outbound.
+then the matching outbound. Operators can also plan an ordered multi-server
+tunnel chain through `/api/v1/servers/xray/runtime/tunnel-chains`, which picks
+conflict-free hop ports from current snapshots, previews the
+`/api/child/inbounds` add commands, and can queue those commands plus
+follow-up scans for every hop server.
 It can also derive managed-node drafts from those inbounds at
 `/api/v1/servers/{server_id}/xray/runtime/node-drafts` and create catalog nodes
 through `/api/v1/servers/{server_id}/xray/runtime/nodes`. Operators can also
@@ -213,6 +217,7 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `GET /api/v1/servers/{server_id}/xray/runtime`
 - `GET /api/v1/servers/{server_id}/xray/runtime/tunnels`
 - `POST /api/v1/servers/{server_id}/xray/runtime/tunnels/delete`
+- `POST /api/v1/servers/xray/runtime/tunnel-chains`
 - `GET /api/v1/servers/{server_id}/xray/runtime/node-drafts`
 - `POST /api/v1/servers/{server_id}/xray/runtime/nodes`
 - `POST /api/v1/servers/{server_id}/xray/runtime/nodes/import`

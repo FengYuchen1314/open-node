@@ -14,6 +14,8 @@ import type {
   ServerResponse,
   ServerSummary,
   ServerXrayConfigSnapshotsResponse,
+  XrayRuntimeTunnelChainCreateRequest,
+  XrayRuntimeTunnelChainCreateResponse,
   XrayRuntimeInventoryResponse,
   XrayRuntimeTunnelDeleteRequest,
   XrayRuntimeTunnelDeleteResponse,
@@ -188,6 +190,21 @@ export async function deleteXrayRuntimeTunnel(
     throw await apiError(response, "Xray runtime tunnel delete request failed");
   }
   return response.json() as Promise<XrayRuntimeTunnelDeleteResponse>;
+}
+
+export async function createXrayRuntimeTunnelChain(
+  payload: XrayRuntimeTunnelChainCreateRequest,
+  fetcher = fetch,
+): Promise<XrayRuntimeTunnelChainCreateResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/xray/runtime/tunnel-chains`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Xray runtime tunnel chain create request failed");
+  }
+  return response.json() as Promise<XrayRuntimeTunnelChainCreateResponse>;
 }
 
 export interface XrayConfigSnapshotListOptions {

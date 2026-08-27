@@ -80,6 +80,10 @@ from open_node.domain.inventory import (
     XrayMode,
     XrayRuntimeInboundRead,
     XrayRuntimeInventoryResponse,
+    XrayRuntimeTunnelChainCreateCommand,
+    XrayRuntimeTunnelChainCreateRequest,
+    XrayRuntimeTunnelChainCreateResponse,
+    XrayRuntimeTunnelChainHopRead,
     XrayRuntimeTunnelChainRead,
     XrayRuntimeTunnelDeleteCommand,
     XrayRuntimeTunnelDeleteRequest,
@@ -240,6 +244,10 @@ class XrayRuntimeNodeDraftUnavailableError(ValueError):
 
 class XrayRuntimeTunnelNotFoundError(ValueError):
     """Raised when a snapshot-derived runtime tunnel target is unavailable."""
+
+
+class XrayRuntimeTunnelChainUnavailableError(ValueError):
+    """Raised when a runtime tunnel chain cannot be planned safely."""
 
 
 _PROBE_SERIES_RANGES = {
@@ -1330,6 +1338,101 @@ class InventoryStore:
                 command_previews=previews,
                 command_count=len(previews),
                 warnings=inventory.warnings,
+            )
+
+    def create_xray_runtime_tunnel_chain(
+        self,
+        payload: XrayRuntimeTunnelChainCreateRequest,
+    ) -> XrayRuntimeTunnelChainCreateResponse:
+        with self._session() as session:
+            servers: list[ServerModel] = []
+            hosts: list[str] = []
+            used_ports: list[set[int]] = []
+            warnings: list[str] = []
+
+            for server_id in payload.server_ids:
+                server = session.get(ServerModel, str(server_id))
+                if not server:
+                    raise ServerNotFoundError(f"server not found: {server_id}")
+                host = self._server_entry_host(server)
+                if not host:
+                    raise XrayRuntimeTunnelChainUnavailableError(
+                        f"server has no reachable address: {server.name}"
+                    )
+                snapshot = self._current_xray_config_snapshot(session, server.id)
+                ports, port_warnings = self._xray_config_snapshot_used_inbound_ports(snapshot)
+                warnings.extend(f"{server.name}:{warning}" for warning in port_warnings)
+                servers.append(server)
+                hosts.append(host)
+                used_ports.append(ports)
+
+            ports: list[int] = []
+            wanted_entry = payload.entry_port or self._next_free_xray_tunnel_port(used_ports[0])
+            entry_port = self._pick_xray_tunnel_port(used_ports[0], wanted_entry)
+            if payload.entry_port and entry_port != payload.entry_port:
+                warnings.append(f"{servers[0].name}:port_{payload.entry_port}_in_use")
+            ports.append(entry_port)
+            used_ports[0].add(entry_port)
+
+            for index in range(1, len(servers)):
+                wanted = ports[index - 1]
+                if index == len(servers) - 1:
+                    wanted = ports[0]
+                port = self._pick_xray_tunnel_port(used_ports[index], wanted)
+                if port != wanted:
+                    warnings.append(f"{servers[index].name}:port_{wanted}_in_use")
+                ports.append(port)
+                used_ports[index].add(port)
+
+            hops: list[XrayRuntimeTunnelChainHopRead] = []
+            previews: list[XrayRuntimeTunnelChainCreateCommand] = []
+            for index, server in enumerate(servers):
+                target_address = (
+                    hosts[index + 1]
+                    if index < len(servers) - 1
+                    else payload.target_address
+                )
+                target_port = ports[index + 1] if index < len(servers) - 1 else payload.target_port
+                tag = f"tunnel-{payload.label}-h{index}"
+                inbound = {
+                    "tag": tag,
+                    "protocol": "tunnel",
+                    "port": ports[index],
+                    "settings": {
+                        "address": target_address,
+                        "port": target_port,
+                        "network": "tcp,udp",
+                    },
+                }
+                hop = XrayRuntimeTunnelChainHopRead(
+                    server_id=UUID(server.id),
+                    server_name=server.name,
+                    tag=tag,
+                    listen_port=ports[index],
+                    target_address=target_address,
+                    target_port=target_port,
+                )
+                hops.append(hop)
+                previews.append(
+                    XrayRuntimeTunnelChainCreateCommand(
+                        server_id=UUID(server.id),
+                        server_name=server.name,
+                        hop_index=index,
+                        body={"action": "add", "inbound": inbound},
+                    )
+                )
+
+            return XrayRuntimeTunnelChainCreateResponse(
+                label=payload.label,
+                entry_server_id=payload.server_ids[0],
+                entry_host=hosts[0],
+                entry_port=ports[0],
+                final_target=self._format_host_port(payload.target_address, payload.target_port)
+                or payload.target_address,
+                hops=hops,
+                command_previews=previews,
+                command_count=len(previews),
+                warnings=self._dedupe_text(warnings),
             )
 
     def list_xray_runtime_node_drafts(
@@ -6154,6 +6257,61 @@ class InventoryStore:
                 body={"action": "remove", "tag": tunnel.tag},
             ),
         ]
+
+    @classmethod
+    def _xray_config_snapshot_used_inbound_ports(
+        cls,
+        snapshot: XrayConfigSnapshotModel | None,
+    ) -> tuple[set[int], list[str]]:
+        if snapshot is None:
+            return set(), ["current_config_snapshot_not_found"]
+        try:
+            config = json.loads(snapshot.config)
+        except json.JSONDecodeError:
+            return set(), ["invalid_config_json"]
+        if not isinstance(config, dict):
+            return set(), ["invalid_config_shape"]
+        inbounds_value = config.get("inbounds")
+        inbounds = cls._list_value(inbounds_value)
+        warnings: list[str] = []
+        if inbounds_value is not None and not isinstance(inbounds_value, list):
+            warnings.append("invalid_inbounds")
+        ports = {
+            port
+            for inbound in inbounds
+            if isinstance(inbound, dict)
+            if (port := cls._port_value(inbound.get("port"))) is not None
+        }
+        return ports, warnings
+
+    @staticmethod
+    def _server_entry_host(server: ServerModel) -> str:
+        for value in [
+            server.ip_address,
+            server.domain,
+            server.pull_address,
+            server.ip_address_v6,
+            server.domain_v6,
+            server.pull_address_v6,
+        ]:
+            if value and value.strip():
+                return value.strip()
+        return ""
+
+    @classmethod
+    def _pick_xray_tunnel_port(cls, used: set[int], wanted: int) -> int:
+        if 0 < wanted <= 65535 and wanted not in used:
+            return wanted
+        return cls._next_free_xray_tunnel_port(used)
+
+    @staticmethod
+    def _next_free_xray_tunnel_port(used: set[int]) -> int:
+        for port in range(20_000, 60_000):
+            if port not in used:
+                return port
+        raise XrayRuntimeTunnelChainUnavailableError(
+            "no free runtime tunnel port in range 20000-59999"
+        )
 
     @classmethod
     def _group_xray_tunnel_chains(

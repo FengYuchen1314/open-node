@@ -82,6 +82,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: tunnel inventory entries can preview or queue delete commands:
      inbound and chain hops remove tunnel inbounds, while routed tunnel cleanup
      removes the routing rule before removing the matching outbound.
+   - Done: ordered runtime tunnel chains can be planned across existing
+     servers, with conflict-free hop ports, `/api/child/inbounds` previews,
+     queued add commands, follow-up scans, and Vue Runtime tab controls.
    - Done: scan-derived managed-node drafts and one-click catalog node creation
      from runtime inbounds, without importing UUIDs, passwords, PSKs, or account
      secrets from existing Xray config.

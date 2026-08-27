@@ -2690,6 +2690,147 @@ def test_xray_runtime_tunnel_inventory_reads_current_config_snapshot(
     assert queued_payload["scan_command"]["timeout_ms"] == 45_000
 
 
+def test_xray_runtime_tunnel_chain_create_plans_and_queues_hops(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    entry = client.post(
+        "/api/v1/servers",
+        json={"name": "chain-entry", "ip_address": "198.51.100.10"},
+    ).json()
+    middle = client.post(
+        "/api/v1/servers",
+        json={"name": "chain-middle", "domain": "middle.example.com"},
+    ).json()
+    exit_server = client.post(
+        "/api/v1/servers",
+        json={
+            "name": "chain-exit",
+            "ip_address": "2001:db8::20",
+            "domain": "exit.example.com",
+        },
+    ).json()
+
+    def record_config(server: dict[str, object], config: dict[str, object]) -> None:
+        server_id = server["server"]["id"]
+        command = client.post(
+            f"/api/v1/servers/{server_id}/operations/xray/config/read",
+        ).json()["command"]
+        result = client.post(
+            f"/api/v1/agents/commands/{command['id']}/result",
+            json={
+                "token": server["agent_token"],
+                "status": 200,
+                "body": {"success": True, "config": json.dumps(config)},
+            },
+        )
+        assert result.status_code == 200
+
+    record_config(entry, {"inbounds": [{"tag": "vless-443", "port": 443}]})
+    record_config(middle, {"inbounds": [{"tag": "occupied", "port": 19000}]})
+    record_config(exit_server, {"inbounds": []})
+
+    request_body = {
+        "label": "Relay-1",
+        "server_ids": [
+            entry["server"]["id"],
+            middle["server"]["id"],
+            exit_server["server"]["id"],
+        ],
+        "entry_port": 19000,
+        "target_address": "service.internal",
+        "target_port": 443,
+    }
+    preview = client.post("/api/v1/servers/xray/runtime/tunnel-chains", json=request_body)
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["license_required"] is False
+    assert payload["label"] == "relay-1"
+    assert payload["entry_server_id"] == entry["server"]["id"]
+    assert payload["entry_host"] == "198.51.100.10"
+    assert payload["entry_port"] == 19000
+    assert payload["final_target"] == "service.internal:443"
+    assert payload["command_count"] == 3
+    assert payload["commands"] == []
+    assert payload["scan_commands"] == []
+    assert payload["warnings"] == ["chain-middle:port_19000_in_use"]
+    assert payload["hops"] == [
+        {
+            "server_id": entry["server"]["id"],
+            "server_name": "chain-entry",
+            "tag": "tunnel-relay-1-h0",
+            "listen_port": 19000,
+            "target_address": "middle.example.com",
+            "target_port": 20000,
+        },
+        {
+            "server_id": middle["server"]["id"],
+            "server_name": "chain-middle",
+            "tag": "tunnel-relay-1-h1",
+            "listen_port": 20000,
+            "target_address": "2001:db8::20",
+            "target_port": 19000,
+        },
+        {
+            "server_id": exit_server["server"]["id"],
+            "server_name": "chain-exit",
+            "tag": "tunnel-relay-1-h2",
+            "listen_port": 19000,
+            "target_address": "service.internal",
+            "target_port": 443,
+        },
+    ]
+    assert [
+        preview["body"]["inbound"]["settings"]
+        for preview in payload["command_previews"]
+    ] == [
+        {"address": "middle.example.com", "port": 20000, "network": "tcp,udp"},
+        {"address": "2001:db8::20", "port": 19000, "network": "tcp,udp"},
+        {"address": "service.internal", "port": 443, "network": "tcp,udp"},
+    ]
+
+    queued = client.post(
+        "/api/v1/servers/xray/runtime/tunnel-chains",
+        json={
+            **request_body,
+            "queue_agent_commands": True,
+            "queue_scan_after_apply": True,
+            "command_timeout_ms": 45_000,
+        },
+    )
+
+    assert queued.status_code == 200
+    queued_payload = queued.json()
+    assert queued_payload["command_count"] == 3
+    assert [command["server_id"] for command in queued_payload["commands"]] == [
+        entry["server"]["id"],
+        middle["server"]["id"],
+        exit_server["server"]["id"],
+    ]
+    assert [command["path"] for command in queued_payload["commands"]] == [
+        "/api/child/inbounds",
+        "/api/child/inbounds",
+        "/api/child/inbounds",
+    ]
+    assert [command["body"]["inbound"]["tag"] for command in queued_payload["commands"]] == [
+        "tunnel-relay-1-h0",
+        "tunnel-relay-1-h1",
+        "tunnel-relay-1-h2",
+    ]
+    assert all(command["timeout_ms"] == 45_000 for command in queued_payload["commands"])
+    assert [command["server_id"] for command in queued_payload["scan_commands"]] == [
+        entry["server"]["id"],
+        middle["server"]["id"],
+        exit_server["server"]["id"],
+    ]
+    assert all(
+        command["path"] == "/api/child/scan"
+        for command in queued_payload["scan_commands"]
+    )
+    assert all(command["timeout_ms"] == 45_000 for command in queued_payload["scan_commands"])
+
+
 def test_xray_runtime_tunnel_inventory_handles_missing_config_snapshot(
     tmp_path: Path,
 ) -> None:

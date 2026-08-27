@@ -50,6 +50,8 @@ from open_node.domain.inventory import (
     ServerTelemetryResponse,
     ServerXrayConfigSnapshotsResponse,
     XrayRuntimeInventoryResponse,
+    XrayRuntimeTunnelChainCreateRequest,
+    XrayRuntimeTunnelChainCreateResponse,
     XrayRuntimeTunnelDeleteRequest,
     XrayRuntimeTunnelDeleteResponse,
     XrayRuntimeTunnelInventoryResponse,
@@ -79,6 +81,7 @@ from open_node.services.inventory import (
     XrayConfigSnapshotNotFoundError,
     XrayRuntimeInboundNotFoundError,
     XrayRuntimeNodeDraftUnavailableError,
+    XrayRuntimeTunnelChainUnavailableError,
     XrayRuntimeTunnelNotFoundError,
 )
 
@@ -165,6 +168,59 @@ def xray_runtime_tunnel_inventory(
         return store.xray_runtime_tunnel_inventory(server_id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/xray/runtime/tunnel-chains",
+    response_model=XrayRuntimeTunnelChainCreateResponse,
+)
+async def create_xray_runtime_tunnel_chain(
+    payload: XrayRuntimeTunnelChainCreateRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> XrayRuntimeTunnelChainCreateResponse:
+    try:
+        response = store.create_xray_runtime_tunnel_chain(payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except XrayRuntimeTunnelChainUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if payload.queue_agent_commands:
+        commands = []
+        for preview in response.command_previews:
+            command = store.create_command(
+                preview.server_id,
+                AgentCommandCreate(
+                    method=preview.method,
+                    path=preview.path,
+                    body=preview.body,
+                    timeout_ms=payload.command_timeout_ms,
+                ),
+            )
+            commands.append(await connections.dispatch_command(store, command))
+
+        scan_commands = []
+        if payload.queue_scan_after_apply and commands:
+            seen_server_ids: set[UUID] = set()
+            for server_id in payload.server_ids:
+                if server_id in seen_server_ids:
+                    continue
+                seen_server_ids.add(server_id)
+                command = store.create_command(
+                    server_id,
+                    AgentCommandCreate(
+                        method="POST",
+                        path="/api/child/scan",
+                        timeout_ms=payload.command_timeout_ms,
+                    ),
+                )
+                scan_commands.append(await connections.dispatch_command(store, command))
+
+        response = response.model_copy(
+            update={"commands": commands, "scan_commands": scan_commands}
+        )
+    return response
 
 
 @router.post(

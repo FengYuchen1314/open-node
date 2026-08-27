@@ -675,6 +675,54 @@ class XrayRuntimeTunnelDeleteCommand(BaseModel):
     body: dict[str, Any]
 
 
+class XrayRuntimeTunnelChainCreateRequest(BaseModel):
+    label: str = Field(min_length=2, max_length=32, pattern=r"^[a-z0-9-]+$")
+    server_ids: list[UUID] = Field(min_length=2, max_length=16)
+    entry_port: int = Field(default=0, ge=0, le=65535)
+    target_address: str = Field(min_length=1, max_length=255)
+    target_port: int = Field(ge=1, le=65535)
+    queue_agent_commands: bool = False
+    queue_scan_after_apply: bool = False
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @field_validator("target_address")
+    @classmethod
+    def normalize_target_address(cls, value: str) -> str:
+        return _strip_required_text(value, "target_address")
+
+    @field_validator("server_ids")
+    @classmethod
+    def validate_unique_servers(cls, value: list[UUID]) -> list[UUID]:
+        if len(set(value)) != len(value):
+            raise ValueError("server_ids must not contain duplicates")
+        return value
+
+
+class XrayRuntimeTunnelChainHopRead(BaseModel):
+    server_id: UUID
+    server_name: str
+    tag: str
+    listen_port: int = Field(ge=0, le=65535)
+    target_address: str
+    target_port: int = Field(ge=0, le=65535)
+
+
+class XrayRuntimeTunnelChainCreateCommand(BaseModel):
+    server_id: UUID
+    server_name: str
+    hop_index: int = Field(ge=0)
+    method: Literal["POST"] = "POST"
+    path: Literal["/api/child/inbounds"] = "/api/child/inbounds"
+    body: dict[str, Any]
+
+
 class XrayConfigSnapshotRead(BaseModel):
     id: UUID
     server_id: UUID
@@ -764,6 +812,21 @@ class XrayRuntimeTunnelDeleteResponse(BaseModel):
     command_previews: list[XrayRuntimeTunnelDeleteCommand] = Field(default_factory=list)
     commands: list[AgentCommandRead] = Field(default_factory=list)
     scan_command: AgentCommandRead | None = None
+    command_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
+class XrayRuntimeTunnelChainCreateResponse(BaseModel):
+    label: str
+    entry_server_id: UUID
+    entry_host: str
+    entry_port: int = Field(ge=0, le=65535)
+    final_target: str
+    hops: list[XrayRuntimeTunnelChainHopRead] = Field(default_factory=list)
+    command_previews: list[XrayRuntimeTunnelChainCreateCommand] = Field(default_factory=list)
+    commands: list[AgentCommandRead] = Field(default_factory=list)
+    scan_commands: list[AgentCommandRead] = Field(default_factory=list)
     command_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     license_required: Literal[False] = False

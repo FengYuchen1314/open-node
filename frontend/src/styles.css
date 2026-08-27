@@ -339,6 +339,30 @@ body {
   justify-content: flex-end;
 }
 
+.runtime-chain-form {
+  border-top: 1px solid #edf2ef;
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.runtime-chain-grid {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(220px, 1.4fr) minmax(110px, 0.7fr);
+}
+
+.runtime-chain-grid .runtime-node-action {
+  align-self: center;
+  width: 100%;
+}
+
+.runtime-chain-grid .v-btn {
+  min-width: 0;
+  width: 100%;
+}
+
 .runtime-inbound-list {
   display: grid;
   gap: 10px;
@@ -1395,6 +1419,7 @@ body {
 
   .config-action-row,
   .config-file-grid,
+  .runtime-chain-grid,
   .runtime-inbound-row,
   .runtime-reconcile-row,
   .snapshot-row,

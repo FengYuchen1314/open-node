@@ -350,6 +350,50 @@ export interface XrayRuntimeTunnelDeleteResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeTunnelChainCreateRequest {
+  label: string;
+  server_ids: string[];
+  entry_port?: number;
+  target_address: string;
+  target_port: number;
+  queue_agent_commands?: boolean;
+  queue_scan_after_apply?: boolean;
+  command_timeout_ms?: number;
+}
+
+export interface XrayRuntimeTunnelChainHop {
+  server_id: string;
+  server_name: string;
+  tag: string;
+  listen_port: number;
+  target_address: string;
+  target_port: number;
+}
+
+export interface XrayRuntimeTunnelChainCreateCommand {
+  server_id: string;
+  server_name: string;
+  hop_index: number;
+  method: "POST";
+  path: "/api/child/inbounds";
+  body: Record<string, unknown>;
+}
+
+export interface XrayRuntimeTunnelChainCreateResponse {
+  label: string;
+  entry_server_id: string;
+  entry_host: string;
+  entry_port: number;
+  final_target: string;
+  hops: XrayRuntimeTunnelChainHop[];
+  command_previews: XrayRuntimeTunnelChainCreateCommand[];
+  commands: AgentCommand[];
+  scan_commands: AgentCommand[];
+  command_count: number;
+  warnings: string[];
+  license_required: false;
+}
+
 export interface XrayConfigSnapshot {
   id: string;
   server_id: string;
