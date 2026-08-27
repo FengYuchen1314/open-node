@@ -4,16 +4,22 @@ import type { AgentCommand } from "../domain/inventory";
 import type {
   ManagedNode,
   ProductUser,
+  SubscriptionCatalogBundle,
   SubscriptionPlan,
+  SubscriptionTemplatePreset,
 } from "../domain/subscriptions";
 import {
   assignSubscriptionPlan,
   createManagedNode,
+  createManagedNodeFromPreset,
   createProductUser,
   createProductUserSubscriptionToken,
   createSubscriptionPlan,
+  exportSubscriptionCatalog,
   getProductUserSubscriptionToken,
   getProductUserTraffic,
+  importSubscriptionCatalog,
+  listSubscriptionTemplatePresets,
   listManagedNodes,
   listProductUserCredentials,
   listProductUsers,
@@ -87,6 +93,74 @@ const subscriptionToken = {
   short_url: "http://testserver/api/v1/subscribe/abcd1234",
   created_at: timestamp,
   updated_at: timestamp,
+};
+
+const subscriptionPreset: SubscriptionTemplatePreset = {
+  id: "vless-vision-tls",
+  name: "VLESS Vision TLS",
+  description: "VLESS preset",
+  protocol: "vless",
+  node_type: "physical",
+  inbound_tag: "vless-443",
+  routed_outbound_tag: null,
+  routed_rule_marktag: null,
+  tag: "vless",
+  tags: ["vless", "tls"],
+  client_template: { email: "{username}__vless-443" },
+  config: { type: "vless", server: "{server_domain}", port: 443 },
+};
+
+const catalogBundle: SubscriptionCatalogBundle = {
+  version: 1,
+  exported_at: timestamp,
+  users: [
+    {
+      username: "alice@example.com",
+      email: "alice@example.com",
+      display_name: "Alice",
+      role: "user",
+      is_active: true,
+      current_plan_name: "Premium",
+      plan_started_at: timestamp,
+      plan_expires_at: null,
+      is_reset: true,
+      reset_day: 1,
+    },
+  ],
+  nodes: [
+    {
+      name: "Tokyo vless",
+      server_name: "edge",
+      protocol: "vless",
+      node_type: "routed",
+      inbound_tag: "vless-443",
+      routed_outbound_tag: "tokyo-out",
+      routed_rule_marktag: "route-tokyo",
+      tag: "jp",
+      tags: ["jp"],
+      enabled: true,
+      client_template: { email: "{username}__tokyo" },
+      config: { type: "vless", server: "tokyo.example.com", port: 443 },
+    },
+  ],
+  plans: [
+    {
+      name: "Premium",
+      description: "Premium routed bundle",
+      traffic_limit_gb: 128,
+      cycle_days: 30,
+      is_reset: true,
+      reset_day: 1,
+      node_names: ["Tokyo vless"],
+      node_multipliers: { "Tokyo vless": 1 },
+      node_speed_limits: {},
+      node_device_limits: {},
+      speed_limit_mbps: 200,
+      device_limit: 3,
+      traffic_mode: "twoway",
+    },
+  ],
+  credentials: [],
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -243,6 +317,99 @@ describe("subscriptions API client", () => {
     expect(response.license_required).toBe(false);
     expect(response.commands[0].path).toBe("/api/child/batch-apply");
     expect(response.provisioning_batches[0].body).toEqual(batchBody);
+  });
+
+  it("lists and applies subscription node presets", async () => {
+    const calls: Array<{ body?: unknown; headers: HeadersInit | undefined; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = input.toString();
+      calls.push({
+        url,
+        headers: init?.headers,
+        body: init?.body ? JSON.parse(init.body.toString()) : undefined,
+      });
+      if (url.endsWith("/node-presets")) {
+        return jsonResponse({ presets: [subscriptionPreset], license_required: false });
+      }
+      return jsonResponse({ node: managedNode, license_required: false }, 201);
+    };
+
+    const presets = await listSubscriptionTemplatePresets(fetcher);
+    const node = await createManagedNodeFromPreset(
+      "vless-vision-tls",
+      {
+        server_id: "srv_1",
+        name: "Tokyo vless",
+        host: "tokyo.example.com",
+        port: 443,
+      },
+      fetcher,
+    );
+
+    expect(presets.presets[0].id).toBe("vless-vision-tls");
+    expect(node.node.name).toBe("Tokyo vless");
+    expect(calls).toEqual([
+      { url: "/api/v1/node-presets", headers: undefined, body: undefined },
+      {
+        url: "/api/v1/node-presets/vless-vision-tls/nodes",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          server_id: "srv_1",
+          name: "Tokyo vless",
+          host: "tokyo.example.com",
+          port: 443,
+        },
+      },
+    ]);
+  });
+
+  it("exports and imports subscription catalog bundles", async () => {
+    const calls: Array<{ body?: unknown; headers: HeadersInit | undefined; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = input.toString();
+      calls.push({
+        url,
+        headers: init?.headers,
+        body: init?.body ? JSON.parse(init.body.toString()) : undefined,
+      });
+      if (url.includes("/catalog/export")) {
+        return jsonResponse({ catalog: catalogBundle, license_required: false });
+      }
+      return jsonResponse({
+        summary: {
+          created_users: 1,
+          updated_users: 0,
+          created_nodes: 1,
+          updated_nodes: 0,
+          created_plans: 1,
+          updated_plans: 0,
+          imported_credentials: 0,
+          warnings: [],
+        },
+        license_required: false,
+      });
+    };
+
+    const exported = await exportSubscriptionCatalog(true, fetcher);
+    const imported = await importSubscriptionCatalog(
+      { catalog: exported.catalog, server_map: { edge: "srv_1" } },
+      fetcher,
+    );
+
+    expect(exported.catalog.plans[0].node_names).toEqual(["Tokyo vless"]);
+    expect(imported.summary.created_nodes).toBe(1);
+    expect(calls).toEqual([
+      {
+        url: "/api/v1/catalog/export?include_credentials=true",
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/catalog/import",
+        headers: { "Content-Type": "application/json" },
+        body: { catalog: catalogBundle, server_map: { edge: "srv_1" } },
+      },
+    ]);
   });
 
   it("manages subscription tokens and user credentials through encoded user routes", async () => {

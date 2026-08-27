@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import Iterable
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -75,16 +76,29 @@ from open_node.domain.probe import (
 from open_node.domain.subscriptions import (
     ManagedNodeCreate,
     ManagedNodeRead,
+    ManagedNodeType,
     ProductUserCreate,
     ProductUserRead,
+    ProductUserRole,
     ProductUserTrafficResponse,
+    SubscriptionCatalogBundle,
+    SubscriptionCatalogCredentialEntry,
+    SubscriptionCatalogImportRequest,
+    SubscriptionCatalogImportResponse,
+    SubscriptionCatalogImportSummary,
+    SubscriptionCatalogNodeEntry,
+    SubscriptionCatalogPlanEntry,
+    SubscriptionCatalogUserEntry,
     SubscriptionClientFormat,
     SubscriptionCredentialRead,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanCreate,
     SubscriptionPlanRead,
     SubscriptionProvisionBatch,
+    SubscriptionTemplatePresetApplyRequest,
+    SubscriptionTemplatePresetRead,
     SubscriptionTrafficEntryRead,
+    SubscriptionTrafficMode,
 )
 
 
@@ -140,11 +154,120 @@ class SubscriptionUnavailableError(ValueError):
     """Raised when a product user has no active renderable subscription."""
 
 
+class SubscriptionTemplatePresetNotFoundError(ValueError):
+    """Raised when a subscription node preset lookup targets an unknown preset."""
+
+
 _PROBE_SERIES_RANGES = {
     "1h": (12, 300),
     "6h": (36, 600),
     "24h": (48, 1800),
 }
+
+_SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "vless-vision-tls",
+        "name": "VLESS Vision TLS",
+        "description": "VLESS TCP TLS node with Vision flow and UUID credentials.",
+        "protocol": "vless",
+        "node_type": "physical",
+        "inbound_tag": "vless-443",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "vless",
+        "tags": ["vless", "tls"],
+        "client_template": {"email": "{username}__vless-443", "flow": "xtls-rprx-vision"},
+        "config": {
+            "name": "{server_name} VLESS",
+            "type": "vless",
+            "server": "{server_domain}",
+            "port": 443,
+            "tls": True,
+            "network": "tcp",
+            "flow": "xtls-rprx-vision",
+        },
+    },
+    {
+        "id": "trojan-tls",
+        "name": "Trojan TLS",
+        "description": "Trojan TLS node with generated password credentials.",
+        "protocol": "trojan",
+        "node_type": "physical",
+        "inbound_tag": "trojan-443",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "trojan",
+        "tags": ["trojan", "tls"],
+        "client_template": {"email": "{username}__trojan-443"},
+        "config": {
+            "name": "{server_name} Trojan",
+            "type": "trojan",
+            "server": "{server_domain}",
+            "port": 443,
+            "tls": True,
+        },
+    },
+    {
+        "id": "shadowsocks-2022",
+        "name": "Shadowsocks 2022",
+        "description": "Shadowsocks 2022 node with per-user generated 32 byte keys.",
+        "protocol": "shadowsocks",
+        "node_type": "physical",
+        "inbound_tag": "ss-2022",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "ss",
+        "tags": ["ss"],
+        "client_template": {"email": "{username}__ss-2022"},
+        "config": {
+            "name": "{server_name} SS",
+            "type": "ss",
+            "server": "{server_domain}",
+            "port": 8388,
+            "cipher": "2022-blake3-aes-256-gcm",
+        },
+    },
+    {
+        "id": "hysteria2",
+        "name": "Hysteria2",
+        "description": "Hysteria2 node with per-user auth credentials.",
+        "protocol": "hysteria2",
+        "node_type": "physical",
+        "inbound_tag": "hy2-443",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "hy2",
+        "tags": ["hy2", "udp"],
+        "client_template": {"email": "{username}__hy2-443"},
+        "config": {
+            "name": "{server_name} Hy2",
+            "type": "hysteria2",
+            "server": "{server_domain}",
+            "port": 443,
+            "tls": True,
+        },
+    },
+    {
+        "id": "routed-outbound",
+        "name": "Routed outbound",
+        "description": "Catalog-only routed node that adds users to an outbound route.",
+        "protocol": "vless",
+        "node_type": "routed",
+        "inbound_tag": None,
+        "routed_outbound_tag": "proxy-out",
+        "routed_rule_marktag": "route-proxy",
+        "tag": "routed",
+        "tags": ["routed"],
+        "client_template": {"email": "{username}__routed"},
+        "config": {
+            "name": "{server_name} Routed",
+            "type": "vless",
+            "server": "{server_domain}",
+            "port": 443,
+            "tls": True,
+        },
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -803,6 +926,242 @@ class InventoryStore:
             session.commit()
             session.refresh(node)
             return self._managed_node_read(node)
+
+    def list_subscription_template_presets(self) -> list[SubscriptionTemplatePresetRead]:
+        return [
+            SubscriptionTemplatePresetRead.model_validate(deepcopy(preset))
+            for preset in _SUBSCRIPTION_NODE_PRESETS
+        ]
+
+    def create_managed_node_from_preset(
+        self,
+        preset_id: str,
+        payload: SubscriptionTemplatePresetApplyRequest,
+    ) -> ManagedNodeRead:
+        preset = self._subscription_template_preset(preset_id)
+        with self._session() as session:
+            server = session.get(ServerModel, str(payload.server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {payload.server_id}")
+            config = deepcopy(preset.config)
+            config["server"] = payload.host or self._server_subscription_host(server)
+            if payload.port:
+                config["port"] = payload.port
+            node_payload = ManagedNodeCreate(
+                name=payload.name or preset.name,
+                server_id=payload.server_id,
+                protocol=preset.protocol,
+                node_type=preset.node_type,
+                inbound_tag=payload.inbound_tag
+                if payload.inbound_tag is not None
+                else preset.inbound_tag,
+                routed_outbound_tag=payload.routed_outbound_tag
+                if payload.routed_outbound_tag is not None
+                else preset.routed_outbound_tag,
+                routed_rule_marktag=payload.routed_rule_marktag
+                if payload.routed_rule_marktag is not None
+                else preset.routed_rule_marktag,
+                tag=payload.tag if payload.tag is not None else preset.tag,
+                tags=payload.tags if payload.tags is not None else preset.tags,
+                enabled=payload.enabled,
+                client_template=deepcopy(preset.client_template),
+                config=config,
+            )
+        return self.create_managed_node(node_payload)
+
+    def export_subscription_catalog(
+        self,
+        include_credentials: bool = False,
+    ) -> SubscriptionCatalogBundle:
+        with self._session() as session:
+            plans = session.scalars(
+                select(SubscriptionPlanModel).order_by(SubscriptionPlanModel.created_at)
+            ).all()
+            plan_names = {plan.id: plan.name for plan in plans}
+            nodes = session.scalars(
+                select(ManagedNodeModel).order_by(ManagedNodeModel.created_at)
+            ).all()
+            node_names = {node.id: node.name for node in nodes}
+            servers = session.scalars(select(ServerModel)).all()
+            server_names = {server.id: server.name for server in servers}
+            users = session.scalars(
+                select(ProductUserModel).order_by(ProductUserModel.created_at)
+            ).all()
+
+            credentials: list[SubscriptionCatalogCredentialEntry] = []
+            if include_credentials:
+                credential_rows = session.scalars(
+                    select(SubscriptionCredentialModel).order_by(
+                        SubscriptionCredentialModel.username,
+                        SubscriptionCredentialModel.created_at,
+                    )
+                ).all()
+                credentials = [
+                    SubscriptionCatalogCredentialEntry(
+                        username=credential.username,
+                        node_name=node_names.get(credential.node_id, credential.node_id),
+                        server_name=server_names.get(credential.server_id, credential.server_id),
+                        inbound_tag=credential.inbound_tag,
+                        protocol=credential.protocol,
+                        email=credential.email,
+                        credential=credential.credential or {},
+                    )
+                    for credential in credential_rows
+                ]
+
+            return SubscriptionCatalogBundle(
+                version=1,
+                exported_at=datetime.now(tz=UTC),
+                users=[
+                    SubscriptionCatalogUserEntry(
+                        username=user.username,
+                        email=user.email,
+                        display_name=user.display_name,
+                        role=ProductUserRole(user.role),
+                        is_active=user.is_active,
+                        current_plan_name=plan_names.get(user.current_plan_id or ""),
+                        plan_started_at=user.plan_started_at,
+                        plan_expires_at=user.plan_expires_at,
+                        is_reset=user.is_reset,
+                        reset_day=user.reset_day,
+                    )
+                    for user in users
+                ],
+                nodes=[
+                    SubscriptionCatalogNodeEntry(
+                        name=node.name,
+                        server_name=server_names.get(node.server_id, node.server_id),
+                        protocol=node.protocol,
+                        node_type=ManagedNodeType(node.node_type),
+                        inbound_tag=node.inbound_tag,
+                        routed_outbound_tag=node.routed_outbound_tag,
+                        routed_rule_marktag=node.routed_rule_marktag,
+                        tag=node.tag,
+                        tags=node.tags or [],
+                        enabled=node.enabled,
+                        client_template=node.client_template or {},
+                        config=node.config or {},
+                    )
+                    for node in nodes
+                ],
+                plans=[
+                    self._subscription_catalog_plan_entry(plan, node_names)
+                    for plan in plans
+                ],
+                credentials=credentials,
+            )
+
+    def import_subscription_catalog(
+        self,
+        payload: SubscriptionCatalogImportRequest,
+    ) -> SubscriptionCatalogImportResponse:
+        now = datetime.now(tz=UTC)
+        summary = SubscriptionCatalogImportSummary()
+        with self._session() as session:
+            for user_entry in payload.catalog.users:
+                existing = session.get(ProductUserModel, user_entry.username)
+                if existing:
+                    existing.email = user_entry.email
+                    existing.display_name = user_entry.display_name or user_entry.username
+                    existing.role = user_entry.role.value
+                    existing.is_active = user_entry.is_active
+                    existing.is_reset = user_entry.is_reset
+                    existing.reset_day = user_entry.reset_day
+                    existing.updated_at = now
+                    summary.updated_users += 1
+                    continue
+                session.add(
+                    ProductUserModel(
+                        username=user_entry.username,
+                        email=user_entry.email,
+                        display_name=user_entry.display_name or user_entry.username,
+                        role=user_entry.role.value,
+                        is_active=user_entry.is_active,
+                        current_plan_id=None,
+                        plan_started_at=None,
+                        plan_expires_at=None,
+                        is_reset=user_entry.is_reset,
+                        reset_day=user_entry.reset_day,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                summary.created_users += 1
+
+            session.flush()
+            node_ids_by_name: dict[str, str] = {}
+            for node_entry in payload.catalog.nodes:
+                server = self._catalog_server(session, payload.server_map, node_entry.server_name)
+                if not server:
+                    summary.warnings.append(
+                        f"node {node_entry.name} skipped; server {node_entry.server_name} not found"
+                    )
+                    continue
+                node = self._catalog_node_by_name(session, node_entry.name, server.id)
+                if node:
+                    self._apply_catalog_node(node, node_entry, server.id, now)
+                    summary.updated_nodes += 1
+                else:
+                    node = self._catalog_node_model(node_entry, server.id, now)
+                    session.add(node)
+                    summary.created_nodes += 1
+                node_ids_by_name[node_entry.name] = node.id
+
+            session.flush()
+            for plan_entry in payload.catalog.plans:
+                plan = session.scalar(
+                    select(SubscriptionPlanModel).where(
+                        SubscriptionPlanModel.name == plan_entry.name
+                    )
+                )
+                node_ids = [
+                    node_ids_by_name[name]
+                    for name in plan_entry.node_names
+                    if name in node_ids_by_name
+                ]
+                missing_nodes = sorted(set(plan_entry.node_names) - set(node_ids_by_name))
+                for node_name in missing_nodes:
+                    summary.warnings.append(
+                        f"plan {plan_entry.name} skipped missing node {node_name}"
+                    )
+                if plan:
+                    self._apply_catalog_plan(plan, plan_entry, node_ids, node_ids_by_name, now)
+                    summary.updated_plans += 1
+                else:
+                    session.add(
+                        self._catalog_plan_model(plan_entry, node_ids, node_ids_by_name, now)
+                    )
+                    summary.created_plans += 1
+
+            session.flush()
+            plan_ids_by_name = dict(
+                session.execute(select(SubscriptionPlanModel.name, SubscriptionPlanModel.id)).all()
+            )
+            for user_entry in payload.catalog.users:
+                user = session.get(ProductUserModel, user_entry.username)
+                if not user:
+                    continue
+                user.current_plan_id = (
+                    plan_ids_by_name.get(user_entry.current_plan_name)
+                    if user_entry.current_plan_name
+                    else None
+                )
+                user.plan_started_at = user_entry.plan_started_at
+                user.plan_expires_at = user_entry.plan_expires_at
+                user.updated_at = now
+
+            if payload.import_credentials:
+                summary.imported_credentials = self._import_subscription_credentials(
+                    session,
+                    payload.catalog.credentials,
+                    payload.server_map,
+                    node_ids_by_name,
+                    now,
+                    summary.warnings,
+                )
+
+            session.commit()
+        return SubscriptionCatalogImportResponse(summary=summary)
 
     def list_subscription_plans(self) -> list[SubscriptionPlanRead]:
         with self._session() as session:
@@ -1812,6 +2171,23 @@ class InventoryStore:
         )
 
     @staticmethod
+    def _subscription_template_preset(preset_id: str) -> SubscriptionTemplatePresetRead:
+        for preset in _SUBSCRIPTION_NODE_PRESETS:
+            if preset["id"] == preset_id:
+                return SubscriptionTemplatePresetRead.model_validate(deepcopy(preset))
+        raise SubscriptionTemplatePresetNotFoundError(f"subscription preset not found: {preset_id}")
+
+    @staticmethod
+    def _server_subscription_host(server: ServerModel) -> str:
+        return (
+            server.domain
+            or server.ip_address
+            or server.domain_v6
+            or server.ip_address_v6
+            or server.name
+        )
+
+    @staticmethod
     def _subscription_plan_read(plan: SubscriptionPlanModel) -> SubscriptionPlanRead:
         return SubscriptionPlanRead(
             id=UUID(plan.id),
@@ -1839,6 +2215,255 @@ class InventoryStore:
             created_at=plan.created_at,
             updated_at=plan.updated_at,
         )
+
+    @staticmethod
+    def _subscription_catalog_plan_entry(
+        plan: SubscriptionPlanModel,
+        node_names: dict[str, str],
+    ) -> SubscriptionCatalogPlanEntry:
+        return SubscriptionCatalogPlanEntry(
+            name=plan.name,
+            description=plan.description,
+            traffic_limit_gb=plan.traffic_limit_bytes / (1024 * 1024 * 1024),
+            cycle_days=plan.cycle_days,
+            is_reset=plan.is_reset,
+            reset_day=plan.reset_day,
+            node_names=[node_names.get(node_id, node_id) for node_id in (plan.node_ids or [])],
+            node_multipliers=InventoryStore._catalog_map_keys_to_names(
+                plan.node_multipliers or {},
+                node_names,
+            ),
+            node_speed_limits=InventoryStore._catalog_map_keys_to_names(
+                plan.node_speed_limits or {},
+                node_names,
+            ),
+            node_device_limits=InventoryStore._catalog_map_keys_to_names(
+                plan.node_device_limits or {},
+                node_names,
+            ),
+            speed_limit_mbps=plan.speed_limit_mbps,
+            device_limit=plan.device_limit,
+            traffic_mode=SubscriptionTrafficMode(plan.traffic_mode),
+        )
+
+    @staticmethod
+    def _catalog_map_keys_to_names(
+        values: dict[str, Any],
+        node_names: dict[str, str],
+    ) -> dict[str, Any]:
+        return {node_names.get(node_id, node_id): value for node_id, value in values.items()}
+
+    @staticmethod
+    def _catalog_server(
+        session: Session,
+        server_map: dict[str, UUID],
+        server_name: str,
+    ) -> ServerModel | None:
+        mapped_id = server_map.get(server_name)
+        if mapped_id:
+            server = session.get(ServerModel, str(mapped_id))
+            if server:
+                return server
+        return session.scalar(select(ServerModel).where(ServerModel.name == server_name))
+
+    @staticmethod
+    def _catalog_node_by_name(
+        session: Session,
+        name: str,
+        server_id: str,
+    ) -> ManagedNodeModel | None:
+        return session.scalar(
+            select(ManagedNodeModel).where(
+                ManagedNodeModel.name == name,
+                ManagedNodeModel.server_id == server_id,
+            )
+        )
+
+    @staticmethod
+    def _catalog_node_model(
+        entry: SubscriptionCatalogNodeEntry,
+        server_id: str,
+        now: datetime,
+    ) -> ManagedNodeModel:
+        return ManagedNodeModel(
+            id=str(uuid4()),
+            name=entry.name,
+            server_id=server_id,
+            protocol=entry.protocol.lower(),
+            node_type=entry.node_type.value,
+            inbound_tag=entry.inbound_tag,
+            routed_outbound_tag=entry.routed_outbound_tag,
+            routed_rule_marktag=entry.routed_rule_marktag,
+            tag=entry.tag,
+            tags=entry.tags,
+            enabled=entry.enabled,
+            client_template=entry.client_template,
+            config=entry.config,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @staticmethod
+    def _apply_catalog_node(
+        node: ManagedNodeModel,
+        entry: SubscriptionCatalogNodeEntry,
+        server_id: str,
+        now: datetime,
+    ) -> None:
+        node.server_id = server_id
+        node.protocol = entry.protocol.lower()
+        node.node_type = entry.node_type.value
+        node.inbound_tag = entry.inbound_tag
+        node.routed_outbound_tag = entry.routed_outbound_tag
+        node.routed_rule_marktag = entry.routed_rule_marktag
+        node.tag = entry.tag
+        node.tags = entry.tags
+        node.enabled = entry.enabled
+        node.client_template = entry.client_template
+        node.config = entry.config
+        node.updated_at = now
+
+    @classmethod
+    def _catalog_plan_model(
+        cls,
+        entry: SubscriptionCatalogPlanEntry,
+        node_ids: list[str],
+        node_ids_by_name: dict[str, str],
+        now: datetime,
+    ) -> SubscriptionPlanModel:
+        return SubscriptionPlanModel(
+            id=str(uuid4()),
+            name=entry.name,
+            description=entry.description,
+            traffic_limit_bytes=int(entry.traffic_limit_gb * 1024 * 1024 * 1024),
+            cycle_days=entry.cycle_days,
+            is_reset=entry.is_reset,
+            reset_day=entry.reset_day,
+            node_ids=node_ids,
+            node_multipliers=cls._catalog_map_keys_to_ids(
+                entry.node_multipliers,
+                node_ids_by_name,
+            ),
+            node_speed_limits=cls._catalog_map_keys_to_ids(
+                entry.node_speed_limits,
+                node_ids_by_name,
+            ),
+            node_device_limits=cls._catalog_map_keys_to_ids(
+                entry.node_device_limits,
+                node_ids_by_name,
+            ),
+            speed_limit_mbps=entry.speed_limit_mbps,
+            device_limit=entry.device_limit,
+            traffic_mode=entry.traffic_mode.value,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @classmethod
+    def _apply_catalog_plan(
+        cls,
+        plan: SubscriptionPlanModel,
+        entry: SubscriptionCatalogPlanEntry,
+        node_ids: list[str],
+        node_ids_by_name: dict[str, str],
+        now: datetime,
+    ) -> None:
+        plan.description = entry.description
+        plan.traffic_limit_bytes = int(entry.traffic_limit_gb * 1024 * 1024 * 1024)
+        plan.cycle_days = entry.cycle_days
+        plan.is_reset = entry.is_reset
+        plan.reset_day = entry.reset_day
+        plan.node_ids = node_ids
+        plan.node_multipliers = cls._catalog_map_keys_to_ids(
+            entry.node_multipliers,
+            node_ids_by_name,
+        )
+        plan.node_speed_limits = cls._catalog_map_keys_to_ids(
+            entry.node_speed_limits,
+            node_ids_by_name,
+        )
+        plan.node_device_limits = cls._catalog_map_keys_to_ids(
+            entry.node_device_limits,
+            node_ids_by_name,
+        )
+        plan.speed_limit_mbps = entry.speed_limit_mbps
+        plan.device_limit = entry.device_limit
+        plan.traffic_mode = entry.traffic_mode.value
+        plan.updated_at = now
+
+    @staticmethod
+    def _catalog_map_keys_to_ids(
+        values: dict[str, Any],
+        node_ids_by_name: dict[str, str],
+    ) -> dict[str, Any]:
+        return {
+            node_ids_by_name[node_name]: value
+            for node_name, value in values.items()
+            if node_name in node_ids_by_name
+        }
+
+    def _import_subscription_credentials(
+        self,
+        session: Session,
+        entries: list[SubscriptionCatalogCredentialEntry],
+        server_map: dict[str, UUID],
+        node_ids_by_name: dict[str, str],
+        now: datetime,
+        warnings: list[str],
+    ) -> int:
+        imported = 0
+        for entry in entries:
+            if not session.get(ProductUserModel, entry.username):
+                warnings.append(
+                    f"credential {entry.email} skipped; user {entry.username} not found"
+                )
+                continue
+            server = self._catalog_server(session, server_map, entry.server_name)
+            if not server:
+                warnings.append(
+                    f"credential {entry.email} skipped; server {entry.server_name} not found"
+                )
+                continue
+            node_id = node_ids_by_name.get(entry.node_name)
+            if not node_id:
+                node = self._catalog_node_by_name(session, entry.node_name, server.id)
+                node_id = node.id if node else None
+            if not node_id:
+                warnings.append(
+                    f"credential {entry.email} skipped; node {entry.node_name} not found"
+                )
+                continue
+
+            existing = session.scalar(
+                select(SubscriptionCredentialModel).where(
+                    SubscriptionCredentialModel.username == entry.username,
+                    SubscriptionCredentialModel.node_id == node_id,
+                )
+            )
+            if existing:
+                existing.server_id = server.id
+                existing.inbound_tag = entry.inbound_tag
+                existing.protocol = entry.protocol.lower()
+                existing.email = entry.email
+                existing.credential = entry.credential
+                existing.updated_at = now
+            else:
+                session.add(
+                    SubscriptionCredentialModel(
+                        id=str(uuid4()),
+                        username=entry.username,
+                        node_id=node_id,
+                        server_id=server.id,
+                        inbound_tag=entry.inbound_tag,
+                        protocol=entry.protocol.lower(),
+                        email=entry.email,
+                        credential=entry.credential,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            imported += 1
+        return imported
 
     @staticmethod
     def _uuid_keyed_float_map(values: dict[UUID, float]) -> dict[str, float]:
@@ -2611,6 +3236,8 @@ class InventoryStore:
             "protocol": node.protocol,
             "server_id": server.id,
             "server_name": server.name,
+            "server_domain": InventoryStore._server_subscription_host(server),
+            "server_host": InventoryStore._server_subscription_host(server),
         }
         for key, value in (credential.credential or {}).items():
             if isinstance(value, str | int | float | bool):

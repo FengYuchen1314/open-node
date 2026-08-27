@@ -169,6 +169,129 @@ export interface ProductUserTrafficResponse {
   license_required: false;
 }
 
+export interface SubscriptionTemplatePreset {
+  id: string;
+  name: string;
+  description: string;
+  protocol: string;
+  node_type: ManagedNodeType;
+  inbound_tag?: string | null;
+  routed_outbound_tag?: string | null;
+  routed_rule_marktag?: string | null;
+  tag?: string | null;
+  tags: string[];
+  client_template: Record<string, unknown>;
+  config: Record<string, unknown>;
+}
+
+export interface SubscriptionTemplatePresetsResponse {
+  presets: SubscriptionTemplatePreset[];
+  license_required: false;
+}
+
+export interface SubscriptionTemplatePresetApplyRequest {
+  server_id: string;
+  name?: string | null;
+  host?: string | null;
+  port?: number | null;
+  inbound_tag?: string | null;
+  routed_outbound_tag?: string | null;
+  routed_rule_marktag?: string | null;
+  tag?: string | null;
+  tags?: string[] | null;
+  enabled?: boolean;
+}
+
+export interface SubscriptionCatalogUserEntry {
+  username: string;
+  email?: string | null;
+  display_name?: string | null;
+  role: ProductUserRole;
+  is_active: boolean;
+  current_plan_name?: string | null;
+  plan_started_at?: string | null;
+  plan_expires_at?: string | null;
+  is_reset: boolean;
+  reset_day: number;
+}
+
+export interface SubscriptionCatalogNodeEntry {
+  name: string;
+  server_name: string;
+  protocol: string;
+  node_type: ManagedNodeType;
+  inbound_tag?: string | null;
+  routed_outbound_tag?: string | null;
+  routed_rule_marktag?: string | null;
+  tag?: string | null;
+  tags: string[];
+  enabled: boolean;
+  client_template: Record<string, unknown>;
+  config: Record<string, unknown>;
+}
+
+export interface SubscriptionCatalogPlanEntry {
+  name: string;
+  description: string;
+  traffic_limit_gb: number;
+  cycle_days: number;
+  is_reset: boolean;
+  reset_day: number;
+  node_names: string[];
+  node_multipliers: Record<string, number>;
+  node_speed_limits: Record<string, number>;
+  node_device_limits: Record<string, number>;
+  speed_limit_mbps: number;
+  device_limit: number;
+  traffic_mode: SubscriptionTrafficMode;
+}
+
+export interface SubscriptionCatalogCredentialEntry {
+  username: string;
+  node_name: string;
+  server_name: string;
+  inbound_tag?: string | null;
+  protocol: string;
+  email: string;
+  credential: Record<string, unknown>;
+}
+
+export interface SubscriptionCatalogBundle {
+  version: number;
+  exported_at?: string | null;
+  users: SubscriptionCatalogUserEntry[];
+  nodes: SubscriptionCatalogNodeEntry[];
+  plans: SubscriptionCatalogPlanEntry[];
+  credentials: SubscriptionCatalogCredentialEntry[];
+}
+
+export interface SubscriptionCatalogExportResponse {
+  catalog: SubscriptionCatalogBundle;
+  license_required: false;
+}
+
+export interface SubscriptionCatalogImportRequest {
+  catalog: SubscriptionCatalogBundle;
+  server_map?: Record<string, string>;
+  import_credentials?: boolean;
+}
+
+export interface SubscriptionCatalogImportSummary {
+  created_users: number;
+  updated_users: number;
+  created_nodes: number;
+  updated_nodes: number;
+  created_plans: number;
+  updated_plans: number;
+  imported_credentials: number;
+  warnings: string[];
+}
+
+export interface SubscriptionCatalogImportResponse {
+  summary: SubscriptionCatalogImportSummary;
+  license_required: false;
+}
+
 export interface ManagedNodesResponse {
   nodes: ManagedNode[];
   license_required: false;

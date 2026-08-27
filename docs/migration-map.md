@@ -59,7 +59,9 @@ This document records the starting source map for the Open Node refactor.
      dispatch, reverse rollback command queuing, and a Vue change workspace.
    - Done: Clash, sing-box, URI-list, and base64 subscription rendering plus
      durable per-user traffic ledgering from agent telemetry.
-   - Next: richer subscription template presets and import/export workflows.
+   - Done: richer subscription template presets and import/export workflows.
+   - Next: quota enforcement/reset automation and deeper Xray runtime
+     integration.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.

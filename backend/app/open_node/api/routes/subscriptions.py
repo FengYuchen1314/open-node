@@ -16,12 +16,17 @@ from open_node.domain.subscriptions import (
     ProductUserSubscriptionTokenRead,
     ProductUserSubscriptionTokenResponse,
     ProductUserTrafficResponse,
+    SubscriptionCatalogExportResponse,
+    SubscriptionCatalogImportRequest,
+    SubscriptionCatalogImportResponse,
     SubscriptionClientFormat,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanAssignResponse,
     SubscriptionPlanCreate,
     SubscriptionPlanResponse,
     SubscriptionPlansResponse,
+    SubscriptionTemplatePresetApplyRequest,
+    SubscriptionTemplatePresetsResponse,
 )
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
@@ -32,6 +37,7 @@ from open_node.services.inventory import (
     ProductUserNotFoundError,
     ServerNotFoundError,
     SubscriptionPlanNotFoundError,
+    SubscriptionTemplatePresetNotFoundError,
     SubscriptionTokenNotFoundError,
     SubscriptionTokenRecord,
     SubscriptionUnavailableError,
@@ -135,6 +141,50 @@ def get_subscription_traffic(
         return store.subscription_user_traffic(username)
     except ProductUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get("/node-presets", response_model=SubscriptionTemplatePresetsResponse)
+def list_subscription_node_presets(
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> SubscriptionTemplatePresetsResponse:
+    return SubscriptionTemplatePresetsResponse(presets=store.list_subscription_template_presets())
+
+
+@router.post(
+    "/node-presets/{preset_id}/nodes",
+    response_model=ManagedNodeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_node_from_preset(
+    preset_id: str,
+    payload: SubscriptionTemplatePresetApplyRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ManagedNodeResponse:
+    try:
+        node = store.create_managed_node_from_preset(preset_id, payload)
+    except SubscriptionTemplatePresetNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return ManagedNodeResponse(node=node)
+
+
+@router.get("/catalog/export", response_model=SubscriptionCatalogExportResponse)
+def export_subscription_catalog(
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    include_credentials: bool = False,
+) -> SubscriptionCatalogExportResponse:
+    return SubscriptionCatalogExportResponse(
+        catalog=store.export_subscription_catalog(include_credentials=include_credentials)
+    )
+
+
+@router.post("/catalog/import", response_model=SubscriptionCatalogImportResponse)
+def import_subscription_catalog(
+    payload: SubscriptionCatalogImportRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> SubscriptionCatalogImportResponse:
+    return store.import_subscription_catalog(payload)
 
 
 @router.get("/nodes", response_model=ManagedNodesResponse)

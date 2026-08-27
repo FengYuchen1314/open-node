@@ -214,9 +214,13 @@ managed nodes, and subscription plans in SQLite and exposes them through:
 - `POST /api/v1/users`
 - `GET /api/v1/nodes`
 - `POST /api/v1/nodes`
+- `GET /api/v1/node-presets`
+- `POST /api/v1/node-presets/{preset_id}/nodes`
 - `GET /api/v1/plans`
 - `POST /api/v1/plans`
 - `POST /api/v1/users/{username}/plan`
+- `GET /api/v1/catalog/export`
+- `POST /api/v1/catalog/import`
 
 Managed nodes link Open Node catalog records to server inventory records. They
 can hold inbound tags, routed outbound or rule markers, tags, opaque config,
@@ -224,6 +228,19 @@ and a JSON client template. The template supports simple placeholders such as
 `{username}`, `{node_name}`, and `{server_name}` so plan assignment can prepare
 the same `inbound_clients` and `routing_user_additions` batch body expected by
 the active `mmw-agent` `/api/child/batch-apply` route.
+
+Node presets provide ready-made free catalog templates for common MMWX
+subscription shapes: VLESS Vision TLS, Trojan TLS, Shadowsocks 2022, Hysteria2,
+and routed outbound entries. Applying a preset creates a normal managed node
+for an existing inventory server while allowing operators to override host,
+port, tags, and route markers.
+
+Catalog export serializes users, nodes, plans, and optionally generated
+credentials by stable names instead of local database IDs. Catalog import can
+recreate or update those resources in another Open Node database, remapping
+servers through `server_map` when the destination inventory uses different
+server IDs. Imported credentials are opt-in so operators can choose between a
+fresh credential lease and an exact migration.
 
 Plan assignment always returns the calculated per-server provisioning batches.
 Callers can keep this as a preview, or set `queue_agent_commands=true` to create
@@ -268,8 +285,8 @@ snapshot until new telemetry arrives.
 
 The frontend exposes this in `/subscriptions`, where operators can create users,
 catalog nodes, plans, assignments, public links, generated credentials, format
-URLs, and traffic ledger summaries, then inspect the last calculated batch
-before or after dispatching it.
+URLs, traffic ledger summaries, preset-created nodes, and catalog export/import
+bundles, then inspect the last calculated batch before or after dispatching it.
 
 ## Public Probe API
 

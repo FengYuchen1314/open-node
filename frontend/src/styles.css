@@ -567,16 +567,35 @@ body {
 }
 
 .credential-list,
+.catalog-import-grid,
+.catalog-sync-row,
 .subscription-action-row {
   display: grid;
   gap: 10px;
+}
+
+.catalog-import-grid,
+.catalog-sync-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .subscription-action-row {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.preset-action-row {
+  align-self: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.catalog-sync-row .v-btn,
 .subscription-action-row .v-btn {
+  min-width: 0;
+}
+
+.preset-action-row .v-btn {
   min-width: 0;
 }
 
@@ -607,6 +626,8 @@ body {
   .change-command-pair,
   .change-control-row,
   .change-toggle-row,
+  .catalog-import-grid,
+  .catalog-sync-row,
   .command-detail-grid,
   .diagnostic-command-grid,
   .config-command-grid,

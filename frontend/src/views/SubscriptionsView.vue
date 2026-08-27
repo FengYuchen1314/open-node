@@ -12,25 +12,32 @@ import type {
   SubscriptionCredential,
   ProductUserCreateRequest,
   ProductUserRole,
+  SubscriptionCatalogBundle,
+  SubscriptionCatalogImportResponse,
   SubscriptionClientFormat,
   SubscriptionPlan,
   SubscriptionPlanAssignRequest,
   SubscriptionPlanAssignResponse,
   SubscriptionPlanCreateRequest,
+  SubscriptionTemplatePreset,
   SubscriptionTrafficMode,
 } from "../domain/subscriptions";
 import { listServers } from "../services/inventory";
 import {
   assignSubscriptionPlan,
   createManagedNode,
+  createManagedNodeFromPreset,
   createProductUser,
   createProductUserSubscriptionToken,
   createSubscriptionPlan,
+  exportSubscriptionCatalog,
   getProductUserTraffic,
+  importSubscriptionCatalog,
   listProductUserCredentials,
   listManagedNodes,
   listProductUsers,
   listSubscriptionPlans,
+  listSubscriptionTemplatePresets,
   resetProductUserSubscriptionToken,
 } from "../services/subscriptions";
 
@@ -38,9 +45,20 @@ const servers = ref<ServerSummary[]>([]);
 const users = ref<ProductUser[]>([]);
 const nodes = ref<ManagedNode[]>([]);
 const plans = ref<SubscriptionPlan[]>([]);
+const nodePresets = ref<SubscriptionTemplatePreset[]>([]);
 const loading = ref(false);
 const savingAction = ref<
-  "assign" | "credentials" | "node" | "plan" | "token" | "traffic" | "user" | ""
+  | "assign"
+  | "credentials"
+  | "export"
+  | "import"
+  | "node"
+  | "plan"
+  | "preset"
+  | "token"
+  | "traffic"
+  | "user"
+  | ""
 >("");
 const errorMessage = ref("");
 const successMessage = ref("");
@@ -49,6 +67,7 @@ const lastAssignment = ref<SubscriptionPlanAssignResponse | null>(null);
 const subscriptionToken = ref<ProductUserSubscriptionToken | null>(null);
 const subscriptionCredentials = ref<SubscriptionCredential[]>([]);
 const subscriptionTraffic = ref<ProductUserTrafficResponse | null>(null);
+const lastCatalogImport = ref<SubscriptionCatalogImportResponse | null>(null);
 
 const userForm = reactive({
   username: "",
@@ -70,6 +89,11 @@ const nodeForm = reactive({
   enabled: true,
   clientTemplateText: '{\n  "id": "client-{username}",\n  "email": "{username}__default"\n}',
   configText: "{}",
+});
+const presetForm = reactive({
+  preset_id: "",
+  host: "",
+  port: 443,
 });
 const planForm = reactive({
   name: "",
@@ -93,6 +117,12 @@ const assignForm = reactive({
   command_timeout_ms: 60_000,
 });
 const subscriptionFormat = ref<SubscriptionClientFormat>("clash");
+const catalogForm = reactive({
+  includeCredentials: false,
+  importCredentials: false,
+  serverMapText: "{}",
+  catalogText: "",
+});
 
 const roleOptions: Array<{ title: string; value: ProductUserRole }> = [
   { title: "User", value: "user" },
@@ -115,6 +145,9 @@ const subscriptionFormatOptions: Array<{ title: string; value: SubscriptionClien
 
 const serverOptions = computed(() =>
   servers.value.map((server) => ({ title: server.name, value: server.id })),
+);
+const nodePresetOptions = computed(() =>
+  nodePresets.value.map((preset) => ({ title: preset.name, value: preset.id })),
 );
 const userOptions = computed(() =>
   users.value.map((user) => ({ title: user.display_name || user.username, value: user.username })),
@@ -142,16 +175,19 @@ async function refresh() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [serverList, userResponse, nodeResponse, planResponse] = await Promise.all([
-      listServers(),
-      listProductUsers(),
-      listManagedNodes(),
-      listSubscriptionPlans(),
-    ]);
+    const [serverList, userResponse, nodeResponse, planResponse, presetResponse] =
+      await Promise.all([
+        listServers(),
+        listProductUsers(),
+        listManagedNodes(),
+        listSubscriptionPlans(),
+        listSubscriptionTemplatePresets(),
+      ]);
     servers.value = serverList;
     users.value = userResponse.users;
     nodes.value = nodeResponse.nodes;
     plans.value = planResponse.plans;
+    nodePresets.value = presetResponse.presets;
     syncDefaults();
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -219,6 +255,61 @@ async function submitNode() {
       config: parseJsonObject(nodeForm.configText, "Node config"),
     };
     const response = await createManagedNode(payload);
+    successMessage.value = `Created node ${response.node.name}.`;
+    resetNodeForm(response.node.server_id);
+    await refresh();
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+function applyNodePreset() {
+  const preset = selectedNodePreset();
+  if (!preset) {
+    errorMessage.value = "Preset is required.";
+    return;
+  }
+  nodeForm.name = nodeForm.name.trim() || preset.name;
+  nodeForm.protocol = preset.protocol;
+  nodeForm.node_type = preset.node_type;
+  nodeForm.inbound_tag = preset.inbound_tag ?? "";
+  nodeForm.routed_outbound_tag = preset.routed_outbound_tag ?? "";
+  nodeForm.routed_rule_marktag = preset.routed_rule_marktag ?? "";
+  nodeForm.tag = preset.tag ?? "";
+  nodeForm.tagsText = preset.tags.join(", ");
+  nodeForm.clientTemplateText = JSON.stringify(preset.client_template, null, 2);
+  nodeForm.configText = JSON.stringify(presetConfig(preset), null, 2);
+}
+
+async function createPresetNode() {
+  const preset = selectedNodePreset();
+  if (!preset) {
+    errorMessage.value = "Preset is required.";
+    return;
+  }
+  if (!nodeForm.server_id) {
+    errorMessage.value = "Server is required.";
+    return;
+  }
+
+  savingAction.value = "preset";
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await createManagedNodeFromPreset(preset.id, {
+      server_id: nodeForm.server_id,
+      name: nodeForm.name.trim() || preset.name,
+      host: blankToNull(presetForm.host),
+      port: presetForm.port || null,
+      inbound_tag: blankToNull(nodeForm.inbound_tag),
+      routed_outbound_tag: blankToNull(nodeForm.routed_outbound_tag),
+      routed_rule_marktag: blankToNull(nodeForm.routed_rule_marktag),
+      tag: blankToNull(nodeForm.tag),
+      tags: splitCsv(nodeForm.tagsText),
+      enabled: nodeForm.enabled,
+    });
     successMessage.value = `Created node ${response.node.name}.`;
     resetNodeForm(response.node.server_id);
     await refresh();
@@ -385,9 +476,49 @@ async function loadSubscriptionTraffic(showSuccess = true) {
   }
 }
 
+async function exportCatalog() {
+  savingAction.value = "export";
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await exportSubscriptionCatalog(catalogForm.includeCredentials);
+    catalogForm.catalogText = JSON.stringify(response.catalog, null, 2);
+    successMessage.value = "Catalog exported.";
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+async function importCatalog() {
+  savingAction.value = "import";
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const catalog = parseCatalogBundle(catalogForm.catalogText);
+    const serverMap = parseServerMap(catalogForm.serverMapText);
+    const response = await importSubscriptionCatalog({
+      catalog,
+      server_map: serverMap,
+      import_credentials: catalogForm.importCredentials,
+    });
+    lastCatalogImport.value = response;
+    successMessage.value = "Catalog imported.";
+    await refresh();
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
 function syncDefaults() {
   if (!nodeForm.server_id && servers.value.length > 0) {
     nodeForm.server_id = servers.value[0].id;
+  }
+  if (!presetForm.preset_id && nodePresets.value.length > 0) {
+    presetForm.preset_id = nodePresets.value[0].id;
   }
   if (!assignForm.username && users.value.length > 0) {
     assignForm.username = users.value[0].username;
@@ -447,6 +578,23 @@ function parseJsonObject(value: string, fieldName: string): Record<string, unkno
   return parsed as Record<string, unknown>;
 }
 
+function parseCatalogBundle(value: string): SubscriptionCatalogBundle {
+  const parsed = JSON.parse(value || "{}") as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Catalog must be a JSON object.");
+  }
+  return parsed as SubscriptionCatalogBundle;
+}
+
+function parseServerMap(value: string) {
+  const parsed = parseJsonObject(value || "{}", "Server map");
+  return Object.fromEntries(
+    Object.entries(parsed).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
 function splitCsv(value: string) {
   return value
     .split(",")
@@ -479,6 +627,21 @@ function credentialIdentifier(credential: SubscriptionCredential) {
   const source = credential.credential;
   const value = source.id ?? source.password ?? source.auth ?? source.psk ?? source.pass;
   return typeof value === "string" ? value : credential.email;
+}
+
+function selectedNodePreset() {
+  return nodePresets.value.find((preset) => preset.id === presetForm.preset_id) ?? null;
+}
+
+function presetConfig(preset: SubscriptionTemplatePreset) {
+  const config: Record<string, unknown> = { ...preset.config };
+  if (presetForm.host.trim()) {
+    config.server = presetForm.host.trim();
+  }
+  if (presetForm.port) {
+    config.port = presetForm.port;
+  }
+  return config;
 }
 
 function subscriptionUrlForFormat(url: string, format: SubscriptionClientFormat) {
@@ -623,6 +786,56 @@ function formatBytes(value: number) {
 
           <v-window-item value="nodes">
             <v-form class="subscription-form" @submit.prevent="submitNode">
+              <div class="form-row">
+                <v-select
+                  v-model="presetForm.preset_id"
+                  :disabled="nodePresetOptions.length === 0"
+                  :items="nodePresetOptions"
+                  density="comfortable"
+                  label="Preset"
+                  prepend-inner-icon="mdi-shape-outline"
+                  variant="outlined"
+                />
+                <v-text-field
+                  v-model="presetForm.host"
+                  density="comfortable"
+                  label="Host"
+                  prepend-inner-icon="mdi-web"
+                  variant="outlined"
+                />
+              </div>
+              <div class="form-row">
+                <v-text-field
+                  v-model.number="presetForm.port"
+                  density="comfortable"
+                  label="Port"
+                  min="1"
+                  type="number"
+                  variant="outlined"
+                />
+                <div class="preset-action-row">
+                  <v-btn
+                    :disabled="!presetForm.preset_id"
+                    prepend-icon="mdi-form-select"
+                    size="small"
+                    variant="tonal"
+                    @click="applyNodePreset"
+                  >
+                    Fill
+                  </v-btn>
+                  <v-btn
+                    :disabled="serverOptions.length === 0 || !presetForm.preset_id"
+                    :loading="savingAction === 'preset'"
+                    color="primary"
+                    prepend-icon="mdi-plus-box-outline"
+                    size="small"
+                    variant="tonal"
+                    @click="createPresetNode"
+                  >
+                    Preset
+                  </v-btn>
+                </div>
+              </div>
               <div class="form-row">
                 <v-text-field
                   v-model="nodeForm.name"
@@ -1049,6 +1262,89 @@ function formatBytes(value: number) {
               </v-chip>
             </div>
           </div>
+
+          <v-divider />
+
+          <div class="section-title compact-title">Catalog import/export</div>
+          <div class="form-row">
+            <v-switch
+              v-model="catalogForm.includeCredentials"
+              color="secondary"
+              density="comfortable"
+              hide-details
+              label="Export creds"
+            />
+            <v-switch
+              v-model="catalogForm.importCredentials"
+              color="warning"
+              density="comfortable"
+              hide-details
+              label="Import creds"
+            />
+          </div>
+          <div class="catalog-sync-row">
+            <v-btn
+              :loading="savingAction === 'export'"
+              prepend-icon="mdi-export"
+              size="small"
+              variant="tonal"
+              @click="exportCatalog"
+            >
+              Export
+            </v-btn>
+            <v-btn
+              :disabled="!catalogForm.catalogText.trim()"
+              :loading="savingAction === 'import'"
+              color="primary"
+              prepend-icon="mdi-import"
+              size="small"
+              variant="tonal"
+              @click="importCatalog"
+            >
+              Import
+            </v-btn>
+          </div>
+          <v-textarea
+            v-model="catalogForm.catalogText"
+            class="config-editor"
+            density="comfortable"
+            label="Catalog JSON"
+            rows="8"
+            variant="outlined"
+          />
+          <v-textarea
+            v-model="catalogForm.serverMapText"
+            class="config-editor"
+            density="comfortable"
+            label="Server map JSON"
+            rows="3"
+            variant="outlined"
+          />
+          <div v-if="lastCatalogImport" class="catalog-import-grid">
+            <v-chip color="primary" prepend-icon="mdi-account-multiple-plus" variant="tonal">
+              Users {{ lastCatalogImport.summary.created_users }} /
+              {{ lastCatalogImport.summary.updated_users }}
+            </v-chip>
+            <v-chip color="secondary" prepend-icon="mdi-vector-link" variant="tonal">
+              Nodes {{ lastCatalogImport.summary.created_nodes }} /
+              {{ lastCatalogImport.summary.updated_nodes }}
+            </v-chip>
+            <v-chip color="info" prepend-icon="mdi-package-variant-closed" variant="tonal">
+              Plans {{ lastCatalogImport.summary.created_plans }} /
+              {{ lastCatalogImport.summary.updated_plans }}
+            </v-chip>
+            <v-chip color="warning" prepend-icon="mdi-key-chain" variant="tonal">
+              Creds {{ lastCatalogImport.summary.imported_credentials }}
+            </v-chip>
+          </div>
+          <v-alert
+            v-if="lastCatalogImport && lastCatalogImport.summary.warnings.length > 0"
+            color="warning"
+            density="compact"
+            variant="tonal"
+          >
+            {{ lastCatalogImport.summary.warnings.join(", ") }}
+          </v-alert>
 
           <v-divider />
 

@@ -274,6 +274,95 @@ def test_subscription_traffic_ledger_tracks_deltas_and_counter_resets(tmp_path: 
     assert header == f"upload=170; download=300; total={128 * 1024 * 1024 * 1024}; expire={expire}"
 
 
+def test_subscription_node_preset_creates_renderable_node(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    server = client.post(
+        "/api/v1/servers",
+        json={"name": "preset-edge", "domain": "preset.example.com"},
+    ).json()
+    server_id = server["server"]["id"]
+
+    presets_response = client.get("/api/v1/node-presets")
+    assert presets_response.status_code == 200
+    presets = presets_response.json()["presets"]
+    assert presets_response.json()["license_required"] is False
+    assert [preset["id"] for preset in presets] == [
+        "vless-vision-tls",
+        "trojan-tls",
+        "shadowsocks-2022",
+        "hysteria2",
+        "routed-outbound",
+    ]
+
+    create_response = client.post(
+        "/api/v1/node-presets/vless-vision-tls/nodes",
+        json={
+            "server_id": server_id,
+            "name": "Preset vless",
+            "host": "edge.example.com",
+            "port": 8443,
+            "tags": ["preset", "premium"],
+        },
+    )
+
+    assert create_response.status_code == 201
+    node = create_response.json()["node"]
+    assert node["protocol"] == "vless"
+    assert node["inbound_tag"] == "vless-443"
+    assert node["tags"] == ["preset", "premium"]
+    assert node["config"]["server"] == "edge.example.com"
+    assert node["config"]["port"] == 8443
+    assert node["client_template"]["flow"] == "xtls-rprx-vision"
+
+
+def test_subscription_catalog_export_import_round_trips_by_names(tmp_path: Path) -> None:
+    source = TestClient(create_app(Settings(database_url=sqlite_url(tmp_path / "source.db"))))
+    _agent_token, _server_id, _node_id, plan_id = create_catalog_fixture(source)
+    assigned = source.post(
+        "/api/v1/users/alice/plan",
+        json={"plan_id": plan_id, "start_date": "2026-08-27", "expire_date": "2026-09-30"},
+    ).json()
+    client_id = assigned["provisioning_batches"][0]["body"]["inbound_clients"][0]["client"]["id"]
+
+    export_response = source.get("/api/v1/catalog/export?include_credentials=true")
+    assert export_response.status_code == 200
+    catalog = export_response.json()["catalog"]
+    assert export_response.json()["license_required"] is False
+    assert catalog["users"][0]["current_plan_name"] == "Premium"
+    assert catalog["plans"][0]["node_names"] == ["Tokyo vless"]
+    assert catalog["credentials"][0]["credential"]["id"] == client_id
+
+    target = TestClient(create_app(Settings(database_url=sqlite_url(tmp_path / "target.db"))))
+    target.post("/api/v1/servers", json={"name": "edge-sub"}).json()
+    import_response = target.post(
+        "/api/v1/catalog/import",
+        json={"catalog": catalog, "import_credentials": True},
+    )
+
+    assert import_response.status_code == 200
+    summary = import_response.json()["summary"]
+    assert import_response.json()["license_required"] is False
+    assert summary == {
+        "created_users": 1,
+        "updated_users": 0,
+        "created_nodes": 1,
+        "updated_nodes": 0,
+        "created_plans": 1,
+        "updated_plans": 0,
+        "imported_credentials": 1,
+        "warnings": [],
+    }
+    users = target.get("/api/v1/users").json()["users"]
+    nodes = target.get("/api/v1/nodes").json()["nodes"]
+    plans = target.get("/api/v1/plans").json()["plans"]
+    credentials = target.get("/api/v1/users/alice/credentials").json()["credentials"]
+    assert users[0]["current_plan_id"] == plans[0]["id"]
+    assert nodes[0]["name"] == "Tokyo vless"
+    assert plans[0]["node_ids"] == [nodes[0]["id"]]
+    assert plans[0]["node_multipliers"] == {nodes[0]["id"]: 1.5}
+    assert credentials[0]["credential"]["id"] == client_id
+
+
 def test_plan_assignment_dispatches_agent_batch_apply(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     agent_token, server_id, _node_id, plan_id = create_catalog_fixture(client)

@@ -8,11 +8,16 @@ import type {
   ProductUserSubscriptionTokenResponse,
   ProductUserTrafficResponse,
   ProductUsersResponse,
+  SubscriptionCatalogExportResponse,
+  SubscriptionCatalogImportRequest,
+  SubscriptionCatalogImportResponse,
   SubscriptionPlanAssignRequest,
   SubscriptionPlanAssignResponse,
   SubscriptionPlanCreateRequest,
   SubscriptionPlanResponse,
   SubscriptionPlansResponse,
+  SubscriptionTemplatePresetApplyRequest,
+  SubscriptionTemplatePresetsResponse,
 } from "../domain/subscriptions";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -113,6 +118,63 @@ export async function getProductUserTraffic(
     throw await apiError(response, "Product user traffic request failed");
   }
   return response.json() as Promise<ProductUserTrafficResponse>;
+}
+
+export async function listSubscriptionTemplatePresets(
+  fetcher = fetch,
+): Promise<SubscriptionTemplatePresetsResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/node-presets`);
+  if (!response.ok) {
+    throw await apiError(response, "Subscription template preset request failed");
+  }
+  return response.json() as Promise<SubscriptionTemplatePresetsResponse>;
+}
+
+export async function createManagedNodeFromPreset(
+  presetId: string,
+  payload: SubscriptionTemplatePresetApplyRequest,
+  fetcher = fetch,
+): Promise<ManagedNodeResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/node-presets/${encodeURIComponent(presetId)}/nodes`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Subscription template preset apply request failed");
+  }
+  return response.json() as Promise<ManagedNodeResponse>;
+}
+
+export async function exportSubscriptionCatalog(
+  includeCredentials = false,
+  fetcher = fetch,
+): Promise<SubscriptionCatalogExportResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/catalog/export?include_credentials=${includeCredentials}`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Subscription catalog export request failed");
+  }
+  return response.json() as Promise<SubscriptionCatalogExportResponse>;
+}
+
+export async function importSubscriptionCatalog(
+  payload: SubscriptionCatalogImportRequest,
+  fetcher = fetch,
+): Promise<SubscriptionCatalogImportResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/catalog/import`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Subscription catalog import request failed");
+  }
+  return response.json() as Promise<SubscriptionCatalogImportResponse>;
 }
 
 export async function listManagedNodes(fetcher = fetch): Promise<ManagedNodesResponse> {
