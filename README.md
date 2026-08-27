@@ -41,8 +41,11 @@ HTTP control connections, durable command execution, host telemetry, and Xray
 configuration and client management without activation or license checks.
 Its built wheel has been exercised against real Xray forwarding on the VPS,
 including newly provisioned users, failed-restart rollback, and restart-safe
-command deduplication. Host installation/upgrade/removal, Nginx/WARP, and
-fork-specific runtime workflows are still incomplete; control-plane wrappers
+command deduplication. The [host deployment CLI](docs/agent-deployment.md) adds
+a dedicated systemd account, per-release environments, upgrade rollback,
+interrupted-switch recovery, and data-preserving uninstall/reinstall.
+Remote lifecycle handlers, Nginx/WARP, and fork-specific runtime workflows are
+still incomplete; control-plane wrappers
 for those operations do not imply the independent agent implements them.
 
 The first milestone establishes the project skeleton, the no-license contract,

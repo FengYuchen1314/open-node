@@ -81,8 +81,15 @@ Managed mode owns one Xray subprocess. Systemd mode controls only its configured
 service. Candidate configs are validated by Xray before atomic file replacement;
 edit-and-restart operations restore the previous config if restart fails.
 Service-stop intent is persisted separately from process liveness. The installed
-wheel has been tested with live VLESS traffic in managed mode; the broader
-host lifecycle and systemd runtime path remain release gates.
+wheel has been tested with live VLESS traffic in managed mode. A host deployment
+CLI installs this mode as a hardened non-root systemd service. It records owned
+paths/account/unit content, stages immutable version/digest releases, checks
+process/package identity and fresh Agent health, and persists release-switch
+transactions before stopping the current service. Failed activation restores
+the previous release; interrupted switches can be recovered explicitly.
+Uninstall preserves configuration/state unless purge is explicitly selected.
+See [Agent deployment](agent-deployment.md). External systemd runtime mode and
+remote lifecycle handlers remain separate release gates.
 
 The control-plane operation wrappers cover more endpoints than this agent
 currently implements. See [the agent contract](../agent/README.md) for its

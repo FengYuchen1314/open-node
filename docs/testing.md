@@ -69,6 +69,37 @@ restart deduplication. Owned process groups are terminated on exit.
 This proves the managed official-Xray VLESS path, not every protocol, encrypted
 legacy-agent migration, systemd mode, or host install/upgrade/uninstall lifecycle.
 
+## Agent Service Lifecycle
+
+After building the Agent wheel, run the following on the designated VPS as root:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-agent-service.py \
+  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl
+```
+
+This requires a running systemd manager plus `useradd`, `runuser`, and curl.
+It uses the same pinned official Xray archive as the independent-runtime smoke;
+`--xray-archive` can reuse that archive without skipping digest verification.
+The fixture creates a uniquely named `open-node-agent-<id>.service`, dedicated
+non-login account, and `/opt/open-node-agent-smoke-<id>` directory. It does not
+reuse existing MMWX services, tokens, databases, unit names, or install roots.
+
+The test verifies failed first installation and corrected-input retry, non-root
+systemd readiness/hardening, real forwarding and runtime edits, successful
+upgrade, explicit rollback, failed preflight without stopping the old process,
+failed-start rollback, and recovery after forcibly terminating the deployment
+process during a recorded switch. It also kills the Agent process to verify
+systemd restart and Xray child cleanup, then checks uninstall/reinstall with
+config/journal preservation and explicit purge of only owned files/account.
+
+Good and deliberately broken candidate wheels are generated only inside the
+test fixture with updated wheel records. They are not published artifacts.
+Fixtures are removed at the end; failures print the service journal and report
+any cleanup that needs attention. Stopped-Agent upgrades and path/ownership
+guards have additional focused unit tests. External `runtime_mode: systemd`
+and arbitrary future schema rollback are not covered by this smoke.
+
 ## Reference-Agent Smoke
 
 After installing the backend development dependencies, run this on the VPS
@@ -123,24 +154,29 @@ bootstrap token. No test disables management authentication.
 
 ## Latest Verification
 
-On 2026-08-28, the independent-agent worktree passed on the VPS:
+On 2026-08-28, the Agent-deployment worktree passed on the VPS:
 
 - Backend: 142 tests, including HTTP agent scan reporting, anonymous management-route rejection, session
   persistence/expiry/revocation, CSRF/Origin rejection, concurrent login limiting,
   a password-reset/login race, administrator CLI recovery, and the existing
   inventory, dependency, migration, subscription, and change-set suites.
-- Independent agent: 26 tests, including private state/lock protection, TLS
+- Independent agent: 58 tests, including private state/lock protection, TLS
   configuration, persistent deduplication, transport reconnects, heartbeats
   during commands, interrupted execution, bounded errors/subprocesses, atomic
-  rollback, client edits, stop intent, and network rate calculation.
+  rollback, client edits, stop intent, network rate calculation, deployment
+  ownership/path guards, package identity, activation recovery, and readiness checks.
 - Agent wheel: isolated build and installation into a separate environment;
   real Xray smoke passed over WebSocket and HTTP, including provisioning,
   revocation, actual forwarding/statistics, failed-start rollback, recovery,
   restart deduplication, and preserved stop intent.
+- Real systemd lifecycle: failed first installation/retry, non-root service
+  ownership and forwarding, upgrade/rollback, failed preflight and startup,
+  interrupted-switch recovery, crash restart with child cleanup, data-preserving
+  uninstall/reinstall, and explicit purge. No fixture units/accounts remain.
 - Frontend: 74 tests, including session/CSRF request handling, expired-session
   transitions, waiting/skipped Vuetify component rendering, and the production build.
 - Probe Worker: TypeScript checks.
-- Ruff: backend, independent agent, and all three smoke scripts.
+- Ruff: backend, independent agent, and all four smoke scripts.
 - Reference-agent smoke: all ten stages, with the pinned image.
 - Chromium operator smoke: desktop 1440x900 and mobile 390x844 sign-in/access,
   server creation, reload persistence, password change, logout, and expiry.

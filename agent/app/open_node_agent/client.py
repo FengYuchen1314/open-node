@@ -2,8 +2,10 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import socket
 import time
+from pathlib import Path
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
@@ -14,7 +16,7 @@ from open_node_agent import __version__
 from open_node_agent.config import AgentConfig
 from open_node_agent.journal import CommandJournal
 from open_node_agent.operations import Operations, telemetry
-from open_node_agent.runtime import XrayRuntime
+from open_node_agent.runtime import XrayRuntime, atomic_write
 
 log = logging.getLogger("open-node-agent")
 
@@ -45,6 +47,36 @@ class Agent:
         self.send_lock = asyncio.Lock()
         self.websocket = None
         self.tasks: list[asyncio.Task] = []
+        self.connected = False
+        self.last_contact: float | None = None
+
+    def control_contact(self) -> None:
+        self.connected = True
+        self.last_contact = time.monotonic()
+
+    async def health_report(self) -> dict:
+        desired = self.journal.desired_running(self.config.auto_start)
+        return {
+            "pid": os.getpid(),
+            "agent_version": __version__,
+            "package_path": str(Path(__file__).resolve().parent),
+            "observed_at": time.time(),
+            "connected": (
+                self.connected
+                and self.last_contact is not None
+                and time.monotonic() - self.last_contact
+                <= max(45, self.config.heartbeat_seconds * 3)
+            ),
+            "runtime_ready": not desired or await self.runtime.running(),
+        }
+
+    async def health_loop(self) -> None:
+        while True:
+            atomic_write(
+                self.config.state_dir / "health.json",
+                json.dumps(await self.health_report()).encode(),
+            )
+            await asyncio.sleep(1)
 
     def registration(self) -> dict:
         return {
@@ -153,6 +185,7 @@ class Agent:
             ):
                 raise AuthenticationRejected("Agent token was rejected")
             self.websocket = connection
+            self.control_contact()
             log.info("Connected to Open Node over WebSocket")
             reporter = asyncio.create_task(self.websocket_reports())
             receiver = asyncio.create_task(self.websocket_receive(connection))
@@ -166,6 +199,7 @@ class Agent:
                     await task
             finally:
                 self.websocket = None
+                self.connected = False
                 for task in (reporter, receiver):
                     task.cancel()
                 for task in (reporter, receiver):
@@ -189,6 +223,8 @@ class Agent:
                 await self.queue.put(command)
             elif message.get("type") == "rpc_reply_ack":
                 self.journal.acknowledge(str(payload.get("request_id", "")))
+            elif message.get("type") == "heartbeat_ack":
+                self.control_contact()
 
     async def http_session(self, duration: float | None = None) -> None:
         token = self.config.token.get_secret_value()
@@ -199,6 +235,7 @@ class Agent:
         ) as client:
             registered = await client.post(base + "/register", json=self.registration())
             registered.raise_for_status()
+            self.control_contact()
             reporter = asyncio.create_task(self.http_reports(client, base, token))
             try:
                 while duration is None or time.monotonic() - started < duration:
@@ -226,6 +263,7 @@ class Agent:
                         self.journal.acknowledge(result["request_id"])
                     await asyncio.sleep(self.config.poll_seconds)
             finally:
+                self.connected = False
                 reporter.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await reporter
@@ -234,6 +272,7 @@ class Agent:
         next_report = 0.0
         while True:
             await self._post(client, base + "/heartbeat", {"token": token})
+            self.control_contact()
             if time.monotonic() >= next_report:
                 await self._post(
                     client, base + "/telemetry", {"token": token, **await self.collect_telemetry()}
@@ -271,6 +310,7 @@ class Agent:
                 group.create_task(self.worker()),
                 group.create_task(self.monitor_runtime()),
                 group.create_task(self.connection_loop()),
+                group.create_task(self.health_loop()),
             ]
 
     async def connection_loop(self) -> None:

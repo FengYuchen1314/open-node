@@ -11,6 +11,11 @@ systemd service. It is not yet a full replacement for every MMWX host operation.
 
 ## Configuration
 
+For a persistent host installation with a dedicated account, systemd service,
+upgrade rollback, and data-preserving uninstall, use the
+[deployment CLI](../docs/agent-deployment.md). The manual commands below are
+for development or separately managed deployments.
+
 Install the agent package and provide a node token created by the control plane:
 
 ```bash
@@ -80,7 +85,7 @@ bounded Xray logs. Network speed is bytes per second between successive speed
 requests; the first sample returns zero and counter resets never produce
 negative rates.
 Unsupported operations return 501 rather than reporting success. Nginx/WARP,
-certificate lifecycle, host installation/upgrades/removal, fork-only protocols,
+certificate lifecycle, remote upgrade/removal handlers, fork-only protocols,
 and further migration workflows remain release gates.
 
 ## Verification
@@ -93,5 +98,7 @@ The installed-wheel smoke covers both transports with real VLESS forwarding,
 new client provisioning/revocation, Xray statistics reaching FastAPI, rejected invalid
 writes, failed-restart rollback, ordered recovery, command deduplication across
 process restarts, and persistent service-stop intent. This is not evidence for
-every protocol, systemd runtime mode, or production installation lifecycle.
+every protocol or external systemd runtime mode. A separate lifecycle smoke
+verifies installation, upgrades, recovery, and removal of the owned systemd
+service with a non-root account.
 See [VPS test instructions](../docs/testing.md#independent-agent-smoke).
