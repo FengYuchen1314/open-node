@@ -8,7 +8,9 @@ import {
   listCommandStreamFrames,
   listServerCommands,
   listServers,
+  listXrayConfigSnapshots,
   queueAgentOperation,
+  restoreXrayConfigSnapshot,
   updateServerProbeMetadata,
 } from "./inventory";
 
@@ -202,6 +204,89 @@ describe("inventory API client", () => {
     expect(response.scan?.xray_running).toBe(true);
     expect(response.scan?.inbounds[0]?.tag).toBe("vless-443");
     expect(headers).toBeUndefined();
+  });
+
+  it("lists Xray config snapshots with optional config bodies", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          snapshots: [
+            {
+              id: "snap_1",
+              server_id: "srv_1",
+              source_command_id: "cmd_1",
+              config_hash: "abcdef012345",
+              source: "agent_report",
+              status: "current",
+              size_bytes: 42,
+              config: "{\"inbounds\":[]}",
+              created_at: "2026-08-27T00:00:00Z",
+            },
+          ],
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await listXrayConfigSnapshots(
+      "srv_1",
+      { limit: 8, withConfig: true },
+      fetcher,
+    );
+
+    expect(requestUrl).toBe(
+      "/api/v1/servers/srv_1/xray/config-snapshots?limit=8&with_config=true",
+    );
+    expect(headers).toBeUndefined();
+    expect(response.license_required).toBe(false);
+    expect(response.snapshots[0]?.status).toBe("current");
+    expect(response.snapshots[0]?.config).toBe("{\"inbounds\":[]}");
+  });
+
+  it("queues Xray config snapshot restores without license headers", async () => {
+    let requestUrl = "";
+    let method = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      method = init?.method ?? "";
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_restore",
+            server_id: "srv_1",
+            request_id: "srv_1-restore",
+            method: "POST",
+            path: "/api/child/xray/config",
+            query: "",
+            body: { config: "{\"inbounds\":[]}" },
+            timeout_ms: 60000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await restoreXrayConfigSnapshot("srv_1", "snap_1", fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/xray/config-snapshots/snap_1/restore");
+    expect(method).toBe("POST");
+    expect(headers).toBeUndefined();
+    expect(response.license_required).toBe(false);
+    expect(response.command.path).toBe("/api/child/xray/config");
   });
 
   it("lists queued commands without sending license headers", async () => {

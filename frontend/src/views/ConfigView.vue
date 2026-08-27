@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 
 import CommandInspector from "../components/CommandInspector.vue";
 import type {
@@ -8,20 +8,27 @@ import type {
   AgentOperationKind,
   AgentOperationPayload,
   ServerSummary,
+  XrayConfigSnapshot,
+  XrayConfigSnapshotStatus,
 } from "../domain/inventory";
 import {
   listCommandStreamFrames,
   listServerCommands,
   listServers,
+  listXrayConfigSnapshots,
   queueAgentOperation,
+  restoreXrayConfigSnapshot,
 } from "../services/inventory";
 
 const servers = ref<ServerSummary[]>([]);
 const selectedServerId = ref("");
 const commandsByServer = ref<Record<string, AgentCommand[]>>({});
 const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({});
+const xraySnapshots = ref<XrayConfigSnapshot[]>([]);
 const loading = ref(false);
+const snapshotsLoading = ref(false);
 const savingOperation = ref<AgentOperationKind | "">("");
+const restoringSnapshotId = ref("");
 const errorMessage = ref("");
 const activeTab = ref("xray");
 
@@ -77,9 +84,22 @@ const serverOptions = computed(() =>
   servers.value.map((server) => ({ title: server.name, value: server.id })),
 );
 const selectedCommands = computed(() => commandsByServer.value[selectedServerId.value] ?? []);
+const selectedCurrentSnapshot = computed(() =>
+  xraySnapshots.value.find((snapshot) => snapshot.status === "current"),
+);
+
+const snapshotStatusColor: Record<XrayConfigSnapshotStatus, string> = {
+  current: "success",
+  old: "grey",
+  pending_recovery: "warning",
+};
 
 onMounted(() => {
   void refresh();
+});
+
+watch(selectedServerId, () => {
+  void refreshXraySnapshots();
 });
 
 async function refresh() {
@@ -91,6 +111,7 @@ async function refresh() {
       selectedServerId.value = servers.value[0].id;
     }
     await refreshCommands();
+    await refreshXraySnapshots();
   } catch (error) {
     errorMessage.value = readableError(error);
   } finally {
@@ -132,6 +153,31 @@ async function refreshStreamFrames(commands: AgentCommand[]) {
     }),
   );
   streamFramesByCommand.value = Object.fromEntries(entries);
+}
+
+async function refreshXraySnapshots(includeConfig = false) {
+  if (!selectedServerId.value) {
+    xraySnapshots.value = [];
+    return;
+  }
+  const serverId = selectedServerId.value;
+  snapshotsLoading.value = true;
+  try {
+    const response = await listXrayConfigSnapshots(serverId, {
+      limit: 8,
+      withConfig: includeConfig,
+    });
+    if (serverId === selectedServerId.value) {
+      xraySnapshots.value = response.snapshots;
+    }
+  } catch (error) {
+    xraySnapshots.value = [];
+    if (includeConfig) {
+      errorMessage.value = readableError(error);
+    }
+  } finally {
+    snapshotsLoading.value = false;
+  }
 }
 
 async function queueOperation(kind: AgentOperationKind, payload?: AgentOperationPayload) {
@@ -220,6 +266,45 @@ async function queueJsonOperation(kind: AgentOperationKind, payloadText: string)
   } catch (error) {
     errorMessage.value = readableError(error);
   }
+}
+
+async function loadXraySnapshot(snapshot: XrayConfigSnapshot) {
+  try {
+    const loaded = await snapshotWithConfig(snapshot);
+    if (!loaded?.config) {
+      errorMessage.value = "Snapshot config is unavailable.";
+      return;
+    }
+    xrayConfigForm.configText = loaded.config;
+    activeTab.value = "xray";
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  }
+}
+
+async function restoreXraySnapshot(snapshot: XrayConfigSnapshot) {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  restoringSnapshotId.value = snapshot.id;
+  errorMessage.value = "";
+  try {
+    await restoreXrayConfigSnapshot(selectedServerId.value, snapshot.id);
+    await refreshCommands();
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    restoringSnapshotId.value = "";
+  }
+}
+
+async function snapshotWithConfig(snapshot: XrayConfigSnapshot) {
+  if (typeof snapshot.config === "string") {
+    return snapshot;
+  }
+  await refreshXraySnapshots(true);
+  return xraySnapshots.value.find((item) => item.id === snapshot.id);
 }
 
 function useLatestXrayConfig() {
@@ -335,6 +420,44 @@ function parseOperationPayload(value: string): AgentOperationPayload | undefined
 
 function readableError(error: unknown) {
   return error instanceof Error ? error.message : "Request failed.";
+}
+
+function snapshotSourceLabel(source: XrayConfigSnapshot["source"]) {
+  const labels: Record<XrayConfigSnapshot["source"], string> = {
+    agent_report: "Agent",
+    master_write: "Master",
+    manual_accept: "Accepted",
+  };
+  return labels[source];
+}
+
+function snapshotStatusLabel(status: XrayConfigSnapshotStatus) {
+  const labels: Record<XrayConfigSnapshotStatus, string> = {
+    current: "Current",
+    old: "Old",
+    pending_recovery: "Pending",
+  };
+  return labels[status];
+}
+
+function shortHash(value: string) {
+  return value.slice(0, 12);
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  return `${(value / 1024).toFixed(value < 10240 ? 1 : 0)} KB`;
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 </script>
 
@@ -453,6 +576,83 @@ function readableError(error: unknown) {
                 >
                   Write
                 </v-btn>
+              </div>
+              <div class="snapshot-panel">
+                <div class="snapshot-head">
+                  <div>
+                    <div class="section-title compact-title">Config snapshots</div>
+                    <div class="section-subtitle">
+                      {{
+                        selectedCurrentSnapshot
+                          ? `${shortHash(selectedCurrentSnapshot.config_hash)} current`
+                          : "No saved Xray config yet"
+                      }}
+                    </div>
+                  </div>
+                  <v-tooltip text="Refresh snapshots">
+                    <template #activator="{ props }">
+                      <v-btn
+                        v-bind="props"
+                        :loading="snapshotsLoading"
+                        icon="mdi-refresh"
+                        size="small"
+                        variant="text"
+                        @click="refreshXraySnapshots()"
+                      />
+                    </template>
+                  </v-tooltip>
+                </div>
+                <div v-if="xraySnapshots.length === 0" class="snapshot-empty">
+                  No snapshots.
+                </div>
+                <div v-else class="snapshot-list">
+                  <div
+                    v-for="snapshot in xraySnapshots"
+                    :key="snapshot.id"
+                    class="snapshot-row"
+                  >
+                    <div class="snapshot-main">
+                      <div class="snapshot-meta">
+                        <v-chip
+                          :color="snapshotStatusColor[snapshot.status]"
+                          density="comfortable"
+                          size="small"
+                          variant="tonal"
+                        >
+                          {{ snapshotStatusLabel(snapshot.status) }}
+                        </v-chip>
+                        <span class="snapshot-hash">{{ shortHash(snapshot.config_hash) }}</span>
+                      </div>
+                      <div class="snapshot-detail">
+                        {{ snapshotSourceLabel(snapshot.source) }} /
+                        {{ formatBytes(snapshot.size_bytes) }} /
+                        {{ formatDateTime(snapshot.created_at) }}
+                      </div>
+                    </div>
+                    <div class="snapshot-actions">
+                      <v-btn
+                        color="secondary"
+                        prepend-icon="mdi-tray-arrow-down"
+                        size="small"
+                        variant="tonal"
+                        @click="loadXraySnapshot(snapshot)"
+                      >
+                        Load
+                      </v-btn>
+                      <v-btn
+                        :disabled="serverOptions.length === 0"
+                        :loading="restoringSnapshotId === snapshot.id"
+                        color="warning"
+                        prepend-icon="mdi-restore"
+                        size="small"
+                        variant="tonal"
+                        @click="restoreXraySnapshot(snapshot)"
+                      >
+                        Restore
+                      </v-btn>
+                    </div>
+                  </div>
+                </div>
               </div>
               <v-text-field
                 v-model="xrayConfigForm.path"

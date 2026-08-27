@@ -164,6 +164,8 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/agent/update-master-url`
 - `POST /api/v1/servers/{server_id}/operations/agent/upgrade`
 - `POST /api/v1/servers/{server_id}/operations/agent/uninstall`
+- `GET /api/v1/servers/{server_id}/xray/config-snapshots`
+- `POST /api/v1/servers/{server_id}/xray/config-snapshots/{snapshot_id}/restore`
 
 These wrappers enqueue the active `mmw-agent` child paths and then reuse the
 same WebSocket RPC dispatch, HTTP lease, result, and stream-frame persistence
@@ -196,6 +198,10 @@ into the text shape the agent expects, validate obvious path and URL hazards,
 and preserve the agent-side write/test/reload behavior. Agent setting wrappers
 cover Xray mode, listen port, master URL probe/update, and WARP credential
 updates without changing the Open Node no-license contract.
+Successful `GET` and `POST` results for `/api/child/xray/config` are also
+stored as Xray config snapshots. New configs become `current`, the previous
+current snapshot is retained as `old`, and operators can queue a restore from
+any saved snapshot through the same command dispatch path.
 
 The Xray external takeover wrapper queues the active agent's
 `/api/child/external-xray/takeover` route. It lets an operator merge an

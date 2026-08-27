@@ -6,6 +6,8 @@ export type AgentServiceName = "xray" | "nginx";
 export type AgentServiceAction = "start" | "stop" | "restart";
 export type AgentLogService = "agent" | "xray" | "nginx";
 export type AgentCommandStatus = "pending" | "leased" | "succeeded" | "failed";
+export type XrayConfigSnapshotStatus = "current" | "old" | "pending_recovery";
+export type XrayConfigSnapshotSource = "agent_report" | "master_write" | "manual_accept";
 export type AgentOperationKind =
   | "system_info"
   | "traffic"
@@ -233,6 +235,24 @@ export interface AgentScanResult {
 export interface ServerScanResultResponse {
   server_id: string;
   scan?: AgentScanResult | null;
+  license_required: false;
+}
+
+export interface XrayConfigSnapshot {
+  id: string;
+  server_id: string;
+  source_command_id?: string | null;
+  config_hash: string;
+  source: XrayConfigSnapshotSource;
+  status: XrayConfigSnapshotStatus;
+  size_bytes: number;
+  config?: string | null;
+  created_at: string;
+}
+
+export interface ServerXrayConfigSnapshotsResponse {
+  server_id: string;
+  snapshots: XrayConfigSnapshot[];
   license_required: false;
 }
 

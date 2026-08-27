@@ -136,6 +136,18 @@ class AgentCommandStatus(StrEnum):
     FAILED = "failed"
 
 
+class XrayConfigSnapshotStatus(StrEnum):
+    CURRENT = "current"
+    OLD = "old"
+    PENDING_RECOVERY = "pending_recovery"
+
+
+class XrayConfigSnapshotSource(StrEnum):
+    AGENT_REPORT = "agent_report"
+    MASTER_WRITE = "master_write"
+    MANUAL_ACCEPT = "manual_accept"
+
+
 class AgentOperationKind(StrEnum):
     SYSTEM_INFO = "system_info"
     TRAFFIC = "traffic"
@@ -550,6 +562,24 @@ class ServerTelemetryResponse(BaseModel):
 class ServerScanResultResponse(BaseModel):
     server_id: UUID
     scan: AgentScanResultRead | None = None
+    license_required: Literal[False] = False
+
+
+class XrayConfigSnapshotRead(BaseModel):
+    id: UUID
+    server_id: UUID
+    source_command_id: UUID | None = None
+    config_hash: str
+    source: XrayConfigSnapshotSource
+    status: XrayConfigSnapshotStatus
+    size_bytes: int
+    config: str | None = None
+    created_at: datetime
+
+
+class ServerXrayConfigSnapshotsResponse(BaseModel):
+    server_id: UUID
+    snapshots: list[XrayConfigSnapshotRead]
     license_required: Literal[False] = False
 
 

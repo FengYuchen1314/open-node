@@ -3,7 +3,7 @@ from typing import Annotated
 from urllib.parse import urlencode
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.inventory import (
@@ -48,6 +48,7 @@ from open_node.domain.inventory import (
     ServerResponse,
     ServerScanResultResponse,
     ServerTelemetryResponse,
+    ServerXrayConfigSnapshotsResponse,
 )
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
@@ -55,6 +56,7 @@ from open_node.services.inventory import (
     DuplicateServerNameError,
     InventoryStore,
     ServerNotFoundError,
+    XrayConfigSnapshotNotFoundError,
 )
 
 router = APIRouter(prefix="/servers", tags=["servers"])
@@ -115,6 +117,65 @@ def latest_server_scan(
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ServerScanResultResponse(server_id=server_id, scan=scan)
+
+
+@router.get("/{server_id}/xray/config-snapshots", response_model=ServerXrayConfigSnapshotsResponse)
+def list_xray_config_snapshots(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    limit: Annotated[int, Query(ge=0, le=100)] = 20,
+    with_config: bool = False,
+) -> ServerXrayConfigSnapshotsResponse:
+    try:
+        snapshots = store.list_xray_config_snapshots(
+            server_id,
+            limit=limit,
+            include_config=with_config,
+        )
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return ServerXrayConfigSnapshotsResponse(server_id=server_id, snapshots=snapshots)
+
+
+@router.post(
+    "/{server_id}/xray/config-snapshots/{snapshot_id}/restore",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def restore_xray_config_snapshot(
+    server_id: UUID,
+    snapshot_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    try:
+        snapshot = store.get_xray_config_snapshot(
+            server_id,
+            snapshot_id,
+            include_config=True,
+        )
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except XrayConfigSnapshotNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    if snapshot.config is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="xray config snapshot body is unavailable",
+        )
+
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/xray/config",
+            body={"config": snapshot.config},
+            timeout_ms=60_000,
+        ),
+        store,
+        connections,
+    )
 
 
 @router.get("/{server_id}/commands", response_model=ServerCommandsResponse)

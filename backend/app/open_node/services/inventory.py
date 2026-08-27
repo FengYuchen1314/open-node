@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from calendar import monthrange
 from collections.abc import Iterable
@@ -70,6 +71,9 @@ from open_node.domain.inventory import (
     SystemTraffic,
     TrafficSource,
     TrafficStatsMode,
+    XrayConfigSnapshotRead,
+    XrayConfigSnapshotSource,
+    XrayConfigSnapshotStatus,
     XrayMode,
     XrayStats,
 )
@@ -142,6 +146,10 @@ class ServerNotFoundError(ValueError):
 
 class CommandNotFoundError(ValueError):
     """Raised when an agent command cannot be found for the requesting server."""
+
+
+class XrayConfigSnapshotNotFoundError(ValueError):
+    """Raised when an Xray config snapshot lookup targets an unknown snapshot."""
 
 
 class ChangeSetNotFoundError(ValueError):
@@ -439,6 +447,29 @@ class AgentScanResultModel(Base):
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class XrayConfigSnapshotModel(Base):
+    __tablename__ = "xray_config_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    source_command_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("agent_commands.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    config: Mapped[str] = mapped_column(Text)
+    config_hash: Mapped[str] = mapped_column(String(64), index=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class CommandModel(Base):
@@ -1061,6 +1092,46 @@ class InventoryStore:
                 raise ServerNotFoundError(f"server not found: {server_id}")
             scan = session.get(AgentScanResultModel, str(server_id))
             return self._scan_result_read(scan) if scan else None
+
+    def list_xray_config_snapshots(
+        self,
+        server_id: UUID,
+        limit: int = 20,
+        include_config: bool = False,
+    ) -> list[XrayConfigSnapshotRead]:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            query = (
+                select(XrayConfigSnapshotModel)
+                .where(XrayConfigSnapshotModel.server_id == server.id)
+                .order_by(XrayConfigSnapshotModel.created_at.desc())
+            )
+            if limit > 0:
+                query = query.limit(min(limit, 100))
+            snapshots = session.scalars(query).all()
+            return [
+                self._xray_config_snapshot_read(snapshot, include_config=include_config)
+                for snapshot in snapshots
+            ]
+
+    def get_xray_config_snapshot(
+        self,
+        server_id: UUID,
+        snapshot_id: UUID,
+        include_config: bool = False,
+    ) -> XrayConfigSnapshotRead:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            snapshot = session.get(XrayConfigSnapshotModel, str(snapshot_id))
+            if not snapshot or snapshot.server_id != server.id:
+                raise XrayConfigSnapshotNotFoundError(
+                    f"xray config snapshot not found: {snapshot_id}"
+                )
+            return self._xray_config_snapshot_read(snapshot, include_config=include_config)
 
     def public_probe_payload(self) -> ProbePayload:
         with self._session() as session:
@@ -4607,6 +4678,96 @@ class InventoryStore:
         return scan
 
     @staticmethod
+    def _upsert_current_xray_config_snapshot(
+        session: Session,
+        server: ServerModel,
+        config: str,
+        source: XrayConfigSnapshotSource,
+        source_command_id: str | None,
+        created_at: datetime,
+    ) -> XrayConfigSnapshotModel:
+        config_hash = InventoryStore._hash_xray_config(config)
+        current_snapshots = session.scalars(
+            select(XrayConfigSnapshotModel)
+            .where(
+                XrayConfigSnapshotModel.server_id == server.id,
+                XrayConfigSnapshotModel.status == XrayConfigSnapshotStatus.CURRENT.value,
+            )
+            .order_by(XrayConfigSnapshotModel.created_at.desc())
+        ).all()
+        if current_snapshots and current_snapshots[0].config_hash == config_hash:
+            return current_snapshots[0]
+
+        for snapshot in current_snapshots:
+            snapshot.status = XrayConfigSnapshotStatus.OLD.value
+
+        snapshot = XrayConfigSnapshotModel(
+            id=str(uuid4()),
+            server_id=server.id,
+            source_command_id=source_command_id,
+            config=config,
+            config_hash=config_hash,
+            source=source.value,
+            status=XrayConfigSnapshotStatus.CURRENT.value,
+            size_bytes=len(config.encode("utf-8")),
+            created_at=created_at,
+        )
+        session.add(snapshot)
+        return snapshot
+
+    @staticmethod
+    def _xray_config_snapshot_source(
+        command: CommandModel,
+        payload: AgentCommandResultRequest,
+    ) -> tuple[str | None, XrayConfigSnapshotSource]:
+        if command.method.upper() == "GET":
+            body = payload.body if isinstance(payload.body, dict) else {}
+            if body.get("success") is False:
+                return None, XrayConfigSnapshotSource.AGENT_REPORT
+            return InventoryStore._xray_config_text(body.get("config")), (
+                XrayConfigSnapshotSource.AGENT_REPORT
+            )
+
+        body = command.body if isinstance(command.body, dict) else {}
+        return InventoryStore._xray_config_text(body.get("config")), (
+            XrayConfigSnapshotSource.MASTER_WRITE
+        )
+
+    @staticmethod
+    def _xray_config_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        except TypeError:
+            return None
+
+    @staticmethod
+    def _hash_xray_config(config: str) -> str:
+        return hashlib.sha256(config.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _xray_config_snapshot_read(
+        snapshot: XrayConfigSnapshotModel,
+        include_config: bool = False,
+    ) -> XrayConfigSnapshotRead:
+        return XrayConfigSnapshotRead(
+            id=UUID(snapshot.id),
+            server_id=UUID(snapshot.server_id),
+            source_command_id=UUID(snapshot.source_command_id)
+            if snapshot.source_command_id
+            else None,
+            config_hash=snapshot.config_hash,
+            source=XrayConfigSnapshotSource(snapshot.source),
+            status=XrayConfigSnapshotStatus(snapshot.status),
+            size_bytes=snapshot.size_bytes,
+            config=snapshot.config if include_config else None,
+            created_at=snapshot.created_at,
+        )
+
+    @staticmethod
     def _scan_result_read(scan: AgentScanResultModel) -> AgentScanResultRead:
         return AgentScanResultRead(
             server_id=UUID(scan.server_id),
@@ -4784,6 +4945,7 @@ class InventoryStore:
         self._upsert_return_route_results(session, server, command, payload, now)
         self._record_domain_latency_result(session, server, command, payload, now)
         self._record_scan_result_from_command(session, server, command, payload, now)
+        self._record_xray_config_snapshot_from_command(session, server, command, payload, now)
 
     def _record_scan_result_from_command(
         self,
@@ -4806,6 +4968,28 @@ class InventoryStore:
         if agent:
             agent.last_seen_at = received_at
         self._upsert_agent_scan_result(session, server, scan_payload, received_at, received_at)
+
+    def _record_xray_config_snapshot_from_command(
+        self,
+        session: Session,
+        server: ServerModel,
+        command: CommandModel,
+        payload: AgentCommandResultRequest,
+        created_at: datetime,
+    ) -> None:
+        if command.path != "/api/child/xray/config" or payload.error or payload.status >= 400:
+            return
+        config, source = self._xray_config_snapshot_source(command, payload)
+        if not config or not config.strip():
+            return
+        self._upsert_current_xray_config_snapshot(
+            session,
+            server,
+            config=config,
+            source=source,
+            source_command_id=command.id,
+            created_at=created_at,
+        )
 
     def _upsert_return_route_results(
         self,

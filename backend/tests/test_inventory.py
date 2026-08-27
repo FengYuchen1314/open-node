@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1404,6 +1405,122 @@ def test_xray_config_write_operation_serializes_structured_config(tmp_path: Path
     assert command["body"]["force"] is True
     assert json.loads(command["body"]["config"]) == {"inbounds": [], "outbounds": []}
     assert command["timeout_ms"] == 20_000
+
+
+def test_xray_config_command_results_record_snapshots_and_restore(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-snapshots"}).json()
+    server_id = created["server"]["id"]
+
+    config_text = '{\n  "inbounds": [{"tag": "vless-443"}],\n  "outbounds": []\n}'
+    read_command = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config/read",
+    ).json()["command"]
+    read_result = client.post(
+        f"/api/v1/agents/commands/{read_command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                "success": True,
+                "path": "/usr/local/etc/xray/config.json",
+                "config": config_text,
+            },
+        },
+    )
+
+    assert read_result.status_code == 200
+    snapshot_response = client.get(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots?with_config=true",
+    )
+    assert snapshot_response.status_code == 200
+    snapshot_payload = snapshot_response.json()
+    assert snapshot_payload["license_required"] is False
+    assert len(snapshot_payload["snapshots"]) == 1
+    current = snapshot_payload["snapshots"][0]
+    assert current["status"] == "current"
+    assert current["source"] == "agent_report"
+    assert current["source_command_id"] == read_command["id"]
+    assert current["config"] == config_text
+    assert current["config_hash"] == hashlib.sha256(config_text.encode()).hexdigest()
+    assert current["size_bytes"] == len(config_text.encode())
+
+    write_config = '{"inbounds":[],"outbounds":[{"tag":"direct","protocol":"freedom"}]}'
+    write_command = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config/write",
+        json={"config": write_config},
+    ).json()["command"]
+    write_result = client.post(
+        f"/api/v1/agents/commands/{write_command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True, "message": "Config saved successfully"},
+        },
+    )
+
+    assert write_result.status_code == 200
+    snapshots = client.get(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots?with_config=true",
+    ).json()["snapshots"]
+    assert [item["status"] for item in snapshots] == ["current", "old"]
+    assert snapshots[0]["source"] == "master_write"
+    assert snapshots[0]["source_command_id"] == write_command["id"]
+    assert snapshots[0]["config"] == write_config
+
+    old_snapshot = snapshots[1]
+    restore = client.post(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/{old_snapshot['id']}/restore",
+    )
+
+    assert restore.status_code == 201
+    restore_payload = restore.json()
+    assert restore_payload["license_required"] is False
+    restore_command = restore_payload["command"]
+    assert restore_command["method"] == "POST"
+    assert restore_command["path"] == "/api/child/xray/config"
+    assert restore_command["body"] == {"config": config_text}
+    assert restore_command["timeout_ms"] == 60_000
+
+
+def test_xray_config_snapshots_ignore_empty_and_failed_results(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-snapshot-empty"}).json()
+    server_id = created["server"]["id"]
+
+    empty_read = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config/read",
+    ).json()["command"]
+    failed_write = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config/write",
+        json={"config": {"inbounds": []}},
+    ).json()["command"]
+
+    empty_result = client.post(
+        f"/api/v1/agents/commands/{empty_read['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True, "config": "   "},
+        },
+    )
+    failed_result = client.post(
+        f"/api/v1/agents/commands/{failed_write['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 400,
+            "body": {"success": False},
+            "error": "invalid config",
+        },
+    )
+
+    assert empty_result.status_code == 200
+    assert failed_result.status_code == 200
+    snapshots = client.get(f"/api/v1/servers/{server_id}/xray/config-snapshots")
+    assert snapshots.status_code == 200
+    assert snapshots.json()["snapshots"] == []
 
 
 def test_xray_system_config_write_queues_agent_schema(tmp_path: Path) -> None:

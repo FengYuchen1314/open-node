@@ -13,6 +13,7 @@ import type {
   ServerProbeMetadataUpdate,
   ServerResponse,
   ServerSummary,
+  ServerXrayConfigSnapshotsResponse,
 } from "../domain/inventory";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -144,6 +145,34 @@ export async function getLatestScanResult(
   return response.json() as Promise<ServerScanResultResponse>;
 }
 
+export interface XrayConfigSnapshotListOptions {
+  limit?: number;
+  withConfig?: boolean;
+}
+
+export async function listXrayConfigSnapshots(
+  serverId: string,
+  options: XrayConfigSnapshotListOptions = {},
+  fetcher = fetch,
+): Promise<ServerXrayConfigSnapshotsResponse> {
+  const query = new URLSearchParams();
+  if (options.limit !== undefined) {
+    query.set("limit", String(options.limit));
+  }
+  if (options.withConfig) {
+    query.set("with_config", "true");
+  }
+  const queryText = query.toString();
+  const suffix = queryText ? `?${queryText}` : "";
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots${suffix}`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray config snapshot request failed");
+  }
+  return response.json() as Promise<ServerXrayConfigSnapshotsResponse>;
+}
+
 export async function listServerCommands(
   serverId: string,
   fetcher = fetch,
@@ -189,6 +218,21 @@ export async function queueAgentOperation(
   );
   if (!response.ok) {
     throw await apiError(response, "Server operation request failed");
+  }
+  return response.json() as Promise<AgentCommandCreateResponse>;
+}
+
+export async function restoreXrayConfigSnapshot(
+  serverId: string,
+  snapshotId: string,
+  fetcher = fetch,
+): Promise<AgentCommandCreateResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots/${snapshotId}/restore`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray config snapshot restore request failed");
   }
   return response.json() as Promise<AgentCommandCreateResponse>;
 }

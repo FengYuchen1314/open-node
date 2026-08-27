@@ -259,6 +259,64 @@ body {
   gap: 14px;
 }
 
+.snapshot-panel {
+  border: 1px solid #dbe5e0;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.snapshot-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.snapshot-empty {
+  color: #66736f;
+  font-size: 13px;
+}
+
+.snapshot-list {
+  display: grid;
+  gap: 10px;
+}
+
+.snapshot-row {
+  align-items: center;
+  border-top: 1px solid #edf2ef;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-top: 10px;
+}
+
+.snapshot-meta {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.snapshot-hash {
+  font-family:
+    "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.snapshot-detail {
+  color: #66736f;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.snapshot-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .subscription-form {
   display: grid;
   gap: 14px;
@@ -1211,6 +1269,7 @@ body {
 
   .config-action-row,
   .config-file-grid,
+  .snapshot-row,
   .change-action-row,
   .change-command-pair,
   .change-control-row,
@@ -1244,7 +1303,8 @@ body {
   }
 
   .probe-target-compare-actions,
-  .probe-task-actions {
+  .probe-task-actions,
+  .snapshot-actions {
     align-items: stretch;
     flex-direction: column;
   }
