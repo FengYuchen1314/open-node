@@ -134,6 +134,10 @@ from open_node.domain.subscriptions import (
     SubscriptionTemplatePresetRead,
     SubscriptionTrafficEntryRead,
     SubscriptionTrafficMode,
+    XrayRuntimeCredentialCleanupCommand,
+    XrayRuntimeCredentialCleanupEntry,
+    XrayRuntimeCredentialCleanupRequest,
+    XrayRuntimeCredentialCleanupResponse,
     XrayRuntimeCredentialReconciliationEntry,
     XrayRuntimeCredentialReconciliationResponse,
     XrayRuntimeCredentialRepairEntry,
@@ -1692,6 +1696,88 @@ class InventoryStore:
             provisioning_batches=provisioning_batches,
             planned_client_count=sum(len(entry.emails) for entry in entries),
             batch_count=len(provisioning_batches),
+            warnings=warnings,
+        )
+
+    def cleanup_extra_xray_runtime_credentials(
+        self,
+        server_id: UUID,
+        payload: XrayRuntimeCredentialCleanupRequest,
+    ) -> XrayRuntimeCredentialCleanupResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            scan = session.get(AgentScanResultModel, str(server_id))
+            if not scan:
+                return XrayRuntimeCredentialCleanupResponse(
+                    server_id=server_id,
+                    has_scan=False,
+                    warnings=["runtime scan not found"],
+                )
+
+            managed_nodes = self._selected_physical_managed_nodes(session, server, payload.node_ids)
+            runtime_by_node_id = self._runtime_inbounds_by_managed_node_id(
+                session,
+                server,
+                scan,
+            )
+            expected_by_node_id = self._expected_runtime_credentials_by_node_id(
+                session,
+                server,
+                managed_nodes,
+            )
+            entries: list[XrayRuntimeCredentialCleanupEntry] = []
+            command_previews: list[XrayRuntimeCredentialCleanupCommand] = []
+            warnings: list[str] = []
+
+            for node in managed_nodes:
+                if not node.inbound_tag:
+                    warnings.append(f"node {node.name} has no inbound tag")
+                    continue
+                runtime = runtime_by_node_id.get(node.id)
+                if not runtime:
+                    warnings.append(f"node {node.name} has no matching runtime inbound")
+                    continue
+                expected_keys = {
+                    context.email.lower() for context in expected_by_node_id.get(node.id, [])
+                }
+                extra_emails = [
+                    email for email in runtime.user_emails if email.lower() not in expected_keys
+                ]
+                if not extra_emails:
+                    continue
+                entries.append(
+                    XrayRuntimeCredentialCleanupEntry(
+                        node_id=UUID(node.id),
+                        node_name=node.name,
+                        protocol=node.protocol,
+                        inbound_tag=node.inbound_tag,
+                        runtime_source_index=runtime.source_index,
+                        runtime_display_name=runtime.display_name,
+                        emails=extra_emails,
+                    )
+                )
+                for email in extra_emails:
+                    command_previews.append(
+                        XrayRuntimeCredentialCleanupCommand(
+                            node_id=UUID(node.id),
+                            node_name=node.name,
+                            body={
+                                "action": "remove-client",
+                                "tag": node.inbound_tag,
+                                "client": {"email": email},
+                            },
+                        )
+                    )
+
+        return XrayRuntimeCredentialCleanupResponse(
+            server_id=server_id,
+            has_scan=True,
+            entries=entries,
+            command_previews=command_previews,
+            planned_client_count=sum(len(entry.emails) for entry in entries),
+            command_count=len(command_previews),
             warnings=warnings,
         )
 

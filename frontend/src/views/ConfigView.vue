@@ -31,6 +31,7 @@ import {
   restoreXrayConfigSnapshot,
 } from "../services/inventory";
 import {
+  cleanupExtraXrayRuntimeCredentials,
   createManagedNodeFromRuntimeInbound,
   getXrayRuntimeCredentialReconciliation,
   getXrayRuntimeNodeReconciliation,
@@ -57,6 +58,7 @@ const runtimeNodeImporting = ref(false);
 const runtimeNodeSavingKey = ref("");
 const runtimeNodeSyncingId = ref("");
 const runtimeCredentialRepairing = ref(false);
+const runtimeCredentialCleaning = ref(false);
 const savingOperation = ref<AgentOperationKind | "">("");
 const restoringSnapshotId = ref("");
 const errorMessage = ref("");
@@ -669,6 +671,7 @@ function runtimeNodeCreateDisabled(inbound: XrayRuntimeInbound) {
     runtimeNodeImporting.value ||
     Boolean(runtimeNodeSyncingId.value) ||
     runtimeCredentialRepairing.value ||
+    runtimeCredentialCleaning.value ||
     (Boolean(runtimeNodeSavingKey.value) &&
       runtimeNodeSavingKey.value !== runtimeNodeSavingId(inbound))
   );
@@ -687,6 +690,9 @@ function runtimeImportTooltip() {
   if (runtimeCredentialRepairing.value) {
     return "Runtime credential repair is running";
   }
+  if (runtimeCredentialCleaning.value) {
+    return "Runtime credential cleanup is running";
+  }
   return `Import ${runtimeMissingNodeCount.value} missing runtime nodes`;
 }
 
@@ -700,7 +706,12 @@ function runtimeCredentialRepairTooltip() {
   if (!runtimeCredentialReconciliation.value?.missing_runtime_client_count) {
     return "No missing runtime clients";
   }
-  if (runtimeNodeImporting.value || runtimeNodeSavingKey.value || runtimeNodeSyncingId.value) {
+  if (
+    runtimeNodeImporting.value ||
+    runtimeNodeSavingKey.value ||
+    runtimeNodeSyncingId.value ||
+    runtimeCredentialCleaning.value
+  ) {
     return "Another runtime catalog action is running";
   }
   return `Queue ${runtimeCredentialReconciliation.value.missing_runtime_client_count} missing runtime clients`;
@@ -710,11 +721,46 @@ function runtimeCredentialRepairDisabled() {
   return (
     runtimeInventoryLoading.value ||
     runtimeCredentialRepairing.value ||
+    runtimeCredentialCleaning.value ||
     !xrayRuntimeInventory.value?.has_scan ||
     !runtimeCredentialReconciliation.value?.missing_runtime_client_count ||
     runtimeNodeImporting.value ||
     Boolean(runtimeNodeSavingKey.value) ||
     Boolean(runtimeNodeSyncingId.value)
+  );
+}
+
+function runtimeCredentialCleanupTooltip() {
+  if (runtimeInventoryLoading.value) {
+    return "Runtime inventory is loading";
+  }
+  if (!xrayRuntimeInventory.value?.has_scan) {
+    return "Run a scan before cleaning runtime clients";
+  }
+  if (!runtimeCredentialReconciliation.value?.extra_runtime_client_count) {
+    return "No extra runtime clients";
+  }
+  if (
+    runtimeNodeImporting.value ||
+    runtimeNodeSavingKey.value ||
+    runtimeNodeSyncingId.value ||
+    runtimeCredentialRepairing.value
+  ) {
+    return "Another runtime catalog action is running";
+  }
+  return `Queue ${runtimeCredentialReconciliation.value.extra_runtime_client_count} extra runtime client removals`;
+}
+
+function runtimeCredentialCleanupDisabled() {
+  return (
+    runtimeInventoryLoading.value ||
+    runtimeCredentialCleaning.value ||
+    !xrayRuntimeInventory.value?.has_scan ||
+    !runtimeCredentialReconciliation.value?.extra_runtime_client_count ||
+    runtimeNodeImporting.value ||
+    Boolean(runtimeNodeSavingKey.value) ||
+    Boolean(runtimeNodeSyncingId.value) ||
+    runtimeCredentialRepairing.value
   );
 }
 
@@ -787,7 +833,8 @@ function runtimeSyncDisabled(entry: XrayRuntimeNodeReconciliationManagedEntry) {
     runtimeNodeImporting.value ||
     Boolean(runtimeNodeSavingKey.value) ||
     Boolean(runtimeNodeSyncingId.value) ||
-    runtimeCredentialRepairing.value
+    runtimeCredentialRepairing.value ||
+    runtimeCredentialCleaning.value
   );
 }
 
@@ -805,7 +852,8 @@ function runtimeSyncTooltip(entry: XrayRuntimeNodeReconciliationManagedEntry) {
     runtimeNodeImporting.value ||
     runtimeNodeSavingKey.value ||
     runtimeNodeSyncingId.value ||
-    runtimeCredentialRepairing.value
+    runtimeCredentialRepairing.value ||
+    runtimeCredentialCleaning.value
   ) {
     return "Another runtime catalog action is running";
   }
@@ -853,6 +901,31 @@ async function repairMissingRuntimeCredentials() {
     errorMessage.value = readableError(error);
   } finally {
     runtimeCredentialRepairing.value = false;
+  }
+}
+
+async function cleanupExtraRuntimeCredentials() {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  if (runtimeCredentialCleanupDisabled()) {
+    errorMessage.value = runtimeCredentialCleanupTooltip();
+    return;
+  }
+  runtimeCredentialCleaning.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await cleanupExtraXrayRuntimeCredentials(selectedServerId.value, {
+      queue_agent_commands: true,
+    });
+    successMessage.value = `Queued ${response.planned_client_count} extra runtime client removals in ${response.commands.length} commands.`;
+    await Promise.all([refreshCommands(), refreshXrayRuntimeInventory()]);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    runtimeCredentialCleaning.value = false;
   }
 }
 
@@ -1248,7 +1321,8 @@ function formatDateTime(value: string) {
                             runtimeMissingNodeCount === 0 ||
                             Boolean(runtimeNodeSavingKey) ||
                             Boolean(runtimeNodeSyncingId) ||
-                            runtimeCredentialRepairing
+                            runtimeCredentialRepairing ||
+                            runtimeCredentialCleaning
                           "
                           :loading="runtimeNodeImporting"
                           color="primary"
@@ -1275,6 +1349,23 @@ function formatDateTime(value: string) {
                           @click="repairMissingRuntimeCredentials"
                         >
                           Repair clients
+                        </v-btn>
+                      </span>
+                    </template>
+                  </v-tooltip>
+                  <v-tooltip :text="runtimeCredentialCleanupTooltip()">
+                    <template #activator="{ props }">
+                      <span v-bind="props" class="runtime-node-action">
+                        <v-btn
+                          :disabled="runtimeCredentialCleanupDisabled()"
+                          :loading="runtimeCredentialCleaning"
+                          color="warning"
+                          prepend-icon="mdi-account-remove-outline"
+                          size="small"
+                          variant="tonal"
+                          @click="cleanupExtraRuntimeCredentials"
+                        >
+                          Cleanup extras
                         </v-btn>
                       </span>
                     </template>

@@ -53,6 +53,8 @@ from open_node.domain.inventory import (
 )
 from open_node.domain.subscriptions import (
     ManagedNodeResponse,
+    XrayRuntimeCredentialCleanupRequest,
+    XrayRuntimeCredentialCleanupResponse,
     XrayRuntimeCredentialReconciliationResponse,
     XrayRuntimeCredentialRepairRequest,
     XrayRuntimeCredentialRepairResponse,
@@ -271,6 +273,40 @@ async def repair_missing_xray_runtime_credentials(
                     method="POST",
                     path="/api/child/batch-apply",
                     body=batch.body,
+                    timeout_ms=payload.command_timeout_ms,
+                ),
+            )
+            commands.append(await connections.dispatch_command(store, command))
+        response = response.model_copy(update={"commands": commands})
+    return response
+
+
+@router.post(
+    "/{server_id}/xray/runtime/credentials/cleanup-extra",
+    response_model=XrayRuntimeCredentialCleanupResponse,
+)
+async def cleanup_extra_xray_runtime_credentials(
+    server_id: UUID,
+    payload: XrayRuntimeCredentialCleanupRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> XrayRuntimeCredentialCleanupResponse:
+    try:
+        response = store.cleanup_extra_xray_runtime_credentials(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ManagedNodeNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    if payload.queue_agent_commands:
+        commands = []
+        for preview in response.command_previews:
+            command = store.create_command(
+                server_id,
+                AgentCommandCreate(
+                    method="POST",
+                    path="/api/child/inbounds",
+                    body=preview.body,
                     timeout_ms=payload.command_timeout_ms,
                 ),
             )

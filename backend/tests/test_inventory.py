@@ -1104,6 +1104,46 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
     assert "secret-orphan-client-id" not in repair_serialized
     assert "orphan@example.com" not in repair_serialized
 
+    cleanup = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/credentials/cleanup-extra",
+        json={},
+    )
+
+    assert cleanup.status_code == 200
+    cleanup_payload = cleanup.json()
+    assert cleanup_payload["license_required"] is False
+    assert cleanup_payload["has_scan"] is True
+    assert cleanup_payload["planned_client_count"] == 1
+    assert cleanup_payload["command_count"] == 1
+    assert cleanup_payload["commands"] == []
+    assert cleanup_payload["entries"] == [
+        {
+            "node_id": node["id"],
+            "node_name": "edge-runtime-credentials vless-443",
+            "protocol": "vless",
+            "inbound_tag": "vless-443",
+            "runtime_source_index": 0,
+            "runtime_display_name": "vless-443",
+            "emails": ["orphan@example.com"],
+        }
+    ]
+    assert cleanup_payload["command_previews"] == [
+        {
+            "node_id": node["id"],
+            "node_name": "edge-runtime-credentials vless-443",
+            "body": {
+                "action": "remove-client",
+                "tag": "vless-443",
+                "client": {"email": "orphan@example.com"},
+            },
+        }
+    ]
+    cleanup_serialized = json.dumps(cleanup_payload)
+    assert alice_id not in cleanup_serialized
+    assert bob_id not in cleanup_serialized
+    assert "secret-runtime-client-id" not in cleanup_serialized
+    assert "secret-orphan-client-id" not in cleanup_serialized
+
     with client.websocket_connect("/api/v1/agents/ws") as websocket:
         websocket.send_json(
             {
@@ -1134,6 +1174,27 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
         assert rpc_call["payload"]["path"] == "/api/child/batch-apply"
         assert rpc_call["payload"]["timeout_ms"] == 75_000
         assert rpc_call["payload"]["body"] == queued_payload["provisioning_batches"][0]["body"]
+
+        cleanup_queued = client.post(
+            f"/api/v1/servers/{server_id}/xray/runtime/credentials/cleanup-extra",
+            json={"queue_agent_commands": True, "command_timeout_ms": 45_000},
+        )
+        assert cleanup_queued.status_code == 200
+        cleanup_queued_payload = cleanup_queued.json()
+        assert cleanup_queued_payload["commands"][0]["status"] == "leased"
+        assert cleanup_queued_payload["commands"][0]["path"] == "/api/child/inbounds"
+        assert cleanup_queued_payload["commands"][0]["body"] == {
+            "action": "remove-client",
+            "tag": "vless-443",
+            "client": {"email": "orphan@example.com"},
+        }
+        cleanup_rpc = websocket.receive_json()
+        assert cleanup_rpc["type"] == "rpc_call"
+        assert cleanup_rpc["payload"]["path"] == "/api/child/inbounds"
+        assert cleanup_rpc["payload"]["timeout_ms"] == 45_000
+        assert cleanup_rpc["payload"]["body"] == cleanup_queued_payload["command_previews"][0][
+            "body"
+        ]
 
 
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:

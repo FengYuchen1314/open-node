@@ -10,6 +10,7 @@ import type {
 } from "../domain/subscriptions";
 import {
   assignSubscriptionPlan,
+  cleanupExtraXrayRuntimeCredentials,
   createManagedNode,
   createManagedNodeFromRuntimeInbound,
   createManagedNodeFromPreset,
@@ -522,6 +523,39 @@ describe("subscriptions API client", () => {
           license_required: false,
         });
       }
+      if (url.endsWith("/xray/runtime/credentials/cleanup-extra")) {
+        return jsonResponse({
+          server_id: "srv_1",
+          has_scan: true,
+          entries: [
+            {
+              node_id: "node_1",
+              node_name: "Tokyo vless",
+              protocol: "vless",
+              inbound_tag: "vless-443",
+              runtime_source_index: 0,
+              runtime_display_name: "vless-443",
+              emails: ["orphan@example.com"],
+            },
+          ],
+          command_previews: [
+            {
+              node_id: "node_1",
+              node_name: "Tokyo vless",
+              body: {
+                action: "remove-client",
+                tag: "vless-443",
+                client: { email: "orphan@example.com" },
+              },
+            },
+          ],
+          commands: [agentCommand({ path: "/api/child/inbounds" })],
+          planned_client_count: 1,
+          command_count: 1,
+          warnings: [],
+          license_required: false,
+        });
+      }
       if (url.endsWith("/xray/runtime/nodes/import")) {
         return jsonResponse({
           server_id: "srv_1",
@@ -562,6 +596,11 @@ describe("subscriptions API client", () => {
       { queue_agent_commands: true, no_restart: false, command_timeout_ms: 75_000 },
       fetcher,
     );
+    const cleaned = await cleanupExtraXrayRuntimeCredentials(
+      "srv_1",
+      { queue_agent_commands: true, command_timeout_ms: 45_000 },
+      fetcher,
+    );
     const node = await createManagedNodeFromRuntimeInbound(
       "srv_1",
       { source_index: 0, host: "public.example.com" },
@@ -584,6 +623,11 @@ describe("subscriptions API client", () => {
     expect(reconciliation.stale_count).toBe(1);
     expect(credentialReconciliation.missing_runtime_client_count).toBe(1);
     expect(repaired.planned_client_count).toBe(1);
+    expect(cleaned.command_previews[0].body).toEqual({
+      action: "remove-client",
+      tag: "vless-443",
+      client: { email: "orphan@example.com" },
+    });
     expect(node.node.id).toBe("node_1");
     expect(imported.created_count).toBe(1);
     expect(synced.updated_fields).toEqual(["config.port"]);
@@ -607,6 +651,11 @@ describe("subscriptions API client", () => {
         url: "/api/v1/servers/srv_1/xray/runtime/credentials/repair-missing",
         headers: { "Content-Type": "application/json" },
         body: { queue_agent_commands: true, no_restart: false, command_timeout_ms: 75000 },
+      },
+      {
+        url: "/api/v1/servers/srv_1/xray/runtime/credentials/cleanup-extra",
+        headers: { "Content-Type": "application/json" },
+        body: { queue_agent_commands: true, command_timeout_ms: 45000 },
       },
       {
         url: "/api/v1/servers/srv_1/xray/runtime/nodes",

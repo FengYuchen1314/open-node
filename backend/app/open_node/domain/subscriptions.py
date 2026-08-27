@@ -729,6 +729,45 @@ class XrayRuntimeCredentialRepairResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeCredentialCleanupRequest(BaseModel):
+    node_ids: list[UUID] | None = Field(default=None, max_length=100)
+    queue_agent_commands: bool = False
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("node_ids")
+    @classmethod
+    def validate_node_ids(cls, value: list[UUID] | None) -> list[UUID] | None:
+        return XrayRuntimeCredentialRepairRequest.validate_node_ids(value)
+
+
+class XrayRuntimeCredentialCleanupEntry(BaseModel):
+    node_id: UUID
+    node_name: str
+    protocol: str
+    inbound_tag: str
+    runtime_source_index: int = Field(ge=0)
+    runtime_display_name: str
+    emails: list[str] = Field(default_factory=list)
+
+
+class XrayRuntimeCredentialCleanupCommand(BaseModel):
+    node_id: UUID
+    node_name: str
+    body: dict[str, Any]
+
+
+class XrayRuntimeCredentialCleanupResponse(BaseModel):
+    server_id: UUID
+    has_scan: bool = False
+    entries: list[XrayRuntimeCredentialCleanupEntry] = Field(default_factory=list)
+    command_previews: list[XrayRuntimeCredentialCleanupCommand] = Field(default_factory=list)
+    commands: list[AgentCommandRead] = Field(default_factory=list)
+    planned_client_count: int = 0
+    command_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
 class SubscriptionPlanAssignResponse(BaseModel):
     user: ProductUserRead
     plan: SubscriptionPlanRead

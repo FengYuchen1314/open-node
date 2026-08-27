@@ -535,6 +535,40 @@ export interface XrayRuntimeCredentialRepairResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeCredentialCleanupRequest {
+  node_ids?: string[] | null;
+  queue_agent_commands?: boolean;
+  command_timeout_ms?: number;
+}
+
+export interface XrayRuntimeCredentialCleanupEntry {
+  node_id: string;
+  node_name: string;
+  protocol: string;
+  inbound_tag: string;
+  runtime_source_index: number;
+  runtime_display_name: string;
+  emails: string[];
+}
+
+export interface XrayRuntimeCredentialCleanupCommand {
+  node_id: string;
+  node_name: string;
+  body: Record<string, unknown>;
+}
+
+export interface XrayRuntimeCredentialCleanupResponse {
+  server_id: string;
+  has_scan: boolean;
+  entries: XrayRuntimeCredentialCleanupEntry[];
+  command_previews: XrayRuntimeCredentialCleanupCommand[];
+  commands: AgentCommand[];
+  planned_client_count: number;
+  command_count: number;
+  warnings: string[];
+  license_required: false;
+}
+
 export interface SubscriptionPlansResponse {
   plans: SubscriptionPlan[];
   license_required: false;
