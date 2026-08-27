@@ -2,9 +2,60 @@ import json
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
+from urllib.parse import urlparse
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
+
+
+def _strip_required_text(value: str, field_name: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field_name} is empty")
+    if any(ord(char) < 32 for char in normalized):
+        raise ValueError(f"{field_name} must not contain control characters")
+    return normalized
+
+
+def _validate_required_content(value: str, field_name: str) -> str:
+    if not value.strip():
+        raise ValueError(f"{field_name} is empty")
+    allowed_controls = {"\n", "\r", "\t"}
+    if any(ord(char) < 32 and char not in allowed_controls for char in value):
+        raise ValueError(f"{field_name} must not contain unsafe control characters")
+    return value
+
+
+def _strip_optional_text(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _strip_required_text(value, field_name)
+
+
+def _ensure_json_serializable_config(value: Any, field_name: str) -> Any:
+    if isinstance(value, str):
+        return _validate_required_content(value, field_name)
+
+    try:
+        json.dumps(value, ensure_ascii=False)
+    except TypeError as exc:
+        raise ValueError(f"{field_name} must be JSON serializable") from exc
+    return value
+
+
+def _validate_xray_config_file(value: str) -> str:
+    normalized = _strip_required_text(value, "file")
+    if "/" in normalized or "\\" in normalized or normalized in {".", ".."}:
+        raise ValueError("file must be a config filename, not a path")
+    return normalized
+
+
+def _validate_agent_url(value: str) -> str:
+    normalized = _strip_required_text(value, "master_url").rstrip("/")
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("master_url must be a valid HTTP(S) URL")
+    return normalized
 
 
 class ConnectionMode(StrEnum):
@@ -71,13 +122,30 @@ class AgentOperationKind(StrEnum):
     LOGS = "logs"
     SCAN = "scan"
     XRAY_TEST_CONFIG = "xray_test_config"
+    XRAY_CONFIG_READ = "xray_config_read"
+    XRAY_CONFIG_WRITE = "xray_config_write"
+    XRAY_SYSTEM_CONFIG_READ = "xray_system_config_read"
+    XRAY_SYSTEM_CONFIG_WRITE = "xray_system_config_write"
+    XRAY_CONFIG_FILES_LIST = "xray_config_files_list"
+    XRAY_CONFIG_FILE_READ = "xray_config_file_read"
+    XRAY_CONFIG_FILE_WRITE = "xray_config_file_write"
     XRAY_INSTALL = "xray_install"
     XRAY_REMOVE = "xray_remove"
+    NGINX_CONFIG_READ = "nginx_config_read"
+    NGINX_CONFIG_WRITE = "nginx_config_write"
+    NGINX_CONFIG_FILES_LIST = "nginx_config_files_list"
+    NGINX_CONFIG_FILE_READ = "nginx_config_file_read"
+    NGINX_CONFIG_FILE_WRITE = "nginx_config_file_write"
     NGINX_INSTALL = "nginx_install"
     NGINX_REMOVE = "nginx_remove"
     WARP_INSTALL = "warp_install"
     WARP_STATUS = "warp_status"
+    WARP_LICENSE = "warp_license"
     WARP_REMOVE = "warp_remove"
+    AGENT_SWITCH_XRAY_MODE = "agent_switch_xray_mode"
+    AGENT_SWITCH_LISTEN_PORT = "agent_switch_listen_port"
+    AGENT_PROBE_MASTER_URL = "agent_probe_master_url"
+    AGENT_UPDATE_MASTER_URL = "agent_update_master_url"
     AGENT_UPGRADE = "agent_upgrade"
     AGENT_UNINSTALL = "agent_uninstall"
 
@@ -403,16 +471,152 @@ class AgentXrayTestConfigOperationRequest(BaseModel):
     @field_validator("config")
     @classmethod
     def validate_config(cls, value: Any) -> Any:
-        if isinstance(value, str):
-            if not value.strip():
-                raise ValueError("config is empty")
-            return value
+        return _ensure_json_serializable_config(value, "config")
 
-        try:
-            json.dumps(value, ensure_ascii=False)
-        except TypeError as exc:
-            raise ValueError("config must be JSON serializable") from exc
+
+class AgentXrayConfigOperationRequest(BaseModel):
+    config: Any
+    path: str | None = Field(default=None, max_length=512)
+    force: bool = False
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, value: Any) -> Any:
+        return _ensure_json_serializable_config(value, "config")
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "path")
+
+
+class AgentXraySystemConfigOperationRequest(BaseModel):
+    metrics_enabled: bool = False
+    metrics_listen: str = Field(default="127.0.0.1:11111", max_length=255)
+    stats_enabled: bool = True
+    grpc_enabled: bool = True
+    grpc_port: int = Field(default=46_736, ge=1, le=65_535)
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("metrics_listen")
+    @classmethod
+    def validate_metrics_listen(cls, value: str) -> str:
+        return _strip_required_text(value, "metrics_listen")
+
+
+class AgentXrayConfigFileReadOperationRequest(BaseModel):
+    file: str = Field(min_length=1, max_length=255)
+
+    @field_validator("file")
+    @classmethod
+    def validate_file(cls, value: str) -> str:
+        return _validate_xray_config_file(value)
+
+
+class AgentXrayConfigFileWriteOperationRequest(BaseModel):
+    file: str = Field(min_length=1, max_length=255)
+    content: Any
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("file")
+    @classmethod
+    def validate_file(cls, value: str) -> str:
+        return _validate_xray_config_file(value)
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: Any) -> Any:
+        return _ensure_json_serializable_config(value, "content")
+
+
+class AgentNginxConfigOperationRequest(BaseModel):
+    config: str = Field(min_length=1)
+    path: str | None = Field(default=None, max_length=512)
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, value: str) -> str:
+        return _validate_required_content(value, "config")
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "path")
+
+
+class AgentNginxConfigFileReadOperationRequest(BaseModel):
+    file: str = Field(min_length=1, max_length=512)
+
+    @field_validator("file")
+    @classmethod
+    def validate_file(cls, value: str) -> str:
+        return _strip_required_text(value, "file")
+
+
+class AgentNginxConfigFileWriteOperationRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=512)
+    content: str = Field(min_length=1)
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        return _strip_required_text(value, "path")
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        return _validate_required_content(value, "content")
+
+
+class AgentWarpLicenseOperationRequest(BaseModel):
+    license: str = Field(min_length=1, max_length=255)
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @field_validator("license")
+    @classmethod
+    def validate_license(cls, value: str) -> str:
+        return _strip_required_text(value, "license")
+
+
+class AgentSwitchXrayModeOperationRequest(BaseModel):
+    xray_mode: XrayMode
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+
+class AgentSwitchListenPortOperationRequest(BaseModel):
+    listen_port: int = Field(ge=0, le=65_535)
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @field_validator("listen_port")
+    @classmethod
+    def validate_listen_port(cls, value: int) -> int:
+        if value != 0 and value < 1024:
+            raise ValueError("listen_port must be 0 or in 1024-65535")
         return value
+
+
+class AgentProbeMasterURLOperationRequest(BaseModel):
+    master_url: str = Field(min_length=1, max_length=512)
+    command_timeout_ms: int = Field(default=15_000, ge=1_000, le=300_000)
+
+    @field_validator("master_url")
+    @classmethod
+    def validate_master_url(cls, value: str) -> str:
+        return _validate_agent_url(value)
+
+
+class AgentUpdateMasterURLOperationRequest(BaseModel):
+    master_url: str = Field(min_length=1, max_length=512)
+    only_if_recovery: bool = False
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @field_validator("master_url")
+    @classmethod
+    def validate_master_url(cls, value: str) -> str:
+        return _validate_agent_url(value)
 
 
 class ServerCommandsResponse(BaseModel):

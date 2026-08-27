@@ -231,6 +231,7 @@ body {
 }
 
 .diagnostic-command-grid,
+.config-command-grid,
 .log-command-grid {
   display: grid;
   gap: 10px;
@@ -253,10 +254,30 @@ body {
 }
 
 .diagnostic-command-grid .v-btn,
+.config-command-grid .v-btn,
 .log-command-grid .v-btn,
 .maintenance-command-grid .v-btn,
 .quick-command-grid .v-btn,
 .service-command-grid .v-btn {
+  min-width: 0;
+}
+
+.compact-form {
+  gap: 10px;
+}
+
+.form-row > .v-btn {
+  align-self: center;
+  min-height: 44px;
+}
+
+.settings-action-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-action-row .v-btn {
   min-width: 0;
 }
 
@@ -303,10 +324,12 @@ body {
   }
 
   .diagnostic-command-grid,
+  .config-command-grid,
   .quick-command-grid,
   .log-command-grid,
   .maintenance-command-grid,
-  .service-command-grid {
+  .service-command-grid,
+  .settings-action-row {
     grid-template-columns: 1fr;
   }
 }

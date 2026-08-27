@@ -103,13 +103,30 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/logs`
 - `POST /api/v1/servers/{server_id}/operations/scan`
 - `POST /api/v1/servers/{server_id}/operations/xray/test-config`
+- `POST /api/v1/servers/{server_id}/operations/xray/config/read`
+- `POST /api/v1/servers/{server_id}/operations/xray/config/write`
+- `POST /api/v1/servers/{server_id}/operations/xray/system-config/read`
+- `POST /api/v1/servers/{server_id}/operations/xray/system-config/write`
+- `POST /api/v1/servers/{server_id}/operations/xray/config-files/list`
+- `POST /api/v1/servers/{server_id}/operations/xray/config-files/read`
+- `POST /api/v1/servers/{server_id}/operations/xray/config-files/write`
 - `POST /api/v1/servers/{server_id}/operations/xray/install`
 - `POST /api/v1/servers/{server_id}/operations/xray/remove`
+- `POST /api/v1/servers/{server_id}/operations/nginx/config/read`
+- `POST /api/v1/servers/{server_id}/operations/nginx/config/write`
+- `POST /api/v1/servers/{server_id}/operations/nginx/config-files/list`
+- `POST /api/v1/servers/{server_id}/operations/nginx/config-files/read`
+- `POST /api/v1/servers/{server_id}/operations/nginx/config-files/write`
 - `POST /api/v1/servers/{server_id}/operations/nginx/install`
 - `POST /api/v1/servers/{server_id}/operations/nginx/remove`
 - `POST /api/v1/servers/{server_id}/operations/warp/install`
 - `POST /api/v1/servers/{server_id}/operations/warp/status`
+- `POST /api/v1/servers/{server_id}/operations/warp/license`
 - `POST /api/v1/servers/{server_id}/operations/warp/remove`
+- `POST /api/v1/servers/{server_id}/operations/agent/switch-xray-mode`
+- `POST /api/v1/servers/{server_id}/operations/agent/switch-listen-port`
+- `POST /api/v1/servers/{server_id}/operations/agent/probe-master-url`
+- `POST /api/v1/servers/{server_id}/operations/agent/update-master-url`
 - `POST /api/v1/servers/{server_id}/operations/agent/upgrade`
 - `POST /api/v1/servers/{server_id}/operations/agent/uninstall`
 
@@ -129,6 +146,13 @@ NIC enumeration, service logs, agent-side scan, and Xray config validation. The
 service-control wrapper only accepts the active agent's `xray` and `nginx`
 targets with `start`, `stop`, or `restart`; the logs wrapper clamps requests to
 the agent-supported `1..2000` line range before building the child query.
+
+Config wrappers cover the active agent's Xray and nginx main config and
+`config-files` routes. Control-plane requests serialize structured Xray JSON
+into the text shape the agent expects, validate obvious path and URL hazards,
+and preserve the agent-side write/test/reload behavior. Agent setting wrappers
+cover Xray mode, listen port, master URL probe/update, and WARP credential
+updates without changing the Open Node no-license contract.
 
 ## Public Probe API
 

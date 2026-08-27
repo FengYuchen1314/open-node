@@ -16,13 +16,30 @@ export type AgentOperationKind =
   | "logs"
   | "scan"
   | "xray_test_config"
+  | "xray_config_read"
+  | "xray_config_write"
+  | "xray_system_config_read"
+  | "xray_system_config_write"
+  | "xray_config_files_list"
+  | "xray_config_file_read"
+  | "xray_config_file_write"
   | "xray_install"
   | "xray_remove"
+  | "nginx_config_read"
+  | "nginx_config_write"
+  | "nginx_config_files_list"
+  | "nginx_config_file_read"
+  | "nginx_config_file_write"
   | "nginx_install"
   | "nginx_remove"
   | "warp_install"
   | "warp_status"
+  | "warp_license"
   | "warp_remove"
+  | "agent_switch_xray_mode"
+  | "agent_switch_listen_port"
+  | "agent_probe_master_url"
+  | "agent_update_master_url"
   | "agent_upgrade"
   | "agent_uninstall";
 
@@ -202,12 +219,92 @@ export interface AgentXrayTestConfigOperationRequest {
   command_timeout_ms?: number;
 }
 
+export interface AgentXrayConfigOperationRequest {
+  config: unknown;
+  path?: string | null;
+  force?: boolean;
+  command_timeout_ms?: number;
+}
+
+export interface AgentXraySystemConfigOperationRequest {
+  metrics_enabled?: boolean;
+  metrics_listen?: string;
+  stats_enabled?: boolean;
+  grpc_enabled?: boolean;
+  grpc_port?: number;
+  command_timeout_ms?: number;
+}
+
+export interface AgentXrayConfigFileReadOperationRequest {
+  file: string;
+}
+
+export interface AgentXrayConfigFileWriteOperationRequest {
+  file: string;
+  content: unknown;
+  command_timeout_ms?: number;
+}
+
+export interface AgentNginxConfigOperationRequest {
+  config: string;
+  path?: string | null;
+  command_timeout_ms?: number;
+}
+
+export interface AgentNginxConfigFileReadOperationRequest {
+  file: string;
+}
+
+export interface AgentNginxConfigFileWriteOperationRequest {
+  path: string;
+  content: string;
+  command_timeout_ms?: number;
+}
+
+export interface AgentWarpLicenseOperationRequest {
+  license: string;
+  command_timeout_ms?: number;
+}
+
+export interface AgentSwitchXrayModeOperationRequest {
+  xray_mode: XrayMode;
+  command_timeout_ms?: number;
+}
+
+export interface AgentSwitchListenPortOperationRequest {
+  listen_port: number;
+  command_timeout_ms?: number;
+}
+
+export interface AgentProbeMasterURLOperationRequest {
+  master_url: string;
+  command_timeout_ms?: number;
+}
+
+export interface AgentUpdateMasterURLOperationRequest {
+  master_url: string;
+  only_if_recovery?: boolean;
+  command_timeout_ms?: number;
+}
+
 export type AgentOperationPayload =
   | AgentDomainLatencyProbeRequest
   | AgentNginxInstallOperationRequest
   | AgentServiceControlOperationRequest
   | AgentLogsOperationRequest
-  | AgentXrayTestConfigOperationRequest;
+  | AgentXrayTestConfigOperationRequest
+  | AgentXrayConfigOperationRequest
+  | AgentXraySystemConfigOperationRequest
+  | AgentXrayConfigFileReadOperationRequest
+  | AgentXrayConfigFileWriteOperationRequest
+  | AgentNginxConfigOperationRequest
+  | AgentNginxConfigFileReadOperationRequest
+  | AgentNginxConfigFileWriteOperationRequest
+  | AgentWarpLicenseOperationRequest
+  | AgentSwitchXrayModeOperationRequest
+  | AgentSwitchListenPortOperationRequest
+  | AgentProbeMasterURLOperationRequest
+  | AgentUpdateMasterURLOperationRequest;
 
 export interface ServerCommandsResponse {
   server_id: string;

@@ -449,4 +449,159 @@ describe("inventory API client", () => {
     expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/logs");
     expect(JSON.parse(body)).toEqual({ service: "xray", lines: 500 });
   });
+
+  it("queues config read operations with preset routes", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_9",
+            server_id: "srv_1",
+            request_id: "srv_1-xray-config",
+            method: "GET",
+            path: "/api/child/xray/config",
+            query: "",
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "xray_config_read", undefined, fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/xray/config/read");
+    expect(headers).toBeUndefined();
+  });
+
+  it("queues Xray config write operations with JSON body", async () => {
+    let requestUrl = "";
+    let body = "";
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      body = init?.body?.toString() ?? "";
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_10",
+            server_id: "srv_1",
+            request_id: "srv_1-xray-write",
+            method: "POST",
+            path: "/api/child/xray/config",
+            query: "",
+            body: JSON.parse(body) as unknown,
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation(
+      "srv_1",
+      "xray_config_write",
+      { config: { inbounds: [], outbounds: [] }, force: true },
+      fetcher,
+    );
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/xray/config/write");
+    expect(JSON.parse(body)).toEqual({
+      config: { inbounds: [], outbounds: [] },
+      force: true,
+    });
+  });
+
+  it("queues WARP credential operations with JSON body", async () => {
+    let requestUrl = "";
+    let body = "";
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      body = init?.body?.toString() ?? "";
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_11",
+            server_id: "srv_1",
+            request_id: "srv_1-warp-license",
+            method: "POST",
+            path: "/api/child/warp/license",
+            query: "",
+            body: JSON.parse(body) as unknown,
+            timeout_ms: 60000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "warp_license", { license: "warp-plus-key" }, fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/warp/license");
+    expect(JSON.parse(body)).toEqual({ license: "warp-plus-key" });
+  });
+
+  it("queues agent master URL updates with JSON body", async () => {
+    let requestUrl = "";
+    let body = "";
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      body = init?.body?.toString() ?? "";
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_12",
+            server_id: "srv_1",
+            request_id: "srv_1-master",
+            method: "POST",
+            path: "/api/child/agent/update-master-url",
+            query: "",
+            body: JSON.parse(body) as unknown,
+            timeout_ms: 60000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation(
+      "srv_1",
+      "agent_update_master_url",
+      { master_url: "https://panel.example.com", only_if_recovery: true },
+      fetcher,
+    );
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/agent/update-master-url");
+    expect(JSON.parse(body)).toEqual({
+      master_url: "https://panel.example.com",
+      only_if_recovery: true,
+    });
+  });
 });

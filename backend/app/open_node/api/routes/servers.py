@@ -12,8 +12,20 @@ from open_node.domain.inventory import (
     AgentCommandStreamFramesResponse,
     AgentDomainLatencyProbeRequest,
     AgentLogsOperationRequest,
+    AgentNginxConfigFileReadOperationRequest,
+    AgentNginxConfigFileWriteOperationRequest,
+    AgentNginxConfigOperationRequest,
     AgentNginxInstallOperationRequest,
+    AgentProbeMasterURLOperationRequest,
     AgentServiceControlOperationRequest,
+    AgentSwitchListenPortOperationRequest,
+    AgentSwitchXrayModeOperationRequest,
+    AgentUpdateMasterURLOperationRequest,
+    AgentWarpLicenseOperationRequest,
+    AgentXrayConfigFileReadOperationRequest,
+    AgentXrayConfigFileWriteOperationRequest,
+    AgentXrayConfigOperationRequest,
+    AgentXraySystemConfigOperationRequest,
     AgentXrayTestConfigOperationRequest,
     ServerCommandsResponse,
     ServerCreate,
@@ -326,6 +338,160 @@ async def queue_xray_test_config_operation(
 
 
 @router.post(
+    "/{server_id}/operations/xray/config/read",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_config_read_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/xray/config"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/config/write",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_config_write_operation(
+    server_id: UUID,
+    payload: AgentXrayConfigOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    body: dict[str, object] = {"config": _config_to_text(payload.config)}
+    if payload.path:
+        body["path"] = payload.path
+    if payload.force:
+        body["force"] = payload.force
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/xray/config",
+            body=body,
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/system-config/read",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_system_config_read_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/xray/system-config"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/system-config/write",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_system_config_write_operation(
+    server_id: UUID,
+    payload: AgentXraySystemConfigOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/xray/system-config",
+            body=payload.model_dump(mode="json", exclude={"command_timeout_ms"}),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/config-files/list",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_config_files_list_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/xray/config-files"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/config-files/read",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_config_file_read_operation(
+    server_id: UUID,
+    payload: AgentXrayConfigFileReadOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="GET",
+            path="/api/child/xray/config-files",
+            query=_query_from_params({"file": payload.file}),
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/config-files/write",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_config_file_write_operation(
+    server_id: UUID,
+    payload: AgentXrayConfigFileWriteOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/xray/config-files",
+            body={"file": payload.file, "content": _config_to_text(payload.content)},
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
     "/{server_id}/operations/xray/install",
     response_model=AgentCommandCreateResponse,
     status_code=status.HTTP_201_CREATED,
@@ -396,6 +562,116 @@ async def queue_nginx_remove_operation(
     return await _queue_maintenance_command(
         server_id,
         "/api/child/nginx/remove-stream",
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/config/read",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_config_read_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/nginx/config"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/config/write",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_config_write_operation(
+    server_id: UUID,
+    payload: AgentNginxConfigOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    body: dict[str, object] = {"config": payload.config}
+    if payload.path:
+        body["path"] = payload.path
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/nginx/config",
+            body=body,
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/config-files/list",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_config_files_list_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/nginx/config-files"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/config-files/read",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_config_file_read_operation(
+    server_id: UUID,
+    payload: AgentNginxConfigFileReadOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="GET",
+            path="/api/child/nginx/config-files",
+            query=_query_from_params({"file": payload.file}),
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/nginx/config-files/write",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_nginx_config_file_write_operation(
+    server_id: UUID,
+    payload: AgentNginxConfigFileWriteOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/nginx/config-files",
+            body=payload.model_dump(mode="json", exclude={"command_timeout_ms"}),
+            timeout_ms=payload.command_timeout_ms,
+        ),
         store,
         connections,
     )
@@ -474,6 +750,30 @@ async def queue_warp_status_operation(
 
 
 @router.post(
+    "/{server_id}/operations/warp/license",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_warp_license_operation(
+    server_id: UUID,
+    payload: AgentWarpLicenseOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/warp/license",
+            body={"license": payload.license},
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
     "/{server_id}/operations/warp/remove",
     response_model=AgentCommandCreateResponse,
     status_code=status.HTTP_201_CREATED,
@@ -486,6 +786,102 @@ async def queue_warp_remove_operation(
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(method="POST", path="/api/child/warp/remove", timeout_ms=60_000),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/agent/switch-xray-mode",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_agent_switch_xray_mode_operation(
+    server_id: UUID,
+    payload: AgentSwitchXrayModeOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/agent/switch-xray-mode",
+            body={"xray_mode": payload.xray_mode.value},
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/agent/switch-listen-port",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_agent_switch_listen_port_operation(
+    server_id: UUID,
+    payload: AgentSwitchListenPortOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/agent/switch-listen-port",
+            body={"listen_port": payload.listen_port},
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/agent/probe-master-url",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_agent_probe_master_url_operation(
+    server_id: UUID,
+    payload: AgentProbeMasterURLOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/agent/probe-master-url",
+            body={"master_url": payload.master_url},
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/agent/update-master-url",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_agent_update_master_url_operation(
+    server_id: UUID,
+    payload: AgentUpdateMasterURLOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/agent/update-master-url",
+            body=payload.model_dump(mode="json", exclude={"command_timeout_ms"}),
+            timeout_ms=payload.command_timeout_ms,
+        ),
         store,
         connections,
     )
@@ -529,6 +925,12 @@ async def _queue_maintenance_command(
 
 def _query_from_params(params: dict[str, str | None]) -> str:
     return urlencode({key: value for key, value in params.items() if value})
+
+
+def _config_to_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    return _json_dumps(value)
 
 
 def _json_dumps(value: object) -> str:

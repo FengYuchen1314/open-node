@@ -8,6 +8,7 @@ import {
   type AgentLogService,
   type AgentOperationKind,
   type AgentServiceName,
+  type AgentOperationPayload,
   type AgentTelemetry,
   type ConnectionMode,
   type ServerCreateRequest,
@@ -50,6 +51,13 @@ const domainLatencyForm = reactive({
   timeout_ms: 2_000,
   allow_icmp: false,
 });
+const agentSettingsForm = reactive({
+  xray_mode: "external" as XrayMode,
+  listen_port: 23889,
+  master_url: "",
+  only_if_recovery: true,
+  warp_license: "",
+});
 
 const connectionModes: Array<{ title: string; value: ConnectionMode }> = [
   { title: "Auto", value: "auto" },
@@ -64,10 +72,24 @@ const xrayModes: Array<{ title: string; value: XrayMode }> = [
 ];
 
 const commandMethods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
-type SimpleAgentOperation = Exclude<
-  AgentOperationKind,
-  "domain_latency" | "service_control" | "logs" | "xray_test_config"
->;
+type PayloadAgentOperation =
+  | "domain_latency"
+  | "service_control"
+  | "logs"
+  | "xray_test_config"
+  | "xray_config_write"
+  | "xray_system_config_write"
+  | "xray_config_file_read"
+  | "xray_config_file_write"
+  | "nginx_config_write"
+  | "nginx_config_file_read"
+  | "nginx_config_file_write"
+  | "warp_license"
+  | "agent_switch_xray_mode"
+  | "agent_switch_listen_port"
+  | "agent_probe_master_url"
+  | "agent_update_master_url";
+type SimpleAgentOperation = Exclude<AgentOperationKind, PayloadAgentOperation>;
 const quickOperations: Array<{
   title: string;
   icon: string;
@@ -138,6 +160,29 @@ const logOperations: Array<{
   { title: "Agent", icon: "mdi-text-box-search-outline", service: "agent" },
   { title: "Xray", icon: "mdi-text-box-search-outline", service: "xray" },
   { title: "Nginx", icon: "mdi-text-box-search-outline", service: "nginx" },
+];
+const configReadOperations: Array<{
+  title: string;
+  icon: string;
+  kind: SimpleAgentOperation;
+}> = [
+  { title: "Xray config", icon: "mdi-file-code-outline", kind: "xray_config_read" },
+  {
+    title: "Xray system",
+    icon: "mdi-tune-variant",
+    kind: "xray_system_config_read",
+  },
+  {
+    title: "Xray files",
+    icon: "mdi-folder-cog-outline",
+    kind: "xray_config_files_list",
+  },
+  { title: "Nginx config", icon: "mdi-file-cog-outline", kind: "nginx_config_read" },
+  {
+    title: "Nginx files",
+    icon: "mdi-folder-cog-outline",
+    kind: "nginx_config_files_list",
+  },
 ];
 
 const statusMeta: Record<ServerStatus, { color: string; icon: string; label: string }> = {
@@ -357,43 +402,80 @@ async function queueQuickOperation(kind: SimpleAgentOperation) {
   }
 }
 
-async function queueServiceRestart(service: AgentServiceName) {
+async function queuePayloadOperation(
+  kind: PayloadAgentOperation,
+  payload: AgentOperationPayload,
+) {
   if (!commandForm.server_id) {
     errorMessage.value = "Target server is required.";
-    return;
+    return false;
   }
 
-  savingOperation.value = "service_control";
+  savingOperation.value = kind;
   errorMessage.value = "";
   try {
-    await queueAgentOperation(commandForm.server_id, "service_control", {
-      service,
-      action: "restart",
-    });
+    await queueAgentOperation(commandForm.server_id, kind, payload);
     await refreshCommands(servers.value);
+    return true;
   } catch (error) {
     errorMessage.value = readableError(error);
+    return false;
   } finally {
     savingOperation.value = "";
   }
 }
 
+async function queueServiceRestart(service: AgentServiceName) {
+  await queuePayloadOperation("service_control", { service, action: "restart" });
+}
+
 async function queueLogs(service: AgentLogService) {
-  if (!commandForm.server_id) {
-    errorMessage.value = "Target server is required.";
+  await queuePayloadOperation("logs", { service, lines: 200 });
+}
+
+async function submitWarpLicense() {
+  const license = agentSettingsForm.warp_license.trim();
+  if (!license) {
+    errorMessage.value = "WARP credential is required.";
     return;
   }
-
-  savingOperation.value = "logs";
-  errorMessage.value = "";
-  try {
-    await queueAgentOperation(commandForm.server_id, "logs", { service, lines: 200 });
-    await refreshCommands(servers.value);
-  } catch (error) {
-    errorMessage.value = readableError(error);
-  } finally {
-    savingOperation.value = "";
+  const queued = await queuePayloadOperation("warp_license", { license });
+  if (queued) {
+    agentSettingsForm.warp_license = "";
   }
+}
+
+async function switchAgentXrayMode() {
+  await queuePayloadOperation("agent_switch_xray_mode", {
+    xray_mode: agentSettingsForm.xray_mode,
+  });
+}
+
+async function switchAgentListenPort() {
+  await queuePayloadOperation("agent_switch_listen_port", {
+    listen_port: agentSettingsForm.listen_port,
+  });
+}
+
+async function probeMasterUrl() {
+  const masterUrl = agentSettingsForm.master_url.trim();
+  if (!masterUrl) {
+    errorMessage.value = "Master URL is required.";
+    return;
+  }
+  await queuePayloadOperation("agent_probe_master_url", { master_url: masterUrl });
+}
+
+async function updateMasterUrl() {
+  const masterUrl = agentSettingsForm.master_url.trim();
+  if (!masterUrl) {
+    errorMessage.value = "Master URL is required.";
+    return;
+  }
+  await queuePayloadOperation("agent_update_master_url", {
+    master_url: masterUrl,
+    only_if_recovery: agentSettingsForm.only_if_recovery,
+  });
 }
 
 async function submitDomainLatency() {
@@ -798,6 +880,126 @@ function latestStreamData(command: AgentCommand) {
             {{ operation.title }}
           </v-btn>
         </div>
+        <div class="section-subtitle operation-subtitle">Config reads</div>
+        <div class="config-command-grid">
+          <v-btn
+            v-for="operation in configReadOperations"
+            :key="operation.kind"
+            :disabled="serverOptions.length === 0"
+            :loading="savingOperation === operation.kind"
+            :prepend-icon="operation.icon"
+            color="secondary"
+            size="small"
+            variant="tonal"
+            @click="queueQuickOperation(operation.kind)"
+          >
+            {{ operation.title }}
+          </v-btn>
+        </div>
+        <div class="section-subtitle operation-subtitle">Agent settings</div>
+        <v-form class="server-form compact-form" @submit.prevent="updateMasterUrl">
+          <div class="form-row">
+            <v-select
+              v-model="agentSettingsForm.xray_mode"
+              :items="xrayModes"
+              density="comfortable"
+              label="Xray mode"
+              variant="outlined"
+            />
+            <v-btn
+              :disabled="serverOptions.length === 0"
+              :loading="savingOperation === 'agent_switch_xray_mode'"
+              color="warning"
+              prepend-icon="mdi-swap-horizontal"
+              size="small"
+              variant="tonal"
+              @click="switchAgentXrayMode"
+            >
+              Switch
+            </v-btn>
+          </div>
+          <div class="form-row">
+            <v-text-field
+              v-model.number="agentSettingsForm.listen_port"
+              density="comfortable"
+              label="Listen port"
+              min="0"
+              max="65535"
+              type="number"
+              variant="outlined"
+            />
+            <v-btn
+              :disabled="serverOptions.length === 0"
+              :loading="savingOperation === 'agent_switch_listen_port'"
+              color="warning"
+              prepend-icon="mdi-lan"
+              size="small"
+              variant="tonal"
+              @click="switchAgentListenPort"
+            >
+              Apply
+            </v-btn>
+          </div>
+          <v-text-field
+            v-model="agentSettingsForm.master_url"
+            density="comfortable"
+            label="Master URL"
+            prepend-inner-icon="mdi-link-variant"
+            variant="outlined"
+          />
+          <v-switch
+            v-model="agentSettingsForm.only_if_recovery"
+            color="primary"
+            density="comfortable"
+            hide-details
+            label="Recovery only"
+          />
+          <div class="settings-action-row">
+            <v-btn
+              :disabled="serverOptions.length === 0"
+              :loading="savingOperation === 'agent_probe_master_url'"
+              color="info"
+              prepend-icon="mdi-access-point-network"
+              size="small"
+              variant="tonal"
+              @click="probeMasterUrl"
+            >
+              Probe
+            </v-btn>
+            <v-btn
+              :disabled="serverOptions.length === 0"
+              :loading="savingOperation === 'agent_update_master_url'"
+              color="warning"
+              prepend-icon="mdi-link-lock"
+              size="small"
+              type="submit"
+              variant="tonal"
+            >
+              Update
+            </v-btn>
+          </div>
+          <div class="form-row">
+            <v-text-field
+              v-model="agentSettingsForm.warp_license"
+              density="comfortable"
+              label="WARP credential"
+              prepend-inner-icon="mdi-key-variant"
+              type="password"
+              variant="outlined"
+            />
+            <v-btn
+              :disabled="serverOptions.length === 0"
+              :loading="savingOperation === 'warp_license'"
+              color="info"
+              prepend-icon="mdi-cloud-key-outline"
+              size="small"
+              variant="tonal"
+              @click="submitWarpLicense"
+            >
+              Set WARP
+            </v-btn>
+          </div>
+        </v-form>
         <v-form class="server-form" @submit.prevent="submitDomainLatency">
           <v-textarea
             v-model="domainLatencyForm.domainsText"

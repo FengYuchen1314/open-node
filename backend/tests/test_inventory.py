@@ -668,6 +668,211 @@ def test_xray_test_config_operation_serializes_structured_config(tmp_path: Path)
     assert json.loads(command["body"]["config"]) == {"log": {"loglevel": "warning"}}
 
 
+def test_config_read_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-config-read"}).json()
+    server_id = created["server"]["id"]
+
+    operations = [
+        ("xray/config/read", "/api/child/xray/config"),
+        ("xray/system-config/read", "/api/child/xray/system-config"),
+        ("xray/config-files/list", "/api/child/xray/config-files"),
+        ("nginx/config/read", "/api/child/nginx/config"),
+        ("nginx/config-files/list", "/api/child/nginx/config-files"),
+    ]
+    responses = [
+        client.post(f"/api/v1/servers/{server_id}/operations/{operation}")
+        for operation, _path in operations
+    ]
+
+    assert all(response.status_code == 201 for response in responses)
+    for response, (_operation, expected_path) in zip(responses, operations, strict=True):
+        command = response.json()["command"]
+        assert response.json()["license_required"] is False
+        assert command["method"] == "GET"
+        assert command["path"] == expected_path
+
+
+def test_xray_config_write_operation_serializes_structured_config(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-config"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/xray/config/write",
+        json={
+            "config": {"inbounds": [], "outbounds": []},
+            "path": "/usr/local/etc/xray/config.json",
+            "force": True,
+            "command_timeout_ms": 20_000,
+        },
+    )
+
+    assert response.status_code == 201
+    command = response.json()["command"]
+    assert command["method"] == "POST"
+    assert command["path"] == "/api/child/xray/config"
+    assert command["body"]["path"] == "/usr/local/etc/xray/config.json"
+    assert command["body"]["force"] is True
+    assert json.loads(command["body"]["config"]) == {"inbounds": [], "outbounds": []}
+    assert command["timeout_ms"] == 20_000
+
+
+def test_xray_system_config_write_queues_agent_schema(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-xray-system"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/xray/system-config/write",
+        json={
+            "metrics_enabled": True,
+            "metrics_listen": "127.0.0.1:11111",
+            "stats_enabled": True,
+            "grpc_enabled": True,
+            "grpc_port": 46736,
+        },
+    )
+
+    assert response.status_code == 201
+    command = response.json()["command"]
+    assert command["method"] == "POST"
+    assert command["path"] == "/api/child/xray/system-config"
+    assert command["body"] == {
+        "metrics_enabled": True,
+        "metrics_listen": "127.0.0.1:11111",
+        "stats_enabled": True,
+        "grpc_enabled": True,
+        "grpc_port": 46736,
+    }
+
+
+def test_config_file_operations_build_queries_and_bodies(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-config-files"}).json()
+    server_id = created["server"]["id"]
+
+    xray_read = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config-files/read",
+        json={"file": "routing.json"},
+    )
+    xray_write = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config-files/write",
+        json={"file": "routing.json", "content": {"routing": {"rules": []}}},
+    )
+    nginx_read = client.post(
+        f"/api/v1/servers/{server_id}/operations/nginx/config-files/read",
+        json={"file": "/etc/nginx/conf.d/site.conf"},
+    )
+    nginx_write = client.post(
+        f"/api/v1/servers/{server_id}/operations/nginx/config-files/write",
+        json={"path": "/etc/nginx/conf.d/site.conf", "content": "server { listen 80; }"},
+    )
+    invalid_xray_file = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config-files/read",
+        json={"file": "../config.json"},
+    )
+
+    assert xray_read.status_code == 201
+    assert xray_write.status_code == 201
+    assert nginx_read.status_code == 201
+    assert nginx_write.status_code == 201
+    assert invalid_xray_file.status_code == 422
+    assert xray_read.json()["command"]["query"] == "file=routing.json"
+    assert xray_write.json()["command"]["body"]["file"] == "routing.json"
+    assert json.loads(xray_write.json()["command"]["body"]["content"]) == {
+        "routing": {"rules": []}
+    }
+    assert (
+        nginx_read.json()["command"]["query"]
+        == "file=%2Fetc%2Fnginx%2Fconf.d%2Fsite.conf"
+    )
+    assert nginx_write.json()["command"]["path"] == "/api/child/nginx/config-files"
+    assert nginx_write.json()["command"]["body"] == {
+        "path": "/etc/nginx/conf.d/site.conf",
+        "content": "server { listen 80; }",
+    }
+
+
+def test_nginx_config_write_operation_queues_text_config(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-nginx-config"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/nginx/config/write",
+        json={
+            "config": "events {}\nhttp {}",
+            "path": "/etc/nginx/nginx.conf",
+            "command_timeout_ms": 25_000,
+        },
+    )
+
+    assert response.status_code == 201
+    command = response.json()["command"]
+    assert command["method"] == "POST"
+    assert command["path"] == "/api/child/nginx/config"
+    assert command["body"] == {
+        "config": "events {}\nhttp {}",
+        "path": "/etc/nginx/nginx.conf",
+    }
+    assert command["timeout_ms"] == 25_000
+
+
+def test_warp_license_and_agent_settings_operations_queue_agent_commands(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-agent-settings"}).json()
+    server_id = created["server"]["id"]
+
+    warp = client.post(
+        f"/api/v1/servers/{server_id}/operations/warp/license",
+        json={"license": "warp-plus-key", "command_timeout_ms": 45_000},
+    )
+    xray_mode = client.post(
+        f"/api/v1/servers/{server_id}/operations/agent/switch-xray-mode",
+        json={"xray_mode": "embedded"},
+    )
+    listen_port = client.post(
+        f"/api/v1/servers/{server_id}/operations/agent/switch-listen-port",
+        json={"listen_port": 24889},
+    )
+    probe_master = client.post(
+        f"/api/v1/servers/{server_id}/operations/agent/probe-master-url",
+        json={"master_url": "https://panel.example.com/"},
+    )
+    update_master = client.post(
+        f"/api/v1/servers/{server_id}/operations/agent/update-master-url",
+        json={"master_url": "https://panel.example.com/", "only_if_recovery": True},
+    )
+    invalid_port = client.post(
+        f"/api/v1/servers/{server_id}/operations/agent/switch-listen-port",
+        json={"listen_port": 80},
+    )
+    invalid_master = client.post(
+        f"/api/v1/servers/{server_id}/operations/agent/probe-master-url",
+        json={"master_url": "file:///etc/passwd"},
+    )
+
+    assert warp.status_code == 201
+    assert xray_mode.status_code == 201
+    assert listen_port.status_code == 201
+    assert probe_master.status_code == 201
+    assert update_master.status_code == 201
+    assert invalid_port.status_code == 422
+    assert invalid_master.status_code == 422
+    assert warp.json()["command"]["path"] == "/api/child/warp/license"
+    assert warp.json()["command"]["body"] == {"license": "warp-plus-key"}
+    assert warp.json()["command"]["timeout_ms"] == 45_000
+    assert xray_mode.json()["command"]["body"] == {"xray_mode": "embedded"}
+    assert listen_port.json()["command"]["body"] == {"listen_port": 24889}
+    assert probe_master.json()["command"]["body"] == {
+        "master_url": "https://panel.example.com"
+    }
+    assert update_master.json()["command"]["body"] == {
+        "master_url": "https://panel.example.com",
+        "only_if_recovery": True,
+    }
+
+
 def test_stream_maintenance_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-maintenance"}).json()
@@ -922,6 +1127,41 @@ def test_online_agent_websocket_receives_diagnostic_operation(tmp_path: Path) ->
         assert rpc_call["type"] == "rpc_call"
         assert rpc_call["payload"]["path"] == "/api/child/services/status"
         assert rpc_call["payload"]["method"] == "GET"
+
+
+def test_online_agent_websocket_receives_agent_setting_operation(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-agent-setting"}).json()
+    server_id = created["server"]["id"]
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-agent-setting-host",
+                    "capabilities": {"rpc": True},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+
+        queued = client.post(
+            f"/api/v1/servers/{server_id}/operations/agent/update-master-url",
+            json={"master_url": "https://panel.example.com", "only_if_recovery": True},
+        )
+
+        assert queued.status_code == 201
+        assert queued.json()["command"]["status"] == "leased"
+        rpc_call = websocket.receive_json()
+        assert rpc_call["type"] == "rpc_call"
+        assert rpc_call["payload"]["path"] == "/api/child/agent/update-master-url"
+        assert rpc_call["payload"]["method"] == "POST"
+        assert rpc_call["payload"]["body"] == {
+            "master_url": "https://panel.example.com",
+            "only_if_recovery": True,
+        }
 
 
 def test_online_agent_websocket_receives_stream_maintenance_operation(tmp_path: Path) -> None:

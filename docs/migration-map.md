@@ -38,8 +38,10 @@ This document records the starting source map for the Open Node refactor.
      install/status/remove, and agent upgrade/uninstall.
    - Done: diagnostic/config-preparation wrappers for service status/control,
      service logs, system NICs, agent-side scan, and Xray config validation.
-   - Next: full Xray/nginx config read-write workflows, WARP credential
-     management, and agent connection setting updates.
+   - Done: control-plane wrappers and frontend client mappings for Xray/nginx
+     config read/write, config-file list/read/write, WARP credential updates,
+     and agent xray-mode/listen-port/master-URL setting updates.
+   - Next: dedicated config editing views and richer command-result rendering.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.
