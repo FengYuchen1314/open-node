@@ -320,6 +320,22 @@ class XrayRuntimeNodeReconciliationResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeNodeSyncRequest(BaseModel):
+    source_index: int | None = Field(default=None, ge=0)
+
+
+class XrayRuntimeNodeSyncResponse(BaseModel):
+    server_id: UUID
+    node: ManagedNodeRead
+    source_index: int = Field(ge=0)
+    source_tag: str | None = None
+    source_display_name: str
+    updated_fields: list[str] = Field(default_factory=list)
+    drifts_before: list[XrayRuntimeNodeReconciliationDrift] = Field(default_factory=list)
+    drifts_after: list[XrayRuntimeNodeReconciliationDrift] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
 class SubscriptionCredentialRead(BaseModel):
     id: UUID
     username: str

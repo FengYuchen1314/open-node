@@ -32,6 +32,7 @@ import {
   resetDueProductUserTraffic,
   resetProductUserTraffic,
   resetProductUserSubscriptionToken,
+  syncManagedNodeFromRuntime,
 } from "./subscriptions";
 
 const timestamp = "2026-08-27T00:00:00Z";
@@ -463,6 +464,19 @@ describe("subscriptions API client", () => {
           license_required: false,
         });
       }
+      if (url.endsWith("/xray/runtime/nodes/node_1/sync")) {
+        return jsonResponse({
+          server_id: "srv_1",
+          node: { ...managedNode, config: { type: "vless", port: 443 } },
+          source_index: 0,
+          source_tag: "vless-443",
+          source_display_name: "vless-443",
+          updated_fields: ["config.port"],
+          drifts_before: [{ field: "config.port", runtime_value: 443, managed_value: 8443 }],
+          drifts_after: [],
+          license_required: false,
+        });
+      }
       return jsonResponse({ node: managedNode, license_required: false }, 201);
     };
 
@@ -478,12 +492,19 @@ describe("subscriptions API client", () => {
       { source_indexes: [0], extra_tags: ["imported"] },
       fetcher,
     );
+    const synced = await syncManagedNodeFromRuntime(
+      "srv_1",
+      "node_1",
+      { source_index: 0 },
+      fetcher,
+    );
 
     expect(drafts.license_required).toBe(false);
     expect(drafts.drafts[0].draft.inbound_tag).toBe("vless-443");
     expect(reconciliation.stale_count).toBe(1);
     expect(node.node.id).toBe("node_1");
     expect(imported.created_count).toBe(1);
+    expect(synced.updated_fields).toEqual(["config.port"]);
     expect(calls).toEqual([
       {
         url: "/api/v1/servers/srv_1/xray/runtime/node-drafts",
@@ -504,6 +525,11 @@ describe("subscriptions API client", () => {
         url: "/api/v1/servers/srv_1/xray/runtime/nodes/import",
         headers: { "Content-Type": "application/json" },
         body: { source_indexes: [0], extra_tags: ["imported"] },
+      },
+      {
+        url: "/api/v1/servers/srv_1/xray/runtime/nodes/node_1/sync",
+        headers: { "Content-Type": "application/json" },
+        body: { source_index: 0 },
       },
     ]);
   });

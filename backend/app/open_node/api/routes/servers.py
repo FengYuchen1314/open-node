@@ -58,12 +58,15 @@ from open_node.domain.subscriptions import (
     XrayRuntimeNodeImportRequest,
     XrayRuntimeNodeImportResponse,
     XrayRuntimeNodeReconciliationResponse,
+    XrayRuntimeNodeSyncRequest,
+    XrayRuntimeNodeSyncResponse,
 )
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
     CommandNotFoundError,
     DuplicateServerNameError,
     InventoryStore,
+    ManagedNodeNotFoundError,
     ServerNotFoundError,
     XrayConfigSnapshotNotFoundError,
     XrayRuntimeInboundNotFoundError,
@@ -201,6 +204,28 @@ def xray_runtime_node_reconciliation(
         return store.xray_runtime_node_reconciliation(server_id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{server_id}/xray/runtime/nodes/{node_id}/sync",
+    response_model=XrayRuntimeNodeSyncResponse,
+)
+def sync_managed_node_from_xray_runtime(
+    server_id: UUID,
+    node_id: UUID,
+    payload: XrayRuntimeNodeSyncRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> XrayRuntimeNodeSyncResponse:
+    try:
+        return store.sync_managed_node_from_xray_runtime(server_id, node_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ManagedNodeNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except XrayRuntimeInboundNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except XrayRuntimeNodeDraftUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/{server_id}/xray/config-snapshots", response_model=ServerXrayConfigSnapshotsResponse)

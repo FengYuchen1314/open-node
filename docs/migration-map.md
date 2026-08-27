@@ -82,6 +82,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: runtime/catalog reconciliation for managed, unmanaged, unavailable,
      stale, missing-runtime, and catalog-only nodes, with sanitized public-field
      drift details in the API and Vue Runtime tab.
+   - Done: stale physical managed nodes can sync public runtime fields back
+     from scan-derived Xray inbounds, without importing existing UUIDs,
+     passwords, PSKs, private keys, account emails, or other runtime secrets.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
    - Done: compatibility wrappers for the active non-stream Xray/nginx

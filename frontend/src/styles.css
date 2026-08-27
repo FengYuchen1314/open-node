@@ -361,8 +361,16 @@ body {
 }
 
 .runtime-reconcile-row {
+  align-items: start;
   display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-width: 0;
+}
+
+.runtime-reconcile-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .runtime-inbound-main {
@@ -1388,6 +1396,7 @@ body {
   .config-action-row,
   .config-file-grid,
   .runtime-inbound-row,
+  .runtime-reconcile-row,
   .snapshot-row,
   .change-action-row,
   .change-command-pair,
@@ -1425,6 +1434,7 @@ body {
   .probe-target-compare-actions,
   .probe-token-actions,
   .probe-task-actions,
+  .runtime-reconcile-actions,
   .runtime-head-actions,
   .runtime-inbound-side,
   .snapshot-actions {

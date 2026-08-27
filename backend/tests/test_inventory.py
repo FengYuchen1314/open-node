@@ -807,6 +807,155 @@ def test_xray_runtime_node_reconciliation_reports_catalog_drift_and_gaps(
     assert "old@example.com" not in json.dumps(payload)
 
 
+def test_xray_runtime_node_sync_updates_public_fields_without_runtime_secrets(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-runtime-sync", "domain": "edge.example.com"},
+    ).json()
+    server_id = created["server"]["id"]
+    command = client.post(f"/api/v1/servers/{server_id}/operations/scan").json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                **scan_result_payload(),
+                "inbounds": [
+                    {
+                        "tag": "vless-443",
+                        "port": 443,
+                        "protocol": "vless",
+                        "settings": {
+                            "clients": [
+                                {
+                                    "id": "secret-runtime-client-id",
+                                    "email": "old@example.com",
+                                    "flow": "xtls-rprx-vision",
+                                }
+                            ]
+                        },
+                        "streamSettings": {
+                            "network": "ws",
+                            "security": "tls",
+                            "wsSettings": {
+                                "path": "/runtime",
+                                "headers": {"Host": "runtime.example.com"},
+                            },
+                        },
+                    }
+                ],
+            },
+        },
+    )
+    assert result.status_code == 200
+    stale = client.post(
+        "/api/v1/nodes",
+        json={
+            "name": "Operator named vless",
+            "server_id": server_id,
+            "protocol": "vless",
+            "inbound_tag": "vless-443",
+            "tags": ["manual", "keep"],
+            "enabled": False,
+            "client_template": {
+                "email": "{username}__operator",
+                "flow": "stale-flow",
+                "operator_note": "keep",
+            },
+            "config": {
+                "type": "vless",
+                "server": "operator.example.com",
+                "port": 8443,
+                "network": "ws",
+                "tls": True,
+                "operator_note": "keep",
+                "ws-opts": {
+                    "path": "/old",
+                    "headers": {"Host": "manual.example.com"},
+                },
+            },
+        },
+    ).json()["node"]
+
+    response = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes/{stale['id']}/sync",
+        json={},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["license_required"] is False
+    assert payload["source_index"] == 0
+    assert payload["source_display_name"] == "vless-443"
+    assert payload["updated_fields"] == [
+        "config.port",
+        "config.ws_path",
+        "client_template.flow",
+    ]
+    assert payload["drifts_before"] == [
+        {"field": "config.port", "runtime_value": 443, "managed_value": 8443},
+        {"field": "config.ws_path", "runtime_value": "/runtime", "managed_value": "/old"},
+        {
+            "field": "client_template.flow",
+            "runtime_value": "xtls-rprx-vision",
+            "managed_value": "stale-flow",
+        },
+    ]
+    assert payload["drifts_after"] == []
+    node = payload["node"]
+    assert node["name"] == "Operator named vless"
+    assert node["tags"] == ["manual", "keep"]
+    assert node["enabled"] is False
+    assert node["config"]["server"] == "operator.example.com"
+    assert node["config"]["port"] == 443
+    assert node["config"]["operator_note"] == "keep"
+    assert node["config"]["ws-opts"] == {
+        "path": "/runtime",
+        "headers": {"Host": "manual.example.com"},
+    }
+    assert node["client_template"] == {
+        "email": "{username}__operator",
+        "flow": "xtls-rprx-vision",
+        "operator_note": "keep",
+    }
+    serialized = json.dumps(payload)
+    assert "secret-runtime-client-id" not in serialized
+    assert "old@example.com" not in serialized
+
+    reconciliation = client.get(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes/reconciliation"
+    ).json()
+    assert reconciliation["in_sync_count"] == 1
+    assert reconciliation["stale_count"] == 0
+    assert reconciliation["managed_entries"][0]["status"] == "in_sync"
+
+    routed = client.post(
+        "/api/v1/nodes",
+        json={
+            "name": "Routed catalog",
+            "server_id": server_id,
+            "protocol": "vless",
+            "node_type": "routed",
+            "routed_outbound_tag": "proxy-out",
+            "routed_rule_marktag": "route-proxy",
+            "config": {"type": "vless", "server": "edge.example.com", "port": 443},
+        },
+    ).json()["node"]
+    routed_response = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes/{routed['id']}/sync",
+        json={"source_index": 0},
+    )
+    assert routed_response.status_code == 400
+    assert routed_response.json()["detail"] == (
+        "runtime sync is only available for physical managed nodes"
+    )
+
+
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-traffic"}).json()

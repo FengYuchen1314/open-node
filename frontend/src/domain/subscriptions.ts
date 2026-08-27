@@ -455,6 +455,22 @@ export interface XrayRuntimeNodeReconciliationResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeNodeSyncRequest {
+  source_index?: number | null;
+}
+
+export interface XrayRuntimeNodeSyncResponse {
+  server_id: string;
+  node: ManagedNode;
+  source_index: number;
+  source_tag?: string | null;
+  source_display_name: string;
+  updated_fields: string[];
+  drifts_before: XrayRuntimeNodeReconciliationDrift[];
+  drifts_after: XrayRuntimeNodeReconciliationDrift[];
+  license_required: false;
+}
+
 export interface SubscriptionPlansResponse {
   plans: SubscriptionPlan[];
   license_required: false;

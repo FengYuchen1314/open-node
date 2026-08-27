@@ -33,6 +33,7 @@ import {
   getXrayRuntimeNodeReconciliation,
   importManagedNodesFromRuntimeInbounds,
   listXrayRuntimeNodeDrafts,
+  syncManagedNodeFromRuntime,
 } from "../services/subscriptions";
 
 const servers = ref<ServerSummary[]>([]);
@@ -48,6 +49,7 @@ const snapshotsLoading = ref(false);
 const runtimeInventoryLoading = ref(false);
 const runtimeNodeImporting = ref(false);
 const runtimeNodeSavingKey = ref("");
+const runtimeNodeSyncingId = ref("");
 const savingOperation = ref<AgentOperationKind | "">("");
 const restoringSnapshotId = ref("");
 const errorMessage = ref("");
@@ -644,6 +646,7 @@ function runtimeNodeCreateDisabled(inbound: XrayRuntimeInbound) {
     !draft.create_available ||
     Boolean(draft.existing_node_id) ||
     runtimeNodeImporting.value ||
+    Boolean(runtimeNodeSyncingId.value) ||
     (Boolean(runtimeNodeSavingKey.value) &&
       runtimeNodeSavingKey.value !== runtimeNodeSavingId(inbound))
   );
@@ -700,6 +703,34 @@ function displayDriftValue(value: string | number | boolean | string[] | null | 
   return String(value);
 }
 
+function runtimeSyncDisabled(entry: XrayRuntimeNodeReconciliationManagedEntry) {
+  return (
+    entry.status !== "stale" ||
+    entry.runtime_source_index === null ||
+    entry.runtime_source_index === undefined ||
+    runtimeInventoryLoading.value ||
+    runtimeNodeImporting.value ||
+    Boolean(runtimeNodeSavingKey.value) ||
+    Boolean(runtimeNodeSyncingId.value)
+  );
+}
+
+function runtimeSyncTooltip(entry: XrayRuntimeNodeReconciliationManagedEntry) {
+  if (entry.status !== "stale") {
+    return "Only stale managed nodes can sync from runtime";
+  }
+  if (entry.runtime_source_index === null || entry.runtime_source_index === undefined) {
+    return "Runtime source is unavailable";
+  }
+  if (runtimeInventoryLoading.value) {
+    return "Runtime inventory is loading";
+  }
+  if (runtimeNodeImporting.value || runtimeNodeSavingKey.value || runtimeNodeSyncingId.value) {
+    return "Another runtime catalog action is running";
+  }
+  return `Sync public fields from ${entry.runtime_display_name ?? "runtime"}`;
+}
+
 async function importRuntimeManagedNodes() {
   if (!selectedServerId.value) {
     errorMessage.value = "Target server is required.";
@@ -716,6 +747,31 @@ async function importRuntimeManagedNodes() {
     errorMessage.value = readableError(error);
   } finally {
     runtimeNodeImporting.value = false;
+  }
+}
+
+async function syncRuntimeManagedNode(entry: XrayRuntimeNodeReconciliationManagedEntry) {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  if (runtimeSyncDisabled(entry)) {
+    errorMessage.value = runtimeSyncTooltip(entry);
+    return;
+  }
+  runtimeNodeSyncingId.value = entry.node_id;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await syncManagedNodeFromRuntime(selectedServerId.value, entry.node_id, {
+      source_index: entry.runtime_source_index,
+    });
+    successMessage.value = `Synced ${response.node.name}: ${response.updated_fields.length} fields.`;
+    await refreshXrayRuntimeInventory();
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    runtimeNodeSyncingId.value = "";
   }
 }
 
@@ -1084,7 +1140,8 @@ function formatDateTime(value: string) {
                             runtimeInventoryLoading ||
                             runtimeNodeImporting ||
                             runtimeMissingNodeCount === 0 ||
-                            Boolean(runtimeNodeSavingKey)
+                            Boolean(runtimeNodeSavingKey) ||
+                            Boolean(runtimeNodeSyncingId)
                           "
                           :loading="runtimeNodeImporting"
                           color="primary"
@@ -1330,6 +1387,25 @@ function formatDateTime(value: string) {
                         {{ driftLabel(drift) }}
                       </v-chip>
                     </div>
+                  </div>
+                  <div v-if="entry.status === 'stale'" class="runtime-reconcile-actions">
+                    <v-tooltip :text="runtimeSyncTooltip(entry)">
+                      <template #activator="{ props }">
+                        <span v-bind="props" class="runtime-node-action">
+                          <v-btn
+                            :disabled="runtimeSyncDisabled(entry)"
+                            :loading="runtimeNodeSyncingId === entry.node_id"
+                            color="primary"
+                            prepend-icon="mdi-sync"
+                            size="small"
+                            variant="tonal"
+                            @click="syncRuntimeManagedNode(entry)"
+                          >
+                            Sync
+                          </v-btn>
+                        </span>
+                      </template>
+                    </v-tooltip>
                   </div>
                 </div>
               </div>

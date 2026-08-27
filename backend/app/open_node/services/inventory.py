@@ -144,6 +144,8 @@ from open_node.domain.subscriptions import (
     XrayRuntimeNodeReconciliationManagedEntry,
     XrayRuntimeNodeReconciliationResponse,
     XrayRuntimeNodeReconciliationRuntimeEntry,
+    XrayRuntimeNodeSyncRequest,
+    XrayRuntimeNodeSyncResponse,
 )
 
 
@@ -1466,6 +1468,54 @@ class InventoryStore:
             runtime_entries=runtime_entries,
             managed_entries=managed_entries,
         )
+
+    def sync_managed_node_from_xray_runtime(
+        self,
+        server_id: UUID,
+        node_id: UUID,
+        payload: XrayRuntimeNodeSyncRequest,
+    ) -> XrayRuntimeNodeSyncResponse:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            node = session.get(ManagedNodeModel, str(node_id))
+            if not node or node.server_id != server.id:
+                raise ManagedNodeNotFoundError(f"managed node not found: {node_id}")
+            if node.node_type != ManagedNodeType.PHYSICAL.value:
+                raise XrayRuntimeNodeDraftUnavailableError(
+                    "runtime sync is only available for physical managed nodes"
+                )
+            scan = session.get(AgentScanResultModel, str(server_id))
+            if scan is None:
+                raise XrayRuntimeInboundNotFoundError(f"runtime scan not found: {server_id}")
+
+            draft = self._runtime_node_sync_draft(session, server, node, scan, payload)
+            if not draft.create_available:
+                warnings = ", ".join(draft.warnings) or "runtime node draft unavailable"
+                raise XrayRuntimeNodeDraftUnavailableError(warnings)
+            if draft.existing_node_id and str(draft.existing_node_id) != node.id:
+                raise XrayRuntimeNodeDraftUnavailableError(
+                    f"runtime inbound already maps to managed node: {draft.existing_node_id}"
+                )
+            drifts_before = self._runtime_managed_node_drifts(draft.draft, node)
+            updated_fields = self._sync_managed_node_public_runtime_fields(node, draft.draft)
+            if updated_fields:
+                node.updated_at = now
+            session.commit()
+            session.refresh(node)
+            drifts_after = self._runtime_managed_node_drifts(draft.draft, node)
+            return XrayRuntimeNodeSyncResponse(
+                server_id=server_id,
+                node=self._managed_node_read(node),
+                source_index=draft.source_index,
+                source_tag=draft.source_tag,
+                source_display_name=draft.source_display_name,
+                updated_fields=updated_fields,
+                drifts_before=drifts_before,
+                drifts_after=drifts_after,
+            )
 
     def list_xray_config_snapshots(
         self,
@@ -6096,6 +6146,120 @@ class InventoryStore:
                 )
             )
         return drifts
+
+    @classmethod
+    def _runtime_node_sync_draft(
+        cls,
+        session: Session,
+        server: ServerModel,
+        node: ManagedNodeModel,
+        scan: AgentScanResultModel,
+        payload: XrayRuntimeNodeSyncRequest,
+    ) -> XrayRuntimeNodeDraft:
+        inbounds = scan.inbounds or []
+        if payload.source_index is not None:
+            inbound, index = cls._select_xray_runtime_inbound(
+                inbounds,
+                XrayRuntimeNodeCreateRequest(source_index=payload.source_index),
+            )
+            return cls._xray_runtime_node_draft(
+                session=session,
+                server=server,
+                inbound=inbound,
+                index=index,
+            )
+        for index, inbound in enumerate(inbounds):
+            draft = cls._xray_runtime_node_draft(
+                session=session,
+                server=server,
+                inbound=inbound,
+                index=index,
+            )
+            if draft.existing_node_id and str(draft.existing_node_id) == node.id:
+                return draft
+        raise XrayRuntimeInboundNotFoundError(
+            f"runtime inbound not found for managed node: {node.id}"
+        )
+
+    @classmethod
+    def _sync_managed_node_public_runtime_fields(
+        cls,
+        node: ManagedNodeModel,
+        draft: ManagedNodeCreate,
+    ) -> list[str]:
+        updated_fields: list[str] = []
+        if node.protocol != draft.protocol:
+            node.protocol = draft.protocol
+            updated_fields.append("protocol")
+        if node.inbound_tag != draft.inbound_tag:
+            node.inbound_tag = draft.inbound_tag
+            updated_fields.append("inbound_tag")
+
+        next_config = dict(cls._record_value(node.config))
+        for field in [
+            "type",
+            "port",
+            "network",
+            "tls",
+            "sni",
+            "alpn",
+            "cipher",
+        ]:
+            if cls._sync_json_public_value(next_config, [field], draft.config.get(field)):
+                updated_fields.append(f"config.{field}")
+        for label, path in [
+            ("config.ws_path", ["ws-opts", "path"]),
+            ("config.grpc_service", ["grpc-opts", "grpc-service-name"]),
+            ("config.http_path", ["http-opts", "path"]),
+        ]:
+            if cls._sync_json_public_value(
+                next_config,
+                path,
+                cls._nested_config_value(draft.config, *path),
+            ):
+                updated_fields.append(label)
+        if next_config != cls._record_value(node.config):
+            node.config = next_config
+
+        next_template = dict(cls._record_value(node.client_template))
+        for field in ["flow", "version", "obfsMode", "obfsHost"]:
+            if cls._sync_json_public_value(
+                next_template,
+                [field],
+                draft.client_template.get(field),
+            ):
+                updated_fields.append(f"client_template.{field}")
+        if next_template != cls._record_value(node.client_template):
+            node.client_template = next_template
+
+        return updated_fields
+
+    @classmethod
+    def _sync_json_public_value(
+        cls,
+        target: dict[str, Any],
+        path: list[str],
+        value: Any,
+    ) -> bool:
+        normalized = cls._reconciliation_public_value(value)
+        current = target
+        for key in path[:-1]:
+            next_value = current.get(key)
+            if normalized is None and not isinstance(next_value, dict):
+                return False
+            if not isinstance(next_value, dict):
+                next_value = {}
+                current[key] = next_value
+            current = next_value
+        key = path[-1]
+        existing = cls._reconciliation_public_value(current.get(key))
+        if existing == normalized:
+            return False
+        if normalized is None:
+            current.pop(key, None)
+        else:
+            current[key] = value
+        return True
 
     @staticmethod
     def _nested_config_value(config: dict[str, Any], *keys: str) -> Any:

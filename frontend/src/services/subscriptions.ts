@@ -26,6 +26,8 @@ import type {
   XrayRuntimeNodeImportRequest,
   XrayRuntimeNodeImportResponse,
   XrayRuntimeNodeReconciliationResponse,
+  XrayRuntimeNodeSyncRequest,
+  XrayRuntimeNodeSyncResponse,
 } from "../domain/subscriptions";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -315,6 +317,26 @@ export async function getXrayRuntimeNodeReconciliation(
     throw await apiError(response, "Xray runtime node reconciliation request failed");
   }
   return response.json() as Promise<XrayRuntimeNodeReconciliationResponse>;
+}
+
+export async function syncManagedNodeFromRuntime(
+  serverId: string,
+  nodeId: string,
+  payload: XrayRuntimeNodeSyncRequest = {},
+  fetcher = fetch,
+): Promise<XrayRuntimeNodeSyncResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/nodes/${nodeId}/sync`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray runtime node sync request failed");
+  }
+  return response.json() as Promise<XrayRuntimeNodeSyncResponse>;
 }
 
 export async function listSubscriptionPlans(
