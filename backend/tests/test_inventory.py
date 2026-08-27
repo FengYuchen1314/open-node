@@ -317,6 +317,64 @@ def test_public_probe_servers_returns_sanitized_mmwx_probe_payload(tmp_path: Pat
     assert "agent_token" not in server
 
 
+def test_public_probe_settings_customize_payload_and_disable_servers(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    client.post("/api/v1/servers", json={"name": "edge-probe-settings"})
+
+    defaults = client.get("/api/v1/public/probe-settings")
+    assert defaults.status_code == 200
+    assert defaults.json()["settings"]["title"] == "Open Node Probe"
+    assert defaults.json()["license_required"] is False
+
+    updated = client.put(
+        "/api/v1/public/probe-settings",
+        json={
+            "enabled": False,
+            "title": "MMWX Public Status",
+            "description": "Public node telemetry",
+            "logo": "https://example.com/logo.png",
+            "show_resource_heatmap": False,
+            "show_traffic_quota": False,
+            "show_health_score": False,
+            "refresh_interval_sec": 2,
+            "appearance": {
+                "theme": "compact",
+                "color_mode": "dark",
+                "revision": "probe-r2",
+            },
+        },
+    )
+
+    assert updated.status_code == 200
+    settings = updated.json()["settings"]
+    assert settings["enabled"] is False
+    assert settings["title"] == "MMWX Public Status"
+    assert settings["description"] == "Public node telemetry"
+    assert settings["show_resource_heatmap"] is False
+    assert settings["show_traffic_quota"] is False
+    assert settings["refresh_interval_sec"] == 2
+    assert settings["appearance"] == {
+        "theme": "compact",
+        "color_mode": "dark",
+        "revision": "probe-r2",
+    }
+    assert settings["updated_at"]
+    assert updated.json()["license_required"] is False
+
+    payload = client.get("/api/v1/public/probe-servers").json()
+    assert payload["enabled"] is False
+    assert payload["title"] == "MMWX Public Status"
+    assert payload["description"] == "Public node telemetry"
+    assert payload["refresh_interval_sec"] == 2
+    assert payload["servers"] == []
+    assert payload["license_required"] is False
+    assert client.get("/api/v1/public/probe-series?server=0").status_code == 404
+
+    alias = client.get("/api/public/probe-settings")
+    assert alias.status_code == 200
+    assert alias.json()["settings"]["title"] == "MMWX Public Status"
+
+
 def test_public_probe_series_uses_public_index_and_aggregates_latency(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-probe-series"}).json()

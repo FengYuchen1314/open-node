@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { getPublicProbePayload, getPublicProbeSeries, getPublicProbeStreamUrl } from "./probe";
+import {
+  getPublicProbePayload,
+  getPublicProbeSeries,
+  getPublicProbeSettings,
+  getPublicProbeStreamUrl,
+  updatePublicProbeSettings,
+} from "./probe";
 
 describe("public probe API client", () => {
   it("loads public probe payload without sending license headers", async () => {
@@ -62,6 +68,65 @@ describe("public probe API client", () => {
     );
     expect(response.series).toMatchObject({ current_ms: 42 });
     expect(response.license_required).toBe(false);
+  });
+
+  it("loads and updates public probe settings", async () => {
+    const calls: Array<{ body?: unknown; headers: HeadersInit | undefined; method?: string; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = input.toString();
+      calls.push({
+        url,
+        method: init?.method,
+        headers: init?.headers,
+        body: init?.body ? JSON.parse(init.body.toString()) : undefined,
+      });
+      return new Response(
+        JSON.stringify({
+          settings: {
+            enabled: true,
+            title: "MMWX Public Status",
+            description: "Public node telemetry",
+            refresh_interval_sec: 3,
+            appearance: { theme: "compact", color_mode: "dark", revision: "probe-r2" },
+          },
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const loaded = await getPublicProbeSettings(fetcher);
+    const updated = await updatePublicProbeSettings(
+      {
+        enabled: true,
+        title: "MMWX Public Status",
+        refresh_interval_sec: 3,
+        appearance: { theme: "compact", color_mode: "dark" },
+      },
+      fetcher,
+    );
+
+    expect(loaded.settings.title).toBe("MMWX Public Status");
+    expect(updated.license_required).toBe(false);
+    expect(calls).toEqual([
+      {
+        url: "/api/v1/public/probe-settings",
+        method: undefined,
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/public/probe-settings",
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          enabled: true,
+          title: "MMWX Public Status",
+          refresh_interval_sec: 3,
+          appearance: { theme: "compact", color_mode: "dark" },
+        },
+      },
+    ]);
   });
 
   it("builds a same-origin public probe websocket URL", () => {

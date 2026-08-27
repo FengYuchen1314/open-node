@@ -1,4 +1,9 @@
-import type { ProbePayload, ProbeSeriesResponse } from "../domain/probe";
+import type {
+  ProbePayload,
+  ProbeSeriesResponse,
+  ProbeSettingsResponse,
+  ProbeSettingsUpdate,
+} from "../domain/probe";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -20,6 +25,29 @@ export async function getPublicProbePayload(fetcher = fetch): Promise<ProbePaylo
     throw await apiError(response, "Public probe request failed");
   }
   return response.json() as Promise<ProbePayload>;
+}
+
+export async function getPublicProbeSettings(fetcher = fetch): Promise<ProbeSettingsResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-settings`);
+  if (!response.ok) {
+    throw await apiError(response, "Public probe settings request failed");
+  }
+  return response.json() as Promise<ProbeSettingsResponse>;
+}
+
+export async function updatePublicProbeSettings(
+  payload: ProbeSettingsUpdate,
+  fetcher = fetch,
+): Promise<ProbeSettingsResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Public probe settings update request failed");
+  }
+  return response.json() as Promise<ProbeSettingsResponse>;
 }
 
 export async function getPublicProbeSeries(

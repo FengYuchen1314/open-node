@@ -1,16 +1,43 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 
-import type { ProbePayload, ProbeServer } from "../domain/probe";
-import { getPublicProbePayload, getPublicProbeStreamUrl } from "../services/probe";
+import type { ProbePayload, ProbeServer, ProbeSettingsUpdate } from "../domain/probe";
+import {
+  getPublicProbePayload,
+  getPublicProbeStreamUrl,
+  updatePublicProbeSettings,
+} from "../services/probe";
 
 const payload = ref<ProbePayload | null>(null);
 const loading = ref(false);
+const savingSettings = ref(false);
 const errorMessage = ref("");
+const successMessage = ref("");
 const streamActive = ref(false);
 let probeStream: WebSocket | undefined;
 
+const settingsForm = reactive({
+  enabled: true,
+  title: "Open Node Probe",
+  description: "MMWX probe-compatible node status without license gates.",
+  logo: "",
+  refresh_interval_sec: 5,
+  theme: "open-node",
+  color_mode: "light" as "light" | "dark" | "system",
+  revision: "open-node",
+  show_resource_heatmap: true,
+  show_traffic_quota: true,
+  show_daily_trend: false,
+  show_traffic_7d: false,
+  show_health_score: true,
+});
+
 const servers = computed(() => payload.value?.servers ?? []);
+const probeDescription = computed(
+  () => payload.value?.description ?? "MMWX probe-compatible node status without license gates.",
+);
+const showSystemColumn = computed(() => payload.value?.show_resource_heatmap !== false);
+const showTrafficColumn = computed(() => payload.value?.show_traffic_quota !== false);
 const onlineCount = computed(() => servers.value.filter((server) => server.online).length);
 const totalUpload = computed(() =>
   servers.value.reduce((sum, server) => sum + (server.upload_speed ?? 0), 0),
@@ -41,6 +68,11 @@ const metrics = computed(() => [
     color: "info",
   },
 ]);
+const colorModeOptions = [
+  { title: "Light", value: "light" },
+  { title: "Dark", value: "dark" },
+  { title: "System", value: "system" },
+];
 
 onMounted(() => {
   void refreshProbe();
@@ -67,6 +99,7 @@ async function refreshProbe() {
 function acceptProbe(nextPayload: ProbePayload) {
   payload.value = nextPayload;
   errorMessage.value = "";
+  syncSettingsForm(nextPayload);
 }
 
 function probeEndpointNote() {
@@ -102,6 +135,58 @@ function openProbeStream() {
   } catch {
     streamActive.value = false;
   }
+}
+
+async function saveProbeSettings() {
+  savingSettings.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    await updatePublicProbeSettings(settingsPayload());
+    await refreshProbe();
+    successMessage.value = "Probe settings saved.";
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "Probe settings failed.";
+  } finally {
+    savingSettings.value = false;
+  }
+}
+
+function syncSettingsForm(nextPayload: ProbePayload) {
+  settingsForm.enabled = nextPayload.enabled;
+  settingsForm.title = nextPayload.title ?? "Open Node Probe";
+  settingsForm.description =
+    nextPayload.description ?? "MMWX probe-compatible node status without license gates.";
+  settingsForm.logo = nextPayload.logo ?? "";
+  settingsForm.refresh_interval_sec = nextPayload.refresh_interval_sec ?? 5;
+  settingsForm.theme = nextPayload.appearance?.theme ?? "open-node";
+  settingsForm.color_mode = nextPayload.appearance?.color_mode ?? "light";
+  settingsForm.revision = nextPayload.appearance?.revision ?? "open-node";
+  settingsForm.show_resource_heatmap = nextPayload.show_resource_heatmap !== false;
+  settingsForm.show_traffic_quota = nextPayload.show_traffic_quota !== false;
+  settingsForm.show_daily_trend = nextPayload.show_daily_trend === true;
+  settingsForm.show_traffic_7d = nextPayload.show_traffic_7d === true;
+  settingsForm.show_health_score = nextPayload.show_health_score !== false;
+}
+
+function settingsPayload(): ProbeSettingsUpdate {
+  return {
+    enabled: settingsForm.enabled,
+    title: settingsForm.title,
+    description: settingsForm.description,
+    logo: settingsForm.logo,
+    refresh_interval_sec: settingsForm.refresh_interval_sec,
+    show_resource_heatmap: settingsForm.show_resource_heatmap,
+    show_traffic_quota: settingsForm.show_traffic_quota,
+    show_daily_trend: settingsForm.show_daily_trend,
+    show_traffic_7d: settingsForm.show_traffic_7d,
+    show_health_score: settingsForm.show_health_score,
+    appearance: {
+      theme: settingsForm.theme,
+      color_mode: settingsForm.color_mode,
+      revision: settingsForm.revision,
+    },
+  };
 }
 
 function displayName(server: ProbeServer, index: number) {
@@ -181,10 +266,15 @@ function formatBytes(value: number) {
 <template>
   <div class="page-shell">
     <section class="page-heading">
-      <div>
-        <div class="eyebrow">Public probe</div>
-        <h1 class="page-title">{{ payload?.title ?? "Open Node Probe" }}</h1>
-        <p class="page-copy">MMWX probe-compatible node status without license gates.</p>
+      <div class="probe-title-row">
+        <v-avatar v-if="payload?.logo" class="probe-logo" rounded="lg" size="52">
+          <v-img :src="payload.logo" alt="" cover />
+        </v-avatar>
+        <div>
+          <div class="eyebrow">Public probe</div>
+          <h1 class="page-title">{{ payload?.title ?? "Open Node Probe" }}</h1>
+          <p class="page-copy">{{ probeDescription }}</p>
+        </div>
       </div>
 
       <v-tooltip text="Refresh probe status">
@@ -209,6 +299,15 @@ function formatBytes(value: number) {
     >
       {{ errorMessage }}
     </v-alert>
+    <v-alert
+      v-if="successMessage"
+      class="status-alert"
+      density="comfortable"
+      type="success"
+      variant="tonal"
+    >
+      {{ successMessage }}
+    </v-alert>
 
     <section class="metric-grid" aria-label="Probe status">
       <v-card
@@ -223,6 +322,142 @@ function formatBytes(value: number) {
         <div class="metric-note">{{ tile.note }}</div>
       </v-card>
     </section>
+
+    <v-sheet class="section-surface" border>
+      <div class="section-head">
+        <div>
+          <div class="section-title">Probe settings</div>
+          <div class="section-subtitle">{{ settingsForm.revision }}</div>
+        </div>
+        <v-chip :color="settingsForm.enabled ? 'success' : 'error'" variant="tonal">
+          {{ settingsForm.enabled ? "Enabled" : "Disabled" }}
+        </v-chip>
+      </div>
+
+      <v-form class="compact-form" @submit.prevent="saveProbeSettings">
+        <div class="form-row">
+          <v-text-field
+            v-model="settingsForm.title"
+            density="comfortable"
+            label="Title"
+            prepend-inner-icon="mdi-format-title"
+            variant="outlined"
+          />
+          <v-text-field
+            v-model.number="settingsForm.refresh_interval_sec"
+            density="comfortable"
+            label="Refresh seconds"
+            max="60"
+            min="1"
+            type="number"
+            variant="outlined"
+          />
+        </div>
+        <v-textarea
+          v-model="settingsForm.description"
+          auto-grow
+          density="comfortable"
+          label="Description"
+          rows="2"
+          variant="outlined"
+        />
+        <div class="form-row">
+          <v-text-field
+            v-model="settingsForm.logo"
+            density="comfortable"
+            label="Logo URL"
+            prepend-inner-icon="mdi-image-outline"
+            variant="outlined"
+          />
+          <v-text-field
+            v-model="settingsForm.theme"
+            density="comfortable"
+            label="Theme"
+            prepend-inner-icon="mdi-palette-outline"
+            variant="outlined"
+          />
+        </div>
+        <div class="form-row">
+          <v-select
+            v-model="settingsForm.color_mode"
+            :items="colorModeOptions"
+            density="comfortable"
+            label="Color mode"
+            variant="outlined"
+          />
+          <v-text-field
+            v-model="settingsForm.revision"
+            density="comfortable"
+            label="Revision"
+            prepend-inner-icon="mdi-source-commit"
+            variant="outlined"
+          />
+        </div>
+        <div class="probe-toggle-grid">
+          <v-switch
+            v-model="settingsForm.enabled"
+            color="primary"
+            density="comfortable"
+            hide-details
+            label="Enabled"
+          />
+          <v-switch
+            v-model="settingsForm.show_resource_heatmap"
+            color="secondary"
+            density="comfortable"
+            hide-details
+            label="System"
+          />
+          <v-switch
+            v-model="settingsForm.show_traffic_quota"
+            color="info"
+            density="comfortable"
+            hide-details
+            label="Traffic"
+          />
+          <v-switch
+            v-model="settingsForm.show_health_score"
+            color="success"
+            density="comfortable"
+            hide-details
+            label="Health"
+          />
+          <v-switch
+            v-model="settingsForm.show_daily_trend"
+            color="warning"
+            density="comfortable"
+            hide-details
+            label="Daily"
+          />
+          <v-switch
+            v-model="settingsForm.show_traffic_7d"
+            color="primary"
+            density="comfortable"
+            hide-details
+            label="7d traffic"
+          />
+        </div>
+        <div class="settings-action-row">
+          <v-btn
+            :loading="savingSettings"
+            color="primary"
+            prepend-icon="mdi-content-save-outline"
+            type="submit"
+            variant="flat"
+          >
+            Save settings
+          </v-btn>
+          <v-btn
+            :loading="loading"
+            prepend-icon="mdi-refresh"
+            variant="tonal"
+            @click="refreshProbe"
+          >
+            Refresh
+          </v-btn>
+        </div>
+      </v-form>
+    </v-sheet>
 
     <v-sheet class="section-surface server-surface" border>
       <div class="section-head">
@@ -244,9 +479,9 @@ function formatBytes(value: number) {
           <tr>
             <th>Name</th>
             <th>Status</th>
-            <th>System</th>
+            <th v-if="showSystemColumn">System</th>
             <th>Latency</th>
-            <th>Traffic</th>
+            <th v-if="showTrafficColumn">Traffic</th>
             <th class="number-cell">Up</th>
             <th class="number-cell">Down</th>
           </tr>
@@ -268,12 +503,12 @@ function formatBytes(value: number) {
                 {{ statusLabel(server) }}
               </v-chip>
             </td>
-            <td class="telemetry-cell">
+            <td v-if="showSystemColumn" class="telemetry-cell">
               <div class="server-name">{{ systemSummary(server) }}</div>
               <div class="server-subline">{{ server.loadavg || "No loadavg" }}</div>
             </td>
             <td>{{ latencySummary(server) }}</td>
-            <td>{{ trafficSummary(server) }}</td>
+            <td v-if="showTrafficColumn">{{ trafficSummary(server) }}</td>
             <td class="number-cell">{{ formatBytesPerSecond(server.upload_speed ?? 0) }}</td>
             <td class="number-cell">{{ formatBytesPerSecond(server.download_speed ?? 0) }}</td>
           </tr>

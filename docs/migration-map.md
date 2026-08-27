@@ -68,5 +68,7 @@ This document records the starting source map for the Open Node refactor.
      view.
    - Done: public probe WebSocket stream compatible with the `mmwx-probe`
      Worker `/api/stream` mapping.
-   - Next: richer probe appearance/settings data.
+   - Done: richer probe appearance/settings data with local settings
+     persistence and Vue controls.
+   - Next: richer probe region/provider/renewal metadata.
 5. Revisit Xray integration once the agent protocol surface is stable.

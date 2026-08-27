@@ -68,12 +68,16 @@ from open_node.domain.inventory import (
     XrayStats,
 )
 from open_node.domain.probe import (
+    ProbeAppearance,
     ProbeBucket,
     ProbeMetricPoint,
     ProbePayload,
     ProbePingSeries,
     ProbeSeriesResponse,
     ProbeServer,
+    ProbeSettingsRead,
+    ProbeSettingsResponse,
+    ProbeSettingsUpdate,
     ProbeSystemSeries,
 )
 from open_node.domain.subscriptions import (
@@ -634,6 +638,31 @@ class SubscriptionTrafficLedgerModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ProbeSettingsModel(Base):
+    __tablename__ = "probe_settings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    show_globe: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_daily_trend: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_traffic_hotspots: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_traffic_7d: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_resource_heatmap: Mapped[bool] = mapped_column(Boolean, default=True)
+    show_traffic_quota: Mapped[bool] = mapped_column(Boolean, default=True)
+    show_renewal_timeline: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_health_score: Mapped[bool] = mapped_column(Boolean, default=True)
+    title: Mapped[str] = mapped_column(String(120), default="Open Node Probe")
+    description: Mapped[str] = mapped_column(
+        Text,
+        default="MMWX probe-compatible node status without license gates.",
+    )
+    logo: Mapped[str] = mapped_column(Text, default="")
+    refresh_interval_sec: Mapped[int] = mapped_column(Integer, default=5)
+    appearance: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class InventoryStore:
     def __init__(self, database_url: str) -> None:
         self._engine = create_inventory_engine(database_url)
@@ -828,13 +857,52 @@ class InventoryStore:
 
     def public_probe_payload(self) -> ProbePayload:
         with self._session() as session:
+            settings = self._probe_settings_read(session)
+            if not settings.enabled:
+                return ProbePayload(
+                    **settings.model_dump(exclude={"updated_at"}),
+                    updated_at=settings.updated_at,
+                    servers=[],
+                )
+
             servers = session.scalars(select(ServerModel).order_by(ServerModel.created_at)).all()
             probe_servers = []
             for server in servers:
                 latest = self._latest_telemetry_model(session, server.id)
                 ping = self._probe_ping_series(session, server.id, bucket_count=12, bucket_sec=300)
                 probe_servers.append(self._probe_server(server, latest, ping))
-            return ProbePayload(servers=probe_servers)
+            return ProbePayload(
+                **settings.model_dump(exclude={"updated_at"}),
+                updated_at=settings.updated_at,
+                servers=probe_servers,
+            )
+
+    def probe_settings(self) -> ProbeSettingsRead:
+        with self._session() as session:
+            return self._probe_settings_read(session)
+
+    def update_probe_settings(self, payload: ProbeSettingsUpdate) -> ProbeSettingsResponse:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            settings = self._probe_settings_model(session, now)
+            update = payload.model_dump(exclude_unset=True)
+            appearance = update.pop("appearance", None)
+            for field, value in update.items():
+                if value is None:
+                    if field in {"description", "logo"}:
+                        setattr(settings, field, "")
+                    continue
+                setattr(settings, field, value)
+            if appearance is not None:
+                current = dict(settings.appearance or {})
+                current.update(
+                    {key: value for key, value in appearance.items() if value is not None}
+                )
+                settings.appearance = ProbeAppearance.model_validate(current).model_dump()
+            settings.updated_at = now
+            session.commit()
+            session.refresh(settings)
+            return ProbeSettingsResponse(settings=self._probe_settings_read(session, settings))
 
     def public_probe_series(
         self,
@@ -849,6 +917,8 @@ class InventoryStore:
         buckets, bucket_sec = _PROBE_SERIES_RANGES.get(range_name, _PROBE_SERIES_RANGES["1h"])
 
         with self._session() as session:
+            if not self._probe_settings_read(session).enabled:
+                raise ProbeNotFoundError("probe is disabled")
             servers = session.scalars(select(ServerModel).order_by(ServerModel.created_at)).all()
             if server_index >= len(servers):
                 raise ProbeNotFoundError("probe server not found")
@@ -1819,6 +1889,60 @@ class InventoryStore:
             session.commit()
             session.refresh(command)
             return self._command_read(command)
+
+    @staticmethod
+    def _probe_settings_model(session: Session, now: datetime) -> ProbeSettingsModel:
+        settings = session.get(ProbeSettingsModel, "default")
+        if settings:
+            return settings
+        defaults = ProbeSettingsRead()
+        settings = ProbeSettingsModel(
+            id="default",
+            enabled=defaults.enabled,
+            show_globe=defaults.show_globe,
+            show_daily_trend=defaults.show_daily_trend,
+            show_traffic_hotspots=defaults.show_traffic_hotspots,
+            show_traffic_7d=defaults.show_traffic_7d,
+            show_resource_heatmap=defaults.show_resource_heatmap,
+            show_traffic_quota=defaults.show_traffic_quota,
+            show_renewal_timeline=defaults.show_renewal_timeline,
+            show_health_score=defaults.show_health_score,
+            title=defaults.title,
+            description=defaults.description,
+            logo=defaults.logo,
+            refresh_interval_sec=defaults.refresh_interval_sec,
+            appearance=defaults.appearance.model_dump(),
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(settings)
+        return settings
+
+    @staticmethod
+    def _probe_settings_read(
+        session: Session,
+        settings: ProbeSettingsModel | None = None,
+    ) -> ProbeSettingsRead:
+        settings = settings or session.get(ProbeSettingsModel, "default")
+        if not settings:
+            return ProbeSettingsRead()
+        return ProbeSettingsRead(
+            enabled=settings.enabled,
+            show_globe=settings.show_globe,
+            show_daily_trend=settings.show_daily_trend,
+            show_traffic_hotspots=settings.show_traffic_hotspots,
+            show_traffic_7d=settings.show_traffic_7d,
+            show_resource_heatmap=settings.show_resource_heatmap,
+            show_traffic_quota=settings.show_traffic_quota,
+            show_renewal_timeline=settings.show_renewal_timeline,
+            show_health_score=settings.show_health_score,
+            title=settings.title,
+            description=settings.description,
+            logo=settings.logo,
+            refresh_interval_sec=settings.refresh_interval_sec,
+            appearance=ProbeAppearance.model_validate(settings.appearance or {}),
+            updated_at=InventoryStore._aware_datetime(settings.updated_at),
+        )
 
     def _probe_server(
         self,

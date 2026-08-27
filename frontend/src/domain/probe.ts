@@ -4,6 +4,12 @@ export interface ProbeAppearance {
   revision?: string;
 }
 
+export interface ProbeAppearanceUpdate {
+  theme?: string | null;
+  color_mode?: "light" | "dark" | "system" | null;
+  revision?: string | null;
+}
+
 export interface ProbeBucket {
   ms: number;
   loss: number;
@@ -60,7 +66,7 @@ export interface ProbeServer {
   ping?: ProbePingSeries[] | null;
 }
 
-export interface ProbePayload {
+export interface ProbeSettings {
   enabled: boolean;
   show_globe?: boolean;
   show_daily_trend?: boolean;
@@ -71,8 +77,36 @@ export interface ProbePayload {
   show_renewal_timeline?: boolean;
   show_health_score?: boolean;
   title?: string;
+  description?: string;
   logo?: string;
+  refresh_interval_sec?: number;
   appearance?: ProbeAppearance;
+  updated_at?: string | null;
+}
+
+export interface ProbeSettingsUpdate {
+  enabled?: boolean;
+  show_globe?: boolean;
+  show_daily_trend?: boolean;
+  show_traffic_hotspots?: boolean;
+  show_traffic_7d?: boolean;
+  show_resource_heatmap?: boolean;
+  show_traffic_quota?: boolean;
+  show_renewal_timeline?: boolean;
+  show_health_score?: boolean;
+  title?: string | null;
+  description?: string | null;
+  logo?: string | null;
+  refresh_interval_sec?: number | null;
+  appearance?: ProbeAppearanceUpdate | null;
+}
+
+export interface ProbeSettingsResponse {
+  settings: ProbeSettings;
+  license_required: false;
+}
+
+export interface ProbePayload extends ProbeSettings {
   servers?: ProbeServer[];
   license_required: false;
 }

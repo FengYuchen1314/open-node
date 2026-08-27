@@ -7,7 +7,12 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from open_node.api.dependencies import get_inventory_store
-from open_node.domain.probe import ProbePayload, ProbeSeriesResponse
+from open_node.domain.probe import (
+    ProbePayload,
+    ProbeSeriesResponse,
+    ProbeSettingsResponse,
+    ProbeSettingsUpdate,
+)
 from open_node.services.inventory import InventoryStore, ProbeNotFoundError
 from open_node.services.probe_stream import PublicProbeStreamManager
 
@@ -23,6 +28,29 @@ def public_probe_servers(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
 ) -> ProbePayload:
     return store.public_probe_payload()
+
+
+@router.get(
+    "/probe-settings",
+    response_model=ProbeSettingsResponse,
+    response_model_exclude_none=True,
+)
+def get_public_probe_settings(
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ProbeSettingsResponse:
+    return ProbeSettingsResponse(settings=store.probe_settings())
+
+
+@router.put(
+    "/probe-settings",
+    response_model=ProbeSettingsResponse,
+    response_model_exclude_none=True,
+)
+def update_public_probe_settings(
+    payload: ProbeSettingsUpdate,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ProbeSettingsResponse:
+    return store.update_probe_settings(payload)
 
 
 @router.get(
@@ -107,7 +135,8 @@ async def _send_probe_snapshots(
     while True:
         payload = await run_in_threadpool(store.public_probe_payload)
         await websocket.send_json(payload.model_dump(mode="json", exclude_none=True))
-        await asyncio.sleep(streams.broadcast_interval_sec)
+        interval_sec = max(1, min(payload.refresh_interval_sec, 60))
+        await asyncio.sleep(interval_sec or streams.broadcast_interval_sec)
 
 
 async def _discard_probe_messages(websocket: WebSocket) -> None:
