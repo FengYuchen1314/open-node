@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     certificate_allow_loopback_http: bool = False
     certificate_poll_seconds: float = Field(default=30, ge=1, le=3600)
     certificate_job_timeout: int = Field(default=240, ge=5, le=600)
+    frontend_dir: Path | None = None
+
+    @field_validator("frontend_dir")
+    @classmethod
+    def frontend_path(cls, value: Path | None) -> Path | None:
+        if value is not None and (not value.is_absolute() or value == Path(value.anchor)):
+            raise ValueError(
+                "Frontend directory must be absolute and cannot be the filesystem root"
+            )
+        return value
 
     @field_validator("certificate_lego_binary", "certificate_ca_file")
     @classmethod

@@ -34,6 +34,16 @@ using the same database configuration as the backend, then sign in through
 the Vue interface. [Administrator setup and recovery](docs/administrator-access.md)
 also covers HTTPS cookies, local previews, session expiry, and API clients.
 
+## Deployment
+
+The root Dockerfile and [Compose deployment](docs/deployment.md) build a
+single non-root image containing FastAPI, the Vue production frontend, and
+pinned lego. The deployment guide covers HTTPS, administrator initialization,
+private persistent storage, backup/restore, upgrades, and explicit rollback.
+No development server is needed. The actual Compose setup has been exercised
+on the VPS with HTTPS desktop/mobile browser workflows and volume recovery.
+Remaining migration gates still apply; this is not yet full MMWX parity.
+
 ## Current Milestone
 
 The independent [Open Node Agent](agent/README.md) now handles WebSocket and
@@ -116,6 +126,7 @@ frontend/  Vue 3 + Vuetify shell, server, config, change, subscription, command,
 probe-worker/  Cloudflare Worker for the standalone public probe surface
 docs/      migration and architecture notes
 scripts/   VPS test runner
+deploy/    Control-plane Compose environment and HTTPS proxy example
 ```
 
 ## Local Development

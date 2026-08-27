@@ -47,6 +47,14 @@ The backend serves JSON APIs under `/api/v1`. The frontend is a Vite application
 that can point to the backend with `VITE_API_BASE_URL` or use same-origin API
 paths in production.
 
+The production image serves the built Vue frontend from FastAPI using
+`OPEN_NODE_FRONTEND_DIR`. Static assets retain conditional/range responses;
+HTML is revalidated and hashed assets are immutable. Browser navigation can
+fall back to `index.html`, but missing API routes, static assets, and dotfiles
+cannot. The shipped Compose service has one backend process and one private
+persistent volume. See [deployment.md](deployment.md) for the HTTPS and
+single-host operating contract.
+
 ## Administrator Sessions
 
 Management routes use a shared FastAPI administrator dependency. Public

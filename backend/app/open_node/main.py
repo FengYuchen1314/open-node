@@ -16,6 +16,7 @@ from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
 from open_node.services.inventory import InventoryStore
 from open_node.services.probe_stream import PublicProbeStreamManager
+from open_node.web import FrontendFiles
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -57,6 +58,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_api_websocket_route("/api/remote/ws", agent_websocket)
     app.include_router(public_router, prefix="/api")
     app.add_api_route("/healthz", healthz, methods=["GET"], include_in_schema=False)
+    if active_settings.frontend_dir:
+        app.mount(
+            "/",
+            FrontendFiles(active_settings.frontend_dir, active_settings.api_prefix),
+            name="frontend",
+        )
     return app
 
 

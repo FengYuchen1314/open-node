@@ -231,6 +231,10 @@ These passing command and snapshot checks do not prove a complete replacement:
 - Extend dependency coordination to multi-server change sets and rollback,
   including interactions with already-running commands. The new dependencies
   cover the server recovery/runtime workflows, not arbitrary concurrent jobs.
-- Complete deployable packaging and broader end-to-end operator workflows
-  before calling the product ready for public deployment. Local administrator
-  authentication is implemented; this alone is not a complete deployment audit.
+- Single-image FastAPI/Vue packaging, non-root read-only Compose deployment,
+  HTTPS reverse proxy, administrator initialization/recovery, persistent-volume
+  backup/restore, and explicit image rollback are implemented. The actual
+  deployment has passed desktop/mobile browser workflows on the VPS. Complete
+  broader operator workflows and the remaining runtime gates before calling
+  the product a full public replacement. Multi-host scaling and arbitrary
+  future database downgrades are not covered. See [deployment.md](deployment.md).

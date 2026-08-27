@@ -85,7 +85,9 @@ def certificates_ui(page, url, output):
     dialog.get_by_role("button", name="Save provider", exact=True).click()
     expect(dialog).not_to_be_visible()
     expect(page.get_by_text("Browser DNS", exact=True)).to_be_visible()
-    page.get_by_role("button", name="Rotate DNS credentials").click()
+    page.locator(".provider-row").filter(has_text="Browser DNS").get_by_role(
+        "button", name="Rotate DNS credentials"
+    ).click()
     expect(dialog.get_by_label("CF_DNS_API_TOKEN", exact=True)).to_have_value("")
     dialog.get_by_role("button", name="Cancel", exact=True).click()
     page.get_by_role("tab", name="Certificates", exact=True).click()
@@ -150,12 +152,24 @@ def certificates_ui(page, url, output):
     )
 
 
-def exercise(url: str, password: str, output: Path, database_url: str) -> None:
+def exercise(
+    url: str,
+    password: str,
+    output: Path,
+    database_url: str,
+    *,
+    certificate_spki: str = "",
+) -> None:
     from open_node.services.auth import AuthStore, OperatorSession
     from sqlalchemy import update
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        args = (
+            [f"--ignore-certificate-errors-spki-list={certificate_spki}"]
+            if certificate_spki
+            else []
+        )
+        browser = playwright.chromium.launch(args=args)
         context = browser.new_context(viewport={"width": 1440, "height": 900})
         page = context.new_page()
         errors, requests = [], []

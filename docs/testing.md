@@ -33,6 +33,55 @@ cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
 
+## Control Plane Deployment Smoke
+
+On the designated VPS, with Docker Compose and a trusted Nginx binary:
+
+```bash
+backend/.venv/bin/pip install -e 'backend[dev,browser]'
+backend/.venv/bin/playwright install --with-deps chromium
+AGENT_ENV="$(mktemp -d /tmp/open-node-package-agent.XXXXXX)"
+python3 -m venv "$AGENT_ENV"
+"$AGENT_ENV/bin/pip" install agent/dist/open_node_agent-0.1.0-py3-none-any.whl
+OPEN_NODE_IMAGE_TAG=local OPEN_NODE_REVISION="$(git rev-parse HEAD)" \
+  docker compose --env-file /dev/null -f deploy/compose.yaml build
+backend/.venv/bin/python scripts/vps/smoke-control-plane.py \
+  --image-tag local \
+  --agent-python "$AGENT_ENV/bin/python" \
+  --nginx /path/to/extracted/usr/sbin/nginx \
+  --output /tmp/open-node-package-shots
+```
+
+Build the Agent wheel with the normal test runner first. The image tag must
+identify the image built from the checkout under test.
+This smoke uses the shipped Compose file and HTTPS proxy template. It creates
+randomized projects with loopback-only ports, private named volumes, a local
+TLS identity, and a private Nginx prefix. No public CA, DNS account, host
+certificate store, production service, or existing volume is modified.
+
+It verifies non-root/read-only runtime restrictions, an empty installation,
+administrator creation and recovery, Secure/HttpOnly/SameSite cookies,
+Origin/CSRF rejection, SPA route reloads, API/static-file boundaries, and an
+actual WSS probe stream. It then checks session, inventory, and encrypted-key
+persistence after container/network recreation, a stopped-volume backup
+restored into a new project, a changed-image upgrade, and explicit rollback
+after a deliberately broken release fails startup. Temporary candidate images
+and owned volumes are removed afterward. No arbitrary future database
+downgrade, multi-host deployment, or zero-downtime upgrade is claimed.
+
+The installed Agent also connects through HTTPS/WSS using only the fixture
+CA, with TLS verification enabled. The full real-Xray forwarding, client
+provisioning/revocation, failed-restart rollback, config recovery, telemetry,
+and persistent-deduplication smoke runs on both transports against the
+container. It uses the pinned Xray archive documented below; the optional
+`--xray-archive` argument reuses a copy without bypassing its checksum.
+
+The full operator browser smoke runs against the production image through
+HTTPS at desktop 1440x900 and mobile 390x844. HTTP and WSS clients validate the
+fixture certificate and hostname. Chromium allows only the generated fixture
+SPKI via its per-process test switch, not a blanket TLS bypass. Screenshots
+remain at `--output`; fixture credentials are not written there.
+
 ## Independent-Agent Smoke
 
 After the normal test runner, install the built wheel into a separate environment

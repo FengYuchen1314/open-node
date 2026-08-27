@@ -1,0 +1,38 @@
+# Include inside the host Nginx http {} block. Replace the hostname and TLS paths.
+map $http_upgrade $open_node_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 80;
+    server_name panel.example.com;
+    return 308 https://panel.example.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name panel.example.com;
+    ssl_certificate /etc/letsencrypt/live/panel.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/panel.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_tokens off;
+    client_max_body_size 10m;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    if ($host != panel.example.com) { return 421; }
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # This is the edge proxy: discard client-supplied forwarding headers.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $open_node_connection_upgrade;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 60s;
+        proxy_buffering off;
+    }
+}

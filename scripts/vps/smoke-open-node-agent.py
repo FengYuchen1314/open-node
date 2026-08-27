@@ -178,7 +178,9 @@ def forwards(socks_port, echo_port):
     return result.returncode == 0 and result.stdout == RESPONSE_BODY
 
 
-def exercise_mode(work, xray, agent_python, client, url, database, echo_port, mode):
+def exercise_mode(
+    work, xray, agent_python, client, url, database, echo_port, mode, *, ca_file=None
+):
     directory = work / mode
     directory.mkdir(mode=0o700)
     created_response = client.post(
@@ -229,7 +231,8 @@ def exercise_mode(work, xray, agent_python, client, url, database, echo_port, mo
             "master_url": url,
             "token": created["agent_token"],
             "connection_mode": mode,
-            "allow_insecure_http": True,
+            "allow_insecure_http": url.startswith("http://"),
+            "ca_file": str(ca_file) if ca_file else None,
             "hostname": "fixture-" + mode,
             "state_dir": str(directory / "state"),
             "xray_binary": str(xray),
