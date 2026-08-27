@@ -253,6 +253,8 @@ export interface XrayRuntimeInbound {
   sniffing_enabled: boolean;
   sniffing_dest_override: string[];
   sniffing_exclude_domains: string[];
+  traffic: TrafficData;
+  user_traffic: TrafficData;
   remarks: string[];
 }
 
@@ -269,6 +271,9 @@ export interface XrayRuntimeInventoryResponse {
   inbound_count: number;
   client_count: number;
   protocol_counts: Record<string, number>;
+  traffic: TrafficData;
+  user_traffic: TrafficData;
+  traffic_reported_at?: string | null;
   inbounds: XrayRuntimeInbound[];
   reported_at?: string | null;
   updated_at?: string | null;

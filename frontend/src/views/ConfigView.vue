@@ -984,11 +984,28 @@ function shortHash(value: string) {
   return value.slice(0, 12);
 }
 
+function trafficTotal(traffic?: { uplink: number; downlink: number }) {
+  return (traffic?.uplink ?? 0) + (traffic?.downlink ?? 0);
+}
+
+function formatTraffic(traffic?: { uplink: number; downlink: number }) {
+  const up = traffic?.uplink ?? 0;
+  const down = traffic?.downlink ?? 0;
+  return `Up ${formatBytes(up)} / Down ${formatBytes(down)}`;
+}
+
 function formatBytes(value: number) {
-  if (value < 1024) {
-    return `${value} B`;
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let current = Math.max(0, value);
+  let unitIndex = 0;
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024;
+    unitIndex += 1;
   }
-  return `${(value / 1024).toFixed(value < 10240 ? 1 : 0)} KB`;
+  if (unitIndex === 0) {
+    return `${Math.round(current)} ${units[unitIndex]}`;
+  }
+  return `${current.toFixed(current < 10 ? 1 : 0)} ${units[unitIndex]}`;
 }
 
 function formatDateTime(value: string) {
@@ -1406,6 +1423,22 @@ function formatDateTime(value: string) {
                   {{ xrayRuntimeInventory?.client_count ?? 0 }} clients
                 </v-chip>
                 <v-chip
+                  v-if="xrayRuntimeInventory?.traffic_reported_at"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Inbound {{ formatTraffic(xrayRuntimeInventory.traffic) }}
+                </v-chip>
+                <v-chip
+                  v-if="xrayRuntimeInventory?.traffic_reported_at"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Users {{ formatTraffic(xrayRuntimeInventory.user_traffic) }}
+                </v-chip>
+                <v-chip
                   v-if="runtimeCredentialReconciliation"
                   :color="
                     runtimeCredentialReconciliation.out_of_sync_count === 0
@@ -1542,6 +1575,22 @@ function formatDateTime(value: string) {
                       variant="tonal"
                     >
                       {{ inbound.sniffing_enabled ? "Sniffing" : "No sniffing" }}
+                    </v-chip>
+                    <v-chip
+                      v-if="trafficTotal(inbound.traffic) > 0"
+                      density="comfortable"
+                      size="small"
+                      variant="tonal"
+                    >
+                      In {{ formatTraffic(inbound.traffic) }}
+                    </v-chip>
+                    <v-chip
+                      v-if="trafficTotal(inbound.user_traffic) > 0"
+                      density="comfortable"
+                      size="small"
+                      variant="tonal"
+                    >
+                      Users {{ formatTraffic(inbound.user_traffic) }}
                     </v-chip>
                     <v-chip
                       v-for="value in inbound.sniffing_dest_override"

@@ -392,6 +392,21 @@ def test_xray_runtime_inventory_summarizes_scan_inbounds_without_secrets(
     )
 
     assert result.status_code == 200
+    telemetry = client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": created["agent_token"],
+            "stats": {
+                "inbound": {"vless-443": {"uplink": 100, "downlink": 200}},
+                "user": {
+                    "alice@example.com": {"uplink": 12, "downlink": 34},
+                    "bob@example.com": {"uplink": 5, "downlink": 6},
+                    "root": {"uplink": 9, "downlink": 10},
+                },
+            },
+        },
+    )
+    assert telemetry.status_code == 200
 
     response = client.get(f"/api/v1/servers/{server_id}/xray/runtime")
 
@@ -407,6 +422,9 @@ def test_xray_runtime_inventory_summarizes_scan_inbounds_without_secrets(
     assert payload["inbound_count"] == 3
     assert payload["client_count"] == 5
     assert payload["protocol_counts"] == {"anytls": 1, "socks": 1, "vless": 1}
+    assert payload["traffic"] == {"uplink": 100, "downlink": 200}
+    assert payload["user_traffic"] == {"uplink": 17, "downlink": 40}
+    assert payload["traffic_reported_at"]
 
     vless = payload["inbounds"][0]
     assert vless["tag"] == "vless-443"
@@ -419,6 +437,8 @@ def test_xray_runtime_inventory_summarizes_scan_inbounds_without_secrets(
     assert vless["sniffing_enabled"] is True
     assert vless["sniffing_dest_override"] == ["http", "tls"]
     assert vless["sniffing_exclude_domains"] == ["Example.com", "foo.test"]
+    assert vless["traffic"] == {"uplink": 100, "downlink": 200}
+    assert vless["user_traffic"] == {"uplink": 12, "downlink": 34}
     assert vless["remarks"] == []
 
     anytls = payload["inbounds"][1]
@@ -427,17 +447,22 @@ def test_xray_runtime_inventory_summarizes_scan_inbounds_without_secrets(
     assert anytls["client_container"] == "users"
     assert anytls["client_count"] == 1
     assert anytls["user_emails"] == ["bob@example.com"]
+    assert anytls["traffic"] == {"uplink": 0, "downlink": 0}
+    assert anytls["user_traffic"] == {"uplink": 5, "downlink": 6}
     assert anytls["remarks"] == ["missing_tag"]
 
     socks = payload["inbounds"][2]
     assert socks["client_container"] == "accounts"
     assert socks["client_count"] == 1
     assert socks["user_emails"] == []
+    assert socks["traffic"] == {"uplink": 0, "downlink": 0}
+    assert socks["user_traffic"] == {"uplink": 0, "downlink": 0}
 
     serialized = json.dumps(payload)
     assert "secret-id" not in serialized
     assert "hidden-password" not in serialized
     assert "secret-pass" not in serialized
+    assert "root" not in serialized
 
 
 def test_xray_runtime_inventory_for_unknown_server_returns_404(tmp_path: Path) -> None:

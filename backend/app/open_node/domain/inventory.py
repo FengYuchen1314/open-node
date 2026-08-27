@@ -580,6 +580,8 @@ class XrayRuntimeInboundRead(BaseModel):
     sniffing_enabled: bool = False
     sniffing_dest_override: list[str] = Field(default_factory=list)
     sniffing_exclude_domains: list[str] = Field(default_factory=list)
+    traffic: TrafficData = Field(default_factory=TrafficData)
+    user_traffic: TrafficData = Field(default_factory=TrafficData)
     remarks: list[str] = Field(default_factory=list)
 
 
@@ -596,6 +598,9 @@ class XrayRuntimeInventoryResponse(BaseModel):
     inbound_count: int = 0
     client_count: int = 0
     protocol_counts: dict[str, int] = Field(default_factory=dict)
+    traffic: TrafficData = Field(default_factory=TrafficData)
+    user_traffic: TrafficData = Field(default_factory=TrafficData)
+    traffic_reported_at: datetime | None = None
     inbounds: list[XrayRuntimeInboundRead] = Field(default_factory=list)
     reported_at: datetime | None = None
     updated_at: datetime | None = None

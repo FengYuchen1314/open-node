@@ -71,6 +71,7 @@ from open_node.domain.inventory import (
     ServerRecord,
     ServerStatus,
     SystemTraffic,
+    TrafficData,
     TrafficSource,
     TrafficStatsMode,
     XrayConfigSnapshotRead,
@@ -1272,7 +1273,8 @@ class InventoryStore:
             if not server:
                 raise ServerNotFoundError(f"server not found: {server_id}")
             scan = session.get(AgentScanResultModel, str(server_id))
-            return self._xray_runtime_inventory_response(server_id, scan)
+            latest_telemetry = self._latest_telemetry_model(session, str(server_id))
+            return self._xray_runtime_inventory_response(server_id, scan, latest_telemetry)
 
     def list_xray_runtime_node_drafts(
         self,
@@ -3985,6 +3987,39 @@ class InventoryStore:
             downlink += int(item.get("downlink") or 0)
         return uplink, downlink
 
+    @classmethod
+    def _traffic_data_for_key(cls, source: dict[str, Any] | None, key: str | None) -> TrafficData:
+        if not source or not key:
+            return TrafficData()
+        return cls._traffic_data_from_record(source.get(key))
+
+    @classmethod
+    def _traffic_data_for_keys(cls, source: dict[str, Any] | None, keys: list[str]) -> TrafficData:
+        if not source or not keys:
+            return TrafficData()
+        uplink = 0
+        downlink = 0
+        for key in keys:
+            traffic = cls._traffic_data_from_record(source.get(key))
+            uplink += traffic.uplink
+            downlink += traffic.downlink
+        return TrafficData(uplink=uplink, downlink=downlink)
+
+    @classmethod
+    def _traffic_data_from_record(cls, value: Any) -> TrafficData:
+        item = cls._record_value(value)
+        return TrafficData(
+            uplink=cls._traffic_counter_value(item.get("uplink")),
+            downlink=cls._traffic_counter_value(item.get("downlink")),
+        )
+
+    @staticmethod
+    def _sum_traffic_data(values: list[TrafficData]) -> TrafficData:
+        return TrafficData(
+            uplink=sum(value.uplink for value in values),
+            downlink=sum(value.downlink for value in values),
+        )
+
     @staticmethod
     def _product_user_read(user: ProductUserModel) -> ProductUserRead:
         return ProductUserRead(
@@ -5814,17 +5849,24 @@ class InventoryStore:
         cls,
         server_id: UUID,
         scan: AgentScanResultModel | None,
+        latest_telemetry: TelemetrySnapshotModel | None = None,
     ) -> XrayRuntimeInventoryResponse:
         if scan is None:
             return XrayRuntimeInventoryResponse(server_id=server_id)
 
+        stats = cls._record_value(latest_telemetry.stats if latest_telemetry else None)
+        inbound_stats = cls._record_value(stats.get("inbound"))
+        user_stats = cls._record_value(stats.get("user"))
         inbounds = [
-            cls._xray_runtime_inbound_read(inbound, index)
+            cls._xray_runtime_inbound_read(inbound, index, inbound_stats, user_stats)
             for index, inbound in enumerate(scan.inbounds or [])
         ]
         protocol_counts: dict[str, int] = {}
         for inbound in inbounds:
             protocol_counts[inbound.protocol] = protocol_counts.get(inbound.protocol, 0) + 1
+        traffic = cls._sum_traffic_data([inbound.traffic for inbound in inbounds])
+        user_traffic = cls._sum_traffic_data([inbound.user_traffic for inbound in inbounds])
+        traffic_reported_at = latest_telemetry.reported_at if latest_telemetry and stats else None
 
         return XrayRuntimeInventoryResponse(
             server_id=server_id,
@@ -5839,6 +5881,9 @@ class InventoryStore:
             inbound_count=len(inbounds),
             client_count=sum(inbound.client_count for inbound in inbounds),
             protocol_counts=protocol_counts,
+            traffic=traffic,
+            user_traffic=user_traffic,
+            traffic_reported_at=traffic_reported_at,
             inbounds=inbounds,
             reported_at=scan.reported_at,
             updated_at=scan.updated_at,
@@ -5849,6 +5894,8 @@ class InventoryStore:
         cls,
         inbound: Any,
         index: int,
+        inbound_stats: dict[str, Any] | None = None,
+        user_stats: dict[str, Any] | None = None,
     ) -> XrayRuntimeInboundRead:
         inbound = cls._record_value(inbound)
         protocol = (cls._text_value(inbound.get("protocol")) or "unknown").lower()
@@ -5861,6 +5908,7 @@ class InventoryStore:
         client_container = _XRAY_CLIENT_CONTAINER_BY_PROTOCOL.get(protocol)
         client_values = cls._list_value(settings.get(client_container)) if client_container else []
         client_records = [item for item in client_values if isinstance(item, dict)]
+        user_emails = cls._client_email_list(client_records)
         remarks: list[str] = []
 
         if not tag:
@@ -5881,10 +5929,12 @@ class InventoryStore:
             security=cls._text_value(stream_settings.get("security")),
             client_container=client_container,
             client_count=len(client_values),
-            user_emails=cls._client_email_list(client_records),
+            user_emails=user_emails,
             sniffing_enabled=cls._bool_value(sniffing.get("enabled")),
             sniffing_dest_override=cls._text_list_value(sniffing.get("destOverride")),
             sniffing_exclude_domains=cls._text_list_value(sniffing.get("excludeDomains")),
+            traffic=cls._traffic_data_for_key(inbound_stats, tag),
+            user_traffic=cls._traffic_data_for_keys(user_stats, user_emails),
             remarks=remarks,
         )
 

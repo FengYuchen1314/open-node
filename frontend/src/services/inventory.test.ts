@@ -226,6 +226,9 @@ describe("inventory API client", () => {
           inbound_count: 1,
           client_count: 2,
           protocol_counts: { vless: 1 },
+          traffic: { uplink: 100, downlink: 200 },
+          user_traffic: { uplink: 12, downlink: 34 },
+          traffic_reported_at: "2026-08-27T00:00:02Z",
           inbounds: [
             {
               source_index: 0,
@@ -241,6 +244,8 @@ describe("inventory API client", () => {
               sniffing_enabled: true,
               sniffing_dest_override: ["http", "tls"],
               sniffing_exclude_domains: ["example.com"],
+              traffic: { uplink: 100, downlink: 200 },
+              user_traffic: { uplink: 12, downlink: 34 },
               remarks: [],
             },
           ],
@@ -258,6 +263,8 @@ describe("inventory API client", () => {
     expect(headers).toBeUndefined();
     expect(response.license_required).toBe(false);
     expect(response.inbounds[0]?.client_count).toBe(2);
+    expect(response.traffic.uplink).toBe(100);
+    expect(response.inbounds[0]?.user_traffic.downlink).toBe(34);
   });
 
   it("lists Xray config snapshots with optional config bodies", async () => {

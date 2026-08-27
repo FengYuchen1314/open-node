@@ -73,6 +73,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: scan-derived Xray runtime inventory summaries with protocol/client
      counts, sanitized user labels, sniffing state, and Vue Runtime tab
      display.
+   - Done: Xray runtime inventory is enriched with latest telemetry
+     `stats.inbound` and `stats.user` traffic counters, matched only by runtime
+     inbound tags and already exposed client email labels.
    - Done: scan-derived managed-node drafts and one-click catalog node creation
      from runtime inbounds, without importing UUIDs, passwords, PSKs, or account
      secrets from existing Xray config.

@@ -72,8 +72,10 @@ The control plane exposes that latest snapshot at
 inventory at `/api/v1/servers/{server_id}/xray/runtime`, summarizing inbound
 tags, protocols, ports, transport/security names, client counts, client email
 labels, sniffing state, protocol totals, and config-repair metadata without
-returning UUIDs, passwords, PSKs, or account secrets. It can also derive
-managed-node drafts from those inbounds at
+returning UUIDs, passwords, PSKs, or account secrets. When latest telemetry has
+Xray stats, runtime inventory also reports matched inbound traffic counters and
+per-inbound user traffic summed only from already exposed client email labels.
+It can also derive managed-node drafts from those inbounds at
 `/api/v1/servers/{server_id}/xray/runtime/node-drafts` and create catalog nodes
 through `/api/v1/servers/{server_id}/xray/runtime/nodes`. Operators can also
 bulk-import all available missing runtime inbounds through
