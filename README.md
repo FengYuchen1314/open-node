@@ -34,14 +34,15 @@ operation wrappers, a subscription catalog with user-plan binding, optional
 agent `batch-apply` provisioning, public subscription links with generated
 per-user credentials, Clash/sing-box/URI subscription rendering, durable
 per-user traffic ledgering, rollback-friendly multi-server change sets, and
-subscription template presets, catalog import/export workflows, and quota
-status plus traffic reset automation, and the customizable public probe
-surface with region/provider/renewal metadata. The Vue frontend now includes a
-config workspace, runtime/site operation payload workbenches, subscription
-catalog, link, format, traffic, quota, preset, and import/export management,
-probe settings and metadata controls, a change-set dispatch/rollback workspace,
-and an expandable command-result inspector. It does not yet replace the full
-MMWX product.
+subscription template presets, catalog import/export workflows, quota status
+plus traffic reset automation, and the customizable public probe surface with
+region/provider/renewal metadata, daily traffic aggregation, and public insight
+views. The Vue frontend now includes a config workspace, runtime/site operation
+payload workbenches, subscription catalog, link, format, traffic, quota,
+preset, and import/export management, probe settings and metadata controls,
+probe status/region filters, health scoring, latency buckets, traffic
+hotspots, a change-set dispatch/rollback workspace, and an expandable
+command-result inspector. It does not yet replace the full MMWX product.
 
 ```text
 backend/   FastAPI app, no-license API, inventory, telemetry, commands, changes, subscriptions, probe

@@ -73,5 +73,8 @@ This document records the starting source map for the Open Node refactor.
    - Done: richer probe region/provider/renewal metadata with a license-free
      management API, sanitized public payload fields, and Vue display/edit
      controls.
-   - Next: deeper public probe visualization parity.
+   - Done: public probe visualization parity slice with seven-day traffic
+     aggregation, status/region filters, health scoring, latency history
+     buckets, quota meters, and live traffic hotspots.
+   - Next: richer return-route badges and interactive probe charts.
 5. Revisit Xray integration once the agent protocol surface is stable.

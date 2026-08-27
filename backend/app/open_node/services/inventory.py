@@ -72,6 +72,7 @@ from open_node.domain.inventory import (
 from open_node.domain.probe import (
     ProbeAppearance,
     ProbeBucket,
+    ProbeDailyTraffic,
     ProbeMetricPoint,
     ProbePayload,
     ProbePingSeries,
@@ -301,6 +302,14 @@ class SubscriptionTokenRecord:
     short_code: str
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ProbeTrafficTotals:
+    source: str
+    uplink: int
+    downlink: int
+    boot_time_unix: int | None = None
 
 
 class Base(DeclarativeBase):
@@ -947,7 +956,8 @@ class InventoryStore:
             for server in servers:
                 latest = self._latest_telemetry_model(session, server.id)
                 ping = self._probe_ping_series(session, server.id, bucket_count=12, bucket_sec=300)
-                probe_servers.append(self._probe_server(server, latest, ping))
+                daily_traffic = self._probe_daily_traffic(session, server.id, day_count=7)
+                probe_servers.append(self._probe_server(server, latest, ping, daily_traffic))
             return ProbePayload(
                 **settings.model_dump(exclude={"updated_at"}),
                 updated_at=settings.updated_at,
@@ -2026,6 +2036,7 @@ class InventoryStore:
         server: ServerModel,
         latest: TelemetrySnapshotModel | None,
         ping_by_key: dict[str, ProbePingSeries],
+        daily_traffic: list[ProbeDailyTraffic] | None = None,
     ) -> ProbeServer:
         probe = ProbeServer(
             name=server.name,
@@ -2037,6 +2048,7 @@ class InventoryStore:
             upload_speed=server.current_upload_speed,
             download_speed=server.current_download_speed,
             traffic_limit=server.traffic_limit,
+            daily_traffic=daily_traffic,
             expires_at=server.expires_at.date().isoformat() if server.expires_at else None,
             renewal_price=server.renewal_price,
             renewal_price_cny=server.renewal_price_cny,
@@ -2082,6 +2094,97 @@ class InventoryStore:
         if ping_by_key:
             probe.ping = sorted(ping_by_key.values(), key=lambda item: (item.label, item.key or ""))
         return probe
+
+    def _probe_daily_traffic(
+        self,
+        session: Session,
+        server_id: str,
+        day_count: int,
+    ) -> list[ProbeDailyTraffic] | None:
+        day_count = max(1, day_count)
+        last_day = datetime.now(tz=UTC).date()
+        first_day = last_day - timedelta(days=day_count - 1)
+        seed_day = first_day - timedelta(days=1)
+        since = datetime.combine(seed_day, datetime.min.time(), tzinfo=UTC)
+        snapshots = session.scalars(
+            select(TelemetrySnapshotModel)
+            .where(
+                TelemetrySnapshotModel.server_id == server_id,
+                TelemetrySnapshotModel.reported_at >= since,
+            )
+            .order_by(TelemetrySnapshotModel.reported_at)
+        ).all()
+        if len(snapshots) < 2:
+            return None
+
+        totals_by_day: dict[date, dict[str, int]] = {
+            first_day + timedelta(days=offset): {"uplink": 0, "downlink": 0}
+            for offset in range(day_count)
+        }
+        previous = snapshots[0]
+        previous_totals = self._probe_snapshot_traffic_totals(previous)
+        for current in snapshots[1:]:
+            current_totals = self._probe_snapshot_traffic_totals(current)
+            if previous_totals and current_totals:
+                delta = self._probe_traffic_delta(previous_totals, current_totals)
+                day = self._aware_datetime(current.reported_at).date()
+                if delta and first_day <= day <= last_day:
+                    totals_by_day[day]["uplink"] += delta.uplink
+                    totals_by_day[day]["downlink"] += delta.downlink
+            previous = current
+            previous_totals = current_totals
+
+        rows = [
+            ProbeDailyTraffic(
+                date=day.isoformat(),
+                uplink=totals["uplink"],
+                downlink=totals["downlink"],
+                total=totals["uplink"] + totals["downlink"],
+            )
+            for day, totals in sorted(totals_by_day.items())
+        ]
+        return rows if any(row.total > 0 for row in rows) else None
+
+    @staticmethod
+    def _probe_snapshot_traffic_totals(
+        snapshot: TelemetrySnapshotModel,
+    ) -> ProbeTrafficTotals | None:
+        if snapshot.stats is not None:
+            uplink, downlink = InventoryStore._traffic_totals_from_stats(snapshot.stats)
+            return ProbeTrafficTotals(source="xray", uplink=uplink, downlink=downlink)
+        if snapshot.system_tx_total is not None and snapshot.system_rx_total is not None:
+            return ProbeTrafficTotals(
+                source="system",
+                uplink=snapshot.system_tx_total,
+                downlink=snapshot.system_rx_total,
+                boot_time_unix=snapshot.system_boot_time_unix,
+            )
+        return None
+
+    @staticmethod
+    def _probe_traffic_delta(
+        previous: ProbeTrafficTotals,
+        current: ProbeTrafficTotals,
+    ) -> ProbeTrafficTotals | None:
+        if previous.source != current.source:
+            return None
+        reset = (
+            current.source == "system"
+            and previous.boot_time_unix is not None
+            and current.boot_time_unix is not None
+            and previous.boot_time_unix != current.boot_time_unix
+        )
+        uplink = (
+            current.uplink
+            if reset or current.uplink < previous.uplink
+            else current.uplink - previous.uplink
+        )
+        downlink = (
+            current.downlink
+            if reset or current.downlink < previous.downlink
+            else current.downlink - previous.downlink
+        )
+        return ProbeTrafficTotals(source=current.source, uplink=uplink, downlink=downlink)
 
     def _probe_ping_series(
         self,

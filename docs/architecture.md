@@ -327,10 +327,12 @@ are also mounted at:
 - `GET /api/public/probe-ws`
 
 Probe responses are built from persisted agent telemetry snapshots. The server
-list exposes only public status, speed, resource, traffic, and latency fields;
-internal identifiers, IP addresses, bootstrap tokens, and agent secrets are not
-serialized. Series lookups use the public server index from the sanitized list
-instead of private server IDs.
+list exposes only public status, speed, resource, traffic, latency, and
+seven-day daily traffic summary fields; internal identifiers, IP addresses,
+bootstrap tokens, and agent secrets are not serialized. Daily traffic is
+calculated from Xray stat counters when present and falls back to system
+network counters across consecutive telemetry snapshots. Series lookups use the
+public server index from the sanitized list instead of private server IDs.
 
 Server probe metadata can be supplied when a server is created or updated with
 `PATCH /api/v1/servers/{server_id}/probe-metadata`. The metadata covers region
@@ -346,7 +348,9 @@ and renewal columns. When the probe is disabled, `/probe-servers` still returns
 a no-license JSON payload with `enabled=false`, but the public server list is
 empty so node telemetry is not exposed. The Vue `/probe` view can edit these
 settings and immediately uses the same public payload to render or hide table
-sections.
+sections, status and region filters, region summaries, seven-day traffic bars,
+health chips, latency history buckets, quota meters, renewal badges, and live
+traffic hotspot rows.
 
 The WebSocket stream is also public and read-only. It sends the same
 `ProbePayload` structure as the HTTP list endpoint, drops any client messages,

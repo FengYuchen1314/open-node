@@ -314,6 +314,11 @@ def test_public_probe_servers_returns_sanitized_mmwx_probe_payload(tmp_path: Pat
         json={
             "token": created["agent_token"],
             "reported_at": first_at.isoformat(),
+            "stats": {
+                "inbound": {"proxy-in": {"uplink": 40, "downlink": 80}},
+                "outbound": {},
+                "user": {},
+            },
             "system": {"rx_total": 1_000, "tx_total": 2_000, "boot_time_unix": 123},
         },
     )
@@ -368,6 +373,16 @@ def test_public_probe_servers_returns_sanitized_mmwx_probe_payload(tmp_path: Pat
     assert server["traffic_used_up"] == 100
     assert server["traffic_used_down"] == 200
     assert server["traffic_used_total"] == 300
+    assert len(server["daily_traffic"]) == 7
+    current_day = next(
+        item for item in server["daily_traffic"] if item["date"] == second_at.date().isoformat()
+    )
+    assert current_day == {
+        "date": second_at.date().isoformat(),
+        "uplink": 60,
+        "downlink": 120,
+        "total": 180,
+    }
     assert server["cumulative_up"] == 3_000
     assert server["cumulative_down"] == 1_600
     assert server["cpu_pct"] == 35.5

@@ -393,6 +393,227 @@ body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.probe-insight-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.probe-insight-panel {
+  align-self: stretch;
+  min-height: 228px;
+}
+
+.compact-head {
+  margin-bottom: 12px;
+}
+
+.probe-region-list,
+.probe-hotspot-list {
+  display: grid;
+  gap: 10px;
+}
+
+.probe-region-list button,
+.probe-hotspot-list > div {
+  align-items: center;
+  background: #f7faf9;
+  border: 1px solid #dfe7e4;
+  border-radius: 8px;
+  color: inherit;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(76px, 0.8fr) auto;
+  min-height: 42px;
+  padding: 9px 10px;
+}
+
+.probe-region-list button {
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.probe-region-list button.active,
+.probe-region-list button:hover {
+  border-color: #176b5b;
+}
+
+.probe-region-list span,
+.probe-hotspot-list span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.probe-region-list i,
+.probe-hotspot-list i {
+  background: #e7eeec;
+  border-radius: 999px;
+  display: block;
+  height: 8px;
+  overflow: hidden;
+}
+
+.probe-region-list b,
+.probe-hotspot-list b {
+  background: #176b5b;
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+}
+
+.probe-hotspot-list b {
+  background: #2f6fed;
+}
+
+.probe-region-list strong,
+.probe-hotspot-list strong {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.probe-daily-bars {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-height: 158px;
+}
+
+.probe-day-bar {
+  display: grid;
+  gap: 8px;
+  grid-template-rows: 1fr auto;
+  min-width: 0;
+}
+
+.probe-day-bar > span {
+  align-items: end;
+  background: #edf3f1;
+  border-radius: 8px;
+  display: flex;
+  gap: 3px;
+  height: 118px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 5px;
+}
+
+.probe-day-bar i {
+  border-radius: 4px 4px 0 0;
+  display: block;
+  flex: 1;
+  max-width: 16px;
+  min-height: 0;
+}
+
+.probe-day-bar .down {
+  background: #2f6fed;
+}
+
+.probe-day-bar .up {
+  background: #f08a24;
+}
+
+.probe-day-bar small {
+  color: #66736f;
+  font-size: 11px;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.probe-filter-row {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px) auto;
+  margin-bottom: 14px;
+}
+
+.probe-status-toggle {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.probe-status-toggle .v-btn {
+  min-width: max-content;
+}
+
+.probe-region-select {
+  min-width: 0;
+}
+
+.filter-count {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+.health-chip {
+  margin-top: 6px;
+}
+
+.probe-latency-bars {
+  display: grid;
+  gap: 3px;
+  grid-template-columns: repeat(12, minmax(5px, 1fr));
+  margin-top: 7px;
+  max-width: 156px;
+}
+
+.probe-latency-bars span {
+  background: #dfe7e4;
+  border-radius: 3px;
+  height: 18px;
+}
+
+.probe-latency-bars .is-good {
+  background: #2e9f6e;
+}
+
+.probe-latency-bars .is-warning {
+  background: #f0a21a;
+}
+
+.probe-latency-bars .is-critical {
+  background: #d84b4b;
+}
+
+.probe-latency-bars .is-none {
+  background: #d7dedb;
+}
+
+.probe-quota-meter {
+  background: #e7eeec;
+  border-radius: 999px;
+  height: 8px;
+  margin-top: 7px;
+  max-width: 160px;
+  overflow: hidden;
+}
+
+.probe-quota-meter i {
+  background: #176b5b;
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+}
+
+.server-table tr.is-filtered-offline td {
+  opacity: 0.82;
+}
+
+.server-table tr.is-expiring .server-name {
+  color: #9a6700;
+}
+
+.server-table tr.is-expired .server-name {
+  color: #a33a3a;
+}
+
 .change-toggle-row,
 .change-action-row,
 .change-control-row {
@@ -651,6 +872,8 @@ body {
   .quick-command-grid,
   .log-command-grid,
   .maintenance-command-grid,
+  .probe-filter-row,
+  .probe-insight-grid,
   .probe-toggle-grid,
   .service-command-grid,
   .subscription-action-row,
