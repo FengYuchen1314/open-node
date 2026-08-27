@@ -142,6 +142,24 @@ unexpired leases cannot be pushed again. Failed socket sends release their own
 lease without resetting a newer attempt. Expired leases can be retried, so
 execution is at-least-once rather than exactly-once.
 
+Recovery apply, tunnel deployment/deletion, and runtime credential repair or
+cleanup create each server's command sequence in one transaction. Commands
+after the first start as `waiting`, with `depends_on_command_id` pointing to
+the preceding command. A successful result makes the immediate successor
+`pending`; a failed result marks all remaining successors `skipped` without
+leasing them. Follow-up scans use the same dependency chain. Tunnel-chain
+servers can proceed independently, but each server's scan waits for its own
+changes. Existing SQLite databases gain the nullable dependency column and
+index without changing earlier commands or history.
+
+An Xray test-config response must explicitly contain `ok=true` before recovery
+can continue. HTTP errors, transport errors, and `success=false` bodies fail
+the command; failure cannot update config snapshots or trigger a success
+refresh. Results for waiting commands are rejected, and terminal results are
+accepted once using a conditional update, including concurrent replies. The
+Vue command inspector distinguishes waiting and skipped commands and shows
+their prerequisite IDs.
+
 ## Agent WebSocket RPC
 
 Agents can connect to `/api/v1/agents/ws` or the active MMWX agent's
@@ -300,6 +318,9 @@ merging agent-only `inbounds` and `outbounds` from the pending config into the
 master snapshot before queuing it, but leaves routing rules untouched because
 they do not have stable tags. Successful master writes discard stale pending
 recovery rows.
+Recovery validation, write, and optional restart are separate dependent
+commands. A validation result with HTTP 200 and `ok=false` skips both write
+and restart, preserving the agent's current file.
 Successful mutating Xray child commands for inbounds, outbounds, routing,
 batch apply, config files, system config, direct config writes, and external
 takeover also enqueue one deduplicated `GET /api/child/xray/config` refresh.

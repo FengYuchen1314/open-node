@@ -11,10 +11,10 @@ import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from open_node.core.config import Settings
-from open_node.domain.inventory import AgentCapabilities
+from open_node.domain.inventory import AgentCapabilities, AgentCommandResultRequest
 from open_node.main import create_app
 from open_node.services.inventory import CommandModel
-from sqlalchemy import update
+from sqlalchemy import Column, MetaData, Table, select, update
 
 
 def sqlite_url(path: Path) -> str:
@@ -38,6 +38,26 @@ def scan_result_payload() -> dict[str, object]:
         "config_added_sections": ["api", "stats"],
         "message": "Xray is running, found 1 inbound(s)",
     }
+
+
+def queue_recovery(client: TestClient) -> tuple[dict, dict]:
+    created = client.post("/api/v1/servers", json={"name": "edge-ordered-recovery"}).json()
+    server_id = created["server"]["id"]
+    read = client.post(f"/api/v1/servers/{server_id}/operations/xray/config/read").json()["command"]
+    result = client.post(
+        f"/api/v1/agents/commands/{read['id']}/result",
+        json={
+            "token": created["agent_token"], "status": 200,
+            "body": {"success": True, "config": '{"inbounds":[],"outbounds":[]}'},
+        },
+    )
+    assert result.status_code == 200
+    applied = client.post(
+        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery/apply",
+        json={"restart_xray": True},
+    )
+    assert applied.status_code == 201
+    return created, applied.json()
 
 
 def test_server_create_issues_agent_token_without_license_header(tmp_path: Path) -> None:
@@ -1264,18 +1284,24 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
         assert queued_payload["commands"][0]["status"] == "leased"
         assert queued_payload["commands"][0]["path"] == "/api/child/batch-apply"
         assert queued_payload["commands"][0]["body"]["no_restart"] is False
-        assert queued_payload["scan_command"]["status"] == "leased"
+        assert queued_payload["scan_command"]["status"] == "waiting"
         assert queued_payload["scan_command"]["path"] == "/api/child/scan"
         rpc_call = websocket.receive_json()
         assert rpc_call["type"] == "rpc_call"
         assert rpc_call["payload"]["path"] == "/api/child/batch-apply"
         assert rpc_call["payload"]["timeout_ms"] == 75_000
         assert rpc_call["payload"]["body"] == queued_payload["provisioning_batches"][0]["body"]
+        websocket.send_json({"type": "rpc_reply", "payload": {
+            "request_id": rpc_call["payload"]["request_id"], "status": 200,
+            "body": {"success": True},
+        }})
+        assert websocket.receive_json()["type"] == "rpc_reply_ack"
         scan_rpc = websocket.receive_json()
         assert scan_rpc["type"] == "rpc_call"
         assert scan_rpc["payload"]["path"] == "/api/child/scan"
         assert scan_rpc["payload"]["timeout_ms"] == 75_000
         assert scan_rpc["payload"]["body"] is None
+        assert websocket.receive_json()["payload"]["query"] == "snapshot_source=master_write"
 
         cleanup_queued = client.post(
             f"/api/v1/servers/{server_id}/xray/runtime/credentials/cleanup-extra",
@@ -1295,7 +1321,7 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
             "tag": "vless-443",
             "client": {"email": "orphan@example.com"},
         }
-        assert cleanup_queued_payload["scan_command"]["status"] == "leased"
+        assert cleanup_queued_payload["scan_command"]["status"] == "waiting"
         assert cleanup_queued_payload["scan_command"]["path"] == "/api/child/scan"
         cleanup_rpc = websocket.receive_json()
         assert cleanup_rpc["type"] == "rpc_call"
@@ -1304,6 +1330,11 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
         assert cleanup_rpc["payload"]["body"] == cleanup_queued_payload["command_previews"][0][
             "body"
         ]
+        websocket.send_json({"type": "rpc_reply", "payload": {
+            "request_id": cleanup_rpc["payload"]["request_id"], "status": 200,
+            "body": {"success": True},
+        }})
+        assert websocket.receive_json()["type"] == "rpc_reply_ack"
         cleanup_scan_rpc = websocket.receive_json()
         assert cleanup_scan_rpc["type"] == "rpc_call"
         assert cleanup_scan_rpc["payload"]["path"] == "/api/child/scan"
@@ -2746,6 +2777,11 @@ def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_succe
     }
 
     config_command = applied_payload["commands"][1]
+    validation = applied_payload["commands"][0]
+    assert client.post(
+        f"/api/v1/agents/commands/{validation['id']}/result",
+        json={"token": created["agent_token"], "status": 200, "body": {"ok": True}},
+    ).status_code == 200
     config_result = client.post(
         f"/api/v1/agents/commands/{config_command['id']}/result",
         json={
@@ -2763,6 +2799,210 @@ def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_succe
     assert recovery_after_apply["current"]["config_hash"] == hashlib.sha256(
         applied_payload["commands"][0]["body"]["config"].encode()
     ).hexdigest()
+
+
+@pytest.mark.parametrize("status, body", [
+    (200, {"ok": False}), (200, {"ok": "true"}), (200, {"success": True}),
+    (500, {"ok": True}), (200, {"ok": True, "success": False}),
+])
+def test_recovery_validation_failure_skips_writes_and_rejects_early_results(
+    tmp_path: Path, status: int, body: dict,
+) -> None:
+    client = make_client(tmp_path)
+    created, applied = queue_recovery(client)
+    validation, write, restart = applied["commands"]
+    assert [command["status"] for command in applied["commands"]] == [
+        "pending", "waiting", "waiting",
+    ]
+    assert write["depends_on_command_id"] == validation["id"]
+    assert restart["depends_on_command_id"] == write["id"]
+    assert client.app.state.inventory.lease_command_for_push(UUID(write["id"])) is None
+    token = created["agent_token"]
+    early = client.post(
+        f"/api/v1/agents/commands/{write['id']}/result",
+        json={"token": token, "status": 200, "body": {"success": True}},
+    )
+    assert early.status_code == 409
+    leased = client.post(
+        "/api/v1/agents/commands/lease", json={"token": token, "max_commands": 10},
+    ).json()["commands"]
+    assert [command["id"] for command in leased] == [validation["id"]]
+    failed = client.post(
+        f"/api/v1/agents/commands/{validation['id']}/result",
+        json={"token": token, "status": status, "body": body},
+    )
+    assert failed.json()["command"]["status"] == "failed"
+    late = client.post(
+        f"/api/v1/agents/commands/{validation['id']}/result",
+        json={"token": token, "status": 200, "body": {"ok": True}},
+    )
+    assert late.json()["command"]["status"] == "failed"
+    commands = client.get(f"/api/v1/servers/{created['server']['id']}/commands").json()["commands"]
+    for command in commands:
+        if command["id"] in {write["id"], restart["id"]}:
+            assert command["status"] == "skipped"
+            assert command["attempts"] == 0
+            assert command["completed_at"]
+            assert "prerequisite" in command["result_error"]
+    assert client.post(
+        "/api/v1/agents/commands/lease", json={"token": token, "max_commands": 10},
+    ).json()["commands"] == []
+    snapshots = client.get(
+        f"/api/v1/servers/{created['server']['id']}/xray/config-snapshots",
+    ).json()["snapshots"]
+    assert len(snapshots) == 1
+    assert snapshots[0]["source"] == "agent_report"
+
+
+def test_recovery_dependencies_persist_across_restart_and_release_one_step_at_a_time(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created, applied = queue_recovery(client)
+    token = created["agent_token"]
+    validation, write, restart = applied["commands"]
+    client = make_client(tmp_path)
+    assert [command["id"] for command in client.post(
+        "/api/v1/agents/commands/lease", json={"token": token, "max_commands": 10},
+    ).json()["commands"]] == [validation["id"]]
+    assert client.post(
+        f"/api/v1/agents/commands/{validation['id']}/result",
+        json={"token": token, "status": 200, "body": {"ok": True}},
+    ).status_code == 200
+    client = make_client(tmp_path)
+    assert [command["id"] for command in client.post(
+        "/api/v1/agents/commands/lease", json={"token": token, "max_commands": 10},
+    ).json()["commands"]] == [write["id"]]
+    assert client.post(
+        f"/api/v1/agents/commands/{write['id']}/result",
+        json={"token": token, "status": 200, "body": {"success": True}},
+    ).status_code == 200
+    client = make_client(tmp_path)
+    leased = client.post(
+        "/api/v1/agents/commands/lease", json={"token": token, "max_commands": 10},
+    ).json()["commands"]
+    assert restart["id"] in {command["id"] for command in leased}
+    assert all(command["id"] not in {validation["id"], write["id"]} for command in leased)
+
+
+@pytest.mark.parametrize("write_succeeds", [True, False])
+def test_websocket_recovery_waits_for_validation_and_write_results(
+    tmp_path: Path, write_succeeds: bool,
+) -> None:
+    client = make_client(tmp_path)
+    created, applied = queue_recovery(client)
+    validation, write, restart = applied["commands"]
+    with client.websocket_connect("/api/remote/ws") as websocket:
+        websocket.send_json({"type": "auth", "payload": {
+            "token": created["agent_token"], "capabilities": {"rpc": True},
+        }})
+        assert websocket.receive_json()["type"] == "auth_result"
+        assert websocket.receive_json()["payload"]["request_id"] == validation["request_id"]
+        startup = websocket.receive_json()["payload"]
+        assert startup["path"] == "/api/child/xray/config"
+        websocket.send_json({"type": "ping"})
+        assert websocket.receive_json()["type"] == "pong"
+        websocket.send_json({"type": "rpc_reply", "payload": {
+            "request_id": write["request_id"], "status": 200, "body": {"success": True},
+        }})
+        assert websocket.receive_json()["type"] == "error"
+        websocket.send_json({"type": "rpc_reply", "payload": {
+            "request_id": validation["request_id"], "status": 200, "body": {"ok": True},
+        }})
+        assert websocket.receive_json()["type"] == "rpc_reply_ack"
+        assert websocket.receive_json()["payload"]["request_id"] == write["request_id"]
+        websocket.send_json({"type": "ping"})
+        assert websocket.receive_json()["type"] == "pong"
+        websocket.send_json({"type": "rpc_reply", "payload": {
+            "request_id": write["request_id"], "status": 200,
+            "body": {"success": write_succeeds},
+        }})
+        ack = websocket.receive_json()
+        assert ack["payload"]["status"] == ("succeeded" if write_succeeds else "failed")
+        if write_succeeds:
+            assert websocket.receive_json()["payload"]["request_id"] == restart["request_id"]
+            assert websocket.receive_json()["payload"]["query"] == "snapshot_source=master_write"
+        websocket.send_json({"type": "ping"})
+        assert websocket.receive_json()["type"] == "pong"
+    commands = client.get(
+        f"/api/v1/servers/{created['server']['id']}/commands",
+    ).json()["commands"]
+    final_restart = next(command for command in commands if command["id"] == restart["id"])
+    assert final_restart["status"] == ("leased" if write_succeeds else "skipped")
+    assert final_restart["attempts"] == (1 if write_succeeds else 0)
+    if not write_succeeds:
+        assert all(command["query"] != "snapshot_source=master_write" for command in commands)
+
+
+def test_concurrent_validation_results_have_one_terminal_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = make_client(tmp_path)
+    created, applied = queue_recovery(client)
+    store = client.app.state.inventory
+    validation, write, restart = applied["commands"]
+    original_apply = store._apply_command_result
+    barrier = Barrier(2)
+
+    def concurrent_apply(session, server, command, payload):
+        barrier.wait(timeout=5)
+        original_apply(session, server, command, payload)
+
+    monkeypatch.setattr(store, "_apply_command_result", concurrent_apply)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [pool.submit(
+            store.complete_command,
+            UUID(validation["id"]),
+            AgentCommandResultRequest(token=created["agent_token"], status=200, body={"ok": ok}),
+        ) for ok in (True, False)]
+        outcomes = [result.result(timeout=10).status for result in results]
+    assert len(set(outcomes)) == 1
+    commands = {
+        str(command.id): command
+        for command in store.list_commands(UUID(created["server"]["id"]))
+    }
+    assert commands[validation["id"]].status == outcomes[0]
+    if outcomes[0] == "succeeded":
+        assert commands[write["id"]].status == "pending"
+        assert commands[restart["id"]].status == "waiting"
+    else:
+        assert commands[write["id"]].status == "skipped"
+        assert commands[restart["id"]].status == "skipped"
+
+
+def test_existing_sqlite_commands_migrate_without_losing_history(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-schema"}).json()
+    command = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/system-info",
+    ).json()["command"]
+    legacy = Table(
+        "agent_commands", MetaData(),
+        *[
+            Column(
+                column.name, column.type, primary_key=column.primary_key, nullable=column.nullable,
+            )
+            for column in CommandModel.__table__.columns
+            if column.name != "depends_on_command_id"
+        ],
+    )
+    with client.app.state.inventory._engine.begin() as connection:
+        row = connection.execute(select(CommandModel.__table__)).mappings().one()
+        CommandModel.__table__.drop(connection)
+        legacy.create(connection)
+        connection.execute(legacy.insert().values(
+            {column.name: row[column.name] for column in legacy.columns}
+        ))
+    upgraded = make_client(tmp_path)
+    migrated = upgraded.get(
+        f"/api/v1/servers/{created['server']['id']}/commands",
+    ).json()["commands"]
+    assert len(migrated) == 1
+    assert migrated[0]["id"] == command["id"]
+    assert migrated[0]["depends_on_command_id"] is None
+    assert migrated[0]["status"] == "pending"
+    _, recovery = queue_recovery(upgraded)
+    assert recovery["commands"][1]["depends_on_command_id"] == recovery["commands"][0]["id"]
 
 
 def test_xray_mutating_commands_queue_deduped_master_snapshot_refresh(
@@ -3182,6 +3422,11 @@ def test_xray_runtime_tunnel_chain_create_plans_and_queues_hops(
         for command in queued_payload["scan_commands"]
     )
     assert all(command["timeout_ms"] == 45_000 for command in queued_payload["scan_commands"])
+    for command, scan in zip(
+        queued_payload["commands"], queued_payload["scan_commands"], strict=True,
+    ):
+        assert scan["status"] == "waiting"
+        assert scan["depends_on_command_id"] == command["id"]
 
 
 def test_xray_runtime_tunnel_deploy_plans_template_and_requires_force(
@@ -3294,6 +3539,20 @@ def test_xray_runtime_tunnel_deploy_plans_template_and_requires_force(
     assert all(command["timeout_ms"] == 45_000 for command in queued_payload["commands"])
     assert queued_payload["scan_command"]["path"] == "/api/child/scan"
     assert queued_payload["scan_command"]["timeout_ms"] == 45_000
+    sequence = [*queued_payload["commands"], queued_payload["scan_command"]]
+    assert [command["status"] for command in sequence] == ["pending", *(["waiting"] * 4)]
+    for previous, following in zip(sequence[:-1], sequence[1:], strict=True):
+        assert following["depends_on_command_id"] == previous["id"]
+    failed = client.post(
+        f"/api/v1/agents/commands/{sequence[0]['id']}/result",
+        json={"token": created["agent_token"], "status": 200, "body": {"success": False}},
+    )
+    assert failed.json()["command"]["status"] == "failed"
+    commands = client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"]
+    for command in commands:
+        if command["id"] in {item["id"] for item in sequence[1:]}:
+            assert command["status"] == "skipped"
+            assert command["attempts"] == 0
 
 
 def test_xray_runtime_tunnel_deploy_protects_existing_tunnel_inbounds(

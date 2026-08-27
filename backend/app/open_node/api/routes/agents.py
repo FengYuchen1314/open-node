@@ -25,6 +25,7 @@ from open_node.domain.inventory import (
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
     CommandNotFoundError,
+    CommandNotReadyError,
     InvalidAgentTokenError,
     InventoryStore,
 )
@@ -105,6 +106,8 @@ async def complete_agent_command(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     except CommandNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except CommandNotReadyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await connections.dispatch_pending_commands(store, command.server_id)
     return AgentCommandResultResponse(command=command)
 

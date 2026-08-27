@@ -52,20 +52,25 @@ modified, and the container, network, and backend are removed when it exits.
 The smoke verifies actual `/api/remote/ws` authentication, the initial config
 snapshot, an agent-validated config write, the automatic WebSocket refresh
 and its returned config, restart-induced drift, and manual acceptance of the
-pending config. It runs in external Xray mode without a live Xray process or
+pending config. It also checks sequential recovery validation/write and the
+failure path: when the real agent returns HTTP 200 with `ok=false`, neither
+the write nor restart is attempted and a previously repaired healthy config
+is unchanged on disk. It runs in external Xray mode without a live Xray process or
 key-exchange configuration. It does not prove forwarding traffic, embedded
 runtime behavior, or migration from an encrypted MMWX connection. It also
 does not make the reference image the distributable Open Node agent.
 
 ## Latest Verification
 
-On 2026-08-28, the reconnect-sync worktree passed on the VPS:
+On 2026-08-28, the dependent-command worktree passed on the VPS:
 
-- Backend: 118 tests, including HTTP/WebSocket lease contention.
-- Frontend: 63 tests and the production build.
+- Backend: 128 tests, including lease/result contention, dependency persistence,
+  old SQLite schema migration, and validation failure stopping later commands.
+- Frontend: 65 tests, including waiting/skipped Vuetify component rendering,
+  and the production build.
 - Probe Worker: TypeScript checks.
 - Ruff: backend and reference-agent smoke script.
-- Reference-agent smoke: all six stages above, with the pinned image.
+- Reference-agent smoke: all ten stages, with the pinned image.
 
 The backend test run still reports a Starlette/httpx deprecation warning, and
 the frontend build reports a large bundle warning. Neither is a failed check.

@@ -5,7 +5,7 @@ export type RenewalCycle = "month" | "quarter" | "half_year" | "year";
 export type AgentServiceName = "xray" | "nginx";
 export type AgentServiceAction = "start" | "stop" | "restart";
 export type AgentLogService = "agent" | "xray" | "nginx";
-export type AgentCommandStatus = "pending" | "leased" | "succeeded" | "failed";
+export type AgentCommandStatus = "waiting" | "pending" | "leased" | "succeeded" | "failed" | "skipped";
 export type XrayConfigSnapshotStatus = "current" | "old" | "pending_recovery";
 export type XrayConfigSnapshotSource = "agent_report" | "master_write" | "manual_accept";
 export type AgentOperationKind =
@@ -507,6 +507,7 @@ export interface AgentCommand {
   timeout_ms: number;
   stream: boolean;
   status: AgentCommandStatus;
+  depends_on_command_id?: string | null;
   attempts: number;
   result_status?: number | null;
   result_body?: unknown;

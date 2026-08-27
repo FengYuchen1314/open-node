@@ -192,6 +192,10 @@ class CommandNotFoundError(ValueError):
     """Raised when an agent command cannot be found for the requesting server."""
 
 
+class CommandNotReadyError(ValueError):
+    """Raised when a result arrives before a command's prerequisite succeeds."""
+
+
 class XrayConfigSnapshotNotFoundError(ValueError):
     """Raised when an Xray config snapshot lookup targets an unknown snapshot."""
 
@@ -855,6 +859,9 @@ class CommandModel(Base):
     timeout_ms: Mapped[int] = mapped_column(Integer)
     stream: Mapped[bool] = mapped_column(Boolean)
     status: Mapped[str] = mapped_column(String(24), index=True)
+    depends_on_command_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("agent_commands.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     result_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     result_body: Mapped[Any | None] = mapped_column(JSON, nullable=True)
@@ -1183,6 +1190,20 @@ class InventoryStore:
             return
         inspector = inspect(self._engine)
         table_names = set(inspector.get_table_names())
+        if "agent_commands" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector,
+                "agent_commands",
+                {
+                    "depends_on_command_id":
+                    "VARCHAR(36) REFERENCES agent_commands(id) ON DELETE CASCADE"
+                },
+            )
+            with self._engine.begin() as connection:
+                connection.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_agent_commands_depends_on_command_id "
+                    "ON agent_commands (depends_on_command_id)"
+                ))
         if "product_users" in table_names:
             self._sqlite_add_missing_columns(
                 inspector,
@@ -3575,6 +3596,23 @@ class InventoryStore:
             session.refresh(command)
             return self._command_read(command)
 
+    def create_command_sequence(
+        self, server_id: UUID, payloads: Iterable[AgentCommandCreate],
+    ) -> list[AgentCommandRead]:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            commands: list[CommandModel] = []
+            previous = None
+            for payload in payloads:
+                command = self._create_command_model(session, server, payload, depends_on=previous)
+                session.flush()
+                commands.append(command)
+                previous = command
+            session.commit()
+            return [self._command_read(command) for command in commands]
+
     def list_commands(self, server_id: UUID) -> list[AgentCommandRead]:
         with self._session() as session:
             server = session.get(ServerModel, str(server_id))
@@ -3715,6 +3753,8 @@ class InventoryStore:
             completed_statuses = {
                 AgentCommandStatus.SUCCEEDED.value,
                 AgentCommandStatus.FAILED.value,
+                AgentCommandStatus.SKIPPED.value,
+                AgentCommandStatus.WAITING.value,
             }
             if not command or not command.stream or command.status in completed_statuses:
                 raise CommandNotFoundError(f"stream command not found: {payload.request_id}")
@@ -6245,6 +6285,8 @@ class InventoryStore:
         server: ServerModel,
         payload: AgentCommandCreate,
         now: datetime | None = None,
+        *,
+        depends_on: CommandModel | None = None,
     ) -> CommandModel:
         active_now = now or datetime.now(tz=UTC)
         command = CommandModel(
@@ -6257,7 +6299,12 @@ class InventoryStore:
             body=payload.body,
             timeout_ms=payload.timeout_ms,
             stream=payload.stream,
-            status=AgentCommandStatus.PENDING.value,
+            status=(
+                AgentCommandStatus.WAITING.value
+                if depends_on and depends_on.status != AgentCommandStatus.SUCCEEDED.value
+                else AgentCommandStatus.PENDING.value
+            ),
+            depends_on_command_id=depends_on.id if depends_on else None,
             attempts=0,
             created_at=active_now,
             updated_at=active_now,
@@ -8155,6 +8202,8 @@ class InventoryStore:
             timeout_ms=command.timeout_ms,
             stream=command.stream,
             status=AgentCommandStatus(command.status),
+            depends_on_command_id=UUID(command.depends_on_command_id)
+            if command.depends_on_command_id else None,
             attempts=command.attempts,
             result_status=command.result_status,
             result_body=command.result_body,
@@ -8280,24 +8329,83 @@ class InventoryStore:
         command: CommandModel,
         payload: AgentCommandResultRequest,
     ) -> None:
+        if command.status in {
+            AgentCommandStatus.SUCCEEDED.value,
+            AgentCommandStatus.FAILED.value,
+            AgentCommandStatus.SKIPPED.value,
+        }:
+            return
+        if command.status == AgentCommandStatus.WAITING.value:
+            raise CommandNotReadyError(f"command is waiting for prerequisite: {command.id}")
         now = datetime.now(tz=UTC)
-        command.status = (
+        result_error = payload.error
+        body = payload.body if isinstance(payload.body, dict) else {}
+        if not result_error and body.get("success") is False:
+            result_error = "Agent reported an unsuccessful result"
+        if (
+            not result_error
+            and command.path == "/api/child/xray/test-config"
+            and body.get("ok") is not True
+        ):
+            result_error = "Xray configuration validation did not return ok=true"
+        result_status = (
             AgentCommandStatus.FAILED.value
-            if payload.error or payload.status >= 400
+            if result_error or payload.status >= 400
             else AgentCommandStatus.SUCCEEDED.value
         )
-        command.result_status = payload.status
-        command.result_body = payload.body
-        command.result_error = payload.error
-        command.completed_at = now
-        command.updated_at = now
+        result = session.execute(
+            update(CommandModel)
+            .where(
+                CommandModel.id == command.id,
+                CommandModel.status == command.status,
+                CommandModel.attempts == command.attempts,
+            )
+            .values(
+                status=result_status,
+                result_status=payload.status,
+                result_body=payload.body,
+                result_error=result_error,
+                completed_at=now,
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        session.refresh(command)
+        if result.rowcount != 1:
+            return
         server.last_heartbeat = now
         server.updated_at = now
+        self._advance_command_dependents(session, command, now)
+        if command.status == AgentCommandStatus.FAILED.value:
+            return
         self._upsert_return_route_results(session, server, command, payload, now)
         self._record_domain_latency_result(session, server, command, payload, now)
         self._record_scan_result_from_command(session, server, command, payload, now)
         self._record_xray_config_snapshot_from_command(session, server, command, payload, now)
         self._queue_xray_snapshot_refresh_after_mutation(session, server, command, payload, now)
+
+    @staticmethod
+    def _advance_command_dependents(session: Session, command: CommandModel, now: datetime) -> None:
+        predecessors = [command]
+        while predecessors:
+            predecessor = predecessors.pop()
+            children = session.scalars(
+                select(CommandModel).where(
+                    CommandModel.depends_on_command_id == predecessor.id,
+                    CommandModel.status == AgentCommandStatus.WAITING.value,
+                )
+            ).all()
+            for child in children:
+                child.updated_at = now
+                if predecessor.status == AgentCommandStatus.SUCCEEDED.value:
+                    child.status = AgentCommandStatus.PENDING.value
+                else:
+                    child.status = AgentCommandStatus.SKIPPED.value
+                    child.completed_at = now
+                    child.result_error = (
+                        f"Skipped because prerequisite {predecessor.id} did not succeed"
+                    )
+                    predecessors.append(child)
 
     def _record_scan_result_from_command(
         self,

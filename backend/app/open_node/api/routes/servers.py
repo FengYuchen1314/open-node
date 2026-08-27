@@ -11,6 +11,7 @@ from open_node.domain.inventory import (
     AgentCertDeployOperationRequest,
     AgentCommandCreate,
     AgentCommandCreateResponse,
+    AgentCommandRead,
     AgentCommandStreamFramesResponse,
     AgentDomainLatencyProbeRequest,
     AgentInboundsManageOperationRequest,
@@ -195,10 +196,9 @@ async def create_xray_runtime_tunnel_chain(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     if payload.queue_agent_commands:
-        commands = []
+        by_server: dict[UUID, list[AgentCommandCreate]] = {}
         for preview in response.command_previews:
-            command = store.create_command(
-                preview.server_id,
+            by_server.setdefault(preview.server_id, []).append(
                 AgentCommandCreate(
                     method=preview.method,
                     path=preview.path,
@@ -206,24 +206,29 @@ async def create_xray_runtime_tunnel_chain(
                     timeout_ms=payload.command_timeout_ms,
                 ),
             )
-            commands.append(await connections.dispatch_command(store, command))
 
-        scan_commands = []
-        if payload.queue_scan_after_apply and commands:
-            seen_server_ids: set[UUID] = set()
-            for server_id in payload.server_ids:
-                if server_id in seen_server_ids:
-                    continue
-                seen_server_ids.add(server_id)
-                command = store.create_command(
-                    server_id,
+        queue_scan = payload.queue_scan_after_apply and bool(by_server)
+        if queue_scan:
+            for server_id in dict.fromkeys(payload.server_ids):
+                by_server.setdefault(server_id, []).append(
                     AgentCommandCreate(
                         method="POST",
                         path="/api/child/scan",
                         timeout_ms=payload.command_timeout_ms,
                     ),
                 )
-                scan_commands.append(await connections.dispatch_command(store, command))
+
+        commands = []
+        scan_commands = []
+        for server_id, command_payloads in by_server.items():
+            queued = await _queue_server_command_sequence(
+                server_id, command_payloads, store, connections,
+            )
+            if queue_scan:
+                commands.extend(queued[:-1])
+                scan_commands.append(queued[-1])
+            else:
+                commands.extend(queued)
 
         response = response.model_copy(
             update={"commands": commands, "scan_commands": scan_commands}
@@ -249,23 +254,18 @@ async def plan_xray_runtime_tunnel_deploy(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     if payload.queue_agent_commands:
-        commands = []
-        for preview in response.command_previews:
-            command = store.create_command(
-                server_id,
-                AgentCommandCreate(
-                    method=preview.method,
-                    path=preview.path,
-                    body=preview.body,
-                    timeout_ms=payload.command_timeout_ms,
-                ),
+        command_payloads = [
+            AgentCommandCreate(
+                method=preview.method,
+                path=preview.path,
+                body=preview.body,
+                timeout_ms=payload.command_timeout_ms,
             )
-            commands.append(await connections.dispatch_command(store, command))
+            for preview in response.command_previews
+        ]
 
-        scan_command = None
         if response.scan_command_preview:
-            command = store.create_command(
-                server_id,
+            command_payloads.append(
                 AgentCommandCreate(
                     method=response.scan_command_preview.method,
                     path=response.scan_command_preview.path,
@@ -273,7 +273,11 @@ async def plan_xray_runtime_tunnel_deploy(
                     timeout_ms=payload.command_timeout_ms,
                 ),
             )
-            scan_command = await connections.dispatch_command(store, command)
+        queued = await _queue_server_command_sequence(
+            server_id, command_payloads, store, connections,
+        )
+        scan_command = queued[-1] if response.scan_command_preview else None
+        commands = queued[:-1] if scan_command else queued
 
         response = response.model_copy(
             update={"commands": commands, "scan_command": scan_command}
@@ -299,29 +303,29 @@ async def delete_xray_runtime_tunnel(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     if payload.queue_agent_commands:
-        commands = []
-        for preview in response.command_previews:
-            command = store.create_command(
-                server_id,
-                AgentCommandCreate(
-                    method=preview.method,
-                    path=preview.path,
-                    body=preview.body,
-                    timeout_ms=payload.command_timeout_ms,
-                ),
+        command_payloads = [
+            AgentCommandCreate(
+                method=preview.method,
+                path=preview.path,
+                body=preview.body,
+                timeout_ms=payload.command_timeout_ms,
             )
-            commands.append(await connections.dispatch_command(store, command))
-        scan_command = None
-        if payload.queue_scan_after_apply and commands:
-            command = store.create_command(
-                server_id,
+            for preview in response.command_previews
+        ]
+        queue_scan = payload.queue_scan_after_apply and bool(command_payloads)
+        if queue_scan:
+            command_payloads.append(
                 AgentCommandCreate(
                     method="POST",
                     path="/api/child/scan",
                     timeout_ms=payload.command_timeout_ms,
                 ),
             )
-            scan_command = await connections.dispatch_command(store, command)
+        queued = await _queue_server_command_sequence(
+            server_id, command_payloads, store, connections,
+        )
+        scan_command = queued[-1] if queue_scan else None
+        commands = queued[:-1] if queue_scan else queued
         response = response.model_copy(update={"commands": commands, "scan_command": scan_command})
     return response
 
@@ -442,29 +446,29 @@ async def repair_missing_xray_runtime_credentials(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     if payload.queue_agent_commands:
-        commands = []
-        for batch in response.provisioning_batches:
-            command = store.create_command(
-                batch.server_id,
-                AgentCommandCreate(
-                    method="POST",
-                    path="/api/child/batch-apply",
-                    body=batch.body,
-                    timeout_ms=payload.command_timeout_ms,
-                ),
+        command_payloads = [
+            AgentCommandCreate(
+                method="POST",
+                path="/api/child/batch-apply",
+                body=batch.body,
+                timeout_ms=payload.command_timeout_ms,
             )
-            commands.append(await connections.dispatch_command(store, command))
-        scan_command = None
-        if payload.queue_scan_after_apply and commands:
-            command = store.create_command(
-                server_id,
+            for batch in response.provisioning_batches
+        ]
+        queue_scan = payload.queue_scan_after_apply and bool(command_payloads)
+        if queue_scan:
+            command_payloads.append(
                 AgentCommandCreate(
                     method="POST",
                     path="/api/child/scan",
                     timeout_ms=payload.command_timeout_ms,
                 ),
             )
-            scan_command = await connections.dispatch_command(store, command)
+        queued = await _queue_server_command_sequence(
+            server_id, command_payloads, store, connections,
+        )
+        scan_command = queued[-1] if queue_scan else None
+        commands = queued[:-1] if queue_scan else queued
         response = response.model_copy(update={"commands": commands, "scan_command": scan_command})
     return response
 
@@ -487,29 +491,29 @@ async def cleanup_extra_xray_runtime_credentials(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     if payload.queue_agent_commands:
-        commands = []
-        for preview in response.command_previews:
-            command = store.create_command(
-                server_id,
-                AgentCommandCreate(
-                    method="POST",
-                    path="/api/child/inbounds",
-                    body=preview.body,
-                    timeout_ms=payload.command_timeout_ms,
-                ),
+        command_payloads = [
+            AgentCommandCreate(
+                method="POST",
+                path="/api/child/inbounds",
+                body=preview.body,
+                timeout_ms=payload.command_timeout_ms,
             )
-            commands.append(await connections.dispatch_command(store, command))
-        scan_command = None
-        if payload.queue_scan_after_apply and commands:
-            command = store.create_command(
-                server_id,
+            for preview in response.command_previews
+        ]
+        queue_scan = payload.queue_scan_after_apply and bool(command_payloads)
+        if queue_scan:
+            command_payloads.append(
                 AgentCommandCreate(
                     method="POST",
                     path="/api/child/scan",
                     timeout_ms=payload.command_timeout_ms,
                 ),
             )
-            scan_command = await connections.dispatch_command(store, command)
+        queued = await _queue_server_command_sequence(
+            server_id, command_payloads, store, connections,
+        )
+        scan_command = queued[-1] if queue_scan else None
+        commands = queued[:-1] if queue_scan else queued
         response = response.model_copy(update={"commands": commands, "scan_command": scan_command})
     return response
 
@@ -627,10 +631,7 @@ async def apply_xray_config_snapshot_recovery(
             )
         )
 
-    commands = []
-    for command_payload in command_payloads:
-        command = store.create_command(server_id, command_payload)
-        commands.append(await connections.dispatch_command(store, command))
+    commands = await _queue_server_command_sequence(server_id, command_payloads, store, connections)
 
     return XrayConfigSnapshotRecoveryApplyResponse(
         server_id=server_id,
@@ -2038,6 +2039,19 @@ async def queue_agent_update_master_url_operation(
         store,
         connections,
     )
+
+
+async def _queue_server_command_sequence(
+    server_id: UUID,
+    payloads: list[AgentCommandCreate],
+    store: InventoryStore,
+    connections: AgentConnectionManager,
+) -> list[AgentCommandRead]:
+    try:
+        commands = store.create_command_sequence(server_id, payloads)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return [await connections.dispatch_command(store, command) for command in commands]
 
 
 async def _queue_server_command(

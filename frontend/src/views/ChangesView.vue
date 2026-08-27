@@ -78,10 +78,12 @@ const changeStatusMeta: Record<AgentChangeSetStatus, { color: string; icon: stri
 };
 
 const commandStatusMeta = {
+  waiting: { color: "secondary", icon: "mdi-link-variant" },
   pending: { color: "warning", icon: "mdi-clock-outline" },
   leased: { color: "info", icon: "mdi-progress-clock" },
   succeeded: { color: "success", icon: "mdi-check-circle-outline" },
   failed: { color: "error", icon: "mdi-alert-circle-outline" },
+  skipped: { color: "grey", icon: "mdi-cancel" },
 } as const;
 
 const serverOptions = computed(() =>

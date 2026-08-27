@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -153,7 +154,8 @@ def run(image: str) -> None:
                         "/etc/mmw-agent/config.yaml",
                     )
                     recovery_url = (
-                        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery?with_config=true"
+                        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery"
+                        "?with_config=true"
                     )
                     commands_url = f"/api/v1/servers/{server_id}/commands"
 
@@ -246,6 +248,78 @@ def run(image: str) -> None:
                         "PASS operator accepts the recovered agent configuration",
                         flush=True,
                     )
+                    applied = client.post(
+                        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery/apply",
+                        json={"restart_xray": False},
+                    )
+                    applied.raise_for_status()
+                    recovery_ids = [command["id"] for command in applied.json()["commands"]]
+
+                    def recovery_commands():
+                        commands = {
+                            item["id"]: item for item in client.get(commands_url).json()["commands"]
+                        }
+                        return [commands[command_id] for command_id in recovery_ids]
+
+                    recovered = poll(
+                        "recovery writes only after successful agent validation",
+                        recovery_commands,
+                        lambda commands: all(
+                            command["status"] == "succeeded" for command in commands
+                        ),
+                    )
+                    assert len(recovered) == 2
+                    assert recovered[1]["depends_on_command_id"] == recovered[0]["id"]
+                    assert datetime.fromisoformat(
+                        recovered[0]["completed_at"]
+                    ) <= datetime.fromisoformat(recovered[1]["leased_at"])
+                    poll(
+                        "recovery write refresh completes",
+                        refresh_result,
+                        lambda command: command is not None and command["status"] == "succeeded",
+                    )
+
+                    healthy_config = xray_file.read_text()
+                    invalid = json.loads(healthy_config)
+                    invalid["inbounds"].append(
+                        {"tag": "invalid-smoke", "protocol": "invalid-smoke"}
+                    )
+                    xray_file.write_text(json.dumps(invalid))
+                    read = client.post(f"/api/v1/servers/{server_id}/operations/xray/config/read")
+                    read.raise_for_status()
+                    poll(
+                        "agent reports an invalid runtime config without overwriting current",
+                        recovery,
+                        lambda state: state["has_pending"],
+                    )
+                    accepted = client.post(
+                        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery/accept",
+                    )
+                    accepted.raise_for_status()
+                    # Simulate an SSH repair while the master still holds the invalid snapshot.
+                    xray_file.write_text(healthy_config)
+                    rejected = client.post(
+                        f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery/apply",
+                        json={"restart_xray": True},
+                    )
+                    rejected.raise_for_status()
+                    recovery_ids = [command["id"] for command in rejected.json()["commands"]]
+                    stopped = poll(
+                        "failed agent validation skips config overwrite and Xray restart",
+                        recovery_commands,
+                        lambda commands: all(
+                            command["status"] in {"failed", "skipped"} for command in commands
+                        ),
+                    )
+                    assert [command["status"] for command in stopped] == [
+                        "failed",
+                        "skipped",
+                        "skipped",
+                    ]
+                    assert stopped[0]["result_status"] == 200
+                    assert stopped[0]["result_body"]["ok"] is False
+                    assert all(command["attempts"] == 0 for command in stopped[1:])
+                    assert xray_file.read_text() == healthy_config
                     print(
                         json.dumps({"status": "passed", "reference_image": image}),
                         flush=True,

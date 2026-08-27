@@ -1,8 +1,12 @@
 import vue from "@vitejs/plugin-vue";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [vue()],
+  // Transform Vuetify's CSS imports for server-rendered component tests.
+  test: {
+    server: { deps: { inline: ["vuetify"] } },
+  },
   server: {
     port: 5173,
     proxy: {

@@ -130,10 +130,12 @@ class AgentLogService(StrEnum):
 
 
 class AgentCommandStatus(StrEnum):
+    WAITING = "waiting"
     PENDING = "pending"
     LEASED = "leased"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class XrayConfigSnapshotStatus(StrEnum):
@@ -799,6 +801,7 @@ class AgentCommandRead(BaseModel):
     timeout_ms: int
     stream: bool
     status: AgentCommandStatus
+    depends_on_command_id: UUID | None = None
     attempts: int
     result_status: int | None = None
     result_body: Any = None

@@ -129,6 +129,15 @@ This document records the starting source map for the Open Node refactor.
      `probe` authentication are supported. A pinned, unmodified `mmw-agent`
      container has exercised initial sync, validated config writes, pushed
      refreshes, reconnect drift, and manual recovery acceptance on the VPS.
+   - Done: recovery test/write/restart, tunnel deployment/deletion, credential
+     repair/cleanup, and their follow-up scans now have persisted per-server
+     command dependencies. Failed steps skip their successors, including
+     HTTP-200 `ok=false` Xray validation. SQLite upgrades preserve history,
+     and duplicate/concurrent results cannot replace a terminal outcome.
+   - Done: Vue command inspection displays waiting/skipped status and prerequisite
+     IDs. The unmodified reference-agent smoke verifies ordered recovery and
+     proves failed validation leaves a healthy on-disk config untouched with
+     zero write/restart attempts.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
    - Done: compatibility wrappers for the active non-stream Xray/nginx
@@ -180,7 +189,8 @@ These passing command and snapshot checks do not prove a complete replacement:
   key exchange; JSON RPC compatibility alone does not cover them.
 - Verify actual proxy traffic and the fork-specific runtime protocols. The
   current reference-agent smoke uses external mode without a running Xray.
-- Gate dependent test/write/restart workflows on successful preceding results;
-  queue order alone does not prove safe execution order in the reference agent.
+- Extend dependency coordination to multi-server change sets and rollback,
+  including interactions with already-running commands. The new dependencies
+  cover the server recovery/runtime workflows, not arbitrary concurrent jobs.
 - Complete control-plane authentication, deployable packaging, and end-to-end
   operator workflows before calling the product ready for public deployment.

@@ -8,13 +8,17 @@ defineProps<{
 }>();
 
 const commandStatusMeta = {
+  waiting: { color: "secondary", icon: "mdi-link-variant" },
   pending: { color: "warning", icon: "mdi-clock-outline" },
   leased: { color: "info", icon: "mdi-progress-clock" },
   succeeded: { color: "success", icon: "mdi-check-circle-outline" },
   failed: { color: "error", icon: "mdi-alert-circle-outline" },
+  skipped: { color: "grey", icon: "mdi-cancel" },
 } as const;
 
 function commandSubtitle(command: AgentCommand, frames: AgentCommandStreamFrame[]) {
+  if (command.status === "waiting") return "Waiting for prerequisite";
+  if (command.status === "skipped") return "Not executed";
   const status = command.result_status ? `status ${command.result_status}` : "waiting";
   const stream = command.stream ? `, ${frames.length} stream frames` : "";
   return `${command.attempts} attempts, ${status}${stream}`;
@@ -79,6 +83,10 @@ function framesText(frames: AgentCommandStreamFrame[]) {
           <div>
             <div class="detail-label">Timeout</div>
             <div class="detail-value">{{ command.timeout_ms }} ms</div>
+          </div>
+          <div v-if="command.depends_on_command_id">
+            <div class="detail-label">Prerequisite</div>
+            <div class="detail-value">{{ command.depends_on_command_id }}</div>
           </div>
           <div>
             <div class="detail-label">Created</div>
