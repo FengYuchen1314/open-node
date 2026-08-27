@@ -209,8 +209,14 @@ These passing command and snapshot checks do not prove a complete replacement:
   key exchange; JSON RPC compatibility alone does not cover them.
 - Owned Nginx HTTP/TLS/configuration/sites, reverse proxy, stream cleanup,
   supplied certificate deployment/rotation, and crash/transaction recovery are
-  implemented in the independent agent. Complete WARP, ACME issuance/renewal,
+  implemented in the independent agent. Complete WARP,
   diagnostics, and remaining host operations. Unimplemented operations return 501.
+- Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
+  version activation and Agent deployment are implemented and verified with
+  real lego/Pebble, short-lived automatic renewal and trusted TLS on both
+  transports. Complete HTTP-01/webroot and account/revocation workflows;
+  validate supported DNS adapters with operator-owned staging accounts before
+  claiming public-provider production coverage. See [certificates.md](certificates.md).
 - Native high-level tunnel deployment now uses the independent Nginx ownership
   contract and official Xray TLS-SNI forwarding, with one conditional command,
   configurable listeners, actual static/proxy/fallback traffic, two-service

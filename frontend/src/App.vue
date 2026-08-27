@@ -54,6 +54,7 @@ async function logout() {
           to="/changes"
         />
         <v-list-item prepend-icon="mdi-file-cog-outline" title="Config" value="config" to="/config" />
+        <v-list-item prepend-icon="mdi-certificate-outline" title="Certificates" value="certificates" to="/certificates" />
         <v-list-item prepend-icon="mdi-chart-line" title="Probe" value="probe" to="/probe" />
         <v-list-item prepend-icon="mdi-shield-check-outline" title="Access" value="access" to="/access" />
       </v-list>

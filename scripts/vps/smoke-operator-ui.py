@@ -1,6 +1,7 @@
 """Run browser-level operator workflows against disposable, loopback-only services."""
 
 import argparse
+import importlib.util
 import json
 import os
 import secrets
@@ -37,21 +38,116 @@ def sign_in(page, password: str) -> None:
 
 
 def check_layout(page) -> None:
-    page.wait_for_function("document.documentElement.scrollWidth <= innerWidth + 1", timeout=5000)
-    page.wait_for_function("""() =>
+    page.wait_for_function(
+        "document.documentElement.scrollWidth <= innerWidth + 1", timeout=5000
+    )
+    page.wait_for_function(
+        """() =>
         [...document.querySelectorAll('form input:not([hidden]), form button')]
         .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
         .every(el => {
             const box = el.getBoundingClientRect();
             return box.x >= 0 && box.right <= innerWidth + 1;
         })
-    """, timeout=5000)
+    """,
+        timeout=5000,
+    )
     for control in page.locator("form input:not([hidden]), form button").all():
         if control.is_visible():
             box = control.bounding_box()
             assert (
-                box and box["x"] >= 0 and box["x"] + box["width"] <= page.viewport_size["width"] + 1
-            ), {"box": box, "control": control.evaluate("el => el.outerHTML.slice(0, 300)")}
+                box
+                and box["x"] >= 0
+                and box["x"] + box["width"] <= page.viewport_size["width"] + 1
+            ), {
+                "box": box,
+                "control": control.evaluate("el => el.outerHTML.slice(0, 300)"),
+            }
+
+
+def certificates_ui(page, url, output):
+    spec = importlib.util.spec_from_file_location(
+        "certificate_ui_fixture", Path(__file__).with_name("smoke-nginx.py")
+    )
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    cert, key, _ = fixture.certificate()
+    page.goto(f"{url}/certificates")
+    expect(page.get_by_role("heading", name="Certificates", exact=True)).to_be_visible()
+    page.get_by_role("tab", name="DNS providers", exact=True).click()
+    page.get_by_role("button", name="Add DNS provider", exact=True).click()
+    dialog = page.get_by_role("dialog")
+    dialog.get_by_label("Provider name", exact=True).fill("Browser DNS")
+    secret = secrets.token_urlsafe(24)
+    token = dialog.get_by_label("CF_DNS_API_TOKEN", exact=True)
+    expect(token).to_have_attribute("type", "password")
+    token.fill(secret)
+    dialog.get_by_role("button", name="Save provider", exact=True).click()
+    expect(dialog).not_to_be_visible()
+    expect(page.get_by_text("Browser DNS", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Rotate DNS credentials").click()
+    expect(dialog.get_by_label("CF_DNS_API_TOKEN", exact=True)).to_have_value("")
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+    page.get_by_role("tab", name="Certificates", exact=True).click()
+    page.get_by_role("button", name="New certificate", exact=True).click()
+    dialog.get_by_label("Certificate name", exact=True).fill("Pending wildcard")
+    dialog.get_by_label("DNS names", exact=True).fill("example.com *.example.com")
+    dialog.get_by_label("Account email", exact=True).fill("operator@example.com")
+    create = dialog.get_by_role("button", name="Create certificate", exact=True)
+    expect(create).to_be_disabled()
+    dialog.get_by_label("I accept this CA's terms of service", exact=True).check()
+    for width, height, name in ((1440, 900, "desktop"), (390, 844, "mobile")):
+        page.set_viewport_size({"width": width, "height": height})
+        check_layout(page)
+        page.screenshot(
+            path=output / f"certificate-form-{name}.png",
+            full_page=True,
+            animations="disabled",
+        )
+    create.click()
+    expect(dialog).not_to_be_visible()
+    expect(
+        page.get_by_role("button", name="Pending wildcard", exact=True)
+    ).to_be_visible()
+    page.get_by_role("button", name="Import PEM", exact=True).click()
+    dialog.get_by_label("Certificate name", exact=True).fill("Imported localhost")
+    dialog.get_by_label("Certificate PEM", exact=True).fill(cert)
+    dialog.get_by_label("Private key PEM", exact=True).fill(key)
+    dialog.get_by_role("button", name="Import certificate", exact=True).click()
+    expect(dialog).not_to_be_visible()
+    page.get_by_role("button", name="Imported localhost", exact=True).click()
+    expect(
+        page.get_by_role("heading", name="Imported localhost", exact=True)
+    ).to_be_visible()
+    expect(page.get_by_label("Auto-renew", exact=True)).to_be_disabled()
+    with page.expect_download() as downloaded:
+        page.get_by_role("button", name="Download certificate", exact=True).click()
+    assert Path(downloaded.value.path()).read_text() == cert
+    page.once("dialog", lambda prompt: prompt.accept())
+    with page.expect_download() as downloaded:
+        page.get_by_role("button", name="Download private key", exact=True).click()
+    assert Path(downloaded.value.path()).read_text() == key
+    for width, height, name in ((1440, 900, "desktop"), (390, 844, "mobile")):
+        page.set_viewport_size({"width": width, "height": height})
+        check_layout(page)
+        page.evaluate("window.scrollTo(0, 0)")
+        page.screenshot(
+            path=output / f"certificates-{name}.png",
+            full_page=True,
+            animations="disabled",
+        )
+    page.get_by_role("button", name="Import PEM", exact=True).click()
+    expect(dialog.get_by_label("Private key PEM", exact=True)).to_have_value("")
+    expect(dialog.get_by_label("Certificate PEM", exact=True)).to_have_value("")
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+    assert secret not in page.content() and key not in page.content()
+    storage = page.evaluate("JSON.stringify({ ...localStorage, ...sessionStorage })")
+    assert key not in storage and secret not in storage
+    page.set_viewport_size({"width": 1440, "height": 900})
+    print(
+        "PASS certificate forms, terms, secret clearing and explicit PEM downloads on desktop/mobile",
+        flush=True,
+    )
 
 
 def exercise(url: str, password: str, output: Path, database_url: str) -> None:
@@ -66,12 +162,18 @@ def exercise(url: str, password: str, output: Path, database_url: str) -> None:
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on("request", lambda request: requests.append(urlparse(request.url).path))
         page.goto(f"{url}/config")
-        expect(page.get_by_role("heading", name="Administrator Sign-In")).to_be_visible()
+        expect(
+            page.get_by_role("heading", name="Administrator Sign-In")
+        ).to_be_visible()
         assert not any(path.startswith("/api/v1/servers") for path in requests)
         check_layout(page)
-        page.screenshot(path=output / "login-desktop.png", full_page=True, animations="disabled")
+        page.screenshot(
+            path=output / "login-desktop.png", full_page=True, animations="disabled"
+        )
         sign_in(page, "incorrect-password")
-        expect(page.get_by_text("Invalid username or password", exact=True)).to_be_visible()
+        expect(
+            page.get_by_text("Invalid username or password", exact=True)
+        ).to_be_visible()
         sign_in(page, password)
         expect(page.get_by_role("button", name="Sign out", exact=True)).to_be_visible()
         page.get_by_role("link", name="Overview", exact=True).click()
@@ -80,37 +182,55 @@ def exercise(url: str, password: str, output: Path, database_url: str) -> None:
         expect(page.get_by_text("browser-smoke-edge", exact=True).first).to_be_visible()
         page.reload()
         expect(page.get_by_text("browser-smoke-edge", exact=True).first).to_be_visible()
-        print("PASS desktop sign-in, authenticated server creation, and reload", flush=True)
+        print(
+            "PASS desktop sign-in, authenticated server creation, and reload",
+            flush=True,
+        )
 
         page.goto(f"{url}/config")
         page.get_by_role("tab", name="Files", exact=True).click()
-        nginx_form = page.locator("form").filter(has=page.get_by_text("Nginx file", exact=True))
-        expect(nginx_form.get_by_label("Read path", exact=True)).to_have_value("servers/site.conf")
-        expect(nginx_form.get_by_label("Write path", exact=True)).to_have_value("servers/site.conf")
+        nginx_form = page.locator("form").filter(
+            has=page.get_by_text("Nginx file", exact=True)
+        )
+        expect(nginx_form.get_by_label("Read path", exact=True)).to_have_value(
+            "servers/site.conf"
+        )
+        expect(nginx_form.get_by_label("Write path", exact=True)).to_have_value(
+            "servers/site.conf"
+        )
         page.get_by_role("tab", name="Sites", exact=True).click()
         payload = page.get_by_label("Payload", exact=True)
         expect(payload).to_be_visible()
         assert json.loads(payload.input_value()) == {"domain": "example.com"}
         for width, height, name in ((1440, 900, "desktop"), (390, 844, "mobile")):
             page.set_viewport_size({"width": width, "height": height})
-            page.wait_for_function("""() => {
+            page.wait_for_function(
+                """() => {
                 const tab = document.querySelector('[role=tab][aria-selected=true]');
                 const track = tab.closest('.v-slide-group__container').getBoundingClientRect();
                 const box = tab.getBoundingClientRect();
                 return box.left >= track.left - 1 && box.right <= track.right + 1;
-            }""", timeout=5000)
-            page.screenshot(path=output / f"nginx-sites-{name}.png", full_page=True,
-                            animations="disabled")
+            }""",
+                timeout=5000,
+            )
+            page.screenshot(
+                path=output / f"nginx-sites-{name}.png",
+                full_page=True,
+                animations="disabled",
+            )
             try:
                 check_layout(page)
             except Exception:
-                print(page.evaluate("""() => [...document.querySelectorAll('body *')]
+                print(
+                    page.evaluate("""() => [...document.querySelectorAll('body *')]
                     .filter(el => el.getClientRects().length &&
                         el.getBoundingClientRect().right > innerWidth + 1)
                     .slice(0, 20).map(el => ({tag: el.tagName, class: el.className,
                         width: el.getBoundingClientRect().width,
                         right: el.getBoundingClientRect().right}))
-                """), file=sys.stderr)
+                """),
+                    file=sys.stderr,
+                )
                 raise
         page.set_viewport_size({"width": 1440, "height": 900})
         print("PASS owned Nginx paths and SSL form on desktop/mobile", flush=True)
@@ -139,10 +259,17 @@ def exercise(url: str, password: str, output: Path, database_url: str) -> None:
                     range.selectNodeContents(el);
                     return range.getBoundingClientRect().height;
                 }""")
-                assert text_height <= 28, {"label": label.inner_text(), "height": text_height}
+                assert text_height <= 28, {
+                    "label": label.inner_text(),
+                    "height": text_height,
+                }
             page.evaluate("window.scrollTo(0, 0)")
             page.wait_for_function("scrollY === 0")
-            page.screenshot(path=output / f"tunnel-{name}.png", full_page=True, animations="disabled")
+            page.screenshot(
+                path=output / f"tunnel-{name}.png",
+                full_page=True,
+                animations="disabled",
+            )
         with page.expect_request("**/xray/runtime/tunnel-deploy") as sent:
             submit.click()
         body = sent.value.post_data_json
@@ -151,16 +278,27 @@ def exercise(url: str, password: str, output: Path, database_url: str) -> None:
         assert body["forward_port"] == 46174 and body["api_port"] == 46736
         assert body["metrics_port"] == 38889
         page.set_viewport_size({"width": 1440, "height": 900})
-        print("PASS tunnel defaults, listener validation and request payload on desktop/mobile", flush=True)
+        print(
+            "PASS tunnel defaults, listener validation and request payload on desktop/mobile",
+            flush=True,
+        )
+
+        certificates_ui(page, url, output)
 
         page.get_by_role("link", name="Access", exact=True).click()
-        expect(page.get_by_role("heading", name="Change Password", exact=True)).to_be_visible()
+        expect(
+            page.get_by_role("heading", name="Change Password", exact=True)
+        ).to_be_visible()
         check_layout(page)
-        page.screenshot(path=output / "access-desktop.png", full_page=True, animations="disabled")
+        page.screenshot(
+            path=output / "access-desktop.png", full_page=True, animations="disabled"
+        )
         page.set_viewport_size({"width": 390, "height": 844})
         expect(page.get_by_role("button", name="Toggle navigation")).to_be_visible()
         check_layout(page)
-        page.screenshot(path=output / "access-mobile.png", full_page=True, animations="disabled")
+        page.screenshot(
+            path=output / "access-mobile.png", full_page=True, animations="disabled"
+        )
         page.get_by_role("button", name="Toggle navigation").click()
         expect(page.get_by_role("link", name="Overview", exact=True)).to_be_visible()
         page.get_by_role("link", name="Access", exact=True).click()
@@ -170,35 +308,52 @@ def exercise(url: str, password: str, output: Path, database_url: str) -> None:
         page.get_by_label("New password", exact=True).fill(replacement)
         page.get_by_label("Confirm new password", exact=True).fill(replacement)
         page.get_by_role("button", name="Change Password", exact=True).click()
-        expect(page.get_by_role("heading", name="Administrator Sign-In")).to_be_visible()
+        expect(
+            page.get_by_role("heading", name="Administrator Sign-In")
+        ).to_be_visible()
         check_layout(page)
-        page.screenshot(path=output / "login-mobile.png", full_page=True, animations="disabled")
+        page.screenshot(
+            path=output / "login-mobile.png", full_page=True, animations="disabled"
+        )
         sign_in(page, password)
-        expect(page.get_by_text("Invalid username or password", exact=True)).to_be_visible()
+        expect(
+            page.get_by_text("Invalid username or password", exact=True)
+        ).to_be_visible()
         sign_in(page, replacement)
-        expect(page.get_by_role("heading", name="Change Password", exact=True)).to_be_visible()
+        expect(
+            page.get_by_role("heading", name="Change Password", exact=True)
+        ).to_be_visible()
         page.get_by_role("button", name="Sign out", exact=True).click()
-        expect(page.get_by_role("heading", name="Administrator Sign-In")).to_be_visible()
+        expect(
+            page.get_by_role("heading", name="Administrator Sign-In")
+        ).to_be_visible()
         page.reload()
-        expect(page.get_by_role("heading", name="Administrator Sign-In")).to_be_visible()
+        expect(
+            page.get_by_role("heading", name="Administrator Sign-In")
+        ).to_be_visible()
         print(
             "PASS mobile navigation, password change, old-password rejection, and sign-out",
             flush=True,
         )
 
         sign_in(page, replacement)
-        expect(page.get_by_role("heading", name="Change Password", exact=True)).to_be_visible()
+        expect(
+            page.get_by_role("heading", name="Change Password", exact=True)
+        ).to_be_visible()
         store = AuthStore(database_url)
         with store.session.begin() as db:
             db.execute(update(OperatorSession).values(last_seen_at=0))
         store.engine.dispose()
         page.get_by_role("button", name="Toggle navigation").click()
         page.get_by_role("link", name="Overview", exact=True).click()
-        expect(page.get_by_role("heading", name="Administrator Sign-In")).to_be_visible()
+        expect(
+            page.get_by_role("heading", name="Administrator Sign-In")
+        ).to_be_visible()
         assert not errors, errors
         assert page.evaluate("localStorage.length") == 0
         print(
-            "PASS expired session returns to sign-in without browser-stored credentials", flush=True
+            "PASS expired session returns to sign-in without browser-stored credentials",
+            flush=True,
         )
         browser.close()
 

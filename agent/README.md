@@ -91,8 +91,11 @@ Native tunnel deployment combines owned Nginx and official Xray configuration,
 validates the current snapshot hash, and restores files and service intentions
 after failures or interruption. The Agent can discover statistics from a
 loopback Xray `api.listen`; explicit `stats_address` takes precedence.
-Unsupported operations return 501 rather than reporting success. WARP, ACME
-issuance/renewal, remote upgrade/removal handlers, fork-only protocols, and
+ACME DNS-01 issuance and renewal are handled by the
+[control plane](../docs/certificates.md), which sends certificate deployment
+commands to this Agent. No Agent-local ACME runtime is required.
+Unsupported operations return 501 rather than reporting success. WARP,
+remote upgrade/removal handlers, fork-only protocols, and
 further migration workflows remain release gates.
 
 ## Verification

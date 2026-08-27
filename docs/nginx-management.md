@@ -169,6 +169,11 @@ network traffic switching. Existing sessions can be interrupted during restart.
 
 ## Failure Behavior
 
+Certificate issuance, renewal and version management live in the
+[control-plane certificate workspace](certificates.md). The Agent receives
+validated deployment commands; it does not run a separate ACME client.
+
+
 Configuration parsing uses [NGINX crossplane](https://github.com/nginxinc/crossplane).
 Includes are expanded only from the owned directory, with cycle/count/size
 limits and symlink/hardlink rejection. The Agent owns daemon/master settings,

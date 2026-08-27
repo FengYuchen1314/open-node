@@ -161,5 +161,8 @@ cover path/ownership guards, stale health reports, and stopped-service behavior.
 This installer uses `runtime_mode: managed` only. Control of an independently
 managed external Xray systemd unit, broader OS/architecture coverage, remote
 Agent-upgrade/uninstall command handlers, Xray binary upgrade automation,
-Nginx/WARP/certificate lifecycle, and full control-plane release packaging remain
+WARP, and full control-plane release packaging remain
 separate work. See [the migration map](migration-map.md) for the remaining scope.
+Owned Nginx operation and certificate deployment are covered by their separate
+runtime smokes; [central certificate issuance/renewal](certificates.md) does not
+require adding an ACME client to the Agent installation.

@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,6 +14,24 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = True
     session_lifetime_seconds: int = Field(default=43200, ge=60, le=604800)
     session_idle_seconds: int = Field(default=1800, ge=60, le=86400)
+    certificate_state_dir: Path = Path("./data/certificates")
+    certificate_lego_binary: Path | None = None
+    certificate_ca_file: Path | None = None
+    certificate_acme_directories: list[str] = [
+        "https://acme-v02.api.letsencrypt.org/directory",
+        "https://acme-staging-v02.api.letsencrypt.org/directory",
+    ]
+    certificate_dns_resolvers: list[str] = []
+    certificate_allow_loopback_http: bool = False
+    certificate_poll_seconds: float = Field(default=30, ge=1, le=3600)
+    certificate_job_timeout: int = Field(default=240, ge=5, le=600)
+
+    @field_validator("certificate_lego_binary", "certificate_ca_file")
+    @classmethod
+    def absolute_certificate_file(cls, value: Path | None) -> Path | None:
+        if value is not None and not value.is_absolute():
+            raise ValueError("Certificate runtime paths must be absolute")
+        return value
 
     @field_validator("cors_origins")
     @classmethod

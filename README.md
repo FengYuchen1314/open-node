@@ -47,9 +47,17 @@ interrupted-switch recovery, and data-preserving uninstall/reinstall.
 Optional [Nginx and certificate management](docs/nginx-management.md) supports
 owned HTTP/TLS sites, supplied certificate rotation, and atomic Nginx/Xray
 tunnel deployment with configurable listeners and failure recovery. Remote lifecycle
-handlers, WARP, ACME renewal, and fork-specific runtime workflows are
+handlers, WARP, and fork-specific runtime workflows are
 still incomplete; control-plane wrappers
 for those operations do not imply the independent agent implements them.
+
+[Central certificate management](docs/certificates.md) now provides DNS
+credentials, PEM import/export, DNS-01 issuance and renewal through pinned
+lego v4, EAB, encrypted version history, and automatic Agent deployment.
+The VPS smoke uses a real Pebble test CA and authoritative DNS, including
+short-lived automatic renewal and trusted TLS/version rollback on both
+Agent transports. Public-CA/provider-account staging and HTTP-01/webroot
+coverage remain separate gates.
 
 The first milestone establishes the project skeleton, the no-license contract,
 persisted server/agent inventory, agent telemetry and command slices, initial

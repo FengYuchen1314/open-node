@@ -151,6 +151,47 @@ command cancellation, corrupt intent records, and idempotent map merging.
 This verifies official Xray v26.3.27 on Debian 12 x86-64, not an arbitrary
 future Xray schema, zero-downtime switching, or fork-specific protocol support.
 
+## ACME Lifecycle Smoke
+
+On the same VPS, install the test-only DNS fixture dependency:
+
+```bash
+backend/.venv/bin/pip install -e 'backend[dev,browser,acme-test]'
+```
+
+Supply the verified lego v4.35.2 binary described in
+[certificate setup](certificates.md#host-setup), and the
+[Pebble v2.6.0 release](https://github.com/letsencrypt/pebble/releases/tag/v2.6.0).
+The tested `pebble-linux-amd64.tar.gz` archive has SHA256
+`ce5d87e1f674934c134b7cbcbc468e3df420994a17e77bdbf7aec611e2d373b9`.
+Verify before extraction; the Pebble binary needs executable permission.
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-certificates.py \
+  --lego /path/to/lego-4.35.2/lego \
+  --pebble /path/to/pebble-linux-amd64/linux/amd64/pebble \
+  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --nginx /path/to/extracted/usr/sbin/nginx \
+  --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so
+```
+
+This root-accessible systemd test needs free UDP/TCP port 53 on `127.0.0.1`
+and `::1`. It binds exclusively and fails instead of replacing an existing
+listener. Existing DNS services on other addresses remain untouched; neither
+`/etc/hosts` nor `/etc/resolv.conf` is modified. The fixture's authoritative
+NS is `localhost`, keeping lego's OS-level NS address lookup offline. ACME,
+webhook, backend, Agent and Nginx listeners are all loopback-only.
+
+The test does real DNS ownership validation, not Pebble's always-valid mode.
+It verifies HTTPS CA trust, EAB account creation, apex plus wildcard SANs,
+TXT presentation and cleanup, not-due skips, credential rejection retaining
+the active certificate, forced renewal, backend restart persistence, and
+actual elapsed-time automatic renewal of four-minute certificates. Real
+non-root Agent services then deploy/reload the certificate and restore a
+historical version, checking trusted TLS leaf serials and HTTP bytes for
+both transports. Test services, accounts, DNS listeners and private state
+are removed on completion. No public CA or real DNS account is used.
+
 ## Reference-Agent Smoke
 
 After installing the backend development dependencies, run this on the VPS
@@ -199,11 +240,33 @@ and mobile login/access screenshots and checks horizontal overflow and form
 control bounds. Services and database files are removed on completion; only
 the requested screenshots remain. No existing administrator is changed.
 
+Certificate coverage also creates a DNS provider and profile, requires explicit
+CA terms, imports a real PEM pair, downloads certificate/private key separately,
+verifies secret fields clear on reopening, and checks desktop/mobile forms.
+Private keys and provider credentials must not appear in browser storage.
+
 The reference-agent smoke also creates a temporary administrator and signs in
 as the operator; the reference agent still authenticates only with its own
 bootstrap token. No test disables management authentication.
 
 ## Latest Verification
+
+Certificate management was verified on the designated VPS:
+
+- Backend: 167 tests; Agent: 86 tests; frontend: 77 tests and production build.
+- Probe Worker type checks and Ruff passed.
+- Real Pebble DNS-01/EAB, wildcard issuance, automatic and forced renewal,
+  restart persistence, failure preservation, and trusted TLS/version rollback
+  passed over both Agent transports.
+- Browser certificate forms, terms confirmation, secret clearing and explicit
+  PEM downloads passed on desktop and mobile; screenshots were inspected.
+- Installed Agent, systemd lifecycle, Nginx, tunnel and reference-agent smokes
+  passed again. No public-CA orders or real DNS credentials were used.
+
+Public-provider staging and the remaining migration gates are not covered by
+these results. Existing deprecation and bundle-size warnings remain.
+
+## Previous Verification
 
 On 2026-08-27 (UTC), the atomic-tunnel worktree passed on the VPS:
 

@@ -9,3 +9,7 @@ Management APIs require a local administrator session. Create an account with
 
 See [administrator access](../docs/administrator-access.md) for database
 configuration, account recovery, HTTPS deployment requirements, and API access.
+
+[Certificate management](../docs/certificates.md) covers the optional pinned
+lego runtime, DNS credentials, central issuance/renewal, private backups,
+version history, and deployment to owned Agent certificate directories.

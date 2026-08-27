@@ -67,6 +67,27 @@ No authentication state is a paid entitlement or licensing gate.
 See [administrator access](administrator-access.md) for deployment settings
 and the HTTP contract.
 
+## Central Certificates
+
+The authenticated `/api/v1/certificates` API stores DNS providers, certificate
+profiles, durable jobs, encrypted versions and deployment targets in the same
+database as inventory. A host-local private directory holds the vault key,
+lego account state and worker lock. Credential and material responses exclude
+secrets unless private-key export is explicitly requested. The existing Agent
+command queue still carries deployment PEM material and must be protected.
+
+One lifespan worker per shared state directory schedules DNS-01 jobs through
+an operator-provided lego v4 executable. Its child inherits the worker lock;
+timeouts/cancellation terminate the owned process group. The worker retains
+the last active version after failures and resumes queued work after restart.
+Imports and deployments do not require an ACME executable. Activating a new
+version queues automatic targets through the normal Agent command and owned
+certificate-file transaction, so issuance and runtime activation have separate
+results. No license service participates in either path.
+
+See [certificate management](certificates.md) for provider fields, setup,
+backup requirements, retry semantics and remaining challenge/account limits.
+
 ## Agent Telemetry
 
 The `agent/` package is an independent Linux implementation, not a repackaged
