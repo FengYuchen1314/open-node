@@ -183,6 +183,10 @@ async function writeXrayFile() {
   });
 }
 
+async function takeoverExternalXray() {
+  await queueOperation("xray_takeover_external");
+}
+
 async function writeNginxConfig() {
   await queueOperation("nginx_config_write", {
     config: nginxConfigForm.configText,
@@ -426,6 +430,17 @@ function readableError(error: unknown) {
                   @click="testXrayConfig"
                 >
                   Test
+                </v-btn>
+                <v-btn
+                  :disabled="serverOptions.length === 0"
+                  :loading="savingOperation === 'xray_takeover_external'"
+                  color="warning"
+                  prepend-icon="mdi-source-merge"
+                  size="small"
+                  variant="tonal"
+                  @click="takeoverExternalXray"
+                >
+                  Takeover external
                 </v-btn>
                 <v-btn
                   :disabled="serverOptions.length === 0"

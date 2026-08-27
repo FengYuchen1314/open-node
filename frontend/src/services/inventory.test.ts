@@ -629,6 +629,40 @@ describe("inventory API client", () => {
     });
   });
 
+  it("queues Xray external takeover with preset route", async () => {
+    let requestUrl = "";
+    let body = "";
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      body = init?.body?.toString() ?? "";
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_10a",
+            server_id: "srv_1",
+            request_id: "srv_1-takeover",
+            method: "POST",
+            path: "/api/child/external-xray/takeover",
+            query: "",
+            timeout_ms: 120000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await queueAgentOperation("srv_1", "xray_takeover_external", undefined, fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/xray/takeover-external");
+    expect(body).toBe("");
+  });
+
   it("queues high-level agent operations with JSON bodies", async () => {
     let requestUrl = "";
     let body = "";

@@ -62,6 +62,8 @@ This document records the starting source map for the Open Node refactor.
    - Done: richer subscription template presets and import/export workflows.
    - Done: quota status, over-limit subscription blocking, manual traffic
      reset, and idempotent monthly reset-due automation.
+   - Done: external Xray takeover command wrapper for merging an existing
+     `-config` plus `-confdir` runtime into the MMWX-managed single config.
    - Next: deeper Xray runtime integration.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
@@ -87,5 +89,7 @@ This document records the starting source map for the Open Node refactor.
      public probe series.
    - Done: public cross-node target comparison endpoint and Vue comparison
      rows using public server indexes and sanitized latency buckets.
+   - Done: external Xray takeover command wrapper for migrating public nodes
+     that still run multi-file external Xray configs.
    - Next: deeper Xray runtime integration.
 5. Revisit Xray integration once the agent protocol surface is stable.

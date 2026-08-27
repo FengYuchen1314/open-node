@@ -36,6 +36,7 @@ from open_node.domain.inventory import (
     AgentXrayConfigFileWriteOperationRequest,
     AgentXrayConfigOperationRequest,
     AgentXraySystemConfigOperationRequest,
+    AgentXrayTakeoverExternalOperationRequest,
     AgentXrayTestConfigOperationRequest,
     ServerCommandsResponse,
     ServerCreate,
@@ -874,6 +875,30 @@ async def queue_xray_config_file_write_operation(
             path="/api/child/xray/config-files",
             body={"file": payload.file, "content": _config_to_text(payload.content)},
             timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/xray/takeover-external",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_xray_takeover_external_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+    payload: AgentXrayTakeoverExternalOperationRequest | None = None,
+) -> AgentCommandCreateResponse:
+    request = payload or AgentXrayTakeoverExternalOperationRequest()
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/external-xray/takeover",
+            timeout_ms=request.command_timeout_ms,
         ),
         store,
         connections,

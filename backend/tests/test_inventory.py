@@ -1393,6 +1393,31 @@ def test_config_file_operations_build_queries_and_bodies(tmp_path: Path) -> None
     }
 
 
+def test_xray_takeover_external_operation_queues_agent_schema(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-takeover-xray"}).json()
+
+    default_response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/xray/takeover-external",
+    )
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/xray/takeover-external",
+        json={"command_timeout_ms": 180_000},
+    )
+
+    assert default_response.status_code == 201
+    assert default_response.json()["command"]["timeout_ms"] == 120_000
+    assert response.status_code == 201
+    payload = response.json()
+    command = payload["command"]
+    assert payload["license_required"] is False
+    assert command["method"] == "POST"
+    assert command["path"] == "/api/child/external-xray/takeover"
+    assert command["stream"] is False
+    assert command["body"] is None
+    assert command["timeout_ms"] == 180_000
+
+
 def test_nginx_config_write_operation_queues_text_config(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-nginx-config"}).json()

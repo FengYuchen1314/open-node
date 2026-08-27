@@ -39,6 +39,7 @@ export type AgentOperationKind =
   | "xray_config_files_list"
   | "xray_config_file_read"
   | "xray_config_file_write"
+  | "xray_takeover_external"
   | "xray_install"
   | "xray_remove"
   | "nginx_config_read"
@@ -401,6 +402,10 @@ export interface AgentXrayConfigFileWriteOperationRequest {
   command_timeout_ms?: number;
 }
 
+export interface AgentXrayTakeoverExternalOperationRequest {
+  command_timeout_ms?: number;
+}
+
 export interface AgentNginxConfigOperationRequest {
   config: string;
   path?: string | null;
@@ -463,6 +468,7 @@ export type AgentOperationPayload =
   | AgentXraySystemConfigOperationRequest
   | AgentXrayConfigFileReadOperationRequest
   | AgentXrayConfigFileWriteOperationRequest
+  | AgentXrayTakeoverExternalOperationRequest
   | AgentNginxConfigOperationRequest
   | AgentNginxConfigFileReadOperationRequest
   | AgentNginxConfigFileWriteOperationRequest

@@ -118,6 +118,7 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `POST /api/v1/servers/{server_id}/operations/xray/config-files/list`
 - `POST /api/v1/servers/{server_id}/operations/xray/config-files/read`
 - `POST /api/v1/servers/{server_id}/operations/xray/config-files/write`
+- `POST /api/v1/servers/{server_id}/operations/xray/takeover-external`
 - `POST /api/v1/servers/{server_id}/operations/xray/install`
 - `POST /api/v1/servers/{server_id}/operations/xray/remove`
 - `POST /api/v1/servers/{server_id}/operations/nginx/config/read`
@@ -168,6 +169,12 @@ into the text shape the agent expects, validate obvious path and URL hazards,
 and preserve the agent-side write/test/reload behavior. Agent setting wrappers
 cover Xray mode, listen port, master URL probe/update, and WARP credential
 updates without changing the Open Node no-license contract.
+
+The Xray external takeover wrapper queues the active agent's
+`/api/child/external-xray/takeover` route. It lets an operator merge an
+existing external Xray `-config` plus `-confdir` layout into the single
+MMWX-managed config file before using the normal runtime inbounds, outbounds,
+and routing operations.
 
 High-level workflow wrappers cover active agent inbound, outbound, routing,
 batch apply, certificate deployment, nginx SSL setup, nginx website inventory

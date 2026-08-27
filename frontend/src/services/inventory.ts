@@ -53,6 +53,7 @@ const operationPaths: Record<AgentOperationKind, string> = {
   xray_config_files_list: "xray/config-files/list",
   xray_config_file_read: "xray/config-files/read",
   xray_config_file_write: "xray/config-files/write",
+  xray_takeover_external: "xray/takeover-external",
   xray_install: "xray/install",
   xray_remove: "xray/remove",
   nginx_config_read: "nginx/config/read",

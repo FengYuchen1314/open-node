@@ -157,6 +157,7 @@ class AgentOperationKind(StrEnum):
     XRAY_CONFIG_FILES_LIST = "xray_config_files_list"
     XRAY_CONFIG_FILE_READ = "xray_config_file_read"
     XRAY_CONFIG_FILE_WRITE = "xray_config_file_write"
+    XRAY_TAKEOVER_EXTERNAL = "xray_takeover_external"
     XRAY_INSTALL = "xray_install"
     XRAY_REMOVE = "xray_remove"
     NGINX_CONFIG_READ = "nginx_config_read"
@@ -941,6 +942,10 @@ class AgentXrayConfigFileWriteOperationRequest(BaseModel):
     @classmethod
     def validate_content(cls, value: Any) -> Any:
         return _ensure_json_serializable_config(value, "content")
+
+
+class AgentXrayTakeoverExternalOperationRequest(BaseModel):
+    command_timeout_ms: int = Field(default=120_000, ge=1_000, le=300_000)
 
 
 class AgentNginxConfigOperationRequest(BaseModel):
