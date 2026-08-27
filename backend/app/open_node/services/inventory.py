@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from secrets import token_bytes, token_urlsafe
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from uuid import UUID, uuid4
 
 import yaml
@@ -76,11 +77,14 @@ from open_node.domain.subscriptions import (
     ManagedNodeRead,
     ProductUserCreate,
     ProductUserRead,
+    ProductUserTrafficResponse,
+    SubscriptionClientFormat,
     SubscriptionCredentialRead,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanCreate,
     SubscriptionPlanRead,
     SubscriptionProvisionBatch,
+    SubscriptionTrafficEntryRead,
 )
 
 
@@ -148,6 +152,7 @@ class RenderedSubscription:
     username: str
     plan_name: str
     content: str
+    media_type: str
     filename: str
     subscription_userinfo: str | None
     warnings: list[str]
@@ -465,6 +470,36 @@ class SubscriptionCredentialModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class SubscriptionTrafficLedgerModel(Base):
+    __tablename__ = "subscription_traffic_ledger"
+    __table_args__ = (
+        UniqueConstraint("username", "server_id", "email", name="uq_subscription_traffic_email"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    username: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("product_users.username", ondelete="CASCADE"),
+        index=True,
+    )
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    upload: Mapped[int] = mapped_column(BigInteger, default=0)
+    download: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_uplink: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_downlink: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_reported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class InventoryStore:
     def __init__(self, database_url: str) -> None:
         self._engine = create_inventory_engine(database_url)
@@ -629,6 +664,7 @@ class InventoryStore:
                 latency=[sample.model_dump(mode="json") for sample in payload.latency],
             )
             session.add(telemetry)
+            self._record_subscription_traffic_ledger(session, server, payload, reported_at, now)
             session.commit()
             session.refresh(server)
             session.refresh(telemetry)
@@ -927,7 +963,11 @@ class InventoryStore:
             ).all()
             return [self._subscription_credential_read(credential) for credential in credentials]
 
-    def render_subscription(self, subscription_key: str) -> RenderedSubscription:
+    def render_subscription(
+        self,
+        subscription_key: str,
+        client_format: SubscriptionClientFormat = SubscriptionClientFormat.CLASH,
+    ) -> RenderedSubscription:
         key = subscription_key.strip()
         if not key:
             raise SubscriptionTokenNotFoundError("subscription key is required")
@@ -958,15 +998,41 @@ class InventoryStore:
             if not proxies:
                 raise SubscriptionUnavailableError("subscription has no renderable nodes")
 
-            content = self._render_clash_subscription(proxies)
-            filename = f"{self._safe_filename(plan.name or user.username)}.yaml"
+            content, media_type, extension = self._render_subscription_content(
+                proxies,
+                client_format,
+            )
+            filename = f"{self._safe_filename(plan.name or user.username)}.{extension}"
             return RenderedSubscription(
                 username=user.username,
                 plan_name=plan.name,
                 content=content,
+                media_type=media_type,
                 filename=filename,
                 subscription_userinfo=self._subscription_userinfo_header(session, user, plan),
                 warnings=warnings,
+            )
+
+    def subscription_user_traffic(self, username: str) -> ProductUserTrafficResponse:
+        with self._session() as session:
+            if not session.get(ProductUserModel, username):
+                raise ProductUserNotFoundError(f"user not found: {username}")
+            entries = session.scalars(
+                select(SubscriptionTrafficLedgerModel)
+                .where(SubscriptionTrafficLedgerModel.username == username)
+                .order_by(
+                    SubscriptionTrafficLedgerModel.server_id,
+                    SubscriptionTrafficLedgerModel.email,
+                )
+            ).all()
+            upload = sum(entry.upload for entry in entries)
+            download = sum(entry.download for entry in entries)
+            return ProductUserTrafficResponse(
+                username=username,
+                upload=upload,
+                download=download,
+                total=upload + download,
+                entries=[self._subscription_traffic_entry_read(entry) for entry in entries],
             )
 
     def list_change_sets(self) -> list[AgentChangeSetRead]:
@@ -1603,6 +1669,97 @@ class InventoryStore:
             return int(raw_at)
         return int(InventoryStore._aware_datetime(snapshot.reported_at).timestamp())
 
+    def _record_subscription_traffic_ledger(
+        self,
+        session: Session,
+        server: ServerModel,
+        payload: AgentTelemetryReport,
+        reported_at: datetime,
+        now: datetime,
+    ) -> None:
+        if not payload.stats:
+            return
+        stats = payload.stats.model_dump(mode="json")
+        user_stats = stats.get("user")
+        if not isinstance(user_stats, dict) or not user_stats:
+            return
+
+        username_by_email = self._subscription_username_by_email(session)
+        if not username_by_email:
+            return
+
+        for email, item in user_stats.items():
+            if not isinstance(email, str) or not isinstance(item, dict):
+                continue
+            username = username_by_email.get(email)
+            if not username:
+                continue
+            uplink = self._traffic_counter_value(item.get("uplink"))
+            downlink = self._traffic_counter_value(item.get("downlink"))
+            ledger = session.scalar(
+                select(SubscriptionTrafficLedgerModel).where(
+                    SubscriptionTrafficLedgerModel.username == username,
+                    SubscriptionTrafficLedgerModel.server_id == server.id,
+                    SubscriptionTrafficLedgerModel.email == email,
+                )
+            )
+            if not ledger:
+                session.add(
+                    SubscriptionTrafficLedgerModel(
+                        id=str(uuid4()),
+                        username=username,
+                        server_id=server.id,
+                        email=email,
+                        upload=uplink,
+                        download=downlink,
+                        last_uplink=uplink,
+                        last_downlink=downlink,
+                        last_reported_at=reported_at,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                continue
+
+            if ledger.last_reported_at and reported_at <= self._aware_datetime(
+                ledger.last_reported_at
+            ):
+                continue
+
+            ledger.upload += (
+                uplink - ledger.last_uplink if uplink >= ledger.last_uplink else uplink
+            )
+            ledger.download += (
+                downlink - ledger.last_downlink
+                if downlink >= ledger.last_downlink
+                else downlink
+            )
+            ledger.last_uplink = uplink
+            ledger.last_downlink = downlink
+            ledger.last_reported_at = reported_at
+            ledger.updated_at = now
+
+    @staticmethod
+    def _subscription_username_by_email(session: Session) -> dict[str, str]:
+        credentials = session.scalars(select(SubscriptionCredentialModel)).all()
+        index: dict[str, str] = {}
+        for credential in credentials:
+            index[credential.email] = credential.username
+            raw_email = credential.credential.get("email")
+            if isinstance(raw_email, str) and raw_email:
+                index[raw_email] = credential.username
+        return index
+
+    @staticmethod
+    def _traffic_counter_value(value: object) -> int:
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, int | float):
+            return max(0, int(value))
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+        return 0
+
     @staticmethod
     def _traffic_totals_from_stats(stats: dict[str, Any]) -> tuple[int, int]:
         source = stats.get("inbound") or stats.get("user") or {}
@@ -1989,6 +2146,32 @@ class InventoryStore:
             return "hysteria2"
         return normalized or "vless"
 
+    @classmethod
+    def _render_subscription_content(
+        cls,
+        proxies: list[dict[str, Any]],
+        client_format: SubscriptionClientFormat,
+    ) -> tuple[str, str, str]:
+        match client_format:
+            case SubscriptionClientFormat.CLASH:
+                return cls._render_clash_subscription(proxies), "text/yaml; charset=utf-8", "yaml"
+            case SubscriptionClientFormat.SING_BOX:
+                return (
+                    cls._render_sing_box_subscription(proxies),
+                    "application/json; charset=utf-8",
+                    "json",
+                )
+            case SubscriptionClientFormat.URI_LIST:
+                return (
+                    cls._render_uri_list_subscription(proxies),
+                    "text/plain; charset=utf-8",
+                    "txt",
+                )
+            case SubscriptionClientFormat.BASE64:
+                uri_list = cls._render_uri_list_subscription(proxies)
+                encoded = base64.b64encode(uri_list.encode("utf-8")).decode("ascii")
+                return encoded + "\n", "text/plain; charset=utf-8", "txt"
+
     @staticmethod
     def _render_clash_subscription(proxies: list[dict[str, Any]]) -> str:
         proxy_names = [str(proxy.get("name") or "proxy") for proxy in proxies]
@@ -2008,6 +2191,253 @@ class InventoryStore:
             "rules": ["MATCH,Proxy"],
         }
         return yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
+
+    @classmethod
+    def _render_sing_box_subscription(cls, proxies: list[dict[str, Any]]) -> str:
+        outbounds = [outbound for proxy in proxies if (outbound := cls._sing_box_outbound(proxy))]
+        tags = [str(outbound["tag"]) for outbound in outbounds]
+        payload = {
+            "log": {"level": "info"},
+            "outbounds": [
+                {
+                    "type": "selector",
+                    "tag": "Proxy",
+                    "outbounds": tags,
+                    "default": tags[0] if tags else "",
+                },
+                {"type": "direct", "tag": "direct"},
+                *outbounds,
+            ],
+            "route": {"final": "Proxy"},
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+    @classmethod
+    def _sing_box_outbound(cls, proxy: dict[str, Any]) -> dict[str, Any] | None:
+        proxy_type = cls._normalized_proxy_type(proxy)
+        server = proxy.get("server")
+        port = cls._proxy_int(proxy.get("port"))
+        if not proxy_type or not isinstance(server, str) or not server or not port:
+            return None
+
+        outbound: dict[str, Any] = {
+            "type": proxy_type,
+            "tag": str(proxy.get("name") or server),
+            "server": server,
+            "server_port": port,
+        }
+
+        if proxy_type in {"vless", "vmess"}:
+            outbound["uuid"] = str(proxy.get("uuid") or proxy.get("id") or "")
+            if proxy_type == "vmess":
+                outbound["security"] = str(proxy.get("cipher") or proxy.get("security") or "auto")
+                outbound["alter_id"] = cls._proxy_int(proxy.get("alterId")) or 0
+            if proxy.get("flow"):
+                outbound["flow"] = str(proxy["flow"])
+        elif proxy_type in {"trojan", "hysteria2"}:
+            outbound["password"] = str(proxy.get("password") or proxy.get("auth") or "")
+        elif proxy_type == "shadowsocks":
+            outbound["method"] = str(proxy.get("cipher") or proxy.get("method") or "aes-128-gcm")
+            outbound["password"] = str(proxy.get("password") or "")
+        elif proxy_type in {"socks", "http"}:
+            if proxy.get("username"):
+                outbound["username"] = str(proxy["username"])
+            if proxy.get("password"):
+                outbound["password"] = str(proxy["password"])
+
+        tls = cls._sing_box_tls(proxy)
+        if tls:
+            outbound["tls"] = tls
+        return outbound
+
+    @staticmethod
+    def _sing_box_tls(proxy: dict[str, Any]) -> dict[str, Any] | None:
+        tls_value = proxy.get("tls")
+        if tls_value is False or tls_value is None:
+            return None
+        tls: dict[str, Any] = {"enabled": True}
+        server_name = proxy.get("servername") or proxy.get("sni")
+        if isinstance(server_name, str) and server_name:
+            tls["server_name"] = server_name
+        if isinstance(tls_value, dict):
+            tls.update(tls_value)
+            tls["enabled"] = bool(tls.get("enabled", True))
+        return tls
+
+    @classmethod
+    def _render_uri_list_subscription(cls, proxies: list[dict[str, Any]]) -> str:
+        uris = [uri for proxy in proxies if (uri := cls._proxy_uri(proxy))]
+        return "\n".join(uris) + ("\n" if uris else "")
+
+    @classmethod
+    def _proxy_uri(cls, proxy: dict[str, Any]) -> str | None:
+        proxy_type = cls._normalized_proxy_type(proxy)
+        match proxy_type:
+            case "vless":
+                return cls._vless_uri(proxy)
+            case "vmess":
+                return cls._vmess_uri(proxy)
+            case "trojan":
+                return cls._trojan_uri(proxy)
+            case "shadowsocks":
+                return cls._shadowsocks_uri(proxy)
+            case "hysteria2":
+                return cls._hysteria2_uri(proxy)
+            case "socks" | "http":
+                return cls._userpass_uri(proxy, proxy_type)
+        return None
+
+    @classmethod
+    def _vless_uri(cls, proxy: dict[str, Any]) -> str | None:
+        server = proxy.get("server")
+        port = cls._proxy_int(proxy.get("port"))
+        uuid = proxy.get("uuid") or proxy.get("id")
+        if not isinstance(server, str) or not server or not port or not uuid:
+            return None
+        query = cls._uri_query(
+            {
+                "type": proxy.get("network") or "tcp",
+                "security": "tls" if cls._proxy_bool(proxy.get("tls")) else None,
+                "sni": proxy.get("servername") or proxy.get("sni"),
+                "flow": proxy.get("flow"),
+                "encryption": proxy.get("encryption") or "none",
+            }
+        )
+        return (
+            f"vless://{quote(str(uuid), safe='')}@{server}:{port}"
+            f"{query}{cls._uri_fragment(proxy)}"
+        )
+
+    @classmethod
+    def _vmess_uri(cls, proxy: dict[str, Any]) -> str | None:
+        server = proxy.get("server")
+        port = cls._proxy_int(proxy.get("port"))
+        uuid = proxy.get("uuid") or proxy.get("id")
+        if not isinstance(server, str) or not server or not port or not uuid:
+            return None
+        ws_options = proxy.get("ws-opts")
+        ws_options = ws_options if isinstance(ws_options, dict) else {}
+        ws_headers = ws_options.get("headers")
+        ws_headers = ws_headers if isinstance(ws_headers, dict) else {}
+        payload = {
+            "v": "2",
+            "ps": str(proxy.get("name") or server),
+            "add": server,
+            "port": str(port),
+            "id": str(uuid),
+            "aid": str(cls._proxy_int(proxy.get("alterId")) or 0),
+            "scy": str(proxy.get("cipher") or proxy.get("security") or "auto"),
+            "net": str(proxy.get("network") or "tcp"),
+            "type": str(proxy.get("headerType") or "none"),
+            "host": str(ws_headers.get("Host") or ""),
+            "path": str(ws_options.get("path") or ""),
+            "tls": "tls" if cls._proxy_bool(proxy.get("tls")) else "",
+            "sni": str(proxy.get("servername") or proxy.get("sni") or ""),
+        }
+        encoded = base64.urlsafe_b64encode(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii").rstrip("=")
+        return f"vmess://{encoded}"
+
+    @classmethod
+    def _trojan_uri(cls, proxy: dict[str, Any]) -> str | None:
+        server = proxy.get("server")
+        port = cls._proxy_int(proxy.get("port"))
+        password = proxy.get("password")
+        if not isinstance(server, str) or not server or not port or not password:
+            return None
+        query = cls._uri_query(
+            {
+                "security": "tls" if cls._proxy_bool(proxy.get("tls")) else None,
+                "sni": proxy.get("servername") or proxy.get("sni"),
+            }
+        )
+        return (
+            f"trojan://{quote(str(password), safe='')}@{server}:{port}"
+            f"{query}{cls._uri_fragment(proxy)}"
+        )
+
+    @classmethod
+    def _shadowsocks_uri(cls, proxy: dict[str, Any]) -> str | None:
+        server = proxy.get("server")
+        port = cls._proxy_int(proxy.get("port"))
+        method = proxy.get("cipher") or proxy.get("method")
+        password = proxy.get("password")
+        if not isinstance(server, str) or not server or not port or not method or not password:
+            return None
+        userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode("ascii").rstrip(
+            "="
+        )
+        return f"ss://{userinfo}@{server}:{port}{cls._uri_fragment(proxy)}"
+
+    @classmethod
+    def _hysteria2_uri(cls, proxy: dict[str, Any]) -> str | None:
+        server = proxy.get("server")
+        port = cls._proxy_int(proxy.get("port"))
+        password = proxy.get("password") or proxy.get("auth")
+        if not isinstance(server, str) or not server or not port or not password:
+            return None
+        query = cls._uri_query({"sni": proxy.get("servername") or proxy.get("sni")})
+        return (
+            f"hysteria2://{quote(str(password), safe='')}@{server}:{port}"
+            f"{query}{cls._uri_fragment(proxy)}"
+        )
+
+    @classmethod
+    def _userpass_uri(cls, proxy: dict[str, Any], scheme: str) -> str | None:
+        server = proxy.get("server")
+        port = cls._proxy_int(proxy.get("port"))
+        if not isinstance(server, str) or not server or not port:
+            return None
+        username = quote(str(proxy.get("username") or ""), safe="")
+        password = quote(str(proxy.get("password") or ""), safe="")
+        auth = f"{username}:{password}@" if username or password else ""
+        return f"{scheme}://{auth}{server}:{port}{cls._uri_fragment(proxy)}"
+
+    @staticmethod
+    def _normalized_proxy_type(proxy: dict[str, Any]) -> str:
+        raw_type = str(proxy.get("type") or "").strip().lower()
+        match raw_type:
+            case "ss" | "shadowsocks":
+                return "shadowsocks"
+            case "socks5" | "socks":
+                return "socks"
+            case "hy2" | "hysteria" | "hysteria2":
+                return "hysteria2"
+        return raw_type
+
+    @staticmethod
+    def _uri_query(params: dict[str, object]) -> str:
+        filtered = {
+            key: str(value)
+            for key, value in params.items()
+            if value is not None and value != "" and value is not False
+        }
+        return f"?{urlencode(filtered)}" if filtered else ""
+
+    @staticmethod
+    def _uri_fragment(proxy: dict[str, Any]) -> str:
+        name = str(proxy.get("name") or "").strip()
+        return f"#{quote(name)}" if name else ""
+
+    @staticmethod
+    def _proxy_int(value: object) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value > 0 else None
+        if isinstance(value, str) and value.isdigit():
+            parsed = int(value)
+            return parsed if parsed > 0 else None
+        return None
+
+    @staticmethod
+    def _proxy_bool(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "tls", "yes"}
+        return bool(value)
 
     def _subscription_userinfo_header(
         self,
@@ -2031,6 +2461,23 @@ class InventoryStore:
         )
 
     def _subscription_user_traffic(self, session: Session, username: str) -> tuple[int, int]:
+        ledgers = session.scalars(
+            select(SubscriptionTrafficLedgerModel).where(
+                SubscriptionTrafficLedgerModel.username == username
+            )
+        ).all()
+        if ledgers:
+            return (
+                sum(ledger.upload for ledger in ledgers),
+                sum(ledger.download for ledger in ledgers),
+            )
+        return self._subscription_latest_user_traffic(session, username)
+
+    def _subscription_latest_user_traffic(
+        self,
+        session: Session,
+        username: str,
+    ) -> tuple[int, int]:
         credentials = session.scalars(
             select(SubscriptionCredentialModel).where(
                 SubscriptionCredentialModel.username == username
@@ -2087,6 +2534,23 @@ class InventoryStore:
             credential=credential.credential or {},
             created_at=credential.created_at,
             updated_at=credential.updated_at,
+        )
+
+    @staticmethod
+    def _subscription_traffic_entry_read(
+        entry: SubscriptionTrafficLedgerModel,
+    ) -> SubscriptionTrafficEntryRead:
+        return SubscriptionTrafficEntryRead(
+            username=entry.username,
+            server_id=UUID(entry.server_id),
+            email=entry.email,
+            upload=entry.upload,
+            download=entry.download,
+            total=entry.upload + entry.download,
+            last_reported_at=InventoryStore._aware_datetime(entry.last_reported_at)
+            if entry.last_reported_at
+            else None,
+            updated_at=InventoryStore._aware_datetime(entry.updated_at),
         )
 
     @staticmethod

@@ -246,16 +246,30 @@ Users can receive a full token URL or short-code URL at:
 - `GET /api/v1/users/{username}/credentials`
 - `GET /api/v1/subscribe/{token_or_short_code}`
 
-The public subscription endpoint renders a minimal Clash-compatible YAML file
-from managed node proxy configs, injects the user's stored credential into each
-proxy, includes a select group, and emits the standard `subscription-userinfo`
-header from the latest telemetry available for that user's credential emails.
-This is intentionally smaller than the original MMWX template/conversion
-system, but it establishes the durable token and credential boundary.
+The public subscription endpoint renders from managed node proxy configs,
+injects the user's stored credential into each proxy, and emits the standard
+`subscription-userinfo` header. The default output remains Clash-compatible
+YAML, and callers can request alternate formats with
+`GET /api/v1/subscribe/{token_or_short_code}?format=...`:
+
+- `clash`: Clash-compatible YAML with a select group.
+- `sing-box`: sing-box JSON outbounds with a selector.
+- `uri-list`: plaintext proxy URI lines.
+- `base64`: base64-encoded URI list for clients that expect legacy
+  subscription bodies.
+
+Open Node records subscription traffic in a durable ledger when agent telemetry
+contains `stats.user` counters for known credential emails. The first observed
+counter value is counted, later telemetry only adds positive deltas, and
+counter resets are treated as a new epoch. The ledger backs both
+`subscription-userinfo` and `GET /api/v1/users/{username}/traffic`; old
+databases without ledger entries still fall back to the latest telemetry
+snapshot until new telemetry arrives.
 
 The frontend exposes this in `/subscriptions`, where operators can create users,
-catalog nodes, plans, assignments, public links, and generated credentials, then
-inspect the last calculated batch before or after dispatching it.
+catalog nodes, plans, assignments, public links, generated credentials, format
+URLs, and traffic ledger summaries, then inspect the last calculated batch
+before or after dispatching it.
 
 ## Public Probe API
 

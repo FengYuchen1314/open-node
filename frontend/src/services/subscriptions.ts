@@ -6,6 +6,7 @@ import type {
   ProductUserCreateRequest,
   ProductUserResponse,
   ProductUserSubscriptionTokenResponse,
+  ProductUserTrafficResponse,
   ProductUsersResponse,
   SubscriptionPlanAssignRequest,
   SubscriptionPlanAssignResponse,
@@ -99,6 +100,19 @@ export async function listProductUserCredentials(
     throw await apiError(response, "Product user credentials request failed");
   }
   return response.json() as Promise<ProductUserCredentialsResponse>;
+}
+
+export async function getProductUserTraffic(
+  username: string,
+  fetcher = fetch,
+): Promise<ProductUserTrafficResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/traffic`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Product user traffic request failed");
+  }
+  return response.json() as Promise<ProductUserTrafficResponse>;
 }
 
 export async function listManagedNodes(fetcher = fetch): Promise<ManagedNodesResponse> {

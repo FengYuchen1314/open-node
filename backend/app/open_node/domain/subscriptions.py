@@ -44,6 +44,13 @@ class SubscriptionTrafficMode(StrEnum):
     TWOWAY = "twoway"
 
 
+class SubscriptionClientFormat(StrEnum):
+    CLASH = "clash"
+    SING_BOX = "sing-box"
+    URI_LIST = "uri-list"
+    BASE64 = "base64"
+
+
 class ProductUserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=80)
     email: str | None = Field(default=None, max_length=255)
@@ -176,6 +183,26 @@ class SubscriptionCredentialRead(BaseModel):
 class ProductUserCredentialsResponse(BaseModel):
     username: str
     credentials: list[SubscriptionCredentialRead]
+    license_required: Literal[False] = False
+
+
+class SubscriptionTrafficEntryRead(BaseModel):
+    username: str
+    server_id: UUID
+    email: str
+    upload: int
+    download: int
+    total: int
+    last_reported_at: datetime | None = None
+    updated_at: datetime
+
+
+class ProductUserTrafficResponse(BaseModel):
+    username: str
+    upload: int
+    download: int
+    total: int
+    entries: list[SubscriptionTrafficEntryRead]
     license_required: Literal[False] = False
 
 

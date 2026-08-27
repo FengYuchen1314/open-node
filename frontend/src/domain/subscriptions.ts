@@ -3,6 +3,7 @@ import type { AgentCommand } from "./inventory";
 export type ProductUserRole = "admin" | "user";
 export type ManagedNodeType = "physical" | "routed";
 export type SubscriptionTrafficMode = "oneway" | "twoway";
+export type SubscriptionClientFormat = "clash" | "sing-box" | "uri-list" | "base64";
 
 export interface ProductUserCreateRequest {
   username: string;
@@ -127,6 +128,17 @@ export interface SubscriptionCredential {
   updated_at: string;
 }
 
+export interface SubscriptionTrafficEntry {
+  username: string;
+  server_id: string;
+  email: string;
+  upload: number;
+  download: number;
+  total: number;
+  last_reported_at?: string | null;
+  updated_at: string;
+}
+
 export interface ProductUsersResponse {
   users: ProductUser[];
   license_required: false;
@@ -145,6 +157,15 @@ export interface ProductUserSubscriptionTokenResponse {
 export interface ProductUserCredentialsResponse {
   username: string;
   credentials: SubscriptionCredential[];
+  license_required: false;
+}
+
+export interface ProductUserTrafficResponse {
+  username: string;
+  upload: number;
+  download: number;
+  total: number;
+  entries: SubscriptionTrafficEntry[];
   license_required: false;
 }
 

@@ -8,9 +8,11 @@ import type {
   ManagedNodeType,
   ProductUser,
   ProductUserSubscriptionToken,
+  ProductUserTrafficResponse,
   SubscriptionCredential,
   ProductUserCreateRequest,
   ProductUserRole,
+  SubscriptionClientFormat,
   SubscriptionPlan,
   SubscriptionPlanAssignRequest,
   SubscriptionPlanAssignResponse,
@@ -24,6 +26,7 @@ import {
   createProductUser,
   createProductUserSubscriptionToken,
   createSubscriptionPlan,
+  getProductUserTraffic,
   listProductUserCredentials,
   listManagedNodes,
   listProductUsers,
@@ -36,13 +39,16 @@ const users = ref<ProductUser[]>([]);
 const nodes = ref<ManagedNode[]>([]);
 const plans = ref<SubscriptionPlan[]>([]);
 const loading = ref(false);
-const savingAction = ref<"assign" | "credentials" | "node" | "plan" | "token" | "user" | "">("");
+const savingAction = ref<
+  "assign" | "credentials" | "node" | "plan" | "token" | "traffic" | "user" | ""
+>("");
 const errorMessage = ref("");
 const successMessage = ref("");
 const activeTab = ref("users");
 const lastAssignment = ref<SubscriptionPlanAssignResponse | null>(null);
 const subscriptionToken = ref<ProductUserSubscriptionToken | null>(null);
 const subscriptionCredentials = ref<SubscriptionCredential[]>([]);
+const subscriptionTraffic = ref<ProductUserTrafficResponse | null>(null);
 
 const userForm = reactive({
   username: "",
@@ -86,6 +92,7 @@ const assignForm = reactive({
   no_restart: true,
   command_timeout_ms: 60_000,
 });
+const subscriptionFormat = ref<SubscriptionClientFormat>("clash");
 
 const roleOptions: Array<{ title: string; value: ProductUserRole }> = [
   { title: "User", value: "user" },
@@ -98,6 +105,12 @@ const nodeTypeOptions: Array<{ title: string; value: ManagedNodeType }> = [
 const trafficModeOptions: Array<{ title: string; value: SubscriptionTrafficMode }> = [
   { title: "One way", value: "oneway" },
   { title: "Two way", value: "twoway" },
+];
+const subscriptionFormatOptions: Array<{ title: string; value: SubscriptionClientFormat }> = [
+  { title: "Clash YAML", value: "clash" },
+  { title: "sing-box JSON", value: "sing-box" },
+  { title: "URI list", value: "uri-list" },
+  { title: "Base64 URI", value: "base64" },
 ];
 
 const serverOptions = computed(() =>
@@ -114,6 +127,11 @@ const planOptions = computed(() =>
 );
 const assignmentJson = computed(() =>
   lastAssignment.value ? JSON.stringify(lastAssignment.value.provisioning_batches, null, 2) : "",
+);
+const selectedFormatUrl = computed(() =>
+  subscriptionToken.value
+    ? subscriptionUrlForFormat(subscriptionToken.value.subscription_url, subscriptionFormat.value)
+    : "",
 );
 
 onMounted(() => {
@@ -271,6 +289,7 @@ async function submitAssignment() {
       ? `Assigned ${response.plan.name} and queued ${response.commands.length} command.`
       : `Assigned ${response.plan.name}.`;
     await loadSubscriptionCredentials(false);
+    await loadSubscriptionTraffic(false);
     await refresh();
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -335,6 +354,29 @@ async function loadSubscriptionCredentials(showSuccess = true) {
     subscriptionCredentials.value = response.credentials;
     if (showSuccess) {
       successMessage.value = `Loaded ${response.credentials.length} credentials.`;
+    }
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+async function loadSubscriptionTraffic(showSuccess = true) {
+  if (!assignForm.username) {
+    errorMessage.value = "User is required.";
+    return;
+  }
+
+  savingAction.value = "traffic";
+  errorMessage.value = "";
+  if (showSuccess) {
+    successMessage.value = "";
+  }
+  try {
+    subscriptionTraffic.value = await getProductUserTraffic(assignForm.username);
+    if (showSuccess) {
+      successMessage.value = `Loaded ${formatBytes(subscriptionTraffic.value.total)} traffic.`;
     }
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -437,6 +479,28 @@ function credentialIdentifier(credential: SubscriptionCredential) {
   const source = credential.credential;
   const value = source.id ?? source.password ?? source.auth ?? source.psk ?? source.pass;
   return typeof value === "string" ? value : credential.email;
+}
+
+function subscriptionUrlForFormat(url: string, format: SubscriptionClientFormat) {
+  if (format === "clash") {
+    return url;
+  }
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}format=${encodeURIComponent(format)}`;
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const units = ["KB", "MB", "GB", "TB"];
+  let active = value / 1024;
+  let unitIndex = 0;
+  while (active >= 1024 && unitIndex < units.length - 1) {
+    active /= 1024;
+    unitIndex += 1;
+  }
+  return `${active.toFixed(active >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 </script>
 
@@ -893,6 +957,17 @@ function credentialIdentifier(credential: SubscriptionCredential) {
             >
               Creds
             </v-btn>
+            <v-btn
+              :disabled="!assignForm.username"
+              :loading="savingAction === 'traffic'"
+              color="info"
+              prepend-icon="mdi-counter"
+              size="small"
+              variant="tonal"
+              @click="loadSubscriptionTraffic()"
+            >
+              Traffic
+            </v-btn>
           </div>
           <template v-if="subscriptionToken">
             <v-text-field
@@ -911,7 +986,54 @@ function credentialIdentifier(credential: SubscriptionCredential) {
               readonly
               variant="outlined"
             />
+            <div class="form-row">
+              <v-select
+                v-model="subscriptionFormat"
+                :items="subscriptionFormatOptions"
+                density="comfortable"
+                label="Client format"
+                prepend-inner-icon="mdi-file-cog-outline"
+                variant="outlined"
+              />
+              <v-text-field
+                :model-value="selectedFormatUrl"
+                density="comfortable"
+                label="Format URL"
+                prepend-inner-icon="mdi-file-link-outline"
+                readonly
+                variant="outlined"
+              />
+            </div>
           </template>
+          <div v-if="subscriptionTraffic" class="assignment-summary">
+            <div class="catalog-item">
+              <div>
+                <div class="server-name">Traffic ledger</div>
+                <div class="server-subline">
+                  Up {{ formatBytes(subscriptionTraffic.upload) }} / Down
+                  {{ formatBytes(subscriptionTraffic.download) }}
+                </div>
+              </div>
+              <v-chip color="info" size="small" variant="tonal">
+                {{ formatBytes(subscriptionTraffic.total) }}
+              </v-chip>
+            </div>
+            <div
+              v-for="entry in subscriptionTraffic.entries"
+              :key="`${entry.server_id}-${entry.email}`"
+              class="catalog-item"
+            >
+              <div>
+                <div class="server-name">{{ entry.email }}</div>
+                <div class="server-subline">
+                  {{ serverName(entry.server_id) }} - {{ formatDate(entry.last_reported_at) }}
+                </div>
+              </div>
+              <v-chip color="secondary" size="small" variant="tonal">
+                {{ formatBytes(entry.total) }}
+              </v-chip>
+            </div>
+          </div>
           <div v-if="subscriptionCredentials.length > 0" class="credential-list">
             <div
               v-for="credential in subscriptionCredentials"

@@ -1,7 +1,7 @@
 import base64
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.inventory import AgentCommandCreate
@@ -15,6 +15,8 @@ from open_node.domain.subscriptions import (
     ProductUsersResponse,
     ProductUserSubscriptionTokenRead,
     ProductUserSubscriptionTokenResponse,
+    ProductUserTrafficResponse,
+    SubscriptionClientFormat,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanAssignResponse,
     SubscriptionPlanCreate,
@@ -121,6 +123,20 @@ def list_subscription_credentials(
     return ProductUserCredentialsResponse(username=username, credentials=credentials)
 
 
+@router.get(
+    "/users/{username}/traffic",
+    response_model=ProductUserTrafficResponse,
+)
+def get_subscription_traffic(
+    username: str,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ProductUserTrafficResponse:
+    try:
+        return store.subscription_user_traffic(username)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 @router.get("/nodes", response_model=ManagedNodesResponse)
 def list_managed_nodes(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
@@ -165,9 +181,13 @@ def create_subscription_plan(
 def render_user_subscription(
     subscription_key: str,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    client_format: Annotated[
+        SubscriptionClientFormat,
+        Query(alias="format"),
+    ] = SubscriptionClientFormat.CLASH,
 ) -> Response:
     try:
-        rendered = store.render_subscription(subscription_key)
+        rendered = store.render_subscription(subscription_key, client_format)
     except SubscriptionTokenNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SubscriptionUnavailableError as exc:
@@ -182,7 +202,7 @@ def render_user_subscription(
         headers["subscription-userinfo"] = rendered.subscription_userinfo
     return Response(
         content=rendered.content,
-        media_type="text/yaml; charset=utf-8",
+        media_type=rendered.media_type,
         headers=headers,
     )
 

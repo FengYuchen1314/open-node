@@ -1,3 +1,5 @@
+import base64
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -193,6 +195,83 @@ def test_subscription_token_renders_clash_yaml_and_traffic_header(tmp_path: Path
     assert proxy["server"] == "tokyo.example.com"
     assert doc["proxy-groups"][0]["proxies"] == ["[1.5] Tokyo base"]
     assert doc["rules"] == ["MATCH,Proxy"]
+
+
+def test_subscription_formats_include_sing_box_uri_list_and_base64(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    _agent_token, _server_id, _node_id, plan_id = create_catalog_fixture(client)
+    assigned = client.post("/api/v1/users/alice/plan", json={"plan_id": plan_id}).json()
+    client_id = assigned["provisioning_batches"][0]["body"]["inbound_clients"][0]["client"]["id"]
+    token = client.post("/api/v1/users/alice/subscription-token").json()["subscription"]["token"]
+
+    sing_box_response = client.get(f"/api/v1/subscribe/{token}?format=sing-box")
+    uri_response = client.get(f"/api/v1/subscribe/{token}?format=uri-list")
+    base64_response = client.get(f"/api/v1/subscribe/{token}?format=base64")
+
+    assert sing_box_response.status_code == 200
+    assert sing_box_response.headers["content-type"].startswith("application/json")
+    sing_box = json.loads(sing_box_response.text)
+    assert sing_box["outbounds"][0]["type"] == "selector"
+    assert sing_box["outbounds"][2]["type"] == "vless"
+    assert sing_box["outbounds"][2]["tag"] == "[1.5] Tokyo base"
+    assert sing_box["outbounds"][2]["uuid"] == client_id
+    assert sing_box["outbounds"][2]["tls"] == {"enabled": True}
+
+    assert uri_response.status_code == 200
+    assert uri_response.headers["content-type"].startswith("text/plain")
+    assert uri_response.text.startswith(f"vless://{client_id}@tokyo.example.com:443")
+    assert "security=tls" in uri_response.text
+    assert "#%5B1.5%5D%20Tokyo%20base" in uri_response.text
+
+    decoded = base64.b64decode(base64_response.text.strip()).decode("utf-8")
+    assert decoded == uri_response.text
+
+
+def test_subscription_traffic_ledger_tracks_deltas_and_counter_resets(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    agent_token, _server_id, _node_id, plan_id = create_catalog_fixture(client)
+    assigned = client.post(
+        "/api/v1/users/alice/plan",
+        json={
+            "plan_id": plan_id,
+            "start_date": "2026-08-27",
+            "expire_date": "2026-09-30",
+        },
+    ).json()
+    client_email = assigned["provisioning_batches"][0]["body"]["inbound_clients"][0]["client"][
+        "email"
+    ]
+
+    for reported_at, uplink, downlink in [
+        ("2026-08-27T00:00:00Z", 100, 200),
+        ("2026-08-27T00:05:00Z", 150, 260),
+        ("2026-08-27T00:10:00Z", 20, 40),
+    ]:
+        response = client.post(
+            "/api/v1/agents/telemetry",
+            json={
+                "token": agent_token,
+                "reported_at": reported_at,
+                "stats": {"user": {client_email: {"uplink": uplink, "downlink": downlink}}},
+            },
+        )
+        assert response.status_code == 200
+
+    traffic = client.get("/api/v1/users/alice/traffic")
+
+    assert traffic.status_code == 200
+    payload = traffic.json()
+    assert payload["license_required"] is False
+    assert payload["upload"] == 170
+    assert payload["download"] == 300
+    assert payload["total"] == 470
+    assert payload["entries"][0]["email"] == client_email
+    assert payload["entries"][0]["last_reported_at"] == "2026-08-27T00:10:00Z"
+
+    token = client.post("/api/v1/users/alice/subscription-token").json()["subscription"]["token"]
+    header = client.get(f"/api/v1/subscribe/{token}").headers["subscription-userinfo"]
+    expire = int(datetime(2026, 9, 30, tzinfo=UTC).timestamp())
+    assert header == f"upload=170; download=300; total={128 * 1024 * 1024 * 1024}; expire={expire}"
 
 
 def test_plan_assignment_dispatches_agent_batch_apply(tmp_path: Path) -> None:

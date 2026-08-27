@@ -13,6 +13,7 @@ import {
   createProductUserSubscriptionToken,
   createSubscriptionPlan,
   getProductUserSubscriptionToken,
+  getProductUserTraffic,
   listManagedNodes,
   listProductUserCredentials,
   listProductUsers,
@@ -269,6 +270,27 @@ describe("subscriptions API client", () => {
           license_required: false,
         });
       }
+      if (url.endsWith("/traffic")) {
+        return jsonResponse({
+          username: "alice@example.com",
+          upload: 170,
+          download: 300,
+          total: 470,
+          entries: [
+            {
+              username: "alice@example.com",
+              server_id: "srv_1",
+              email: "alice@example.com__vless-443",
+              upload: 170,
+              download: 300,
+              total: 470,
+              last_reported_at: timestamp,
+              updated_at: timestamp,
+            },
+          ],
+          license_required: false,
+        });
+      }
       return jsonResponse({ subscription: subscriptionToken, license_required: false });
     };
 
@@ -276,11 +298,13 @@ describe("subscriptions API client", () => {
     const createResponse = await createProductUserSubscriptionToken("alice@example.com", fetcher);
     const resetResponse = await resetProductUserSubscriptionToken("alice@example.com", fetcher);
     const credentialsResponse = await listProductUserCredentials("alice@example.com", fetcher);
+    const trafficResponse = await getProductUserTraffic("alice@example.com", fetcher);
 
     expect(getResponse.subscription.short_code).toBe("abcd1234");
     expect(createResponse.license_required).toBe(false);
     expect(resetResponse.subscription.subscription_url).toContain("/subscribe/token_1");
     expect(credentialsResponse.credentials[0].email).toBe("alice@example.com__vless-443");
+    expect(trafficResponse.total).toBe(470);
     expect(calls).toEqual([
       {
         url: "/api/v1/users/alice%40example.com/subscription-token",
@@ -296,6 +320,10 @@ describe("subscriptions API client", () => {
       },
       {
         url: "/api/v1/users/alice%40example.com/credentials",
+        method: undefined,
+      },
+      {
+        url: "/api/v1/users/alice%40example.com/traffic",
         method: undefined,
       },
     ]);
