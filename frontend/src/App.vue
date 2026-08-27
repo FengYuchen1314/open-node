@@ -24,6 +24,12 @@
           value="subscriptions"
           to="/subscriptions"
         />
+        <v-list-item
+          prepend-icon="mdi-clipboard-text-clock-outline"
+          title="Changes"
+          value="changes"
+          to="/changes"
+        />
         <v-list-item prepend-icon="mdi-file-cog-outline" title="Config" value="config" to="/config" />
         <v-list-item prepend-icon="mdi-chart-line" title="Probe" value="probe" to="/probe" />
         <v-list-item prepend-icon="mdi-shield-check-outline" title="Access" value="access" />

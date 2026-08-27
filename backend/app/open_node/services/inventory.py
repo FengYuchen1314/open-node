@@ -28,6 +28,14 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
+from open_node.domain.changes import (
+    AgentChangeSetCreate,
+    AgentChangeSetRead,
+    AgentChangeSetRollbackRequest,
+    AgentChangeSetStatus,
+    AgentChangeSetStepCreate,
+    AgentChangeSetStepRead,
+)
 from open_node.domain.inventory import (
     AgentCapabilities,
     AgentCommandCreate,
@@ -90,6 +98,10 @@ class ServerNotFoundError(ValueError):
 
 class CommandNotFoundError(ValueError):
     """Raised when an agent command cannot be found for the requesting server."""
+
+
+class ChangeSetNotFoundError(ValueError):
+    """Raised when an agent change set lookup targets an unknown change set."""
 
 
 class ProbeNotFoundError(ValueError):
@@ -274,6 +286,66 @@ class CommandStreamFrameModel(Base):
     sequence: Mapped[int] = mapped_column(Integer, index=True)
     data: Mapped[str] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AgentChangeSetModel(Base):
+    __tablename__ = "agent_change_sets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    rollback_on_failure: Mapped[bool] = mapped_column(Boolean, default=True)
+    rollback_reason: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AgentChangeSetStepModel(Base):
+    __tablename__ = "agent_change_set_steps"
+    __table_args__ = (
+        UniqueConstraint("change_set_id", "sequence", name="uq_change_set_step_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    change_set_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agent_change_sets.id", ondelete="CASCADE"),
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, index=True)
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    label: Mapped[str] = mapped_column(String(160), default="")
+    forward_method: Mapped[str] = mapped_column(String(12))
+    forward_path: Mapped[str] = mapped_column(String(255))
+    forward_query: Mapped[str] = mapped_column(String(2048), default="")
+    forward_body: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    forward_timeout_ms: Mapped[int] = mapped_column(Integer)
+    forward_stream: Mapped[bool] = mapped_column(Boolean, default=False)
+    rollback_method: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    rollback_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rollback_query: Mapped[str] = mapped_column(String(2048), default="")
+    rollback_body: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    rollback_timeout_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rollback_stream: Mapped[bool] = mapped_column(Boolean, default=False)
+    forward_command_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("agent_commands.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    rollback_command_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("agent_commands.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ProductUserModel(Base):
@@ -897,29 +969,140 @@ class InventoryStore:
                 warnings=warnings,
             )
 
+    def list_change_sets(self) -> list[AgentChangeSetRead]:
+        with self._session() as session:
+            change_sets = session.scalars(
+                select(AgentChangeSetModel).order_by(AgentChangeSetModel.created_at.desc())
+            ).all()
+            return [self._change_set_read(session, change_set) for change_set in change_sets]
+
+    def get_change_set(self, change_set_id: UUID) -> AgentChangeSetRead:
+        with self._session() as session:
+            change_set = self._change_set_model(session, change_set_id)
+            return self._change_set_read(session, change_set)
+
+    def create_change_set(self, payload: AgentChangeSetCreate) -> AgentChangeSetRead:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            self._ensure_step_servers_exist(session, payload.steps)
+            change_set = AgentChangeSetModel(
+                id=str(uuid4()),
+                name=payload.name,
+                description=payload.description,
+                status=AgentChangeSetStatus.PLANNED.value,
+                rollback_on_failure=payload.rollback_on_failure,
+                rollback_reason="",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(change_set)
+            for index, step in enumerate(payload.steps, start=1):
+                rollback = step.rollback
+                session.add(
+                    AgentChangeSetStepModel(
+                        id=str(uuid4()),
+                        change_set_id=change_set.id,
+                        sequence=index,
+                        server_id=str(step.server_id),
+                        label=step.label or f"Step {index}",
+                        forward_method=step.forward.method,
+                        forward_path=step.forward.path,
+                        forward_query=step.forward.query,
+                        forward_body=step.forward.body,
+                        forward_timeout_ms=step.forward.timeout_ms,
+                        forward_stream=step.forward.stream,
+                        rollback_method=rollback.method if rollback else None,
+                        rollback_path=rollback.path if rollback else None,
+                        rollback_query=rollback.query if rollback else "",
+                        rollback_body=rollback.body if rollback else None,
+                        rollback_timeout_ms=rollback.timeout_ms if rollback else None,
+                        rollback_stream=rollback.stream if rollback else False,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            session.commit()
+            session.refresh(change_set)
+            return self._change_set_read(session, change_set)
+
+    def dispatch_change_set(
+        self,
+        change_set_id: UUID,
+    ) -> tuple[AgentChangeSetRead, list[AgentCommandRead]]:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            change_set = self._change_set_model(session, change_set_id)
+            commands: list[CommandModel] = []
+            for step in self._change_set_steps(session, change_set.id):
+                if step.forward_command_id:
+                    continue
+                server = session.get(ServerModel, step.server_id)
+                if not server:
+                    raise ServerNotFoundError(f"server not found: {step.server_id}")
+                command = self._create_command_model(
+                    session,
+                    server,
+                    self._step_forward_command(step),
+                    now,
+                )
+                step.forward_command_id = command.id
+                step.updated_at = now
+                commands.append(command)
+
+            change_set.status = AgentChangeSetStatus.DISPATCHED.value
+            change_set.updated_at = now
+            session.commit()
+            for command in commands:
+                session.refresh(command)
+            session.refresh(change_set)
+            return self._change_set_read(session, change_set), [
+                self._command_read(command) for command in commands
+            ]
+
+    def rollback_change_set(
+        self,
+        change_set_id: UUID,
+        payload: AgentChangeSetRollbackRequest,
+    ) -> tuple[AgentChangeSetRead, list[AgentCommandRead], list[str]]:
+        now = datetime.now(tz=UTC)
+        warnings: list[str] = []
+        with self._session() as session:
+            change_set = self._change_set_model(session, change_set_id)
+            commands: list[CommandModel] = []
+            steps = list(reversed(self._change_set_steps(session, change_set.id)))
+            for step in steps:
+                if step.rollback_command_id:
+                    continue
+                rollback = self._step_rollback_command(step)
+                if not rollback:
+                    warnings.append(f"step {step.sequence} has no rollback command")
+                    continue
+                server = session.get(ServerModel, step.server_id)
+                if not server:
+                    raise ServerNotFoundError(f"server not found: {step.server_id}")
+                command = self._create_command_model(session, server, rollback, now)
+                step.rollback_command_id = command.id
+                step.updated_at = now
+                commands.append(command)
+
+            change_set.status = AgentChangeSetStatus.ROLLBACK_QUEUED.value
+            change_set.rollback_reason = payload.reason
+            change_set.updated_at = now
+            session.commit()
+            for command in commands:
+                session.refresh(command)
+            session.refresh(change_set)
+            return self._change_set_read(session, change_set), [
+                self._command_read(command) for command in commands
+            ], warnings
+
     def create_command(self, server_id: UUID, payload: AgentCommandCreate) -> AgentCommandRead:
         with self._session() as session:
             server = session.get(ServerModel, str(server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {server_id}")
 
-            now = datetime.now(tz=UTC)
-            command = CommandModel(
-                id=str(uuid4()),
-                server_id=server.id,
-                request_id=f"{server.id}-{uuid4().hex}",
-                method=payload.method,
-                path=payload.path,
-                query=payload.query,
-                body=payload.body,
-                timeout_ms=payload.timeout_ms,
-                stream=payload.stream,
-                status=AgentCommandStatus.PENDING.value,
-                attempts=0,
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(command)
+            command = self._create_command_model(session, server, payload)
             session.commit()
             session.refresh(command)
             return self._command_read(command)
@@ -2085,6 +2268,135 @@ class InventoryStore:
             registered_at=agent.registered_at,
             last_seen_at=agent.last_seen_at,
         )
+
+    @staticmethod
+    def _ensure_step_servers_exist(
+        session: Session,
+        steps: Iterable[AgentChangeSetStepCreate],
+    ) -> None:
+        server_ids = {str(step.server_id) for step in steps}
+        existing_ids = set(
+            session.scalars(select(ServerModel.id).where(ServerModel.id.in_(server_ids))).all()
+        )
+        missing_ids = sorted(server_ids - existing_ids)
+        if missing_ids:
+            raise ServerNotFoundError(f"server not found: {missing_ids[0]}")
+
+    @staticmethod
+    def _change_set_model(session: Session, change_set_id: UUID) -> AgentChangeSetModel:
+        change_set = session.get(AgentChangeSetModel, str(change_set_id))
+        if change_set:
+            return change_set
+        raise ChangeSetNotFoundError(f"change set not found: {change_set_id}")
+
+    @staticmethod
+    def _change_set_steps(session: Session, change_set_id: str) -> list[AgentChangeSetStepModel]:
+        return list(
+            session.scalars(
+                select(AgentChangeSetStepModel)
+                .where(AgentChangeSetStepModel.change_set_id == change_set_id)
+                .order_by(AgentChangeSetStepModel.sequence)
+            ).all()
+        )
+
+    def _change_set_read(
+        self,
+        session: Session,
+        change_set: AgentChangeSetModel,
+    ) -> AgentChangeSetRead:
+        steps = self._change_set_steps(session, change_set.id)
+        return AgentChangeSetRead(
+            id=UUID(change_set.id),
+            name=change_set.name,
+            description=change_set.description,
+            status=AgentChangeSetStatus(change_set.status),
+            rollback_on_failure=change_set.rollback_on_failure,
+            rollback_reason=change_set.rollback_reason,
+            steps=[self._change_set_step_read(session, step) for step in steps],
+            created_at=change_set.created_at,
+            updated_at=change_set.updated_at,
+        )
+
+    @staticmethod
+    def _change_set_step_read(
+        session: Session,
+        step: AgentChangeSetStepModel,
+    ) -> AgentChangeSetStepRead:
+        forward_command = (
+            session.get(CommandModel, step.forward_command_id) if step.forward_command_id else None
+        )
+        rollback_command = (
+            session.get(CommandModel, step.rollback_command_id)
+            if step.rollback_command_id
+            else None
+        )
+        return AgentChangeSetStepRead(
+            id=UUID(step.id),
+            change_set_id=UUID(step.change_set_id),
+            sequence=step.sequence,
+            server_id=UUID(step.server_id),
+            label=step.label,
+            forward=InventoryStore._step_forward_command(step),
+            rollback=InventoryStore._step_rollback_command(step),
+            forward_command=InventoryStore._command_read(forward_command)
+            if forward_command
+            else None,
+            rollback_command=InventoryStore._command_read(rollback_command)
+            if rollback_command
+            else None,
+            created_at=step.created_at,
+            updated_at=step.updated_at,
+        )
+
+    @staticmethod
+    def _step_forward_command(step: AgentChangeSetStepModel) -> AgentCommandCreate:
+        return AgentCommandCreate(
+            method=step.forward_method,
+            path=step.forward_path,
+            query=step.forward_query,
+            body=step.forward_body,
+            timeout_ms=step.forward_timeout_ms,
+            stream=step.forward_stream,
+        )
+
+    @staticmethod
+    def _step_rollback_command(step: AgentChangeSetStepModel) -> AgentCommandCreate | None:
+        if not step.rollback_method or not step.rollback_path:
+            return None
+        return AgentCommandCreate(
+            method=step.rollback_method,
+            path=step.rollback_path,
+            query=step.rollback_query,
+            body=step.rollback_body,
+            timeout_ms=step.rollback_timeout_ms or 30_000,
+            stream=step.rollback_stream,
+        )
+
+    @staticmethod
+    def _create_command_model(
+        session: Session,
+        server: ServerModel,
+        payload: AgentCommandCreate,
+        now: datetime | None = None,
+    ) -> CommandModel:
+        active_now = now or datetime.now(tz=UTC)
+        command = CommandModel(
+            id=str(uuid4()),
+            server_id=server.id,
+            request_id=f"{server.id}-{uuid4().hex}",
+            method=payload.method,
+            path=payload.path,
+            query=payload.query,
+            body=payload.body,
+            timeout_ms=payload.timeout_ms,
+            stream=payload.stream,
+            status=AgentCommandStatus.PENDING.value,
+            attempts=0,
+            created_at=active_now,
+            updated_at=active_now,
+        )
+        session.add(command)
+        return command
 
     @staticmethod
     def _telemetry_read(snapshot: TelemetrySnapshotModel) -> AgentTelemetryRead:

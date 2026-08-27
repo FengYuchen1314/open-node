@@ -32,14 +32,15 @@ agent operation, maintenance, diagnostic, and config-preparation wrappers, and
 Xray/nginx config plus agent setting wrappers, high-level runtime/site
 operation wrappers, a subscription catalog with user-plan binding, optional
 agent `batch-apply` provisioning, public subscription links with generated
-per-user credentials, and the public probe read-only surface. The Vue frontend
-now includes a config workspace, runtime/site operation payload workbenches,
-subscription catalog and link management, and an expandable command-result
-inspector. It does not yet replace the full MMWX product.
+per-user credentials, rollback-friendly multi-server change sets, and the
+public probe read-only surface. The Vue frontend now includes a config
+workspace, runtime/site operation payload workbenches, subscription catalog and
+link management, a change-set dispatch/rollback workspace, and an expandable
+command-result inspector. It does not yet replace the full MMWX product.
 
 ```text
-backend/   FastAPI app, no-license API, inventory, telemetry, commands, subscriptions, probe
-frontend/  Vue 3 + Vuetify shell, server, config, subscription, command, and probe views
+backend/   FastAPI app, no-license API, inventory, telemetry, commands, changes, subscriptions, probe
+frontend/  Vue 3 + Vuetify shell, server, config, change, subscription, command, and probe views
 docs/      migration and architecture notes
 scripts/   VPS test runner
 ```

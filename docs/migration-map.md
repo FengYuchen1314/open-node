@@ -55,8 +55,10 @@ This document records the starting source map for the Open Node refactor.
    - Done: public subscription token/short-code links, stable per-user
      per-node credentials, Clash YAML rendering, and subscription userinfo
      headers from latest telemetry.
-   - Next: rollback-friendly multi-server changes plus richer subscription
-     templates, client format conversion, and traffic ledgering.
+   - Done: rollback-friendly multi-server change sets with forward command
+     dispatch, reverse rollback command queuing, and a Vue change workspace.
+   - Next: richer subscription templates, client format conversion, and
+     traffic ledgering.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.

@@ -181,6 +181,29 @@ into editors, manage config-file read/write calls, dispatch high-level runtime
 and site payloads, and inspect each command's request, result body, error, and
 stream frames.
 
+## Change Sets and Rollback
+
+Open Node groups coordinated multi-server agent work as persisted change sets
+under `/api/v1/change-sets`. A change set contains ordered steps. Each step
+targets one server and stores a forward `AgentCommandCreate` payload plus an
+optional rollback payload.
+
+Creating a change set can be a dry plan or an immediate dispatch. Dispatch
+creates one persisted `agent_commands` row per forward step and reuses the same
+WebSocket RPC and HTTP lease/result paths as ordinary commands. Repeated
+dispatch calls only create missing forward commands.
+
+Rollback queues rollback commands in reverse step order, again through
+`agent_commands`, and records the operator-provided reason on the change set.
+Steps without rollback payloads are skipped and returned as warnings. The
+current state machine is intentionally small: `planned`, `dispatched`, and
+`rollback_queued`. Automatic failure detection can be layered on later without
+changing the command transport.
+
+The frontend exposes this in `/changes`, where operators can create JSON step
+plans, dispatch them, queue reverse rollback, and inspect each step's forward
+and rollback command status.
+
 ## Subscription Catalog
 
 Open Node keeps the MMWX subscription workflow as first-party product data

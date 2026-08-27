@@ -1,0 +1,87 @@
+import type {
+  AgentChangeSetCreateRequest,
+  AgentChangeSetResponse,
+  AgentChangeSetsResponse,
+  AgentChangeSetRollbackRequest,
+} from "../domain/changes";
+
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
+
+const jsonHeaders = {
+  "Content-Type": "application/json",
+};
+
+export async function listChangeSets(fetcher = fetch): Promise<AgentChangeSetsResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets`);
+  if (!response.ok) {
+    throw await apiError(response, "Change set list request failed");
+  }
+  return response.json() as Promise<AgentChangeSetsResponse>;
+}
+
+export async function getChangeSet(
+  changeSetId: string,
+  fetcher = fetch,
+): Promise<AgentChangeSetResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/${changeSetId}`);
+  if (!response.ok) {
+    throw await apiError(response, "Change set request failed");
+  }
+  return response.json() as Promise<AgentChangeSetResponse>;
+}
+
+export async function createChangeSet(
+  payload: AgentChangeSetCreateRequest,
+  fetcher = fetch,
+): Promise<AgentChangeSetResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Change set create request failed");
+  }
+  return response.json() as Promise<AgentChangeSetResponse>;
+}
+
+export async function dispatchChangeSet(
+  changeSetId: string,
+  fetcher = fetch,
+): Promise<AgentChangeSetResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/${changeSetId}/dispatch`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Change set dispatch request failed");
+  }
+  return response.json() as Promise<AgentChangeSetResponse>;
+}
+
+export async function rollbackChangeSet(
+  changeSetId: string,
+  payload: AgentChangeSetRollbackRequest,
+  fetcher = fetch,
+): Promise<AgentChangeSetResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/${changeSetId}/rollback`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Change set rollback request failed");
+  }
+  return response.json() as Promise<AgentChangeSetResponse>;
+}
+
+async function apiError(response: Response, fallback: string): Promise<Error> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string" && body.detail.length > 0) {
+      return new Error(body.detail);
+    }
+  } catch {
+    // The backend normally returns JSON errors, but network proxies may not.
+  }
+  return new Error(`${fallback} with ${response.status}`);
+}
