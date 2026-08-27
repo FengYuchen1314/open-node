@@ -42,8 +42,9 @@ includes a config workspace, runtime/site operation payload workbenches,
 subscription catalog, link, format, traffic, quota, preset, and import/export
 management, probe settings and metadata controls, probe status/region filters,
 health scoring, latency buckets, traffic hotspots, three-carrier route badges,
-a change-set dispatch/rollback workspace, and an expandable command-result
-inspector. It does not yet replace the full MMWX product.
+probe network drill-down charts, a change-set dispatch/rollback workspace, and
+an expandable command-result inspector. It does not yet replace the full MMWX
+product.
 
 ```text
 backend/   FastAPI app, no-license API, inventory, telemetry, commands, changes, subscriptions, probe

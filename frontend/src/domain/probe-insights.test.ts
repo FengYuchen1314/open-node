@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ProbeServer } from "./probe";
 import {
   buildRegionOptions,
+  buildSparkline,
   filterProbeServers,
   latencyBucketLevels,
   probeHealth,
@@ -195,5 +196,16 @@ describe("probe insights", () => {
         missing: false,
       },
     ]);
+  });
+
+  it("builds stable sparkline geometry for probe drilldowns", () => {
+    const chart = buildSparkline([10, -1, 30], 100, 50, 5);
+
+    expect(chart).toMatchObject({ min: 10, max: 30, latest: 30, empty: false });
+    expect(chart.points).toBe("5.0,45.0 95.0,5.0");
+    expect(chart.areaPoints).toBe("5.0,45.0 5.0,45.0 95.0,5.0 95.0,45.0");
+
+    expect(buildSparkline([-1, null, undefined]).empty).toBe(true);
+    expect(buildSparkline([42], 100, 50, 5).points).toBe("5.0,5.0 6.0,5.0");
   });
 });

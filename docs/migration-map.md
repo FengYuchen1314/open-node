@@ -79,5 +79,8 @@ This document records the starting source map for the Open Node refactor.
    - Done: return-route result persistence from agent command completions,
      public `return_routes` summaries, settings toggle, and Vue three-carrier
      badges.
-   - Next: interactive probe charts and richer network drill-downs.
+   - Done: interactive Vue probe drill-down drawer backed by public 1h/6h/24h
+     ping and system series, with SVG latency, loss, resource, and throughput
+     charts.
+   - Next: richer network target comparison and automated probe task scheduling.
 5. Revisit Xray integration once the agent protocol surface is stable.

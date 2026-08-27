@@ -1,15 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
-import type { ProbePayload, ProbeServer, ProbeSettingsUpdate } from "../domain/probe";
+import type {
+  ProbeMetricPoint,
+  ProbePayload,
+  ProbePingSeries,
+  ProbeServer,
+  ProbeSeriesResponse,
+  ProbeSettingsUpdate,
+  ProbeSystemSeries,
+} from "../domain/probe";
 import type {
   ProbeHealth,
   ProbeLatencyBucket,
   ProbeReturnRouteBadge,
+  ProbeSparkline,
   ProbeStatusFilter,
 } from "../domain/probe-insights";
 import {
   buildRegionOptions,
+  buildSparkline,
   filterProbeServers,
   isExpired,
   isExpiring,
@@ -26,9 +36,30 @@ import {
 } from "../domain/probe-insights";
 import {
   getPublicProbePayload,
+  getPublicProbeSeries,
   getPublicProbeStreamUrl,
   updatePublicProbeSettings,
 } from "../services/probe";
+
+type ProbeSeriesRange = "1h" | "6h" | "24h";
+type ProbeSeriesMetric = "ping" | "system";
+
+interface ProbeTrendCard {
+  key: string;
+  label: string;
+  latestLabel: string;
+  domainLabel: string;
+  chart: ProbeSparkline;
+  color: string;
+}
+
+interface ProbeTargetTrend {
+  key: string;
+  label: string;
+  currentLabel: string;
+  lossLabel: string;
+  chart: ProbeSparkline;
+}
 
 const payload = ref<ProbePayload | null>(null);
 const loading = ref(false);
@@ -38,6 +69,14 @@ const successMessage = ref("");
 const streamActive = ref(false);
 const statusFilter = ref<ProbeStatusFilter>("all");
 const regionFilter = ref("all");
+const detailOpen = ref(false);
+const selectedServerIndex = ref<number | null>(null);
+const selectedSeriesRange = ref<ProbeSeriesRange>("1h");
+const selectedSeriesMetric = ref<ProbeSeriesMetric>("ping");
+const selectedSeries = ref<ProbeSeriesResponse | null>(null);
+const selectedSeriesLoading = ref(false);
+const selectedSeriesError = ref("");
+let selectedSeriesRequest = 0;
 let probeStream: WebSocket | undefined;
 
 const settingsForm = reactive({
@@ -147,11 +186,97 @@ const showInsightGrid = computed(
       (showDailyTrend.value && dailyTraffic.value.length > 0) ||
       (showTrafficHotspots.value && hotspots.value.length > 0)),
 );
+const selectedServer = computed(() => {
+  if (selectedServerIndex.value === null) {
+    return null;
+  }
+  return servers.value[selectedServerIndex.value] ?? null;
+});
+const selectedPingSeries = computed(() =>
+  isPingSeries(selectedSeries.value?.series) ? selectedSeries.value.series : null,
+);
+const selectedSystemSeries = computed(() =>
+  isSystemSeries(selectedSeries.value?.series) ? selectedSeries.value.series : null,
+);
+const selectedSeriesGeneratedAt = computed(() => {
+  const generatedAt = selectedSeries.value?.generated_at;
+  return generatedAt ? new Date(generatedAt * 1000).toLocaleString() : "";
+});
+const pingTrendCards = computed<ProbeTrendCard[]>(() => {
+  const series = selectedPingSeries.value;
+  if (!series) {
+    return [];
+  }
+  return [
+    trendCard(
+      "latency",
+      "Average latency",
+      series.buckets.map((bucket) => bucket.ms),
+      formatMilliseconds,
+      "#2f6fed",
+    ),
+    trendCard(
+      "loss",
+      "Packet loss",
+      series.buckets.map((bucket) => bucket.loss),
+      formatLoss,
+      "#d84b4b",
+    ),
+  ];
+});
+const targetPingRows = computed<ProbeTargetTrend[]>(() =>
+  (selectedSeries.value?.all_series ?? []).map((series) => ({
+    key: series.key ?? series.label,
+    label: series.label,
+    currentLabel: series.current_ms >= 0 ? formatMilliseconds(series.current_ms) : "failed",
+    lossLabel: formatLoss(series.loss_pct),
+    chart: buildSparkline(series.buckets.map((bucket) => bucket.ms)),
+  })),
+);
+const systemTrendCards = computed<ProbeTrendCard[]>(() => {
+  const series = selectedSystemSeries.value;
+  if (!series) {
+    return [];
+  }
+  return [
+    trendCard("cpu", "CPU", metricValues(series.cpu_pct), formatPercentValue, "#176b5b"),
+    trendCard(
+      "memory",
+      "Memory",
+      memoryPercentValues(series.mem_used, series.mem_total),
+      formatPercentValue,
+      "#8b5cf6",
+    ),
+    trendCard("upload", "Upload", metricValues(series.upload_speed), formatBytesPerSecond, "#f08a24"),
+    trendCard(
+      "download",
+      "Download",
+      metricValues(series.download_speed),
+      formatBytesPerSecond,
+      "#2f6fed",
+    ),
+  ];
+});
 const colorModeOptions = [
   { title: "Light", value: "light" },
   { title: "Dark", value: "dark" },
   { title: "System", value: "system" },
 ];
+const seriesMetricOptions: Array<{ title: string; value: ProbeSeriesMetric; icon: string }> = [
+  { title: "Ping", value: "ping", icon: "mdi-pulse" },
+  { title: "System", value: "system", icon: "mdi-monitor-dashboard" },
+];
+const seriesRangeOptions: Array<{ title: string; value: ProbeSeriesRange }> = [
+  { title: "1h", value: "1h" },
+  { title: "6h", value: "6h" },
+  { title: "24h", value: "24h" },
+];
+
+watch([detailOpen, selectedServerIndex, selectedSeriesRange, selectedSeriesMetric], () => {
+  if (detailOpen.value && selectedServerIndex.value !== null) {
+    void loadSelectedSeries();
+  }
+});
 
 onMounted(() => {
   void refreshProbe();
@@ -284,6 +409,65 @@ function syncFilters(nextServers: ProbeServer[]) {
   ) {
     regionFilter.value = "all";
   }
+}
+
+function serverPublicIndex(server: ProbeServer) {
+  return servers.value.indexOf(server);
+}
+
+function openServerDetail(server: ProbeServer) {
+  const index = serverPublicIndex(server);
+  if (index < 0) {
+    return;
+  }
+  selectedServerIndex.value = index;
+  detailOpen.value = true;
+}
+
+function setDetailOpen(open: boolean) {
+  detailOpen.value = open;
+  if (!open) {
+    selectedServerIndex.value = null;
+    selectedSeries.value = null;
+    selectedSeriesError.value = "";
+  }
+}
+
+async function loadSelectedSeries() {
+  if (selectedServerIndex.value === null) {
+    return;
+  }
+  const request = ++selectedSeriesRequest;
+  selectedSeriesLoading.value = true;
+  selectedSeriesError.value = "";
+  try {
+    const response = await getPublicProbeSeries(selectedServerIndex.value, {
+      range: selectedSeriesRange.value,
+      metric: selectedSeriesMetric.value,
+      all: selectedSeriesMetric.value === "ping",
+    });
+    if (request === selectedSeriesRequest) {
+      selectedSeries.value = response;
+    }
+  } catch (error) {
+    if (request === selectedSeriesRequest) {
+      selectedSeries.value = null;
+      selectedSeriesError.value =
+        error instanceof Error ? error.message : "Probe series request failed.";
+    }
+  } finally {
+    if (request === selectedSeriesRequest) {
+      selectedSeriesLoading.value = false;
+    }
+  }
+}
+
+function isPingSeries(series: ProbeSeriesResponse["series"]): series is ProbePingSeries {
+  return !!series && "buckets" in series;
+}
+
+function isSystemSeries(series: ProbeSeriesResponse["series"]): series is ProbeSystemSeries {
+  return !!series && "cpu_pct" in series;
 }
 
 function displayName(server: ProbeServer, index: number) {
@@ -438,6 +622,36 @@ function returnRouteTitle(route: ProbeReturnRouteBadge) {
   return details.length ? `${route.carrierLabel} ${route.routeType} - ${details.join(", ")}` : `${route.carrierLabel} ${route.routeType}`;
 }
 
+function trendCard(
+  key: string,
+  label: string,
+  values: Array<number | null | undefined>,
+  formatter: (value: number) => string,
+  color: string,
+): ProbeTrendCard {
+  const chart = buildSparkline(values);
+  return {
+    key,
+    label,
+    latestLabel: chart.latest === null ? "No sample" : formatter(chart.latest),
+    domainLabel: chart.empty ? "No samples" : `${formatter(chart.min)} - ${formatter(chart.max)}`,
+    chart,
+    color,
+  };
+}
+
+function metricValues(points: ProbeMetricPoint[] | undefined) {
+  return points?.map((point) => point.value) ?? [];
+}
+
+function memoryPercentValues(
+  usedPoints: ProbeMetricPoint[] | undefined,
+  totalPoints: ProbeMetricPoint[] | undefined,
+) {
+  const totalByTime = new Map((totalPoints ?? []).map((point) => [point.t, point.value]));
+  return (usedPoints ?? []).map((point) => percent(point.value, totalByTime.get(point.t)));
+}
+
 function renewalTone(server: ProbeServer) {
   if (isExpired(server)) {
     return "error";
@@ -454,6 +668,18 @@ function renewalCountdown(server: ProbeServer) {
 
 function formatPercent(used: number, total: number) {
   return `${((used / total) * 100).toFixed(0)}%`;
+}
+
+function formatPercentValue(value: number) {
+  return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
+}
+
+function formatMilliseconds(value: number) {
+  return `${value.toFixed(0)} ms`;
+}
+
+function formatLoss(value: number) {
+  return `${value.toFixed(value >= 10 ? 0 : 1)}% loss`;
 }
 
 function formatBytesPerSecond(value: number) {
@@ -842,12 +1068,25 @@ function formatBytes(value: number) {
         </thead>
         <tbody>
           <tr
-            v-for="(server, index) in visibleServers"
-            :key="`${displayName(server, index)}-${index}`"
+            v-for="server in visibleServers"
+            :key="`${displayName(server, serverPublicIndex(server))}-${serverPublicIndex(server)}`"
             :class="rowClass(server)"
           >
             <td>
-              <div class="server-name">{{ displayName(server, index) }}</div>
+              <div class="server-name-row">
+                <div class="server-name">{{ displayName(server, serverPublicIndex(server)) }}</div>
+                <v-tooltip text="Open probe details">
+                  <template #activator="{ props }">
+                    <v-btn
+                      v-bind="props"
+                      icon="mdi-chart-line"
+                      size="x-small"
+                      variant="text"
+                      @click.stop="openServerDetail(server)"
+                    />
+                  </template>
+                </v-tooltip>
+              </div>
               <div class="server-subline">{{ regionSummary(server) }}</div>
               <div class="server-subline">{{ providerSummary(server) }}</div>
             </td>
@@ -951,5 +1190,149 @@ function formatBytes(value: number) {
         <div>No nodes match the current filters.</div>
       </div>
     </v-sheet>
+
+    <v-navigation-drawer
+      :model-value="detailOpen"
+      class="probe-detail-drawer"
+      location="right"
+      temporary
+      width="520"
+      @update:model-value="setDetailOpen"
+    >
+      <div class="probe-detail">
+        <div class="probe-detail-head">
+          <div>
+            <div class="eyebrow">Probe details</div>
+            <h2>{{ selectedServer ? displayName(selectedServer, selectedServerIndex ?? 0) : "Node" }}</h2>
+            <p>{{ selectedServer ? regionSummary(selectedServer) : "" }}</p>
+          </div>
+          <v-btn icon="mdi-close" variant="text" @click="setDetailOpen(false)" />
+        </div>
+
+        <div class="probe-detail-controls">
+          <v-btn-toggle
+            v-model="selectedSeriesMetric"
+            density="comfortable"
+            mandatory
+            variant="outlined"
+          >
+            <v-btn
+              v-for="option in seriesMetricOptions"
+              :key="option.value"
+              :prepend-icon="option.icon"
+              :value="option.value"
+              size="small"
+            >
+              {{ option.title }}
+            </v-btn>
+          </v-btn-toggle>
+          <v-btn-toggle
+            v-model="selectedSeriesRange"
+            density="comfortable"
+            mandatory
+            variant="outlined"
+          >
+            <v-btn
+              v-for="option in seriesRangeOptions"
+              :key="option.value"
+              :value="option.value"
+              size="small"
+            >
+              {{ option.title }}
+            </v-btn>
+          </v-btn-toggle>
+        </div>
+
+        <v-alert
+          v-if="selectedSeriesError"
+          density="comfortable"
+          type="error"
+          variant="tonal"
+        >
+          {{ selectedSeriesError }}
+        </v-alert>
+        <div v-else-if="selectedSeriesLoading" class="probe-detail-loading">
+          <v-progress-circular color="primary" indeterminate size="28" width="3" />
+        </div>
+
+        <div v-else-if="selectedSeriesMetric === 'ping'" class="probe-detail-section">
+          <div class="probe-trend-grid">
+            <div
+              v-for="card in pingTrendCards"
+              :key="card.key"
+              :style="{ '--trend-color': card.color }"
+              class="probe-trend-card"
+            >
+              <div>
+                <span>{{ card.label }}</span>
+                <strong>{{ card.latestLabel }}</strong>
+              </div>
+              <svg aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 320 96">
+                <polygon v-if="!card.chart.empty" :points="card.chart.areaPoints" />
+                <polyline v-if="!card.chart.empty" :points="card.chart.points" />
+              </svg>
+              <small>{{ card.domainLabel }}</small>
+            </div>
+          </div>
+
+          <div class="probe-target-trends">
+            <div class="section-title compact-title">Targets</div>
+            <div v-if="targetPingRows.length === 0" class="server-subline">No target series.</div>
+            <div v-for="target in targetPingRows" :key="target.key" class="probe-target-row">
+              <div>
+                <strong>{{ target.label }}</strong>
+                <span>{{ target.currentLabel }} / {{ target.lossLabel }}</span>
+              </div>
+              <svg aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 320 54">
+                <polygon v-if="!target.chart.empty" :points="target.chart.areaPoints" />
+                <polyline v-if="!target.chart.empty" :points="target.chart.points" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="probe-detail-section">
+          <div class="probe-trend-grid">
+            <div
+              v-for="card in systemTrendCards"
+              :key="card.key"
+              :style="{ '--trend-color': card.color }"
+              class="probe-trend-card"
+            >
+              <div>
+                <span>{{ card.label }}</span>
+                <strong>{{ card.latestLabel }}</strong>
+              </div>
+              <svg aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 320 96">
+                <polygon v-if="!card.chart.empty" :points="card.chart.areaPoints" />
+                <polyline v-if="!card.chart.empty" :points="card.chart.points" />
+              </svg>
+              <small>{{ card.domainLabel }}</small>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="selectedServer && showReturnRoute" class="probe-detail-section">
+          <div class="section-title compact-title">Return routes</div>
+          <div class="probe-detail-routes">
+            <v-chip
+              v-for="route in returnRouteBadges(selectedServer)"
+              :key="route.carrier"
+              :class="{ 'is-premium': route.premium, 'is-missing': route.missing }"
+              :title="returnRouteTitle(route)"
+              density="comfortable"
+              size="small"
+              variant="tonal"
+            >
+              {{ route.carrierLabel }} {{ route.routeType }}
+            </v-chip>
+          </div>
+        </div>
+
+        <div v-if="selectedSeriesGeneratedAt" class="probe-detail-generated">
+          Updated {{ selectedSeriesGeneratedAt }}
+        </div>
+      </div>
+    </v-navigation-drawer>
   </div>
 </template>

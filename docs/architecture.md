@@ -355,7 +355,10 @@ server list is empty so node telemetry is not exposed. The Vue `/probe` view
 can edit these settings and immediately uses the same public payload to render
 or hide table sections, status and region filters, region summaries, seven-day
 traffic bars, health chips, latency history buckets, quota meters,
-return-route badges, renewal badges, and live traffic hotspot rows.
+return-route badges, renewal badges, live traffic hotspot rows, and per-node
+drill-down charts. Drill-downs call the public series endpoint with the
+selected public server index, range, and metric mode, then render latency, loss,
+CPU, memory, and throughput history without revealing private server IDs.
 
 The WebSocket stream is also public and read-only. It sends the same
 `ProbePayload` structure as the HTTP list endpoint, drops any client messages,

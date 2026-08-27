@@ -46,6 +46,15 @@ export interface ProbeReturnRouteBadge {
   missing: boolean;
 }
 
+export interface ProbeSparkline {
+  points: string;
+  areaPoints: string;
+  min: number;
+  max: number;
+  latest: number | null;
+  empty: boolean;
+}
+
 const routeCarriers: ProbeRouteCarrier[] = ["telecom", "unicom", "mobile"];
 const routeCarrierLabels: Record<ProbeRouteCarrier, string> = {
   telecom: "Telecom",
@@ -303,6 +312,56 @@ export function returnRouteBadges(server: ProbeServer): ProbeReturnRouteBadge[] 
 
 export function displayReturnRoute(value: string): string {
   return normalizeReturnRoute(value) === "CMIN" ? "CMI" : value.trim() || "Unknown";
+}
+
+export function buildSparkline(
+  values: Array<number | null | undefined>,
+  width = 320,
+  height = 96,
+  padding = 8,
+): ProbeSparkline {
+  const valid = values
+    .map((value, index) => ({ index, value }))
+    .filter((point): point is { index: number; value: number } =>
+      typeof point.value === "number" && Number.isFinite(point.value) && point.value >= 0,
+    );
+  if (valid.length === 0) {
+    return { points: "", areaPoints: "", min: 0, max: 0, latest: null, empty: true };
+  }
+
+  const min = Math.min(...valid.map((point) => point.value));
+  const max = Math.max(...valid.map((point) => point.value));
+  const span = Math.max(1, max - min);
+  const range = Math.max(1, values.length - 1);
+  const plotWidth = Math.max(1, width - padding * 2);
+  const plotHeight = Math.max(1, height - padding * 2);
+  const coordinates = valid.map((point) => {
+    const x = padding + (point.index / range) * plotWidth;
+    const y = padding + ((max - point.value) / span) * plotHeight;
+    return { x, y };
+  });
+  const lineCoordinates =
+    coordinates.length === 1
+      ? [
+          { x: Math.max(padding, coordinates[0].x - 1), y: coordinates[0].y },
+          { x: Math.min(width - padding, coordinates[0].x + 1), y: coordinates[0].y },
+        ]
+      : coordinates;
+  const points = lineCoordinates
+    .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
+    .join(" ");
+  const bottom = height - padding;
+  const firstX = lineCoordinates[0].x.toFixed(1);
+  const lastX = lineCoordinates[lineCoordinates.length - 1].x.toFixed(1);
+  const areaPoints = `${firstX},${bottom.toFixed(1)} ${points} ${lastX},${bottom.toFixed(1)}`;
+  return {
+    points,
+    areaPoints,
+    min,
+    max,
+    latest: valid[valid.length - 1].value,
+    empty: false,
+  };
 }
 
 export function isExpiring(server: ProbeServer, nowMs = Date.now()): boolean {

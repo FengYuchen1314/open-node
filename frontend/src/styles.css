@@ -186,6 +186,13 @@ body {
   font-weight: 720;
 }
 
+.server-name-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .server-subline {
   color: #66736f;
   font-size: 12px;
@@ -635,6 +642,162 @@ body {
   opacity: 0.58;
 }
 
+.probe-detail-drawer {
+  border-left: 1px solid #d8e2de;
+}
+
+.probe-detail {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.probe-detail-head {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.probe-detail-head h2 {
+  color: #17211f;
+  font-size: 24px;
+  line-height: 1.15;
+  margin: 4px 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.probe-detail-head p,
+.probe-detail-generated {
+  color: #66736f;
+  font-size: 13px;
+  margin: 0;
+}
+
+.probe-detail-controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.probe-detail-controls .v-btn-toggle {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.probe-detail-loading {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+}
+
+.probe-detail-section {
+  display: grid;
+  gap: 14px;
+}
+
+.probe-trend-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.probe-trend-card {
+  background: #f7faf9;
+  border: 1px solid #dbe6e2;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.probe-trend-card > div {
+  align-items: baseline;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.probe-trend-card span,
+.probe-target-row span {
+  color: #66736f;
+  font-size: 12px;
+}
+
+.probe-trend-card strong,
+.probe-target-row strong {
+  color: #17211f;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.probe-trend-card small {
+  color: #72807c;
+  font-size: 11px;
+}
+
+.probe-trend-card svg,
+.probe-target-row svg {
+  background: #eef4f2;
+  border-radius: 6px;
+  display: block;
+  height: 96px;
+  width: 100%;
+}
+
+.probe-trend-card polygon,
+.probe-target-row polygon {
+  fill: var(--trend-color, #2f6fed);
+  opacity: 0.14;
+}
+
+.probe-trend-card polyline,
+.probe-target-row polyline {
+  fill: none;
+  stroke: var(--trend-color, #2f6fed);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.probe-target-trends {
+  display: grid;
+  gap: 9px;
+}
+
+.probe-target-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(120px, 0.9fr) minmax(0, 1.1fr);
+}
+
+.probe-target-row > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.probe-target-row svg {
+  --trend-color: #2f6fed;
+  height: 54px;
+}
+
+.probe-detail-routes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.probe-detail-routes .is-premium {
+  background: #fff3c4;
+}
+
+.probe-detail-routes .is-missing {
+  opacity: 0.58;
+}
+
 .server-table tr.is-filtered-offline td {
   opacity: 0.82;
 }
@@ -905,13 +1068,20 @@ body {
   .quick-command-grid,
   .log-command-grid,
   .maintenance-command-grid,
+  .probe-detail-controls,
+  .probe-target-row,
   .probe-filter-row,
   .probe-insight-grid,
   .probe-toggle-grid,
+  .probe-trend-grid,
   .service-command-grid,
   .subscription-action-row,
   .system-config-grid,
   .settings-action-row {
     grid-template-columns: 1fr;
+  }
+
+  .probe-detail-drawer {
+    width: 100% !important;
   }
 }
