@@ -219,6 +219,20 @@ body {
   white-space: normal;
 }
 
+.command-divider {
+  margin: 22px 0;
+}
+
+.command-list {
+  margin-top: 14px;
+}
+
+.empty-command {
+  color: #66736f;
+  font-size: 13px;
+  margin-top: 14px;
+}
+
 @media (max-width: 960px) {
   .metric-grid,
   .inventory-layout {

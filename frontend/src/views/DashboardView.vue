@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import {
   defaultServerCreateRequest,
+  type AgentCommand,
   type AgentTelemetry,
   type ConnectionMode,
   type ServerCreateRequest,
@@ -10,15 +11,32 @@ import {
   type ServerSummary,
   type XrayMode,
 } from "../domain/inventory";
-import { createServer, getLatestTelemetry, listServers } from "../services/inventory";
+import {
+  createServer,
+  createServerCommand,
+  getLatestTelemetry,
+  listServerCommands,
+  listServers,
+} from "../services/inventory";
 
 const servers = ref<ServerSummary[]>([]);
 const telemetryByServer = ref<Record<string, AgentTelemetry | null>>({});
+const commandsByServer = ref<Record<string, AgentCommand[]>>({});
 const loading = ref(false);
 const saving = ref(false);
+const savingCommand = ref(false);
 const errorMessage = ref("");
 const latestToken = ref<{ serverName: string; token: string } | null>(null);
 const form = reactive<ServerCreateRequest>(defaultServerCreateRequest());
+const commandForm = reactive({
+  server_id: "",
+  method: "GET",
+  path: "/api/child/system/info",
+  query: "",
+  bodyText: "",
+  timeout_ms: 30_000,
+  stream: false,
+});
 
 const connectionModes: Array<{ title: string; value: ConnectionMode }> = [
   { title: "Auto", value: "auto" },
@@ -32,11 +50,20 @@ const xrayModes: Array<{ title: string; value: XrayMode }> = [
   { title: "Embedded", value: "embedded" },
 ];
 
+const commandMethods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+
 const statusMeta: Record<ServerStatus, { color: string; icon: string; label: string }> = {
   pending: { color: "warning", icon: "mdi-timer-sand", label: "Pending" },
   connected: { color: "success", icon: "mdi-lan-connect", label: "Connected" },
   offline: { color: "error", icon: "mdi-lan-disconnect", label: "Offline" },
 };
+
+const commandStatusMeta = {
+  pending: { color: "warning", icon: "mdi-clock-outline" },
+  leased: { color: "info", icon: "mdi-progress-clock" },
+  succeeded: { color: "success", icon: "mdi-check-circle-outline" },
+  failed: { color: "error", icon: "mdi-alert-circle-outline" },
+} as const;
 
 const totalUpload = computed(() =>
   servers.value.reduce((sum, server) => sum + server.current_upload_speed, 0),
@@ -71,6 +98,10 @@ const metrics = computed(() => [
   },
 ]);
 const emptyState = computed(() => !loading.value && servers.value.length === 0);
+const serverOptions = computed(() =>
+  servers.value.map((server) => ({ title: server.name, value: server.id })),
+);
+const selectedCommands = computed(() => commandsByServer.value[commandForm.server_id] ?? []);
 
 onMounted(() => {
   void refreshServers();
@@ -82,7 +113,8 @@ async function refreshServers() {
   try {
     const nextServers = await listServers();
     servers.value = nextServers;
-    await refreshTelemetry(nextServers);
+    syncCommandTarget(nextServers);
+    await Promise.all([refreshTelemetry(nextServers), refreshCommands(nextServers)]);
   } catch (error) {
     errorMessage.value = readableError(error);
   } finally {
@@ -102,6 +134,31 @@ async function refreshTelemetry(nextServers: ServerSummary[]) {
     }),
   );
   telemetryByServer.value = Object.fromEntries(entries);
+}
+
+async function refreshCommands(nextServers: ServerSummary[]) {
+  const entries = await Promise.all(
+    nextServers.map(async (server) => {
+      try {
+        const response = await listServerCommands(server.id);
+        return [server.id, response.commands] as const;
+      } catch {
+        return [server.id, []] as const;
+      }
+    }),
+  );
+  commandsByServer.value = Object.fromEntries(entries);
+}
+
+function syncCommandTarget(nextServers: ServerSummary[]) {
+  if (nextServers.length === 0) {
+    commandForm.server_id = "";
+    return;
+  }
+  const stillPresent = nextServers.some((server) => server.id === commandForm.server_id);
+  if (!stillPresent) {
+    commandForm.server_id = nextServers[0].id;
+  }
 }
 
 async function submitServer() {
@@ -132,6 +189,48 @@ async function submitServer() {
     errorMessage.value = readableError(error);
   } finally {
     saving.value = false;
+  }
+}
+
+async function submitCommand() {
+  if (!commandForm.server_id) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+
+  const path = commandForm.path.trim();
+  if (!path) {
+    errorMessage.value = "Command path is required.";
+    return;
+  }
+
+  let body: unknown;
+  if (commandForm.bodyText.trim()) {
+    try {
+      body = JSON.parse(commandForm.bodyText);
+    } catch {
+      errorMessage.value = "Command body must be valid JSON.";
+      return;
+    }
+  }
+
+  savingCommand.value = true;
+  errorMessage.value = "";
+  try {
+    await createServerCommand(commandForm.server_id, {
+      method: commandForm.method,
+      path,
+      query: commandForm.query.trim(),
+      body,
+      timeout_ms: commandForm.timeout_ms,
+      stream: commandForm.stream,
+    });
+    commandForm.bodyText = "";
+    await refreshCommands(servers.value);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingCommand.value = false;
   }
 }
 
@@ -199,6 +298,11 @@ function latencySummary(server: ServerSummary) {
 
 function formatPercent(used: number, total: number) {
   return `${((used / total) * 100).toFixed(0)}%`;
+}
+
+function commandSubtitle(command: AgentCommand) {
+  const status = command.result_status ? `status ${command.result_status}` : "waiting";
+  return `${command.attempts} attempts, ${status}`;
 }
 </script>
 
@@ -402,6 +506,96 @@ function formatPercent(used: number, total: number) {
           <div class="token-label">{{ latestToken.serverName }} agent token</div>
           <code class="token-code">{{ latestToken.token }}</code>
         </v-alert>
+
+        <v-divider class="command-divider" />
+
+        <div class="section-title">Command queue</div>
+        <v-form class="server-form" @submit.prevent="submitCommand">
+          <v-select
+            v-model="commandForm.server_id"
+            :disabled="serverOptions.length === 0"
+            :items="serverOptions"
+            density="comfortable"
+            label="Target server"
+            prepend-inner-icon="mdi-server-network"
+            variant="outlined"
+          />
+          <div class="form-row">
+            <v-select
+              v-model="commandForm.method"
+              :items="commandMethods"
+              density="comfortable"
+              label="Method"
+              variant="outlined"
+            />
+            <v-text-field
+              v-model.number="commandForm.timeout_ms"
+              density="comfortable"
+              label="Timeout"
+              min="1000"
+              max="300000"
+              type="number"
+              variant="outlined"
+            />
+          </div>
+          <v-text-field
+            v-model="commandForm.path"
+            density="comfortable"
+            label="Path"
+            prepend-inner-icon="mdi-api"
+            variant="outlined"
+          />
+          <v-text-field
+            v-model="commandForm.query"
+            density="comfortable"
+            label="Query"
+            prepend-inner-icon="mdi-tune"
+            variant="outlined"
+          />
+          <v-textarea
+            v-model="commandForm.bodyText"
+            auto-grow
+            density="comfortable"
+            label="JSON body"
+            rows="2"
+            variant="outlined"
+          />
+          <v-switch
+            v-model="commandForm.stream"
+            color="primary"
+            density="comfortable"
+            hide-details
+            label="Stream"
+          />
+          <v-btn
+            :disabled="serverOptions.length === 0"
+            :loading="savingCommand"
+            block
+            color="secondary"
+            prepend-icon="mdi-send"
+            type="submit"
+            variant="flat"
+          >
+            Queue command
+          </v-btn>
+        </v-form>
+
+        <v-list v-if="selectedCommands.length > 0" class="command-list" density="compact">
+          <v-list-item
+            v-for="command in selectedCommands"
+            :key="command.id"
+            :subtitle="commandSubtitle(command)"
+            :title="`${command.method} ${command.path}`"
+          >
+            <template #prepend>
+              <v-icon
+                :color="commandStatusMeta[command.status].color"
+                :icon="commandStatusMeta[command.status].icon"
+              />
+            </template>
+          </v-list-item>
+        </v-list>
+        <div v-else class="empty-command">No commands queued.</div>
       </v-sheet>
     </section>
   </div>

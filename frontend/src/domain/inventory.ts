@@ -1,6 +1,7 @@
 export type ConnectionMode = "auto" | "websocket" | "http" | "pull";
 export type ServerStatus = "pending" | "connected" | "offline";
 export type XrayMode = "external" | "embedded";
+export type AgentCommandStatus = "pending" | "leased" | "succeeded" | "failed";
 
 export interface ServerCreateRequest {
   name: string;
@@ -103,6 +104,47 @@ export interface AgentTelemetry {
 export interface ServerTelemetryResponse {
   server_id: string;
   latest?: AgentTelemetry | null;
+  license_required: false;
+}
+
+export interface AgentCommandCreateRequest {
+  method: string;
+  path: string;
+  query?: string;
+  body?: unknown;
+  timeout_ms?: number;
+  stream?: boolean;
+}
+
+export interface AgentCommand {
+  id: string;
+  server_id: string;
+  request_id: string;
+  method: string;
+  path: string;
+  query: string;
+  body?: unknown;
+  timeout_ms: number;
+  stream: boolean;
+  status: AgentCommandStatus;
+  attempts: number;
+  result_status?: number | null;
+  result_body?: unknown;
+  result_error?: string | null;
+  created_at: string;
+  leased_at?: string | null;
+  completed_at?: string | null;
+  updated_at: string;
+}
+
+export interface AgentCommandCreateResponse {
+  command: AgentCommand;
+  license_required: false;
+}
+
+export interface ServerCommandsResponse {
+  server_id: string;
+  commands: AgentCommand[];
   license_required: false;
 }
 

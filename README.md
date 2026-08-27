@@ -31,8 +31,8 @@ and a persisted server/agent inventory slice. It does not yet replace the full
 MMWX product.
 
 ```text
-backend/   FastAPI app, no-license contract API, SQLite inventory and telemetry
-frontend/  Vue 3 + Vuetify shell, server list/create and telemetry workflow
+backend/   FastAPI app, no-license API, SQLite inventory, telemetry, commands
+frontend/  Vue 3 + Vuetify shell, server, telemetry, and command workflows
 docs/      migration and architecture notes
 scripts/   VPS test runner
 ```

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { createServer, getLatestTelemetry, listServers } from "./inventory";
+import {
+  createServer,
+  createServerCommand,
+  getLatestTelemetry,
+  listServerCommands,
+  listServers,
+} from "./inventory";
 
 describe("inventory API client", () => {
   it("creates servers without sending license headers", async () => {
@@ -94,5 +100,61 @@ describe("inventory API client", () => {
     expect(requestUrl).toBe("/api/v1/servers/srv_1/telemetry/latest");
     expect(response.license_required).toBe(false);
     expect(headers).toBeUndefined();
+  });
+
+  it("lists queued commands without sending license headers", async () => {
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (_input, init) => {
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          commands: [],
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await listServerCommands("srv_1", fetcher);
+
+    expect(response.commands).toEqual([]);
+    expect(headers).toBeUndefined();
+  });
+
+  it("queues commands without sending license headers", async () => {
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (_input, init) => {
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          command: {
+            id: "cmd_1",
+            server_id: "srv_1",
+            request_id: "srv_1-abc",
+            method: "GET",
+            path: "/api/child/system/info",
+            query: "",
+            timeout_ms: 30000,
+            stream: false,
+            status: "pending",
+            attempts: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await createServerCommand(
+      "srv_1",
+      { method: "GET", path: "/api/child/system/info" },
+      fetcher,
+    );
+
+    expect(response.command.status).toBe("pending");
+    expect(headers).toEqual({ "Content-Type": "application/json" });
   });
 });

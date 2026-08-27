@@ -1,4 +1,7 @@
 import type {
+  AgentCommandCreateRequest,
+  AgentCommandCreateResponse,
+  ServerCommandsResponse,
   ServerTelemetryResponse,
   ServerCreateRequest,
   ServerCreateResponse,
@@ -43,6 +46,33 @@ export async function getLatestTelemetry(
     throw await apiError(response, "Server telemetry request failed");
   }
   return response.json() as Promise<ServerTelemetryResponse>;
+}
+
+export async function listServerCommands(
+  serverId: string,
+  fetcher = fetch,
+): Promise<ServerCommandsResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/commands`);
+  if (!response.ok) {
+    throw await apiError(response, "Server command list request failed");
+  }
+  return response.json() as Promise<ServerCommandsResponse>;
+}
+
+export async function createServerCommand(
+  serverId: string,
+  payload: AgentCommandCreateRequest,
+  fetcher = fetch,
+): Promise<AgentCommandCreateResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/commands`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Server command create request failed");
+  }
+  return response.json() as Promise<AgentCommandCreateResponse>;
 }
 
 async function apiError(response: Response, fallback: string): Promise<Error> {

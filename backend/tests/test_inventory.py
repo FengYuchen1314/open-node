@@ -254,3 +254,119 @@ def test_latest_telemetry_for_unknown_server_returns_404(tmp_path: Path) -> None
 
     assert response.status_code == 404
     assert response.json()["detail"] == "server not found: 00000000-0000-0000-0000-000000000000"
+
+
+def test_agent_command_queue_runs_without_license_header(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-command"}).json()
+    server_id = created["server"]["id"]
+
+    command_response = client.post(
+        f"/api/v1/servers/{server_id}/commands",
+        json={
+            "method": "post",
+            "path": "/api/child/xray/test-config",
+            "body": {"config": {"log": {"loglevel": "warning"}}},
+            "timeout_ms": 5000,
+        },
+    )
+
+    assert command_response.status_code == 201
+    command = command_response.json()["command"]
+    assert command_response.json()["license_required"] is False
+    assert command["status"] == "pending"
+    assert command["method"] == "POST"
+    assert command["attempts"] == 0
+
+    lease_response = client.post(
+        "/api/v1/agents/commands/lease",
+        json={"token": created["agent_token"], "max_commands": 1},
+    )
+
+    assert lease_response.status_code == 200
+    leased = lease_response.json()["commands"][0]
+    assert leased["id"] == command["id"]
+    assert leased["request_id"]
+    assert leased["status"] == "leased"
+    assert leased["attempts"] == 1
+
+    result_response = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"ok": True},
+        },
+    )
+
+    assert result_response.status_code == 200
+    completed = result_response.json()["command"]
+    assert result_response.json()["license_required"] is False
+    assert completed["status"] == "succeeded"
+    assert completed["result_status"] == 200
+    assert completed["result_body"] == {"ok": True}
+
+    commands = client.get(f"/api/v1/servers/{server_id}/commands")
+    assert commands.status_code == 200
+    assert commands.json()["commands"][0]["status"] == "succeeded"
+
+
+def test_agent_command_result_error_marks_command_failed(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-command-fail"}).json()
+    server_id = created["server"]["id"]
+    command = client.post(
+        f"/api/v1/servers/{server_id}/commands",
+        json={"method": "GET", "path": "/api/child/system/info"},
+    ).json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+
+    response = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 500,
+            "body": {"error": "boom"},
+            "error": "agent handler panic",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["command"]["status"] == "failed"
+    assert response.json()["command"]["result_error"] == "agent handler panic"
+
+
+def test_agent_command_rejects_non_child_paths(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-command-path"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/commands",
+        json={"method": "GET", "path": "/etc/passwd"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_invalid_command_token_is_rejected_as_auth_not_license(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/api/v1/agents/commands/lease",
+        json={"token": "not-a-real-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid agent token"
+
+
+def test_create_command_for_unknown_server_returns_404(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/api/v1/servers/00000000-0000-0000-0000-000000000000/commands",
+        json={"method": "GET", "path": "/api/child/system/info"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "server not found: 00000000-0000-0000-0000-000000000000"

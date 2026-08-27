@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ConnectionMode(StrEnum):
@@ -33,6 +33,13 @@ class TrafficStatsMode(StrEnum):
 class XrayMode(StrEnum):
     EXTERNAL = "external"
     EMBEDDED = "embedded"
+
+
+class AgentCommandStatus(StrEnum):
+    PENDING = "pending"
+    LEASED = "leased"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
 
 
 class AgentCapabilities(BaseModel):
@@ -225,4 +232,84 @@ class AgentTelemetryResponse(BaseModel):
 class ServerTelemetryResponse(BaseModel):
     server_id: UUID
     latest: AgentTelemetryRead | None = None
+    license_required: Literal[False] = False
+
+
+class AgentCommandCreate(BaseModel):
+    method: str = Field(default="GET", max_length=12)
+    path: str = Field(min_length=1, max_length=255)
+    query: str = Field(default="", max_length=2048)
+    body: Any = None
+    timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+    stream: bool = False
+
+    @field_validator("method")
+    @classmethod
+    def normalize_method(cls, value: str) -> str:
+        normalized = value.upper()
+        allowed = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+        if normalized not in allowed:
+            raise ValueError(f"method must be one of {', '.join(sorted(allowed))}")
+        return normalized
+
+    @field_validator("path")
+    @classmethod
+    def validate_child_path(cls, value: str) -> str:
+        if not value.startswith("/api/child/"):
+            raise ValueError("path must target an agent /api/child/ endpoint")
+        return value
+
+
+class AgentCommandRead(BaseModel):
+    id: UUID
+    server_id: UUID
+    request_id: str
+    method: str
+    path: str
+    query: str = ""
+    body: Any = None
+    timeout_ms: int
+    stream: bool
+    status: AgentCommandStatus
+    attempts: int
+    result_status: int | None = None
+    result_body: Any = None
+    result_error: str | None = None
+    created_at: datetime
+    leased_at: datetime | None = None
+    completed_at: datetime | None = None
+    updated_at: datetime
+
+
+class AgentCommandCreateResponse(BaseModel):
+    command: AgentCommandRead
+    license_required: Literal[False] = False
+
+
+class ServerCommandsResponse(BaseModel):
+    server_id: UUID
+    commands: list[AgentCommandRead]
+    license_required: Literal[False] = False
+
+
+class AgentCommandLeaseRequest(BaseModel):
+    token: str = Field(min_length=1)
+    max_commands: int = Field(default=1, ge=1, le=10)
+
+
+class AgentCommandLeaseResponse(BaseModel):
+    server: ServerRead
+    commands: list[AgentCommandRead]
+    license_required: Literal[False] = False
+
+
+class AgentCommandResultRequest(BaseModel):
+    token: str = Field(min_length=1)
+    status: int = Field(ge=100, le=599)
+    body: Any = None
+    error: str | None = Field(default=None, max_length=2048)
+
+
+class AgentCommandResultResponse(BaseModel):
+    command: AgentCommandRead
     license_required: Literal[False] = False

@@ -5,6 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from open_node.api.dependencies import get_inventory_store
 from open_node.domain.inventory import (
+    AgentCommandCreate,
+    AgentCommandCreateResponse,
+    ServerCommandsResponse,
     ServerCreate,
     ServerCreateResponse,
     ServerRead,
@@ -49,3 +52,32 @@ def latest_server_telemetry(
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ServerTelemetryResponse(server_id=server_id, latest=latest)
+
+
+@router.get("/{server_id}/commands", response_model=ServerCommandsResponse)
+def list_server_commands(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ServerCommandsResponse:
+    try:
+        commands = store.list_commands(server_id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return ServerCommandsResponse(server_id=server_id, commands=commands)
+
+
+@router.post(
+    "/{server_id}/commands",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_server_command(
+    server_id: UUID,
+    payload: AgentCommandCreate,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> AgentCommandCreateResponse:
+    try:
+        command = store.create_command(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return AgentCommandCreateResponse(command=command)

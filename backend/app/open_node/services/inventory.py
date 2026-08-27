@@ -22,6 +22,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 from open_node.domain.inventory import (
     AgentCapabilities,
+    AgentCommandCreate,
+    AgentCommandRead,
+    AgentCommandResultRequest,
+    AgentCommandStatus,
     AgentHeartbeatRequest,
     AgentRead,
     AgentRegistrationRequest,
@@ -52,6 +56,10 @@ class DuplicateServerNameError(ValueError):
 
 class ServerNotFoundError(ValueError):
     """Raised when an inventory lookup targets an unknown server."""
+
+
+class CommandNotFoundError(ValueError):
+    """Raised when an agent command cannot be found for the requesting server."""
 
 
 class Base(DeclarativeBase):
@@ -132,6 +140,33 @@ class TelemetrySnapshotModel(Base):
     system_boot_time_unix: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     sysmetrics: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     latency: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+
+class CommandModel(Base):
+    __tablename__ = "agent_commands"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    request_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    method: Mapped[str] = mapped_column(String(12))
+    path: Mapped[str] = mapped_column(String(255))
+    query: Mapped[str] = mapped_column(String(2048), default="")
+    body: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    timeout_ms: Mapped[int] = mapped_column(Integer)
+    stream: Mapped[bool] = mapped_column(Boolean)
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    result_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_body: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    result_error: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    leased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class InventoryStore:
@@ -311,6 +346,116 @@ class InventoryStore:
             telemetry = self._latest_telemetry_model(session, str(server_id))
             return self._telemetry_read(telemetry) if telemetry else None
 
+    def create_command(self, server_id: UUID, payload: AgentCommandCreate) -> AgentCommandRead:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+
+            now = datetime.now(tz=UTC)
+            command = CommandModel(
+                id=str(uuid4()),
+                server_id=server.id,
+                request_id=f"{server.id}-{uuid4().hex}",
+                method=payload.method,
+                path=payload.path,
+                query=payload.query,
+                body=payload.body,
+                timeout_ms=payload.timeout_ms,
+                stream=payload.stream,
+                status=AgentCommandStatus.PENDING.value,
+                attempts=0,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(command)
+            session.commit()
+            session.refresh(command)
+            return self._command_read(command)
+
+    def list_commands(self, server_id: UUID) -> list[AgentCommandRead]:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            commands = session.scalars(
+                select(CommandModel)
+                .where(CommandModel.server_id == str(server_id))
+                .order_by(CommandModel.created_at.desc())
+            ).all()
+            return [self._command_read(command) for command in commands]
+
+    def lease_commands(
+        self,
+        token: str,
+        max_commands: int,
+    ) -> tuple[ServerRead, list[AgentCommandRead]]:
+        with self._session() as session:
+            server = self._server_by_token(session, token)
+            now = datetime.now(tz=UTC)
+            candidates = session.scalars(
+                select(CommandModel)
+                .where(
+                    CommandModel.server_id == server.id,
+                    CommandModel.status.in_(
+                        [AgentCommandStatus.PENDING.value, AgentCommandStatus.LEASED.value]
+                    ),
+                )
+                .order_by(CommandModel.created_at)
+            ).all()
+
+            leased: list[CommandModel] = []
+            for command in candidates:
+                if len(leased) >= max_commands:
+                    break
+                if command.status == AgentCommandStatus.LEASED.value and not self._lease_expired(
+                    command,
+                    now,
+                ):
+                    continue
+                command.status = AgentCommandStatus.LEASED.value
+                command.attempts += 1
+                command.leased_at = now
+                command.updated_at = now
+                leased.append(command)
+
+            server.status = ServerStatus.CONNECTED.value
+            server.last_heartbeat = now
+            server.updated_at = now
+            session.commit()
+            for command in leased:
+                session.refresh(command)
+            session.refresh(server)
+            return self._public_server(server), [self._command_read(command) for command in leased]
+
+    def complete_command(
+        self,
+        command_id: UUID,
+        payload: AgentCommandResultRequest,
+    ) -> AgentCommandRead:
+        with self._session() as session:
+            server = self._server_by_token(session, payload.token)
+            command = session.get(CommandModel, str(command_id))
+            if not command or command.server_id != server.id:
+                raise CommandNotFoundError(f"command not found: {command_id}")
+
+            now = datetime.now(tz=UTC)
+            command.status = (
+                AgentCommandStatus.FAILED.value
+                if payload.error or payload.status >= 400
+                else AgentCommandStatus.SUCCEEDED.value
+            )
+            command.result_status = payload.status
+            command.result_body = payload.body
+            command.result_error = payload.error
+            command.completed_at = now
+            command.updated_at = now
+            server.last_heartbeat = now
+            server.updated_at = now
+            session.commit()
+            session.refresh(command)
+            return self._command_read(command)
+
     def _session(self) -> Session:
         return self._session_factory()
 
@@ -403,6 +548,29 @@ class InventoryStore:
         )
 
     @staticmethod
+    def _command_read(command: CommandModel) -> AgentCommandRead:
+        return AgentCommandRead(
+            id=UUID(command.id),
+            server_id=UUID(command.server_id),
+            request_id=command.request_id,
+            method=command.method,
+            path=command.path,
+            query=command.query,
+            body=command.body,
+            timeout_ms=command.timeout_ms,
+            stream=command.stream,
+            status=AgentCommandStatus(command.status),
+            attempts=command.attempts,
+            result_status=command.result_status,
+            result_body=command.result_body,
+            result_error=command.result_error,
+            created_at=command.created_at,
+            leased_at=command.leased_at,
+            completed_at=command.completed_at,
+            updated_at=command.updated_at,
+        )
+
+    @staticmethod
     def _server_by_token(session: Session, token: str) -> ServerModel:
         server = session.scalar(select(ServerModel).where(ServerModel.agent_token == token))
         if server:
@@ -461,6 +629,14 @@ class InventoryStore:
         if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
         return value
+
+    @staticmethod
+    def _lease_expired(command: CommandModel, now: datetime) -> bool:
+        if command.leased_at is None:
+            return True
+        leased_at = InventoryStore._aware_datetime(command.leased_at)
+        elapsed_ms = (now - leased_at).total_seconds() * 1000
+        return elapsed_ms >= command.timeout_ms
 
 
 def create_inventory_engine(database_url: str) -> Engine:

@@ -57,3 +57,15 @@ counts.
 
 The backend persists telemetry snapshots in SQLite and exposes the latest
 snapshot at `/api/v1/servers/{server_id}/telemetry/latest`.
+
+## Agent Commands
+
+Open Node models master-to-agent work as a transport-neutral command queue.
+Control-plane calls are created under `/api/v1/servers/{server_id}/commands`
+using the same method, path, query, body, timeout, and stream fields as the
+active MMWX WebSocket RPC payload. Agents lease pending commands through
+`/api/v1/agents/commands/lease` with their bootstrap token and submit
+HTTP-like results to `/api/v1/agents/commands/{command_id}/result`.
+
+The first implementation is intentionally queue-based so pull-mode agents and
+future WebSocket RPC can share one persisted state machine.
