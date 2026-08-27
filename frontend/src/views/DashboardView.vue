@@ -12,7 +12,9 @@ import {
   type AgentOperationPayload,
   type AgentTelemetry,
   type ConnectionMode,
+  type RenewalCycle,
   type ServerCreateRequest,
+  type ServerProbeMetadataUpdate,
   type ServerStatus,
   type ServerSummary,
   type XrayMode,
@@ -25,6 +27,7 @@ import {
   listServerCommands,
   listServers,
   queueAgentOperation,
+  updateServerProbeMetadata,
 } from "../services/inventory";
 
 const servers = ref<ServerSummary[]>([]);
@@ -33,11 +36,28 @@ const commandsByServer = ref<Record<string, AgentCommand[]>>({});
 const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({});
 const loading = ref(false);
 const saving = ref(false);
+const savingMetadata = ref(false);
 const savingCommand = ref(false);
 const savingOperation = ref<AgentOperationKind | "">("");
 const errorMessage = ref("");
+const successMessage = ref("");
 const latestToken = ref<{ serverName: string; token: string } | null>(null);
 const form = reactive<ServerCreateRequest>(defaultServerCreateRequest());
+const metadataForm = reactive({
+  server_id: "",
+  region: "",
+  region_country: "",
+  region_name: "",
+  region_city: "",
+  provider_name: "",
+  provider_url: "",
+  expires_at: "",
+  renewal_price: null as number | null,
+  renewal_price_cny: null as number | null,
+  renewal_cycle: null as RenewalCycle | null,
+  renewal_currency: "",
+  telecom_paid_peer: null as boolean | null,
+});
 const commandForm = reactive({
   server_id: "",
   method: "GET",
@@ -70,6 +90,17 @@ const connectionModes: Array<{ title: string; value: ConnectionMode }> = [
 const xrayModes: Array<{ title: string; value: XrayMode }> = [
   { title: "External", value: "external" },
   { title: "Embedded", value: "embedded" },
+];
+const renewalCycleOptions: Array<{ title: string; value: RenewalCycle }> = [
+  { title: "Month", value: "month" },
+  { title: "Quarter", value: "quarter" },
+  { title: "Half year", value: "half_year" },
+  { title: "Year", value: "year" },
+];
+const paidPeerOptions: Array<{ title: string; value: boolean | null }> = [
+  { title: "Unknown", value: null },
+  { title: "Paid peer", value: true },
+  { title: "Standard peer", value: false },
 ];
 
 const commandMethods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
@@ -229,6 +260,9 @@ const serverOptions = computed(() =>
   servers.value.map((server) => ({ title: server.name, value: server.id })),
 );
 const selectedCommands = computed(() => commandsByServer.value[commandForm.server_id] ?? []);
+const selectedMetadataServer = computed(
+  () => servers.value.find((server) => server.id === metadataForm.server_id) ?? null,
+);
 
 onMounted(() => {
   void refreshServers();
@@ -241,6 +275,7 @@ async function refreshServers() {
     const nextServers = await listServers();
     servers.value = nextServers;
     syncCommandTarget(nextServers);
+    syncMetadataTarget(nextServers);
     await Promise.all([refreshTelemetry(nextServers), refreshCommands(nextServers)]);
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -305,6 +340,18 @@ function syncCommandTarget(nextServers: ServerSummary[]) {
   }
 }
 
+function syncMetadataTarget(nextServers: ServerSummary[]) {
+  if (nextServers.length === 0) {
+    metadataForm.server_id = "";
+    fillProbeMetadataFromServer(null);
+    return;
+  }
+  const target =
+    nextServers.find((server) => server.id === metadataForm.server_id) ?? nextServers[0];
+  metadataForm.server_id = target.id;
+  fillProbeMetadataFromServer(target);
+}
+
 async function submitServer() {
   const name = form.name.trim();
   if (!name) {
@@ -322,6 +369,18 @@ async function submitServer() {
       ip_address_v6: blankToNull(form.ip_address_v6),
       domain: blankToNull(form.domain),
       domain_v6: blankToNull(form.domain_v6),
+      region: blankToNull(form.region),
+      region_country: blankToNull(form.region_country),
+      region_name: blankToNull(form.region_name),
+      region_city: blankToNull(form.region_city),
+      provider_name: blankToNull(form.provider_name),
+      provider_url: blankToNull(form.provider_url),
+      expires_at: dateToUtcDateTime(form.expires_at),
+      renewal_price: numberToNull(form.renewal_price),
+      renewal_price_cny: numberToNull(form.renewal_price_cny),
+      renewal_cycle: form.renewal_cycle ?? null,
+      renewal_currency: blankToNull(form.renewal_currency),
+      telecom_paid_peer: form.telecom_paid_peer ?? null,
     });
     latestToken.value = {
       serverName: response.server.name,
@@ -333,6 +392,32 @@ async function submitServer() {
     errorMessage.value = readableError(error);
   } finally {
     saving.value = false;
+  }
+}
+
+async function saveProbeMetadata() {
+  if (!metadataForm.server_id) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+
+  savingMetadata.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await updateServerProbeMetadata(
+      metadataForm.server_id,
+      probeMetadataPayload(),
+    );
+    servers.value = servers.value.map((server) =>
+      server.id === response.server.id ? response.server : server,
+    );
+    fillProbeMetadataFromServer(response.server);
+    successMessage.value = "Probe metadata saved.";
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingMetadata.value = false;
   }
 }
 
@@ -505,6 +590,59 @@ function resetForm() {
   Object.assign(form, defaultServerCreateRequest());
 }
 
+function fillProbeMetadataFromServer(server: ServerSummary | null = selectedMetadataServer.value) {
+  if (!server) {
+    metadataForm.region = "";
+    metadataForm.region_country = "";
+    metadataForm.region_name = "";
+    metadataForm.region_city = "";
+    metadataForm.provider_name = "";
+    metadataForm.provider_url = "";
+    metadataForm.expires_at = "";
+    metadataForm.renewal_price = null;
+    metadataForm.renewal_price_cny = null;
+    metadataForm.renewal_cycle = null;
+    metadataForm.renewal_currency = "";
+    metadataForm.telecom_paid_peer = null;
+    return;
+  }
+  metadataForm.server_id = server.id;
+  metadataForm.region = server.region ?? "";
+  metadataForm.region_country = server.region_country ?? "";
+  metadataForm.region_name = server.region_name ?? "";
+  metadataForm.region_city = server.region_city ?? "";
+  metadataForm.provider_name = server.provider_name ?? "";
+  metadataForm.provider_url = server.provider_url ?? "";
+  metadataForm.expires_at = server.expires_at?.slice(0, 10) ?? "";
+  metadataForm.renewal_price = server.renewal_price ?? null;
+  metadataForm.renewal_price_cny = server.renewal_price_cny ?? null;
+  metadataForm.renewal_cycle = server.renewal_cycle ?? null;
+  metadataForm.renewal_currency = server.renewal_currency ?? "";
+  metadataForm.telecom_paid_peer = server.telecom_paid_peer ?? null;
+}
+
+function probeMetadataPayload(): ServerProbeMetadataUpdate {
+  return {
+    region: blankToNull(metadataForm.region),
+    region_country: blankToNull(metadataForm.region_country),
+    region_name: blankToNull(metadataForm.region_name),
+    region_city: blankToNull(metadataForm.region_city),
+    provider_name: blankToNull(metadataForm.provider_name),
+    provider_url: blankToNull(metadataForm.provider_url),
+    expires_at: dateToUtcDateTime(metadataForm.expires_at),
+    renewal_price: numberToNull(metadataForm.renewal_price),
+    renewal_price_cny: numberToNull(metadataForm.renewal_price_cny),
+    renewal_cycle: metadataForm.renewal_cycle,
+    renewal_currency: blankToNull(metadataForm.renewal_currency),
+    telecom_paid_peer: metadataForm.telecom_paid_peer,
+  };
+}
+
+function selectMetadataServer(serverId: unknown) {
+  metadataForm.server_id = typeof serverId === "string" ? serverId : "";
+  fillProbeMetadataFromServer(selectedMetadataServer.value);
+}
+
 function parseDomainTargets(value: string) {
   return value
     .split(/[\n,]+/)
@@ -515,6 +653,19 @@ function parseDomainTargets(value: string) {
 function blankToNull(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function dateToUtcDateTime(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? `${trimmed}T00:00:00Z` : null;
+}
+
+function numberToNull(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function readableError(error: unknown) {
@@ -537,6 +688,34 @@ function formatBytesPerSecond(value: number) {
 
 function endpointFor(server: ServerSummary) {
   return server.domain ?? server.ip_address ?? server.domain_v6 ?? server.ip_address_v6 ?? "Unassigned";
+}
+
+function probeRegionSummary(server: ServerSummary) {
+  const region = server.region_city ?? server.region_name ?? server.region ?? null;
+  const country = server.region_country;
+  return [region, country].filter(Boolean).join(", ") || "No probe region";
+}
+
+function providerSummary(server: ServerSummary) {
+  return server.provider_name ?? "No provider";
+}
+
+function renewalSummary(server: ServerSummary) {
+  const parts: string[] = [];
+  if (server.expires_at) {
+    parts.push(`expires ${server.expires_at.slice(0, 10)}`);
+  }
+  if (server.renewal_price !== null && server.renewal_price !== undefined) {
+    parts.push(`${server.renewal_price} ${server.renewal_currency ?? ""}`.trim());
+  }
+  if (server.renewal_cycle) {
+    parts.push(renewalCycleLabel(server.renewal_cycle));
+  }
+  return parts.join(" / ") || "No renewal";
+}
+
+function renewalCycleLabel(cycle: RenewalCycle) {
+  return renewalCycleOptions.find((option) => option.value === cycle)?.title ?? cycle;
 }
 
 function telemetryFor(server: ServerSummary) {
@@ -624,6 +803,15 @@ function formatPercent(used: number, total: number) {
     >
       {{ errorMessage }}
     </v-alert>
+    <v-alert
+      v-if="successMessage"
+      class="status-alert"
+      density="comfortable"
+      type="success"
+      variant="tonal"
+    >
+      {{ successMessage }}
+    </v-alert>
 
     <section class="inventory-layout">
       <v-sheet class="section-surface server-surface" border>
@@ -647,6 +835,7 @@ function formatPercent(used: number, total: number) {
               <th>Name</th>
               <th>Status</th>
               <th>Endpoint</th>
+              <th>Probe</th>
               <th>Telemetry</th>
               <th>Mode</th>
               <th class="number-cell">Port</th>
@@ -672,6 +861,12 @@ function formatPercent(used: number, total: number) {
                 </v-chip>
               </td>
               <td>{{ endpointFor(server) }}</td>
+              <td class="telemetry-cell">
+                <div class="server-name">{{ probeRegionSummary(server) }}</div>
+                <div class="server-subline">
+                  {{ providerSummary(server) }} / {{ renewalSummary(server) }}
+                </div>
+              </td>
               <td class="telemetry-cell">
                 <div class="server-name">{{ systemSummary(server) }}</div>
                 <div class="server-subline">{{ latencySummary(server) }}</div>
@@ -746,6 +941,40 @@ function formatPercent(used: number, total: number) {
               variant="outlined"
             />
           </div>
+          <div class="form-row">
+            <v-text-field
+              v-model="form.region_city"
+              density="comfortable"
+              label="Probe city"
+              prepend-inner-icon="mdi-map-marker-outline"
+              variant="outlined"
+            />
+            <v-text-field
+              v-model="form.provider_name"
+              density="comfortable"
+              label="Provider"
+              prepend-inner-icon="mdi-cloud-outline"
+              variant="outlined"
+            />
+          </div>
+          <div class="form-row">
+            <v-text-field
+              v-model="form.expires_at"
+              density="comfortable"
+              label="Expires"
+              prepend-inner-icon="mdi-calendar-outline"
+              type="date"
+              variant="outlined"
+            />
+            <v-text-field
+              v-model.number="form.renewal_price"
+              density="comfortable"
+              label="Renewal"
+              min="0"
+              type="number"
+              variant="outlined"
+            />
+          </div>
           <v-switch
             v-model="form.ipv6_enabled"
             color="primary"
@@ -776,6 +1005,142 @@ function formatPercent(used: number, total: number) {
           <div class="token-label">{{ latestToken.serverName }} agent token</div>
           <code class="token-code">{{ latestToken.token }}</code>
         </v-alert>
+
+        <v-divider class="command-divider" />
+
+        <div class="section-title">Probe metadata</div>
+        <v-form class="server-form" @submit.prevent="saveProbeMetadata">
+          <v-select
+            v-model="metadataForm.server_id"
+            :disabled="serverOptions.length === 0"
+            :items="serverOptions"
+            density="comfortable"
+            label="Server"
+            prepend-inner-icon="mdi-server-network"
+            variant="outlined"
+            @update:model-value="selectMetadataServer"
+          />
+          <div class="form-row">
+            <v-text-field
+              v-model="metadataForm.region"
+              density="comfortable"
+              label="Region code"
+              prepend-inner-icon="mdi-map-marker-radius-outline"
+              variant="outlined"
+            />
+            <v-text-field
+              v-model="metadataForm.region_country"
+              density="comfortable"
+              label="Country"
+              prepend-inner-icon="mdi-flag-outline"
+              variant="outlined"
+            />
+          </div>
+          <div class="form-row">
+            <v-text-field
+              v-model="metadataForm.region_name"
+              density="comfortable"
+              label="Region"
+              prepend-inner-icon="mdi-map-outline"
+              variant="outlined"
+            />
+            <v-text-field
+              v-model="metadataForm.region_city"
+              density="comfortable"
+              label="City"
+              prepend-inner-icon="mdi-city-variant-outline"
+              variant="outlined"
+            />
+          </div>
+          <div class="form-row">
+            <v-text-field
+              v-model="metadataForm.provider_name"
+              density="comfortable"
+              label="Provider"
+              prepend-inner-icon="mdi-cloud-outline"
+              variant="outlined"
+            />
+            <v-text-field
+              v-model="metadataForm.provider_url"
+              density="comfortable"
+              label="Provider URL"
+              prepend-inner-icon="mdi-link-variant"
+              variant="outlined"
+            />
+          </div>
+          <div class="form-row">
+            <v-text-field
+              v-model="metadataForm.expires_at"
+              density="comfortable"
+              label="Expires"
+              prepend-inner-icon="mdi-calendar-outline"
+              type="date"
+              variant="outlined"
+            />
+            <v-select
+              v-model="metadataForm.renewal_cycle"
+              :items="renewalCycleOptions"
+              clearable
+              density="comfortable"
+              label="Cycle"
+              variant="outlined"
+            />
+          </div>
+          <div class="form-row">
+            <v-text-field
+              v-model.number="metadataForm.renewal_price"
+              density="comfortable"
+              label="Renewal price"
+              min="0"
+              type="number"
+              variant="outlined"
+            />
+            <v-text-field
+              v-model.number="metadataForm.renewal_price_cny"
+              density="comfortable"
+              label="CNY price"
+              min="0"
+              type="number"
+              variant="outlined"
+            />
+          </div>
+          <div class="form-row">
+            <v-text-field
+              v-model="metadataForm.renewal_currency"
+              density="comfortable"
+              label="Currency"
+              prepend-inner-icon="mdi-cash"
+              variant="outlined"
+            />
+            <v-select
+              v-model="metadataForm.telecom_paid_peer"
+              :items="paidPeerOptions"
+              density="comfortable"
+              label="Telecom peer"
+              variant="outlined"
+            />
+          </div>
+          <div class="settings-action-row">
+            <v-btn
+              :disabled="serverOptions.length === 0"
+              :loading="savingMetadata"
+              color="primary"
+              prepend-icon="mdi-content-save-outline"
+              type="submit"
+              variant="flat"
+            >
+              Save metadata
+            </v-btn>
+            <v-btn
+              :disabled="serverOptions.length === 0"
+              prepend-icon="mdi-refresh"
+              variant="tonal"
+              @click="fillProbeMetadataFromServer()"
+            >
+              Reload
+            </v-btn>
+          </div>
+        </v-form>
 
         <v-divider class="command-divider" />
 

@@ -57,7 +57,9 @@ from open_node.domain.inventory import (
     ConnectionMode,
     ProbeLatencySample,
     ProbeSysMetrics,
+    RenewalCycle,
     ServerCreate,
+    ServerProbeMetadataUpdate,
     ServerRead,
     ServerRecord,
     ServerStatus,
@@ -326,6 +328,18 @@ class ServerModel(Base):
     traffic_stats_mode: Mapped[str] = mapped_column(String(24))
     traffic_source: Mapped[str] = mapped_column(String(24))
     xray_mode: Mapped[str] = mapped_column(String(24))
+    region: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    region_country: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    region_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    region_city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    provider_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    provider_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    renewal_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    renewal_price_cny: Mapped[float | None] = mapped_column(Float, nullable=True)
+    renewal_cycle: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    renewal_currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    telecom_paid_peer: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     current_upload_speed: Mapped[int] = mapped_column(Integer, default=0)
     current_download_speed: Mapped[int] = mapped_column(Integer, default=0)
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -676,14 +690,46 @@ class InventoryStore:
         if self._engine.dialect.name != "sqlite":
             return
         inspector = inspect(self._engine)
-        if "product_users" not in inspector.get_table_names():
+        table_names = set(inspector.get_table_names())
+        if "product_users" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector,
+                "product_users",
+                {"last_traffic_reset_at": "DATETIME"},
+            )
+        if "servers" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector,
+                "servers",
+                {
+                    "region": "VARCHAR(120)",
+                    "region_country": "VARCHAR(120)",
+                    "region_name": "VARCHAR(120)",
+                    "region_city": "VARCHAR(120)",
+                    "provider_name": "VARCHAR(120)",
+                    "provider_url": "VARCHAR(500)",
+                    "expires_at": "DATETIME",
+                    "renewal_price": "FLOAT",
+                    "renewal_price_cny": "FLOAT",
+                    "renewal_cycle": "VARCHAR(24)",
+                    "renewal_currency": "VARCHAR(12)",
+                    "telecom_paid_peer": "BOOLEAN",
+                },
+            )
+
+    def _sqlite_add_missing_columns(
+        self,
+        inspector: Any,
+        table_name: str,
+        columns: dict[str, str],
+    ) -> None:
+        existing = {column["name"] for column in inspector.get_columns(table_name)}
+        missing = [(name, kind) for name, kind in columns.items() if name not in existing]
+        if not missing:
             return
-        columns = {column["name"] for column in inspector.get_columns("product_users")}
-        if "last_traffic_reset_at" not in columns:
-            with self._engine.begin() as connection:
-                connection.execute(
-                    text("ALTER TABLE product_users ADD COLUMN last_traffic_reset_at DATETIME")
-                )
+        with self._engine.begin() as connection:
+            for name, kind in missing:
+                connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {kind}"))
 
     def list_servers(self) -> list[ServerRead]:
         with self._session() as session:
@@ -715,6 +761,18 @@ class InventoryStore:
                 traffic_stats_mode=payload.traffic_stats_mode.value,
                 traffic_source=payload.traffic_source.value,
                 xray_mode=payload.xray_mode.value,
+                region=payload.region,
+                region_country=payload.region_country,
+                region_name=payload.region_name,
+                region_city=payload.region_city,
+                provider_name=payload.provider_name,
+                provider_url=payload.provider_url,
+                expires_at=payload.expires_at,
+                renewal_price=payload.renewal_price,
+                renewal_price_cny=payload.renewal_price_cny,
+                renewal_cycle=payload.renewal_cycle.value if payload.renewal_cycle else None,
+                renewal_currency=payload.renewal_currency,
+                telecom_paid_peer=payload.telecom_paid_peer,
                 current_upload_speed=0,
                 current_download_speed=0,
                 created_at=now,
@@ -728,6 +786,25 @@ class InventoryStore:
 
     def public_server(self, server: ServerRecord) -> ServerRead:
         return ServerRead(**server.model_dump(exclude={"agent_token"}))
+
+    def update_server_probe_metadata(
+        self,
+        server_id: UUID,
+        payload: ServerProbeMetadataUpdate,
+    ) -> ServerRead:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            for field, value in payload.model_dump(exclude_unset=True).items():
+                if field == "renewal_cycle" and value is not None:
+                    value = RenewalCycle(value).value
+                setattr(server, field, value)
+            server.updated_at = now
+            session.commit()
+            session.refresh(server)
+            return self._public_server(server)
 
     def list_agents(self) -> list[AgentRead]:
         with self._session() as session:
@@ -1952,10 +2029,22 @@ class InventoryStore:
     ) -> ProbeServer:
         probe = ProbeServer(
             name=server.name,
+            region=server.region,
+            region_country=server.region_country,
+            region_name=server.region_name,
+            region_city=server.region_city,
             online=server.status == ServerStatus.CONNECTED.value,
             upload_speed=server.current_upload_speed,
             download_speed=server.current_download_speed,
             traffic_limit=server.traffic_limit,
+            expires_at=server.expires_at.date().isoformat() if server.expires_at else None,
+            renewal_price=server.renewal_price,
+            renewal_price_cny=server.renewal_price_cny,
+            renewal_cycle=server.renewal_cycle,
+            renewal_currency=server.renewal_currency,
+            provider_name=server.provider_name,
+            provider_url=server.provider_url,
+            telecom_paid_peer=server.telecom_paid_peer,
         )
 
         if latest:
@@ -3773,6 +3862,20 @@ class InventoryStore:
             traffic_stats_mode=TrafficStatsMode(server.traffic_stats_mode),
             traffic_source=TrafficSource(server.traffic_source),
             xray_mode=XrayMode(server.xray_mode),
+            region=server.region,
+            region_country=server.region_country,
+            region_name=server.region_name,
+            region_city=server.region_city,
+            provider_name=server.provider_name,
+            provider_url=server.provider_url,
+            expires_at=InventoryStore._aware_datetime(server.expires_at)
+            if server.expires_at
+            else None,
+            renewal_price=server.renewal_price,
+            renewal_price_cny=server.renewal_price_cny,
+            renewal_cycle=RenewalCycle(server.renewal_cycle) if server.renewal_cycle else None,
+            renewal_currency=server.renewal_currency,
+            telecom_paid_peer=server.telecom_paid_peer,
             current_upload_speed=server.current_upload_speed,
             current_download_speed=server.current_download_speed,
             last_heartbeat=server.last_heartbeat,

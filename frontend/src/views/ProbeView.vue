@@ -29,6 +29,7 @@ const settingsForm = reactive({
   show_traffic_quota: true,
   show_daily_trend: false,
   show_traffic_7d: false,
+  show_renewal_timeline: false,
   show_health_score: true,
 });
 
@@ -38,6 +39,7 @@ const probeDescription = computed(
 );
 const showSystemColumn = computed(() => payload.value?.show_resource_heatmap !== false);
 const showTrafficColumn = computed(() => payload.value?.show_traffic_quota !== false);
+const showRenewalColumn = computed(() => payload.value?.show_renewal_timeline === true);
 const onlineCount = computed(() => servers.value.filter((server) => server.online).length);
 const totalUpload = computed(() =>
   servers.value.reduce((sum, server) => sum + (server.upload_speed ?? 0), 0),
@@ -166,6 +168,7 @@ function syncSettingsForm(nextPayload: ProbePayload) {
   settingsForm.show_traffic_quota = nextPayload.show_traffic_quota !== false;
   settingsForm.show_daily_trend = nextPayload.show_daily_trend === true;
   settingsForm.show_traffic_7d = nextPayload.show_traffic_7d === true;
+  settingsForm.show_renewal_timeline = nextPayload.show_renewal_timeline === true;
   settingsForm.show_health_score = nextPayload.show_health_score !== false;
 }
 
@@ -180,6 +183,7 @@ function settingsPayload(): ProbeSettingsUpdate {
     show_traffic_quota: settingsForm.show_traffic_quota,
     show_daily_trend: settingsForm.show_daily_trend,
     show_traffic_7d: settingsForm.show_traffic_7d,
+    show_renewal_timeline: settingsForm.show_renewal_timeline,
     show_health_score: settingsForm.show_health_score,
     appearance: {
       theme: settingsForm.theme,
@@ -238,6 +242,47 @@ function trafficSummary(server: ProbeServer) {
     return `${formatBytes(used)} / ${formatBytes(server.traffic_limit)}`;
   }
   return formatBytes(used);
+}
+
+function regionSummary(server: ProbeServer) {
+  const region = server.region_city ?? server.region_name ?? server.region ?? null;
+  const country = server.region_country;
+  return [region, country].filter(Boolean).join(", ") || "No region";
+}
+
+function providerSummary(server: ProbeServer) {
+  return server.provider_name ?? "No provider";
+}
+
+function renewalSummary(server: ProbeServer) {
+  const parts: string[] = [];
+  if (server.expires_at) {
+    parts.push(`expires ${server.expires_at.slice(0, 10)}`);
+  }
+  if (server.renewal_price !== null && server.renewal_price !== undefined) {
+    parts.push(`${server.renewal_price} ${server.renewal_currency ?? ""}`.trim());
+  }
+  if (server.renewal_cycle) {
+    parts.push(renewalCycleLabel(server.renewal_cycle));
+  }
+  return parts.join(" / ") || "No renewal";
+}
+
+function renewalCycleLabel(cycle: NonNullable<ProbeServer["renewal_cycle"]>) {
+  const labels: Record<NonNullable<ProbeServer["renewal_cycle"]>, string> = {
+    month: "Month",
+    quarter: "Quarter",
+    half_year: "Half year",
+    year: "Year",
+  };
+  return labels[cycle];
+}
+
+function peerSummary(server: ProbeServer) {
+  if (server.telecom_paid_peer === null || server.telecom_paid_peer === undefined) {
+    return "Peer unknown";
+  }
+  return server.telecom_paid_peer ? "Paid peer" : "Standard peer";
 }
 
 function formatPercent(used: number, total: number) {
@@ -436,6 +481,13 @@ function formatBytes(value: number) {
             hide-details
             label="7d traffic"
           />
+          <v-switch
+            v-model="settingsForm.show_renewal_timeline"
+            color="secondary"
+            density="comfortable"
+            hide-details
+            label="Renewal"
+          />
         </div>
         <div class="settings-action-row">
           <v-btn
@@ -482,6 +534,7 @@ function formatBytes(value: number) {
             <th v-if="showSystemColumn">System</th>
             <th>Latency</th>
             <th v-if="showTrafficColumn">Traffic</th>
+            <th v-if="showRenewalColumn">Renewal</th>
             <th class="number-cell">Up</th>
             <th class="number-cell">Down</th>
           </tr>
@@ -490,7 +543,8 @@ function formatBytes(value: number) {
           <tr v-for="(server, index) in servers" :key="`${displayName(server, index)}-${index}`">
             <td>
               <div class="server-name">{{ displayName(server, index) }}</div>
-              <div class="server-subline">{{ server.os || "Unknown OS" }}</div>
+              <div class="server-subline">{{ regionSummary(server) }}</div>
+              <div class="server-subline">{{ providerSummary(server) }}</div>
             </td>
             <td>
               <v-chip
@@ -502,13 +556,27 @@ function formatBytes(value: number) {
               >
                 {{ statusLabel(server) }}
               </v-chip>
+              <div class="server-subline">{{ peerSummary(server) }}</div>
             </td>
             <td v-if="showSystemColumn" class="telemetry-cell">
               <div class="server-name">{{ systemSummary(server) }}</div>
-              <div class="server-subline">{{ server.loadavg || "No loadavg" }}</div>
+              <div class="server-subline">
+                {{ server.os || "Unknown OS" }} / {{ server.loadavg || "No loadavg" }}
+              </div>
             </td>
             <td>{{ latencySummary(server) }}</td>
-            <td v-if="showTrafficColumn">{{ trafficSummary(server) }}</td>
+            <td v-if="showTrafficColumn" class="telemetry-cell">
+              <div class="server-name">{{ trafficSummary(server) }}</div>
+              <div v-if="!showRenewalColumn" class="server-subline">
+                {{ renewalSummary(server) }}
+              </div>
+            </td>
+            <td v-if="showRenewalColumn" class="telemetry-cell">
+              <div class="server-name">{{ renewalSummary(server) }}</div>
+              <div class="server-subline">
+                CNY {{ server.renewal_price_cny ?? "n/a" }}
+              </div>
+            </td>
             <td class="number-cell">{{ formatBytesPerSecond(server.upload_speed ?? 0) }}</td>
             <td class="number-cell">{{ formatBytesPerSecond(server.download_speed ?? 0) }}</td>
           </tr>

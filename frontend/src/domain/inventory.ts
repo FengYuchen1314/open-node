@@ -1,6 +1,7 @@
 export type ConnectionMode = "auto" | "websocket" | "http" | "pull";
 export type ServerStatus = "pending" | "connected" | "offline";
 export type XrayMode = "external" | "embedded";
+export type RenewalCycle = "month" | "quarter" | "half_year" | "year";
 export type AgentServiceName = "xray" | "nginx";
 export type AgentServiceAction = "start" | "stop" | "restart";
 export type AgentLogService = "agent" | "xray" | "nginx";
@@ -70,6 +71,33 @@ export interface ServerCreateRequest {
   ipv6_enabled?: boolean;
   traffic_limit?: number;
   xray_mode?: XrayMode;
+  region?: string | null;
+  region_country?: string | null;
+  region_name?: string | null;
+  region_city?: string | null;
+  provider_name?: string | null;
+  provider_url?: string | null;
+  expires_at?: string | null;
+  renewal_price?: number | null;
+  renewal_price_cny?: number | null;
+  renewal_cycle?: RenewalCycle | null;
+  renewal_currency?: string | null;
+  telecom_paid_peer?: boolean | null;
+}
+
+export interface ServerProbeMetadataUpdate {
+  region?: string | null;
+  region_country?: string | null;
+  region_name?: string | null;
+  region_city?: string | null;
+  provider_name?: string | null;
+  provider_url?: string | null;
+  expires_at?: string | null;
+  renewal_price?: number | null;
+  renewal_price_cny?: number | null;
+  renewal_cycle?: RenewalCycle | null;
+  renewal_currency?: string | null;
+  telecom_paid_peer?: boolean | null;
 }
 
 export interface ServerSummary {
@@ -86,6 +114,18 @@ export interface ServerSummary {
   ipv6_enabled: boolean;
   traffic_limit: number;
   xray_mode: XrayMode;
+  region?: string | null;
+  region_country?: string | null;
+  region_name?: string | null;
+  region_city?: string | null;
+  provider_name?: string | null;
+  provider_url?: string | null;
+  expires_at?: string | null;
+  renewal_price?: number | null;
+  renewal_price_cny?: number | null;
+  renewal_cycle?: RenewalCycle | null;
+  renewal_currency?: string | null;
+  telecom_paid_peer?: boolean | null;
   current_upload_speed: number;
   current_download_speed: number;
   last_heartbeat?: string | null;
@@ -96,6 +136,11 @@ export interface ServerSummary {
 export interface ServerCreateResponse {
   server: ServerSummary;
   agent_token: string;
+  license_required: false;
+}
+
+export interface ServerResponse {
+  server: ServerSummary;
   license_required: false;
 }
 
@@ -442,9 +487,26 @@ export interface AgentCommandStreamFramesResponse {
 
 export const defaultServerCreateRequest = (): ServerCreateRequest => ({
   name: "",
+  ip_address: "",
+  ip_address_v6: "",
+  domain: "",
+  domain_v6: "",
   connection_mode: "auto",
   listen_port: 23889,
+  pull_port: 0,
   ipv6_enabled: true,
   traffic_limit: 0,
   xray_mode: "external",
+  region: "",
+  region_country: "",
+  region_name: "",
+  region_city: "",
+  provider_name: "",
+  provider_url: "",
+  expires_at: "",
+  renewal_price: null,
+  renewal_price_cny: null,
+  renewal_cycle: null,
+  renewal_currency: "",
+  telecom_paid_peer: null,
 });

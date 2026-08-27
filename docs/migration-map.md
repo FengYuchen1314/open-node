@@ -70,5 +70,8 @@ This document records the starting source map for the Open Node refactor.
      Worker `/api/stream` mapping.
    - Done: richer probe appearance/settings data with local settings
      persistence and Vue controls.
-   - Next: richer probe region/provider/renewal metadata.
+   - Done: richer probe region/provider/renewal metadata with a license-free
+     management API, sanitized public payload fields, and Vue display/edit
+     controls.
+   - Next: deeper public probe visualization parity.
 5. Revisit Xray integration once the agent protocol surface is stable.

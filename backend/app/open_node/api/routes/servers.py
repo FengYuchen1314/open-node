@@ -40,7 +40,9 @@ from open_node.domain.inventory import (
     ServerCommandsResponse,
     ServerCreate,
     ServerCreateResponse,
+    ServerProbeMetadataUpdate,
     ServerRead,
+    ServerResponse,
     ServerTelemetryResponse,
 )
 from open_node.services.agent_ws import AgentConnectionManager
@@ -72,6 +74,19 @@ def create_server(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     public_server = store.public_server(server)
     return ServerCreateResponse(server=public_server, agent_token=server.agent_token)
+
+
+@router.patch("/{server_id}/probe-metadata", response_model=ServerResponse)
+def update_server_probe_metadata(
+    server_id: UUID,
+    payload: ServerProbeMetadataUpdate,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ServerResponse:
+    try:
+        server = store.update_server_probe_metadata(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return ServerResponse(server=server)
 
 
 @router.get("/{server_id}/telemetry/latest", response_model=ServerTelemetryResponse)

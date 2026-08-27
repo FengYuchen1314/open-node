@@ -9,6 +9,8 @@ import type {
   ServerTelemetryResponse,
   ServerCreateRequest,
   ServerCreateResponse,
+  ServerProbeMetadataUpdate,
+  ServerResponse,
   ServerSummary,
 } from "../domain/inventory";
 
@@ -93,6 +95,22 @@ export async function createServer(
     throw await apiError(response, "Server create request failed");
   }
   return response.json() as Promise<ServerCreateResponse>;
+}
+
+export async function updateServerProbeMetadata(
+  serverId: string,
+  payload: ServerProbeMetadataUpdate,
+  fetcher = fetch,
+): Promise<ServerResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/probe-metadata`, {
+    method: "PATCH",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Server probe metadata update failed");
+  }
+  return response.json() as Promise<ServerResponse>;
 }
 
 export async function getLatestTelemetry(

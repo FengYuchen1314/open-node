@@ -93,6 +93,13 @@ class XrayMode(StrEnum):
     EMBEDDED = "embedded"
 
 
+class RenewalCycle(StrEnum):
+    MONTH = "month"
+    QUARTER = "quarter"
+    HALF_YEAR = "half_year"
+    YEAR = "year"
+
+
 class AgentServiceName(StrEnum):
     XRAY = "xray"
     NGINX = "nginx"
@@ -193,6 +200,83 @@ class ServerCreate(BaseModel):
     traffic_stats_mode: TrafficStatsMode = TrafficStatsMode.BOTH
     traffic_source: TrafficSource = TrafficSource.XRAY
     xray_mode: XrayMode = XrayMode.EXTERNAL
+    region: str | None = Field(default=None, max_length=120)
+    region_country: str | None = Field(default=None, max_length=120)
+    region_name: str | None = Field(default=None, max_length=120)
+    region_city: str | None = Field(default=None, max_length=120)
+    provider_name: str | None = Field(default=None, max_length=120)
+    provider_url: str | None = Field(default=None, max_length=500)
+    expires_at: datetime | None = None
+    renewal_price: float | None = Field(default=None, ge=0)
+    renewal_price_cny: float | None = Field(default=None, ge=0)
+    renewal_cycle: RenewalCycle | None = None
+    renewal_currency: str | None = Field(default=None, max_length=12)
+    telecom_paid_peer: bool | None = None
+
+    @field_validator(
+        "region",
+        "region_country",
+        "region_name",
+        "region_city",
+        "provider_name",
+        "renewal_currency",
+    )
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "server metadata") or None
+
+    @field_validator("provider_url")
+    @classmethod
+    def validate_provider_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = _strip_optional_text(value, "provider_url")
+        if not normalized:
+            return None
+        parsed = urlparse(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("provider_url must be a valid HTTP(S) URL")
+        return normalized
+
+
+class ServerProbeMetadataUpdate(BaseModel):
+    region: str | None = Field(default=None, max_length=120)
+    region_country: str | None = Field(default=None, max_length=120)
+    region_name: str | None = Field(default=None, max_length=120)
+    region_city: str | None = Field(default=None, max_length=120)
+    provider_name: str | None = Field(default=None, max_length=120)
+    provider_url: str | None = Field(default=None, max_length=500)
+    expires_at: datetime | None = None
+    renewal_price: float | None = Field(default=None, ge=0)
+    renewal_price_cny: float | None = Field(default=None, ge=0)
+    renewal_cycle: RenewalCycle | None = None
+    renewal_currency: str | None = Field(default=None, max_length=12)
+    telecom_paid_peer: bool | None = None
+
+    @field_validator(
+        "region",
+        "region_country",
+        "region_name",
+        "region_city",
+        "provider_name",
+        "renewal_currency",
+    )
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "server metadata") or None
+
+    @field_validator("provider_url")
+    @classmethod
+    def validate_provider_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = _strip_optional_text(value, "provider_url")
+        if not normalized:
+            return None
+        parsed = urlparse(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("provider_url must be a valid HTTP(S) URL")
+        return normalized
 
 
 class ServerRead(BaseModel):
@@ -213,6 +297,18 @@ class ServerRead(BaseModel):
     traffic_stats_mode: TrafficStatsMode
     traffic_source: TrafficSource
     xray_mode: XrayMode
+    region: str | None = None
+    region_country: str | None = None
+    region_name: str | None = None
+    region_city: str | None = None
+    provider_name: str | None = None
+    provider_url: str | None = None
+    expires_at: datetime | None = None
+    renewal_price: float | None = None
+    renewal_price_cny: float | None = None
+    renewal_cycle: RenewalCycle | None = None
+    renewal_currency: str | None = None
+    telecom_paid_peer: bool | None = None
     current_upload_speed: int = 0
     current_download_speed: int = 0
     last_heartbeat: datetime | None = None
@@ -227,6 +323,11 @@ class ServerRecord(ServerRead):
 class ServerCreateResponse(BaseModel):
     server: ServerRead
     agent_token: str
+    license_required: Literal[False] = False
+
+
+class ServerResponse(BaseModel):
+    server: ServerRead
     license_required: Literal[False] = False
 
 

@@ -64,6 +64,14 @@ export interface ProbeServer {
   kernel?: string | null;
   arch?: string | null;
   ping?: ProbePingSeries[] | null;
+  expires_at?: string | null;
+  renewal_price?: number | null;
+  renewal_price_cny?: number | null;
+  renewal_cycle?: "month" | "quarter" | "half_year" | "year" | null;
+  renewal_currency?: string | null;
+  provider_name?: string | null;
+  provider_url?: string | null;
+  telecom_paid_peer?: boolean | null;
 }
 
 export interface ProbeSettings {

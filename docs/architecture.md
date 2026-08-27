@@ -332,13 +332,21 @@ internal identifiers, IP addresses, bootstrap tokens, and agent secrets are not
 serialized. Series lookups use the public server index from the sanitized list
 instead of private server IDs.
 
+Server probe metadata can be supplied when a server is created or updated with
+`PATCH /api/v1/servers/{server_id}/probe-metadata`. The metadata covers region
+code/country/name/city, provider name/URL, expiry date, renewal price in native
+and CNY currencies, renewal cycle, and telecom paid-peer status. The public
+probe payload includes these sanitized values while continuing to omit private
+server IDs and connectivity details.
+
 Probe settings are stored locally in SQLite and are license-free. They control
 the public title, description, logo URL, refresh interval, appearance metadata,
-and visibility flags such as traffic quota and resource columns. When the
-probe is disabled, `/probe-servers` still returns a no-license JSON payload
-with `enabled=false`, but the public server list is empty so node telemetry is
-not exposed. The Vue `/probe` view can edit these settings and immediately
-uses the same public payload to render or hide table sections.
+and visibility flags such as traffic quota, resource, health, traffic-history,
+and renewal columns. When the probe is disabled, `/probe-servers` still returns
+a no-license JSON payload with `enabled=false`, but the public server list is
+empty so node telemetry is not exposed. The Vue `/probe` view can edit these
+settings and immediately uses the same public payload to render or hide table
+sections.
 
 The WebSocket stream is also public and read-only. It sends the same
 `ProbePayload` structure as the HTTP list endpoint, drops any client messages,

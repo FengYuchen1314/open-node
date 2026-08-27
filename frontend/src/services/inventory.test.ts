@@ -8,13 +8,16 @@ import {
   listServerCommands,
   listServers,
   queueAgentOperation,
+  updateServerProbeMetadata,
 } from "./inventory";
 
 describe("inventory API client", () => {
   it("creates servers without sending license headers", async () => {
+    let body: unknown;
     let headers: HeadersInit | undefined;
     const fetcher: typeof fetch = async (_input, init) => {
       headers = init?.headers;
+      body = JSON.parse(init?.body?.toString() ?? "{}") as unknown;
       return new Response(
         JSON.stringify({
           server: {
@@ -24,6 +27,7 @@ describe("inventory API client", () => {
             connection_mode: "auto",
             listen_port: 23889,
             xray_mode: "external",
+            region_city: "Tokyo",
             current_upload_speed: 0,
             current_download_speed: 0,
           },
@@ -34,10 +38,12 @@ describe("inventory API client", () => {
       );
     };
 
-    const response = await createServer({ name: "edge" }, fetcher);
+    const response = await createServer({ name: "edge", region_city: "Tokyo" }, fetcher);
 
     expect(response.license_required).toBe(false);
+    expect(response.server.region_city).toBe("Tokyo");
     expect(headers).toEqual({ "Content-Type": "application/json" });
+    expect(body).toEqual({ name: "edge", region_city: "Tokyo" });
   });
 
   it("lists servers without sending license headers", async () => {
@@ -70,6 +76,61 @@ describe("inventory API client", () => {
 
     expect(response[0].name).toBe("edge");
     expect(headers).toBeUndefined();
+  });
+
+  it("updates server probe metadata with JSON only", async () => {
+    let requestUrl = "";
+    let requestBody: unknown;
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      requestBody = JSON.parse(init?.body?.toString() ?? "{}") as unknown;
+      return new Response(
+        JSON.stringify({
+          server: {
+            id: "srv_1",
+            name: "edge",
+            status: "connected",
+            connection_mode: "websocket",
+            listen_port: 23889,
+            pull_port: 0,
+            ipv6_enabled: true,
+            traffic_limit: 0,
+            xray_mode: "external",
+            region_city: "Osaka",
+            provider_name: "Example Cloud",
+            renewal_cycle: "month",
+            current_upload_speed: 0,
+            current_download_speed: 0,
+            created_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:00Z",
+          },
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await updateServerProbeMetadata(
+      "srv_1",
+      {
+        region_city: "Osaka",
+        provider_name: "Example Cloud",
+        renewal_cycle: "month",
+      },
+      fetcher,
+    );
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/probe-metadata");
+    expect(headers).toEqual({ "Content-Type": "application/json" });
+    expect(requestBody).toEqual({
+      region_city: "Osaka",
+      provider_name: "Example Cloud",
+      renewal_cycle: "month",
+    });
+    expect(response.license_required).toBe(false);
+    expect(response.server.region_city).toBe("Osaka");
   });
 
   it("reads latest telemetry without sending license headers", async () => {

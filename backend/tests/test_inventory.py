@@ -37,6 +37,70 @@ def test_server_create_issues_agent_token_without_license_header(tmp_path: Path)
     assert "agent_token" not in payload["server"]
 
 
+def test_server_probe_metadata_round_trips_to_public_probe(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    created = client.post(
+        "/api/v1/servers",
+        json={
+            "name": "edge-meta",
+            "ip_address": "203.0.113.10",
+            "region": "asia-east",
+            "region_country": "JP",
+            "region_name": "Japan",
+            "region_city": "Tokyo",
+            "provider_name": "Example Cloud",
+            "provider_url": "https://provider.example",
+            "expires_at": "2026-12-31T00:00:00Z",
+            "renewal_price": 12.5,
+            "renewal_price_cny": 89,
+            "renewal_cycle": "month",
+            "renewal_currency": "USD",
+            "telecom_paid_peer": True,
+        },
+    )
+
+    assert created.status_code == 201
+    server_id = created.json()["server"]["id"]
+    assert created.json()["license_required"] is False
+    assert created.json()["server"]["provider_name"] == "Example Cloud"
+    assert created.json()["server"]["renewal_cycle"] == "month"
+
+    updated = client.patch(
+        f"/api/v1/servers/{server_id}/probe-metadata",
+        json={
+            "region_city": "Osaka",
+            "provider_url": None,
+            "renewal_price": 10,
+            "telecom_paid_peer": False,
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["license_required"] is False
+    updated_server = updated.json()["server"]
+    assert updated_server["region_city"] == "Osaka"
+    assert updated_server["provider_url"] is None
+    assert updated_server["renewal_price"] == 10
+    assert updated_server["telecom_paid_peer"] is False
+
+    probe = client.get("/api/v1/public/probe-servers").json()["servers"][0]
+    assert probe["name"] == "edge-meta"
+    assert probe["region"] == "asia-east"
+    assert probe["region_country"] == "JP"
+    assert probe["region_name"] == "Japan"
+    assert probe["region_city"] == "Osaka"
+    assert probe["provider_name"] == "Example Cloud"
+    assert probe["expires_at"] == "2026-12-31"
+    assert probe["renewal_price"] == 10
+    assert probe["renewal_price_cny"] == 89
+    assert probe["renewal_cycle"] == "month"
+    assert probe["renewal_currency"] == "USD"
+    assert probe["telecom_paid_peer"] is False
+    assert "ip_address" not in probe
+    assert "agent_token" not in probe
+
+
 def test_agent_registration_connects_server_without_license_header(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-2"}).json()
@@ -335,6 +399,7 @@ def test_public_probe_settings_customize_payload_and_disable_servers(tmp_path: P
             "logo": "https://example.com/logo.png",
             "show_resource_heatmap": False,
             "show_traffic_quota": False,
+            "show_renewal_timeline": True,
             "show_health_score": False,
             "refresh_interval_sec": 2,
             "appearance": {
@@ -352,6 +417,7 @@ def test_public_probe_settings_customize_payload_and_disable_servers(tmp_path: P
     assert settings["description"] == "Public node telemetry"
     assert settings["show_resource_heatmap"] is False
     assert settings["show_traffic_quota"] is False
+    assert settings["show_renewal_timeline"] is True
     assert settings["refresh_interval_sec"] == 2
     assert settings["appearance"] == {
         "theme": "compact",
