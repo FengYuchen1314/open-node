@@ -327,11 +327,16 @@ body {
 }
 
 .runtime-summary-row,
+.runtime-head-actions,
 .runtime-chip-row,
 .runtime-inbound-side {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.runtime-head-actions {
+  justify-content: flex-end;
 }
 
 .runtime-inbound-list {
@@ -1408,6 +1413,7 @@ body {
   .probe-target-compare-actions,
   .probe-token-actions,
   .probe-task-actions,
+  .runtime-head-actions,
   .runtime-inbound-side,
   .snapshot-actions {
     align-items: stretch;

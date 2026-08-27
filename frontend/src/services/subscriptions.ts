@@ -23,6 +23,8 @@ import type {
   SubscriptionTemplatePresetsResponse,
   XrayRuntimeNodeCreateRequest,
   XrayRuntimeNodeDraftsResponse,
+  XrayRuntimeNodeImportRequest,
+  XrayRuntimeNodeImportResponse,
 } from "../domain/subscriptions";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -280,6 +282,25 @@ export async function createManagedNodeFromRuntimeInbound(
     throw await apiError(response, "Xray runtime node create request failed");
   }
   return response.json() as Promise<ManagedNodeResponse>;
+}
+
+export async function importManagedNodesFromRuntimeInbounds(
+  serverId: string,
+  payload: XrayRuntimeNodeImportRequest = {},
+  fetcher = fetch,
+): Promise<XrayRuntimeNodeImportResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/nodes/import`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray runtime nodes import request failed");
+  }
+  return response.json() as Promise<XrayRuntimeNodeImportResponse>;
 }
 
 export async function listSubscriptionPlans(

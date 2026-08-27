@@ -615,6 +615,82 @@ def test_xray_runtime_node_drafts_handle_missing_scan_and_unavailable_inbound(
     assert create_response.json()["detail"] == "unsupported_protocol, missing_port"
 
 
+def test_xray_runtime_node_import_creates_only_missing_available_nodes(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-runtime-import", "domain": "edge.example.com"},
+    ).json()
+    server_id = created["server"]["id"]
+    command = client.post(f"/api/v1/servers/{server_id}/operations/scan").json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                **scan_result_payload(),
+                "inbounds": [
+                    {
+                        "tag": "vless-443",
+                        "port": 443,
+                        "protocol": "vless",
+                        "streamSettings": {"network": "tcp", "security": "tls"},
+                    },
+                    {
+                        "tag": "trojan-443",
+                        "port": 8443,
+                        "protocol": "trojan",
+                        "streamSettings": {"network": "tcp", "security": "tls"},
+                    },
+                    {"tag": "dokodemo", "protocol": "dokodemo-door"},
+                ],
+            },
+        },
+    )
+    assert result.status_code == 200
+    existing = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes",
+        json={"source_index": 1},
+    ).json()["node"]
+
+    response = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes/import",
+        json={"host": "public.example.com", "extra_tags": ["imported", "runtime"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["license_required"] is False
+    assert payload["has_scan"] is True
+    assert payload["created_count"] == 1
+    assert payload["existing_count"] == 1
+    assert payload["skipped_count"] == 1
+    assert payload["created_nodes"][0]["name"] == "edge-runtime-import vless-443"
+    assert payload["created_nodes"][0]["config"]["server"] == "public.example.com"
+    assert payload["created_nodes"][0]["tags"] == ["runtime", "vless", "tcp", "tls", "imported"]
+    assert payload["existing_nodes"][0]["id"] == existing["id"]
+    assert payload["skipped"][0] == {
+        "source_index": 2,
+        "source_tag": "dokodemo",
+        "source_display_name": "dokodemo",
+        "warnings": ["unsupported_protocol", "missing_port"],
+    }
+    assert len(client.get("/api/v1/nodes").json()["nodes"]) == 2
+
+    repeated = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/nodes/import",
+        json={},
+    ).json()
+
+    assert repeated["created_count"] == 0
+    assert repeated["existing_count"] == 2
+    assert repeated["skipped_count"] == 1
+
+
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-traffic"}).json()

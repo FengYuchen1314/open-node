@@ -381,6 +381,32 @@ export interface XrayRuntimeNodeCreateRequest {
   enabled?: boolean;
 }
 
+export interface XrayRuntimeNodeImportRequest {
+  source_indexes?: number[] | null;
+  host?: string | null;
+  extra_tags?: string[];
+  enabled?: boolean;
+}
+
+export interface XrayRuntimeNodeImportSkipped {
+  source_index: number;
+  source_tag?: string | null;
+  source_display_name: string;
+  warnings: string[];
+}
+
+export interface XrayRuntimeNodeImportResponse {
+  server_id: string;
+  has_scan: boolean;
+  created_nodes: ManagedNode[];
+  existing_nodes: ManagedNode[];
+  skipped: XrayRuntimeNodeImportSkipped[];
+  created_count: number;
+  existing_count: number;
+  skipped_count: number;
+  license_required: false;
+}
+
 export interface SubscriptionPlansResponse {
   plans: SubscriptionPlan[];
   license_required: false;

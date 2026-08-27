@@ -137,6 +137,9 @@ from open_node.domain.subscriptions import (
     XrayRuntimeNodeCreateRequest,
     XrayRuntimeNodeDraft,
     XrayRuntimeNodeDraftsResponse,
+    XrayRuntimeNodeImportRequest,
+    XrayRuntimeNodeImportResponse,
+    XrayRuntimeNodeImportSkipped,
 )
 
 
@@ -1300,12 +1303,10 @@ class InventoryStore:
             if not draft.create_available:
                 warnings = ", ".join(draft.warnings) or "draft unavailable"
                 raise XrayRuntimeNodeDraftUnavailableError(warnings)
-            existing = self._existing_xray_runtime_node(
-                session,
-                server=server,
-                source_tag=draft.source_tag,
-                source_display_name=draft.source_display_name,
-                protocol=draft.draft.protocol,
+            existing = (
+                session.get(ManagedNodeModel, str(draft.existing_node_id))
+                if draft.existing_node_id
+                else None
             )
             if existing:
                 return self._managed_node_read(existing)
@@ -1314,6 +1315,86 @@ class InventoryStore:
             session.commit()
             session.refresh(node)
             return self._managed_node_read(node)
+
+    def import_managed_nodes_from_xray_runtime(
+        self,
+        server_id: UUID,
+        payload: XrayRuntimeNodeImportRequest,
+    ) -> XrayRuntimeNodeImportResponse:
+        now = datetime.now(tz=UTC)
+        created_nodes: list[ManagedNodeRead] = []
+        existing_nodes: list[ManagedNodeRead] = []
+        skipped: list[XrayRuntimeNodeImportSkipped] = []
+
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            scan = session.get(AgentScanResultModel, str(server_id))
+            if scan is None:
+                return XrayRuntimeNodeImportResponse(server_id=server_id)
+
+            inbounds = scan.inbounds or []
+            indexes = (
+                payload.source_indexes
+                if payload.source_indexes is not None
+                else range(len(inbounds))
+            )
+            for index in indexes:
+                if index >= len(inbounds):
+                    skipped.append(
+                        XrayRuntimeNodeImportSkipped(
+                            source_index=index,
+                            source_display_name=f"inbound-{index + 1}",
+                            warnings=["not_found"],
+                        )
+                    )
+                    continue
+                draft = self._xray_runtime_node_draft(
+                    session=session,
+                    server=server,
+                    inbound=inbounds[index],
+                    index=index,
+                    host=payload.host,
+                    extra_tags=payload.extra_tags,
+                    payload=XrayRuntimeNodeCreateRequest(
+                        source_index=index,
+                        host=payload.host,
+                        enabled=payload.enabled,
+                    ),
+                )
+                if draft.existing_node_id:
+                    existing = session.get(ManagedNodeModel, str(draft.existing_node_id))
+                    if existing:
+                        existing_nodes.append(self._managed_node_read(existing))
+                    continue
+                if not draft.create_available:
+                    skipped.append(
+                        XrayRuntimeNodeImportSkipped(
+                            source_index=draft.source_index,
+                            source_tag=draft.source_tag,
+                            source_display_name=draft.source_display_name,
+                            warnings=draft.warnings,
+                        )
+                    )
+                    continue
+                node = self._new_managed_node_model(server, draft.draft, now)
+                session.add(node)
+                session.flush()
+                created_nodes.append(self._managed_node_read(node))
+
+            session.commit()
+
+        return XrayRuntimeNodeImportResponse(
+            server_id=server_id,
+            has_scan=True,
+            created_nodes=created_nodes,
+            existing_nodes=existing_nodes,
+            skipped=skipped,
+            created_count=len(created_nodes),
+            existing_count=len(existing_nodes),
+            skipped_count=len(skipped),
+        )
 
     def list_xray_config_snapshots(
         self,
@@ -5430,6 +5511,7 @@ class InventoryStore:
         inbound: Any,
         index: int,
         host: str | None = None,
+        extra_tags: Iterable[str | None] = (),
         payload: XrayRuntimeNodeCreateRequest | None = None,
     ) -> XrayRuntimeNodeDraft:
         runtime = cls._xray_runtime_inbound_read(inbound, index)
@@ -5446,7 +5528,7 @@ class InventoryStore:
             create_available = False
             warnings.append("missing_port")
 
-        protocol = managed_protocol or runtime.protocol
+        protocol = managed_protocol or "unsupported"
         node_name = cls._runtime_node_name(server, runtime, payload.name if payload else None)
         draft = ManagedNodeCreate(
             name=node_name,
@@ -5456,10 +5538,10 @@ class InventoryStore:
             inbound_tag=runtime.tag,
             routed_outbound_tag=None,
             routed_rule_marktag=None,
-            tag=runtime.protocol if runtime.protocol != "unknown" else None,
+            tag=runtime.protocol[:120] if runtime.protocol != "unknown" else None,
             tags=payload.tags
             if payload and payload.tags is not None
-            else cls._runtime_node_tags(runtime, protocol),
+            else cls._runtime_node_tags(runtime, protocol, extra_tags),
             enabled=payload.enabled if payload else True,
             client_template=cls._runtime_node_client_template(runtime, settings, protocol),
             config=cls._runtime_node_config(
@@ -5479,6 +5561,7 @@ class InventoryStore:
             source_tag=runtime.tag,
             source_display_name=runtime.display_name,
             protocol=protocol,
+            port=runtime.port,
         )
         return XrayRuntimeNodeDraft(
             source_index=index,
@@ -5737,6 +5820,7 @@ class InventoryStore:
         cls,
         runtime: XrayRuntimeInboundRead,
         protocol: str,
+        extra_tags: Iterable[str | None] = (),
     ) -> list[str]:
         return cls._dedupe_text(
             [
@@ -5745,6 +5829,7 @@ class InventoryStore:
                 runtime.protocol,
                 runtime.network,
                 runtime.security,
+                *extra_tags,
             ]
         )[:24]
 
@@ -5781,13 +5866,15 @@ class InventoryStore:
             items.append(normalized)
         return items
 
-    @staticmethod
+    @classmethod
     def _existing_xray_runtime_node(
+        cls,
         session: Session,
         server: ServerModel,
         source_tag: str | None,
         source_display_name: str,
         protocol: str,
+        port: int | None = None,
     ) -> ManagedNodeModel | None:
         statement = select(ManagedNodeModel).where(
             ManagedNodeModel.server_id == server.id,
@@ -5795,12 +5882,23 @@ class InventoryStore:
         )
         if source_tag:
             statement = statement.where(ManagedNodeModel.inbound_tag == source_tag)
-        else:
-            statement = statement.where(
-                ManagedNodeModel.inbound_tag.is_(None),
-                ManagedNodeModel.name == f"{server.name} {source_display_name}"[:120].rstrip(),
+            return session.scalar(statement.order_by(ManagedNodeModel.created_at))
+        candidates = session.scalars(
+            statement.where(ManagedNodeModel.inbound_tag.is_(None)).order_by(
+                ManagedNodeModel.created_at
             )
-        return session.scalar(statement.order_by(ManagedNodeModel.created_at))
+        ).all()
+        fallback_name = f"{server.name} {source_display_name}"[:120].rstrip()
+        for candidate in candidates:
+            if candidate.name == fallback_name:
+                return candidate
+        if port is None:
+            return None
+        for candidate in candidates:
+            config = candidate.config if isinstance(candidate.config, dict) else {}
+            if cls._int_value(config.get("port")) == port:
+                return candidate
+        return None
 
     @staticmethod
     def _generated_inbound_name(protocol: str, port: int | None, index: int) -> str:

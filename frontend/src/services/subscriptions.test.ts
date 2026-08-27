@@ -21,6 +21,7 @@ import {
   getProductUserSubscriptionToken,
   getProductUserTraffic,
   importSubscriptionCatalog,
+  importManagedNodesFromRuntimeInbounds,
   listXrayRuntimeNodeDrafts,
   listSubscriptionTemplatePresets,
   listManagedNodes,
@@ -405,6 +406,19 @@ describe("subscriptions API client", () => {
           license_required: false,
         });
       }
+      if (url.endsWith("/xray/runtime/nodes/import")) {
+        return jsonResponse({
+          server_id: "srv_1",
+          has_scan: true,
+          created_nodes: [managedNode],
+          existing_nodes: [],
+          skipped: [],
+          created_count: 1,
+          existing_count: 0,
+          skipped_count: 0,
+          license_required: false,
+        });
+      }
       return jsonResponse({ node: managedNode, license_required: false }, 201);
     };
 
@@ -414,10 +428,16 @@ describe("subscriptions API client", () => {
       { source_index: 0, host: "public.example.com" },
       fetcher,
     );
+    const imported = await importManagedNodesFromRuntimeInbounds(
+      "srv_1",
+      { source_indexes: [0], extra_tags: ["imported"] },
+      fetcher,
+    );
 
     expect(drafts.license_required).toBe(false);
     expect(drafts.drafts[0].draft.inbound_tag).toBe("vless-443");
     expect(node.node.id).toBe("node_1");
+    expect(imported.created_count).toBe(1);
     expect(calls).toEqual([
       {
         url: "/api/v1/servers/srv_1/xray/runtime/node-drafts",
@@ -428,6 +448,11 @@ describe("subscriptions API client", () => {
         url: "/api/v1/servers/srv_1/xray/runtime/nodes",
         headers: { "Content-Type": "application/json" },
         body: { source_index: 0, host: "public.example.com" },
+      },
+      {
+        url: "/api/v1/servers/srv_1/xray/runtime/nodes/import",
+        headers: { "Content-Type": "application/json" },
+        body: { source_indexes: [0], extra_tags: ["imported"] },
       },
     ]);
   });

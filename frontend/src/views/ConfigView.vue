@@ -25,6 +25,7 @@ import {
 } from "../services/inventory";
 import {
   createManagedNodeFromRuntimeInbound,
+  importManagedNodesFromRuntimeInbounds,
   listXrayRuntimeNodeDrafts,
 } from "../services/subscriptions";
 
@@ -38,6 +39,7 @@ const runtimeNodeDrafts = ref<XrayRuntimeNodeDraft[]>([]);
 const loading = ref(false);
 const snapshotsLoading = ref(false);
 const runtimeInventoryLoading = ref(false);
+const runtimeNodeImporting = ref(false);
 const runtimeNodeSavingKey = ref("");
 const savingOperation = ref<AgentOperationKind | "">("");
 const restoringSnapshotId = ref("");
@@ -107,6 +109,12 @@ const runtimeProtocolEntries = computed(() =>
 );
 const runtimeNodeDraftsByIndex = computed(
   () => new Map(runtimeNodeDrafts.value.map((draft) => [draft.source_index, draft])),
+);
+const runtimeMissingNodeCount = computed(
+  () =>
+    runtimeNodeDrafts.value.filter(
+      (draft) => draft.create_available && !draft.existing_node_id,
+    ).length,
 );
 const runtimeStatusLabel = computed(() => {
   if (!xrayRuntimeInventory.value?.has_scan) {
@@ -582,9 +590,42 @@ function runtimeNodeCreateDisabled(inbound: XrayRuntimeInbound) {
     !draft ||
     !draft.create_available ||
     Boolean(draft.existing_node_id) ||
+    runtimeNodeImporting.value ||
     (Boolean(runtimeNodeSavingKey.value) &&
       runtimeNodeSavingKey.value !== runtimeNodeSavingId(inbound))
   );
+}
+
+function runtimeImportTooltip() {
+  if (runtimeInventoryLoading.value) {
+    return "Runtime inventory is loading";
+  }
+  if (!xrayRuntimeInventory.value?.has_scan) {
+    return "Run a scan before importing runtime nodes";
+  }
+  if (runtimeMissingNodeCount.value === 0) {
+    return "All available runtime inbounds are already managed";
+  }
+  return `Import ${runtimeMissingNodeCount.value} missing runtime nodes`;
+}
+
+async function importRuntimeManagedNodes() {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  runtimeNodeImporting.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await importManagedNodesFromRuntimeInbounds(selectedServerId.value);
+    successMessage.value = `Imported ${response.created_count} nodes, ${response.existing_count} already managed, ${response.skipped_count} skipped.`;
+    await refreshXrayRuntimeInventory();
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    runtimeNodeImporting.value = false;
+  }
 }
 
 async function createRuntimeManagedNode(inbound: XrayRuntimeInbound) {
@@ -943,18 +984,42 @@ function formatDateTime(value: string) {
                   <div class="section-title compact-title">Runtime inventory</div>
                   <div class="section-subtitle">{{ runtimeSummary }}</div>
                 </div>
-                <v-tooltip text="Refresh runtime inventory">
-                  <template #activator="{ props }">
-                    <v-btn
-                      v-bind="props"
-                      :loading="runtimeInventoryLoading"
-                      icon="mdi-refresh"
-                      size="small"
-                      variant="text"
-                      @click="refreshXrayRuntimeInventory(true)"
-                    />
-                  </template>
-                </v-tooltip>
+                <div class="runtime-head-actions">
+                  <v-tooltip :text="runtimeImportTooltip()">
+                    <template #activator="{ props }">
+                      <span v-bind="props" class="runtime-node-action">
+                        <v-btn
+                          :disabled="
+                            runtimeInventoryLoading ||
+                            runtimeNodeImporting ||
+                            runtimeMissingNodeCount === 0 ||
+                            Boolean(runtimeNodeSavingKey)
+                          "
+                          :loading="runtimeNodeImporting"
+                          color="primary"
+                          prepend-icon="mdi-database-import-outline"
+                          size="small"
+                          variant="tonal"
+                          @click="importRuntimeManagedNodes"
+                        >
+                          Import missing
+                        </v-btn>
+                      </span>
+                    </template>
+                  </v-tooltip>
+                  <v-tooltip text="Refresh runtime inventory">
+                    <template #activator="{ props }">
+                      <v-btn
+                        v-bind="props"
+                        :loading="runtimeInventoryLoading"
+                        icon="mdi-refresh"
+                        size="small"
+                        variant="text"
+                        @click="refreshXrayRuntimeInventory(true)"
+                      />
+                    </template>
+                  </v-tooltip>
+                </div>
               </div>
 
               <div class="runtime-summary-row">

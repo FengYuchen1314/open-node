@@ -55,6 +55,8 @@ from open_node.domain.subscriptions import (
     ManagedNodeResponse,
     XrayRuntimeNodeCreateRequest,
     XrayRuntimeNodeDraftsResponse,
+    XrayRuntimeNodeImportRequest,
+    XrayRuntimeNodeImportResponse,
 )
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
@@ -169,6 +171,21 @@ def create_managed_node_from_xray_runtime(
     except XrayRuntimeNodeDraftUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return ManagedNodeResponse(node=node)
+
+
+@router.post(
+    "/{server_id}/xray/runtime/nodes/import",
+    response_model=XrayRuntimeNodeImportResponse,
+)
+def import_managed_nodes_from_xray_runtime(
+    server_id: UUID,
+    payload: XrayRuntimeNodeImportRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> XrayRuntimeNodeImportResponse:
+    try:
+        return store.import_managed_nodes_from_xray_runtime(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/{server_id}/xray/config-snapshots", response_model=ServerXrayConfigSnapshotsResponse)

@@ -214,6 +214,64 @@ class XrayRuntimeNodeCreateRequest(BaseModel):
         return tags
 
 
+class XrayRuntimeNodeImportRequest(BaseModel):
+    source_indexes: list[int] | None = Field(default=None, max_length=1000)
+    host: str | None = Field(default=None, max_length=255)
+    extra_tags: list[str] = Field(default_factory=list, max_length=24)
+    enabled: bool = True
+
+    @field_validator("host")
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "runtime node field")
+
+    @field_validator("source_indexes")
+    @classmethod
+    def validate_source_indexes(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        indexes: list[int] = []
+        seen: set[int] = set()
+        for index in value:
+            if index < 0:
+                raise ValueError("runtime node source index must be non-negative")
+            if index not in seen:
+                indexes.append(index)
+                seen.add(index)
+        return indexes
+
+    @field_validator("extra_tags")
+    @classmethod
+    def validate_extra_tags(cls, value: list[str]) -> list[str]:
+        tags: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            tag = _strip_required_text(raw, "tag")
+            if tag not in seen:
+                tags.append(tag)
+                seen.add(tag)
+        return tags
+
+
+class XrayRuntimeNodeImportSkipped(BaseModel):
+    source_index: int = Field(ge=0)
+    source_tag: str | None = None
+    source_display_name: str
+    warnings: list[str] = Field(default_factory=list)
+
+
+class XrayRuntimeNodeImportResponse(BaseModel):
+    server_id: UUID
+    has_scan: bool = False
+    created_nodes: list[ManagedNodeRead] = Field(default_factory=list)
+    existing_nodes: list[ManagedNodeRead] = Field(default_factory=list)
+    skipped: list[XrayRuntimeNodeImportSkipped] = Field(default_factory=list)
+    created_count: int = 0
+    existing_count: int = 0
+    skipped_count: int = 0
+    license_required: Literal[False] = False
+
+
 class SubscriptionCredentialRead(BaseModel):
     id: UUID
     username: str
