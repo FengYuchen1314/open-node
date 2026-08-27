@@ -2,7 +2,12 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 
 import type { ProbePayload, ProbeServer, ProbeSettingsUpdate } from "../domain/probe";
-import type { ProbeHealth, ProbeLatencyBucket, ProbeStatusFilter } from "../domain/probe-insights";
+import type {
+  ProbeHealth,
+  ProbeLatencyBucket,
+  ProbeReturnRouteBadge,
+  ProbeStatusFilter,
+} from "../domain/probe-insights";
 import {
   buildRegionOptions,
   filterProbeServers,
@@ -12,6 +17,7 @@ import {
   percent,
   probeHealth,
   remainingDaysLabel,
+  returnRouteBadges,
   serverRegionLabel,
   summarizeSevenDayTraffic,
   trafficHotspots,
@@ -49,6 +55,7 @@ const settingsForm = reactive({
   show_daily_trend: false,
   show_traffic_hotspots: false,
   show_traffic_7d: false,
+  show_return_route: false,
   show_renewal_timeline: false,
   show_health_score: true,
 });
@@ -65,6 +72,7 @@ const showRegionOverview = computed(() => payload.value?.show_globe === true && 
 const showDailyTrend = computed(() => payload.value?.show_daily_trend === true);
 const showTrafficHotspots = computed(() => payload.value?.show_traffic_hotspots === true);
 const showSevenDayTraffic = computed(() => payload.value?.show_traffic_7d === true);
+const showReturnRoute = computed(() => payload.value?.show_return_route === true);
 const onlineCount = computed(() => servers.value.filter((server) => server.online).length);
 const expiringCount = computed(() => servers.value.filter((server) => isExpiring(server)).length);
 const expiredCount = computed(() => servers.value.filter((server) => isExpired(server)).length);
@@ -240,6 +248,7 @@ function syncSettingsForm(nextPayload: ProbePayload) {
   settingsForm.show_daily_trend = nextPayload.show_daily_trend === true;
   settingsForm.show_traffic_hotspots = nextPayload.show_traffic_hotspots === true;
   settingsForm.show_traffic_7d = nextPayload.show_traffic_7d === true;
+  settingsForm.show_return_route = nextPayload.show_return_route === true;
   settingsForm.show_renewal_timeline = nextPayload.show_renewal_timeline === true;
   settingsForm.show_health_score = nextPayload.show_health_score !== false;
 }
@@ -257,6 +266,7 @@ function settingsPayload(): ProbeSettingsUpdate {
     show_daily_trend: settingsForm.show_daily_trend,
     show_traffic_hotspots: settingsForm.show_traffic_hotspots,
     show_traffic_7d: settingsForm.show_traffic_7d,
+    show_return_route: settingsForm.show_return_route,
     show_renewal_timeline: settingsForm.show_renewal_timeline,
     show_health_score: settingsForm.show_health_score,
     appearance: {
@@ -421,6 +431,11 @@ function quotaWidth(server: ProbeServer) {
 function sevenDayTrafficSummary(server: ProbeServer) {
   const rows = server.daily_traffic ?? [];
   return rows.length ? `7d ${formatBytes(trafficTotal(rows))}` : "No 7d traffic";
+}
+
+function returnRouteTitle(route: ProbeReturnRouteBadge) {
+  const details = [route.region, route.testedAt ? `tested ${route.testedAt}` : ""].filter(Boolean);
+  return details.length ? `${route.carrierLabel} ${route.routeType} - ${details.join(", ")}` : `${route.carrierLabel} ${route.routeType}`;
 }
 
 function renewalTone(server: ProbeServer) {
@@ -730,6 +745,13 @@ function formatBytes(value: number) {
             label="7d traffic"
           />
           <v-switch
+            v-model="settingsForm.show_return_route"
+            color="secondary"
+            density="comfortable"
+            hide-details
+            label="Return routes"
+          />
+          <v-switch
             v-model="settingsForm.show_renewal_timeline"
             color="secondary"
             density="comfortable"
@@ -812,6 +834,7 @@ function formatBytes(value: number) {
             <th v-if="showSystemColumn">System</th>
             <th>Latency</th>
             <th v-if="showTrafficColumn">Traffic</th>
+            <th v-if="showReturnRoute">Routes</th>
             <th v-if="showRenewalColumn">Renewal</th>
             <th class="number-cell">Up</th>
             <th class="number-cell">Down</th>
@@ -881,6 +904,22 @@ function formatBytes(value: number) {
               </div>
               <div v-if="!showRenewalColumn" class="server-subline">
                 {{ renewalSummary(server) }}
+              </div>
+            </td>
+            <td v-if="showReturnRoute" class="telemetry-cell">
+              <div class="probe-return-routes">
+                <v-chip
+                  v-for="route in returnRouteBadges(server)"
+                  :key="route.carrier"
+                  :class="{ 'is-premium': route.premium, 'is-missing': route.missing }"
+                  :title="returnRouteTitle(route)"
+                  density="compact"
+                  size="small"
+                  variant="tonal"
+                >
+                  <span>{{ route.carrierLabel }}</span>
+                  <strong>{{ route.routeType }}</strong>
+                </v-chip>
               </div>
             </td>
             <td v-if="showRenewalColumn" class="telemetry-cell">

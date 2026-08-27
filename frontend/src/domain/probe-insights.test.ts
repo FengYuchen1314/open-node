@@ -7,6 +7,7 @@ import {
   latencyBucketLevels,
   probeHealth,
   remainingDaysLabel,
+  returnRouteBadges,
   summarizeSevenDayTraffic,
   trafficHotspots,
 } from "./probe-insights";
@@ -147,5 +148,52 @@ describe("probe insights", () => {
       { ms: 225, loss: 10, level: "critical" },
     ]);
     expect(remainingDaysLabel("2026-08-27", now)).toBe("expires today");
+  });
+
+  it("normalizes return route badges for three-carrier display", () => {
+    const badges = returnRouteBadges({
+      name: "edge",
+      online: true,
+      telecom_paid_peer: true,
+      return_routes: [
+        {
+          carrier: "telecom",
+          region: "Guangzhou",
+          route_type: "163",
+          tested_at: "2026-08-27T01:02:03Z",
+        },
+        { carrier: "mobile", region: "Shanghai", route_type: "CMIN" },
+      ],
+    });
+
+    expect(badges).toEqual([
+      {
+        carrier: "telecom",
+        carrierLabel: "Telecom",
+        routeType: "163 PP",
+        region: "Guangzhou",
+        testedAt: "2026-08-27T01:02:03Z",
+        premium: true,
+        missing: false,
+      },
+      {
+        carrier: "unicom",
+        carrierLabel: "Unicom",
+        routeType: "Unknown",
+        region: "",
+        testedAt: "",
+        premium: false,
+        missing: true,
+      },
+      {
+        carrier: "mobile",
+        carrierLabel: "Mobile",
+        routeType: "CMI",
+        region: "Shanghai",
+        testedAt: "",
+        premium: false,
+        missing: false,
+      },
+    ]);
   });
 });

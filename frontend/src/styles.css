@@ -602,6 +602,39 @@ body {
   height: 100%;
 }
 
+.probe-return-routes {
+  display: grid;
+  gap: 6px;
+  min-width: 128px;
+}
+
+.probe-return-routes .v-chip {
+  justify-content: space-between;
+  max-width: 160px;
+  width: 100%;
+}
+
+.probe-return-routes span {
+  color: #66736f;
+  font-size: 11px;
+  margin-right: 8px;
+}
+
+.probe-return-routes strong {
+  color: #263532;
+  font-size: 12px;
+  font-weight: 780;
+  overflow-wrap: anywhere;
+}
+
+.probe-return-routes .is-premium {
+  background: #fff3c4;
+}
+
+.probe-return-routes .is-missing {
+  opacity: 0.58;
+}
+
 .server-table tr.is-filtered-offline td {
   opacity: 0.82;
 }

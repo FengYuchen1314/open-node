@@ -415,6 +415,7 @@ def test_public_probe_settings_customize_payload_and_disable_servers(tmp_path: P
             "show_resource_heatmap": False,
             "show_traffic_quota": False,
             "show_renewal_timeline": True,
+            "show_return_route": True,
             "show_health_score": False,
             "refresh_interval_sec": 2,
             "appearance": {
@@ -433,6 +434,7 @@ def test_public_probe_settings_customize_payload_and_disable_servers(tmp_path: P
     assert settings["show_resource_heatmap"] is False
     assert settings["show_traffic_quota"] is False
     assert settings["show_renewal_timeline"] is True
+    assert settings["show_return_route"] is True
     assert settings["refresh_interval_sec"] == 2
     assert settings["appearance"] == {
         "theme": "compact",
@@ -653,6 +655,91 @@ def test_agent_command_result_error_marks_command_failed(tmp_path: Path) -> None
     assert response.status_code == 200
     assert response.json()["command"]["status"] == "failed"
     assert response.json()["command"]["result_error"] == "agent handler panic"
+
+
+def test_return_route_command_result_updates_public_probe_badges(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-routes", "telecom_paid_peer": True},
+    ).json()
+    server_id = created["server"]["id"]
+
+    command = client.post(
+        f"/api/v1/servers/{server_id}/operations/network/return-route-test",
+        json={
+            "targets": [
+                {"carrier": "telecom", "region": "Guangzhou", "host": "ct.example"},
+                {"carrier": "unicom", "region": "Shanghai", "host": "cu.example"},
+                {"carrier": "mobile", "region": "Beijing", "host": "cm.example"},
+            ],
+        },
+    ).json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                "success": True,
+                "results": [
+                    {
+                        "carrier": "mobile",
+                        "region": "Beijing",
+                        "success": True,
+                        "route_type": "CMIN",
+                        "entry_hop": {"ip": "198.51.100.1", "asn": "58807"},
+                        "reason": "private diagnostic detail",
+                    },
+                    {
+                        "carrier": "telecom",
+                        "region": "Guangzhou",
+                        "success": True,
+                        "route_type": "163",
+                        "entry_hop": {"ip": "198.51.100.2", "asn": "4134"},
+                    },
+                    {
+                        "carrier": "unicom",
+                        "region": "Shanghai",
+                        "success": False,
+                        "error": "trace timeout",
+                    },
+                    {"carrier": "unknown", "route_type": "ignored"},
+                ],
+            },
+        },
+    )
+    assert result.status_code == 200
+
+    client.put("/api/v1/public/probe-settings", json={"show_return_route": True})
+    server = client.get("/api/v1/public/probe-servers").json()["servers"][0]
+
+    assert server["return_routes"] == [
+        {
+            "carrier": "telecom",
+            "region": "Guangzhou",
+            "route_type": "163",
+            "tested_at": server["return_routes"][0]["tested_at"],
+        },
+        {
+            "carrier": "unicom",
+            "region": "Shanghai",
+            "route_type": "Unknown",
+            "tested_at": server["return_routes"][1]["tested_at"],
+        },
+        {
+            "carrier": "mobile",
+            "region": "Beijing",
+            "route_type": "CMIN",
+            "tested_at": server["return_routes"][2]["tested_at"],
+        },
+    ]
+    assert server["return_routes"][0]["tested_at"]
+    assert "entry_ip" not in server["return_routes"][0]
+    assert "entry_asn" not in server["return_routes"][0]
+    assert "reason" not in server["return_routes"][0]
 
 
 def test_system_info_operation_queues_mmwx_child_command(tmp_path: Path) -> None:

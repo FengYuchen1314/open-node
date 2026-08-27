@@ -172,8 +172,12 @@ updates without changing the Open Node no-license contract.
 High-level workflow wrappers cover active agent inbound, outbound, routing,
 batch apply, certificate deployment, nginx SSL setup, nginx website inventory
 and deletion, return-route testing, website validation, and embedded limiter
-configuration. Routing manage requests preserve the agent's camel-case
-`burstObservatory` field while keeping the Open Node API typed and explicit.
+configuration. Successful return-route test command results are parsed into a
+local latest-result table keyed by server and carrier; public probe output only
+exposes the carrier, region, route type, and timestamp, leaving hop evidence
+and diagnostic reasons private. Routing manage requests preserve the agent's
+camel-case `burstObservatory` field while keeping the Open Node API typed and
+explicit.
 
 The frontend exposes these wrappers in a dedicated `/config` workspace. It can
 queue Xray and nginx read/write operations, load completed read results back
@@ -327,12 +331,13 @@ are also mounted at:
 - `GET /api/public/probe-ws`
 
 Probe responses are built from persisted agent telemetry snapshots. The server
-list exposes only public status, speed, resource, traffic, latency, and
-seven-day daily traffic summary fields; internal identifiers, IP addresses,
-bootstrap tokens, and agent secrets are not serialized. Daily traffic is
-calculated from Xray stat counters when present and falls back to system
-network counters across consecutive telemetry snapshots. Series lookups use the
-public server index from the sanitized list instead of private server IDs.
+list exposes only public status, speed, resource, traffic, latency, seven-day
+daily traffic summary, and optional return-route summary fields; internal
+identifiers, IP addresses, bootstrap tokens, route entry hops, trace reasons,
+and agent secrets are not serialized. Daily traffic is calculated from Xray stat
+counters when present and falls back to system network counters across
+consecutive telemetry snapshots. Series lookups use the public server index
+from the sanitized list instead of private server IDs.
 
 Server probe metadata can be supplied when a server is created or updated with
 `PATCH /api/v1/servers/{server_id}/probe-metadata`. The metadata covers region
@@ -344,13 +349,13 @@ server IDs and connectivity details.
 Probe settings are stored locally in SQLite and are license-free. They control
 the public title, description, logo URL, refresh interval, appearance metadata,
 and visibility flags such as traffic quota, resource, health, traffic-history,
-and renewal columns. When the probe is disabled, `/probe-servers` still returns
-a no-license JSON payload with `enabled=false`, but the public server list is
-empty so node telemetry is not exposed. The Vue `/probe` view can edit these
-settings and immediately uses the same public payload to render or hide table
-sections, status and region filters, region summaries, seven-day traffic bars,
-health chips, latency history buckets, quota meters, renewal badges, and live
-traffic hotspot rows.
+return-route, and renewal columns. When the probe is disabled, `/probe-servers`
+still returns a no-license JSON payload with `enabled=false`, but the public
+server list is empty so node telemetry is not exposed. The Vue `/probe` view
+can edit these settings and immediately uses the same public payload to render
+or hide table sections, status and region filters, region summaries, seven-day
+traffic bars, health chips, latency history buckets, quota meters,
+return-route badges, renewal badges, and live traffic hotspot rows.
 
 The WebSocket stream is also public and read-only. It sends the same
 `ProbePayload` structure as the HTTP list endpoint, drops any client messages,

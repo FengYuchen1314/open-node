@@ -31,6 +31,15 @@ export interface ProbeDailyTraffic {
   total: number;
 }
 
+export type ProbeRouteCarrier = "telecom" | "unicom" | "mobile";
+
+export interface ProbeReturnRoute {
+  carrier: ProbeRouteCarrier;
+  region?: string | null;
+  route_type: string;
+  tested_at?: string | null;
+}
+
 export interface ProbeServer {
   name?: string | null;
   region?: string | null;
@@ -72,6 +81,7 @@ export interface ProbeServer {
   provider_name?: string | null;
   provider_url?: string | null;
   telecom_paid_peer?: boolean | null;
+  return_routes?: ProbeReturnRoute[] | null;
 }
 
 export interface ProbeSettings {
@@ -80,6 +90,7 @@ export interface ProbeSettings {
   show_daily_trend?: boolean;
   show_traffic_hotspots?: boolean;
   show_traffic_7d?: boolean;
+  show_return_route?: boolean;
   show_resource_heatmap?: boolean;
   show_traffic_quota?: boolean;
   show_renewal_timeline?: boolean;
@@ -98,6 +109,7 @@ export interface ProbeSettingsUpdate {
   show_daily_trend?: boolean;
   show_traffic_hotspots?: boolean;
   show_traffic_7d?: boolean;
+  show_return_route?: boolean;
   show_resource_heatmap?: boolean;
   show_traffic_quota?: boolean;
   show_renewal_timeline?: boolean;

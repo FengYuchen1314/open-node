@@ -1,4 +1,4 @@
-import type { ProbeDailyTraffic, ProbePingSeries, ProbeServer } from "./probe";
+import type { ProbeDailyTraffic, ProbePingSeries, ProbeRouteCarrier, ProbeServer } from "./probe";
 
 export type ProbeStatusFilter = "all" | "online" | "offline" | "expiring" | "expired" | "renewal";
 
@@ -35,6 +35,24 @@ export interface ProbeDailyTrafficSummary {
   downlink: number;
   total: number;
 }
+
+export interface ProbeReturnRouteBadge {
+  carrier: ProbeRouteCarrier;
+  carrierLabel: string;
+  routeType: string;
+  region: string;
+  testedAt: string;
+  premium: boolean;
+  missing: boolean;
+}
+
+const routeCarriers: ProbeRouteCarrier[] = ["telecom", "unicom", "mobile"];
+const routeCarrierLabels: Record<ProbeRouteCarrier, string> = {
+  telecom: "Telecom",
+  unicom: "Unicom",
+  mobile: "Mobile",
+};
+const premiumReturnRoutes = new Set(["CN2GIA", "CTGGIA", "9929", "CMIN2", "163PP"]);
 
 export function serverRegionKey(server: ProbeServer): string {
   const value =
@@ -260,6 +278,33 @@ export function trafficTotal(rows: ProbeDailyTraffic[]): number {
   return rows.reduce((sum, row) => sum + row.total, 0);
 }
 
+export function returnRouteBadges(server: ProbeServer): ProbeReturnRouteBadge[] {
+  const byCarrier = new Map((server.return_routes ?? []).map((route) => [route.carrier, route]));
+  return routeCarriers.map((carrier) => {
+    const route = byCarrier.get(carrier);
+    const detectedRouteType = displayReturnRoute(route?.route_type || "Unknown");
+    const routeType =
+      carrier === "telecom" &&
+      server.telecom_paid_peer &&
+      normalizeReturnRoute(detectedRouteType) === "163"
+        ? "163 PP"
+        : detectedRouteType;
+    return {
+      carrier,
+      carrierLabel: routeCarrierLabels[carrier],
+      routeType,
+      region: route?.region?.trim() ?? "",
+      testedAt: route?.tested_at?.trim() ?? "",
+      premium: premiumReturnRoutes.has(normalizeReturnRoute(routeType)),
+      missing: !route,
+    };
+  });
+}
+
+export function displayReturnRoute(value: string): string {
+  return normalizeReturnRoute(value) === "CMIN" ? "CMI" : value.trim() || "Unknown";
+}
+
 export function isExpiring(server: ProbeServer, nowMs = Date.now()): boolean {
   const days = daysUntil(server.expires_at, nowMs);
   return days !== null && days >= 0 && days <= 30;
@@ -312,6 +357,10 @@ function latencyBucketLevel(ms: number, loss: number): ProbeLatencyBucket["level
     return "warning";
   }
   return "good";
+}
+
+function normalizeReturnRoute(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function daysUntil(value?: string | null, nowMs = Date.now()): number | null {

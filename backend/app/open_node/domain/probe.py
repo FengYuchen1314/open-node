@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -48,6 +48,7 @@ class ProbeSettingsRead(BaseModel):
     show_daily_trend: bool = False
     show_traffic_hotspots: bool = False
     show_traffic_7d: bool = False
+    show_return_route: bool = False
     show_resource_heatmap: bool = True
     show_traffic_quota: bool = True
     show_renewal_timeline: bool = False
@@ -79,6 +80,7 @@ class ProbeSettingsUpdate(BaseModel):
     show_daily_trend: bool | None = None
     show_traffic_hotspots: bool | None = None
     show_traffic_7d: bool | None = None
+    show_return_route: bool | None = None
     show_resource_heatmap: bool | None = None
     show_traffic_quota: bool | None = None
     show_renewal_timeline: bool | None = None
@@ -128,6 +130,23 @@ class ProbeDailyTraffic(BaseModel):
     total: int = 0
 
 
+class ProbeReturnRoute(BaseModel):
+    carrier: Literal["telecom", "unicom", "mobile"]
+    region: str | None = Field(default=None, max_length=120)
+    route_type: str = Field(default="Unknown", max_length=80)
+    tested_at: str | None = None
+
+    @field_validator("region", "tested_at")
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "return route field")
+
+    @field_validator("route_type")
+    @classmethod
+    def validate_route_type(cls, value: str) -> str:
+        return _strip_optional_text(value, "return route field") or "Unknown"
+
+
 class ProbeServer(BaseModel):
     name: str | None = None
     region: str | None = None
@@ -169,7 +188,7 @@ class ProbeServer(BaseModel):
     provider_name: str | None = None
     provider_url: str | None = None
     telecom_paid_peer: bool | None = None
-    return_routes: list[dict[str, Any]] | None = None
+    return_routes: list[ProbeReturnRoute] | None = None
 
 
 class ProbePayload(ProbeSettingsRead):

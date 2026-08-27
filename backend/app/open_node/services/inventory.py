@@ -76,6 +76,7 @@ from open_node.domain.probe import (
     ProbeMetricPoint,
     ProbePayload,
     ProbePingSeries,
+    ProbeReturnRoute,
     ProbeSeriesResponse,
     ProbeServer,
     ProbeSettingsRead,
@@ -450,6 +451,24 @@ class CommandStreamFrameModel(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class ServerReturnRouteModel(Base):
+    __tablename__ = "server_return_routes"
+
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    carrier: Mapped[str] = mapped_column(String(16), primary_key=True)
+    region: Mapped[str] = mapped_column(String(120), default="")
+    route_type: Mapped[str] = mapped_column(String(80), default="Unknown")
+    entry_ip: Mapped[str] = mapped_column(String(255), default="")
+    entry_asn: Mapped[str] = mapped_column(String(32), default="")
+    reason: Mapped[str] = mapped_column(String(2048), default="")
+    tested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AgentChangeSetModel(Base):
     __tablename__ = "agent_change_sets"
 
@@ -670,6 +689,7 @@ class ProbeSettingsModel(Base):
     show_daily_trend: Mapped[bool] = mapped_column(Boolean, default=False)
     show_traffic_hotspots: Mapped[bool] = mapped_column(Boolean, default=False)
     show_traffic_7d: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_return_route: Mapped[bool] = mapped_column(Boolean, default=False)
     show_resource_heatmap: Mapped[bool] = mapped_column(Boolean, default=True)
     show_traffic_quota: Mapped[bool] = mapped_column(Boolean, default=True)
     show_renewal_timeline: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -724,6 +744,12 @@ class InventoryStore:
                     "renewal_currency": "VARCHAR(12)",
                     "telecom_paid_peer": "BOOLEAN",
                 },
+            )
+        if "probe_settings" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector,
+                "probe_settings",
+                {"show_return_route": "BOOLEAN"},
             )
 
     def _sqlite_add_missing_columns(
@@ -952,12 +978,25 @@ class InventoryStore:
                 )
 
             servers = session.scalars(select(ServerModel).order_by(ServerModel.created_at)).all()
+            return_routes = (
+                self._probe_return_routes(session, [server.id for server in servers])
+                if settings.show_return_route
+                else {}
+            )
             probe_servers = []
             for server in servers:
                 latest = self._latest_telemetry_model(session, server.id)
                 ping = self._probe_ping_series(session, server.id, bucket_count=12, bucket_sec=300)
                 daily_traffic = self._probe_daily_traffic(session, server.id, day_count=7)
-                probe_servers.append(self._probe_server(server, latest, ping, daily_traffic))
+                probe_servers.append(
+                    self._probe_server(
+                        server,
+                        latest,
+                        ping,
+                        daily_traffic,
+                        return_routes.get(server.id),
+                    )
+                )
             return ProbePayload(
                 **settings.model_dump(exclude={"updated_at"}),
                 updated_at=settings.updated_at,
@@ -1881,7 +1920,7 @@ class InventoryStore:
             if not command or command.server_id != server.id:
                 raise CommandNotFoundError(f"command not found: {command_id}")
 
-            self._apply_command_result(server, command, payload)
+            self._apply_command_result(session, server, command, payload)
             session.commit()
             session.refresh(command)
             return self._command_read(command)
@@ -1902,7 +1941,7 @@ class InventoryStore:
             if not command:
                 raise CommandNotFoundError(f"command not found: {request_id}")
 
-            self._apply_command_result(server, command, payload)
+            self._apply_command_result(session, server, command, payload)
             session.commit()
             session.refresh(command)
             return self._command_read(command)
@@ -1990,6 +2029,7 @@ class InventoryStore:
             show_daily_trend=defaults.show_daily_trend,
             show_traffic_hotspots=defaults.show_traffic_hotspots,
             show_traffic_7d=defaults.show_traffic_7d,
+            show_return_route=defaults.show_return_route,
             show_resource_heatmap=defaults.show_resource_heatmap,
             show_traffic_quota=defaults.show_traffic_quota,
             show_renewal_timeline=defaults.show_renewal_timeline,
@@ -2015,14 +2055,24 @@ class InventoryStore:
             return ProbeSettingsRead()
         return ProbeSettingsRead(
             enabled=settings.enabled,
-            show_globe=settings.show_globe,
-            show_daily_trend=settings.show_daily_trend,
-            show_traffic_hotspots=settings.show_traffic_hotspots,
-            show_traffic_7d=settings.show_traffic_7d,
-            show_resource_heatmap=settings.show_resource_heatmap,
-            show_traffic_quota=settings.show_traffic_quota,
-            show_renewal_timeline=settings.show_renewal_timeline,
-            show_health_score=settings.show_health_score,
+            show_globe=InventoryStore._stored_bool(settings.show_globe, False),
+            show_daily_trend=InventoryStore._stored_bool(settings.show_daily_trend, False),
+            show_traffic_hotspots=InventoryStore._stored_bool(
+                settings.show_traffic_hotspots,
+                False,
+            ),
+            show_traffic_7d=InventoryStore._stored_bool(settings.show_traffic_7d, False),
+            show_return_route=InventoryStore._stored_bool(settings.show_return_route, False),
+            show_resource_heatmap=InventoryStore._stored_bool(
+                settings.show_resource_heatmap,
+                True,
+            ),
+            show_traffic_quota=InventoryStore._stored_bool(settings.show_traffic_quota, True),
+            show_renewal_timeline=InventoryStore._stored_bool(
+                settings.show_renewal_timeline,
+                False,
+            ),
+            show_health_score=InventoryStore._stored_bool(settings.show_health_score, True),
             title=settings.title,
             description=settings.description,
             logo=settings.logo,
@@ -2031,12 +2081,17 @@ class InventoryStore:
             updated_at=InventoryStore._aware_datetime(settings.updated_at),
         )
 
+    @staticmethod
+    def _stored_bool(value: bool | None, default: bool) -> bool:
+        return default if value is None else bool(value)
+
     def _probe_server(
         self,
         server: ServerModel,
         latest: TelemetrySnapshotModel | None,
         ping_by_key: dict[str, ProbePingSeries],
         daily_traffic: list[ProbeDailyTraffic] | None = None,
+        return_routes: list[ProbeReturnRoute] | None = None,
     ) -> ProbeServer:
         probe = ProbeServer(
             name=server.name,
@@ -2049,6 +2104,7 @@ class InventoryStore:
             download_speed=server.current_download_speed,
             traffic_limit=server.traffic_limit,
             daily_traffic=daily_traffic,
+            return_routes=return_routes,
             expires_at=server.expires_at.date().isoformat() if server.expires_at else None,
             renewal_price=server.renewal_price,
             renewal_price_cny=server.renewal_price_cny,
@@ -2094,6 +2150,34 @@ class InventoryStore:
         if ping_by_key:
             probe.ping = sorted(ping_by_key.values(), key=lambda item: (item.label, item.key or ""))
         return probe
+
+    def _probe_return_routes(
+        self,
+        session: Session,
+        server_ids: list[str],
+    ) -> dict[str, list[ProbeReturnRoute]]:
+        if not server_ids:
+            return {}
+        rows = session.scalars(
+            select(ServerReturnRouteModel)
+            .where(ServerReturnRouteModel.server_id.in_(server_ids))
+            .order_by(ServerReturnRouteModel.server_id, ServerReturnRouteModel.carrier)
+        ).all()
+        order = {"telecom": 0, "unicom": 1, "mobile": 2}
+        by_server: dict[str, list[ProbeReturnRoute]] = {}
+        for row in rows:
+            if row.carrier not in order:
+                continue
+            route = ProbeReturnRoute(
+                carrier=row.carrier,
+                region=row.region or None,
+                route_type=row.route_type or "Unknown",
+                tested_at=self._aware_datetime(row.tested_at).isoformat(),
+            )
+            by_server.setdefault(row.server_id, []).append(route)
+        for routes in by_server.values():
+            routes.sort(key=lambda item: order.get(item.carrier, 99))
+        return by_server
 
     def _probe_daily_traffic(
         self,
@@ -4282,8 +4366,9 @@ class InventoryStore:
         elapsed_ms = (now - leased_at).total_seconds() * 1000
         return elapsed_ms >= command.timeout_ms
 
-    @staticmethod
     def _apply_command_result(
+        self,
+        session: Session,
         server: ServerModel,
         command: CommandModel,
         payload: AgentCommandResultRequest,
@@ -4301,6 +4386,99 @@ class InventoryStore:
         command.updated_at = now
         server.last_heartbeat = now
         server.updated_at = now
+        self._upsert_return_route_results(session, server, command, payload, now)
+
+    def _upsert_return_route_results(
+        self,
+        session: Session,
+        server: ServerModel,
+        command: CommandModel,
+        payload: AgentCommandResultRequest,
+        tested_at: datetime,
+    ) -> None:
+        if (
+            command.path != "/api/child/network/return-route-test"
+            or payload.error
+            or payload.status >= 400
+        ):
+            return
+        results = self._return_route_results(payload.body)
+        if not results:
+            return
+        for item in results:
+            route = self._return_route_values(item)
+            if route is None:
+                continue
+            record = session.get(
+                ServerReturnRouteModel,
+                {"server_id": server.id, "carrier": route["carrier"]},
+            )
+            if record is None:
+                record = ServerReturnRouteModel(
+                    server_id=server.id,
+                    carrier=route["carrier"],
+                    region=route["region"],
+                    route_type=route["route_type"],
+                    entry_ip=route["entry_ip"],
+                    entry_asn=route["entry_asn"],
+                    reason=route["reason"],
+                    tested_at=tested_at,
+                    updated_at=tested_at,
+                )
+                session.add(record)
+                continue
+            record.region = route["region"]
+            record.route_type = route["route_type"]
+            record.entry_ip = route["entry_ip"]
+            record.entry_asn = route["entry_asn"]
+            record.reason = route["reason"]
+            record.tested_at = tested_at
+            record.updated_at = tested_at
+
+    @staticmethod
+    def _return_route_results(body: Any) -> list[Any]:
+        if isinstance(body, dict):
+            results = body.get("results")
+            return results if isinstance(results, list) else []
+        return body if isinstance(body, list) else []
+
+    @staticmethod
+    def _return_route_values(item: Any) -> dict[str, str] | None:
+        if not isinstance(item, dict):
+            return None
+        carrier = str(item.get("carrier") or "").strip().lower()
+        if carrier not in {"telecom", "unicom", "mobile"}:
+            return None
+        entry_hop = item.get("entry_hop") if isinstance(item.get("entry_hop"), dict) else {}
+        route_type = InventoryStore._return_route_text(
+            item.get("route_type") or item.get("route"),
+            80,
+        )
+        return {
+            "carrier": carrier,
+            "region": InventoryStore._return_route_text(item.get("region"), 120),
+            "route_type": route_type or "Unknown",
+            "entry_ip": InventoryStore._return_route_text(
+                item.get("entry_ip") or entry_hop.get("ip"),
+                255,
+            ),
+            "entry_asn": InventoryStore._return_route_text(
+                item.get("entry_asn") or entry_hop.get("asn"),
+                32,
+            ),
+            "reason": InventoryStore._return_route_text(
+                item.get("reason") or item.get("error"),
+                2048,
+            ),
+        }
+
+    @staticmethod
+    def _return_route_text(value: Any, max_length: int) -> str:
+        if value is None:
+            return ""
+        normalized = str(value).strip()
+        normalized = "".join(char for char in normalized if ord(char) >= 32)
+        return normalized[:max_length]
 
 
 def create_inventory_engine(database_url: str) -> Engine:
