@@ -457,6 +457,100 @@ body {
   font-size: 12px;
 }
 
+.probe-target-compare {
+  display: grid;
+  gap: 14px;
+}
+
+.probe-target-compare-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.probe-target-compare-list {
+  display: grid;
+  gap: 12px;
+}
+
+.probe-target-compare-row {
+  align-items: center;
+  background: #f7faf9;
+  border: 1px solid #dfe7e4;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1.1fr) minmax(210px, 1fr);
+  min-height: 104px;
+  padding: 12px;
+}
+
+.probe-target-compare-main strong,
+.probe-target-compare-main span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.probe-target-compare-main span {
+  color: #66736f;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.probe-target-compare-row svg {
+  height: 64px;
+  min-width: 0;
+  width: 100%;
+}
+
+.probe-target-compare-row polygon {
+  fill: rgba(47, 111, 237, 0.12);
+}
+
+.probe-target-compare-row polyline {
+  fill: none;
+  stroke: #2f6fed;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.probe-target-compare-stats {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.probe-target-compare-stats span {
+  background: #edf3f1;
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.probe-target-compare-stats b,
+.probe-target-compare-stats small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.probe-target-compare-stats small {
+  color: #66736f;
+  font-size: 11px;
+}
+
+.probe-target-server-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  grid-column: 1 / -1;
+}
+
 .probe-insight-grid {
   display: grid;
   gap: 16px;
@@ -1127,6 +1221,7 @@ body {
   .maintenance-command-grid,
   .probe-detail-controls,
   .probe-target-row,
+  .probe-target-compare-row,
   .probe-filter-row,
   .probe-insight-grid,
   .probe-task-form,
@@ -1142,5 +1237,15 @@ body {
 
   .probe-detail-drawer {
     width: 100% !important;
+  }
+
+  .probe-target-compare-actions,
+  .probe-task-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .probe-target-compare-stats {
+    grid-template-columns: 1fr;
   }
 }

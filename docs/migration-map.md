@@ -85,5 +85,7 @@ This document records the starting source map for the Open Node refactor.
    - Done: private probe task schedules with due dispatch into the existing
      agent command queue plus domain-latency command result ingestion into
      public probe series.
-   - Next: richer network target comparison and deeper Xray runtime integration.
+   - Done: public cross-node target comparison endpoint and Vue comparison
+     rows using public server indexes and sanitized latency buckets.
+   - Next: deeper Xray runtime integration.
 5. Revisit Xray integration once the agent protocol surface is stable.

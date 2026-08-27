@@ -3,6 +3,7 @@ import type {
   ProbeSeriesResponse,
   ProbeSettingsResponse,
   ProbeSettingsUpdate,
+  ProbeTargetComparisonResponse,
   ProbeTaskCreateRequest,
   ProbeTaskDispatchResponse,
   ProbeTaskListResponse,
@@ -23,6 +24,8 @@ export interface ProbeSeriesOptions {
   target?: string;
   all?: boolean;
 }
+
+export type ProbeRange = "1h" | "6h" | "24h";
 
 export async function getPublicProbePayload(fetcher = fetch): Promise<ProbePayload> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-servers`);
@@ -77,6 +80,18 @@ export async function getPublicProbeSeries(
     throw await apiError(response, "Public probe series request failed");
   }
   return response.json() as Promise<ProbeSeriesResponse>;
+}
+
+export async function getPublicProbeTargets(
+  range: ProbeRange = "1h",
+  fetcher = fetch,
+): Promise<ProbeTargetComparisonResponse> {
+  const params = new URLSearchParams({ range });
+  const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-targets?${params}`);
+  if (!response.ok) {
+    throw await apiError(response, "Public probe targets request failed");
+  }
+  return response.json() as Promise<ProbeTargetComparisonResponse>;
 }
 
 export async function listProbeTasks(fetcher = fetch): Promise<ProbeTaskListResponse> {

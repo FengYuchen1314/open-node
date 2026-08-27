@@ -157,6 +157,35 @@ export interface ProbeSeriesResponse {
   license_required: false;
 }
 
+export interface ProbeTargetServerComparison {
+  server_index: number;
+  server_name?: string | null;
+  region?: string | null;
+  current_ms: number;
+  loss_pct: number;
+  buckets: ProbeBucket[];
+}
+
+export interface ProbeTargetComparison {
+  key: string;
+  label: string;
+  server_count: number;
+  healthy_count: number;
+  average_ms?: number | null;
+  best_ms?: number | null;
+  worst_ms?: number | null;
+  average_loss_pct: number;
+  servers: ProbeTargetServerComparison[];
+}
+
+export interface ProbeTargetComparisonResponse {
+  success: boolean;
+  targets: ProbeTargetComparison[];
+  bucket_sec?: number | null;
+  generated_at?: number | null;
+  license_required: false;
+}
+
 export type ProbeTaskKind = "system" | "domain_latency" | "return_route";
 
 export interface ProbeTaskReturnRouteTarget {

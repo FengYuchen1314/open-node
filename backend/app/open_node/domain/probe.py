@@ -223,6 +223,35 @@ class ProbeSeriesResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class ProbeTargetServerComparison(BaseModel):
+    server_index: int
+    server_name: str | None = None
+    region: str | None = None
+    current_ms: int
+    loss_pct: float
+    buckets: list[ProbeBucket] = Field(default_factory=list)
+
+
+class ProbeTargetComparison(BaseModel):
+    key: str
+    label: str
+    server_count: int
+    healthy_count: int
+    average_ms: int | None = None
+    best_ms: int | None = None
+    worst_ms: int | None = None
+    average_loss_pct: float
+    servers: list[ProbeTargetServerComparison] = Field(default_factory=list)
+
+
+class ProbeTargetComparisonResponse(BaseModel):
+    success: bool
+    targets: list[ProbeTargetComparison] = Field(default_factory=list)
+    bucket_sec: int | None = None
+    generated_at: int | None = None
+    license_required: Literal[False] = False
+
+
 ProbeTaskKind = Literal["system", "domain_latency", "return_route"]
 
 

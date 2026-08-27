@@ -12,6 +12,7 @@ from open_node.domain.probe import (
     ProbeSeriesResponse,
     ProbeSettingsResponse,
     ProbeSettingsUpdate,
+    ProbeTargetComparisonResponse,
 )
 from open_node.services.inventory import InventoryStore, ProbeNotFoundError
 from open_node.services.probe_stream import PublicProbeStreamManager
@@ -74,6 +75,24 @@ def public_probe_series(
             target=target,
             all_targets=all_targets,
         )
+    except ProbeNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"success": False, "license_required": False},
+        )
+
+
+@router.get(
+    "/probe-targets",
+    response_model=ProbeTargetComparisonResponse,
+    response_model_exclude_none=True,
+)
+def public_probe_targets(
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    range_name: Annotated[str, Query(alias="range")] = "1h",
+) -> ProbeTargetComparisonResponse | JSONResponse:
+    try:
+        return store.public_probe_target_comparison(range_name=range_name)
     except ProbeNotFoundError:
         return JSONResponse(
             status_code=404,

@@ -637,6 +637,79 @@ def test_domain_latency_command_result_updates_public_probe_series(tmp_path: Pat
     assert "server_id" not in payload
 
 
+def test_public_probe_targets_compare_latency_across_public_nodes(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    edge_a = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-a", "region": "jp-tokyo", "ip_address": "203.0.113.10"},
+    ).json()
+    edge_b = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-b", "region_city": "Singapore", "ip_address": "203.0.113.11"},
+    ).json()
+    reported_at = datetime.now(tz=UTC).replace(microsecond=0)
+
+    for edge, latency_ms, success in [(edge_a, 31, True), (edge_b, 0, False)]:
+        response = client.post(
+            "/api/v1/agents/telemetry",
+            json={
+                "token": edge["agent_token"],
+                "reported_at": reported_at.isoformat(),
+                "latency": [
+                    {
+                        "key": "ct-shanghai",
+                        "success": success,
+                        "latency_ms": latency_ms,
+                        "at": int(reported_at.timestamp()),
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+
+    response = client.get("/api/v1/public/probe-targets?range=1h")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["license_required"] is False
+    assert payload["bucket_sec"] == 300
+    assert payload["generated_at"] > 0
+    assert payload["targets"] == [
+        {
+            "key": "ct-shanghai",
+            "label": "ct-shanghai",
+            "server_count": 2,
+            "healthy_count": 1,
+            "average_ms": 31,
+            "best_ms": 31,
+            "worst_ms": 31,
+            "average_loss_pct": 50,
+            "servers": [
+                {
+                    "server_index": 0,
+                    "server_name": "edge-a",
+                    "region": "jp-tokyo",
+                    "current_ms": 31,
+                    "loss_pct": 0,
+                    "buckets": payload["targets"][0]["servers"][0]["buckets"],
+                },
+                {
+                    "server_index": 1,
+                    "server_name": "edge-b",
+                    "region": "Singapore",
+                    "current_ms": -1,
+                    "loss_pct": 100,
+                    "buckets": payload["targets"][0]["servers"][1]["buckets"],
+                },
+            ],
+        }
+    ]
+    assert len(payload["targets"][0]["servers"][0]["buckets"]) == 12
+    assert "server_id" not in payload
+    assert "ip_address" not in payload["targets"][0]["servers"][0]
+
+
 def test_public_probe_mmwx_worker_alias_is_available(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     client.post("/api/v1/servers", json={"name": "edge-probe-alias"})

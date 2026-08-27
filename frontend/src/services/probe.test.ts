@@ -7,6 +7,7 @@ import {
   getPublicProbeSeries,
   getPublicProbeSettings,
   getPublicProbeStreamUrl,
+  getPublicProbeTargets,
   listProbeTasks,
   updateProbeTask,
   updatePublicProbeSettings,
@@ -72,6 +73,49 @@ describe("public probe API client", () => {
     );
     expect(response.series).toMatchObject({ current_ms: 42 });
     expect(response.license_required).toBe(false);
+  });
+
+  it("loads public probe target comparisons", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return jsonResponse({
+        success: true,
+        targets: [
+          {
+            key: "ct-shanghai",
+            label: "ct-shanghai",
+            server_count: 2,
+            healthy_count: 1,
+            average_ms: 42,
+            best_ms: 31,
+            worst_ms: 57,
+            average_loss_pct: 50,
+            servers: [
+              {
+                server_index: 0,
+                server_name: "edge-a",
+                current_ms: 31,
+                loss_pct: 0,
+                buckets: [],
+              },
+            ],
+          },
+        ],
+        bucket_sec: 300,
+        generated_at: 1798330000,
+        license_required: false,
+      });
+    };
+
+    const response = await getPublicProbeTargets("6h", fetcher);
+
+    expect(requestUrl).toBe("/api/v1/public/probe-targets?range=6h");
+    expect(headers).toBeUndefined();
+    expect(response.license_required).toBe(false);
+    expect(response.targets[0].servers[0].server_index).toBe(0);
   });
 
   it("loads and updates public probe settings", async () => {

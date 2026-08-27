@@ -38,13 +38,14 @@ subscription template presets, catalog import/export workflows, quota status
 plus traffic reset automation, and the customizable public probe surface with
 region/provider/renewal metadata, daily traffic aggregation, and public insight
 views plus return-route summaries from agent test results, scheduled probe task
-dispatch, and domain-latency result ingestion. The Vue frontend now includes a
-config workspace, runtime/site operation payload workbenches, subscription
-catalog, link, format, traffic, quota, preset, and import/export management,
-probe settings, metadata, and task controls, probe status/region filters,
-health scoring, latency buckets, traffic hotspots, three-carrier route badges,
-probe network drill-down charts, a change-set dispatch/rollback workspace, and
-an expandable command-result inspector. It does not yet replace the full MMWX
+dispatch, domain-latency result ingestion, and cross-node target comparison.
+The Vue frontend now includes a config workspace, runtime/site operation
+payload workbenches, subscription catalog, link, format, traffic, quota,
+preset, and import/export management, probe settings, metadata, and task
+controls, probe status/region filters, health scoring, latency buckets,
+traffic hotspots, three-carrier route badges, probe network drill-down charts,
+target comparison rows, a change-set dispatch/rollback workspace, and an
+expandable command-result inspector. It does not yet replace the full MMWX
 product.
 
 ```text

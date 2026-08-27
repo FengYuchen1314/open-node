@@ -9,6 +9,7 @@ import type {
   ProbeSeriesResponse,
   ProbeSettingsUpdate,
   ProbeSystemSeries,
+  ProbeTargetComparison,
   ProbeTask,
 } from "../domain/probe";
 import type { ServerSummary } from "../domain/inventory";
@@ -42,6 +43,7 @@ import {
   getPublicProbePayload,
   getPublicProbeSeries,
   getPublicProbeStreamUrl,
+  getPublicProbeTargets,
   listProbeTasks,
   updateProbeTask,
   updatePublicProbeSettings,
@@ -68,6 +70,20 @@ interface ProbeTargetTrend {
   chart: ProbeSparkline;
 }
 
+interface ProbeTargetComparisonRow {
+  key: string;
+  label: string;
+  healthLabel: string;
+  averageLabel: string;
+  bestLabel: string;
+  worstLabel: string;
+  lossLabel: string;
+  averageMs: number | null;
+  lossPct: number;
+  chart: ProbeSparkline;
+  servers: ProbeTargetComparison["servers"];
+}
+
 const payload = ref<ProbePayload | null>(null);
 const loading = ref(false);
 const savingSettings = ref(false);
@@ -83,6 +99,11 @@ const selectedSeriesMetric = ref<ProbeSeriesMetric>("ping");
 const selectedSeries = ref<ProbeSeriesResponse | null>(null);
 const selectedSeriesLoading = ref(false);
 const selectedSeriesError = ref("");
+const targetComparisonRange = ref<ProbeSeriesRange>("1h");
+const targetComparisons = ref<ProbeTargetComparison[]>([]);
+const targetComparisonLoading = ref(false);
+const targetComparisonError = ref("");
+const targetComparisonGeneratedAt = ref("");
 const probeTasks = ref<ProbeTask[]>([]);
 const taskServers = ref<ServerSummary[]>([]);
 const tasksLoading = ref(false);
@@ -97,6 +118,7 @@ const taskForm = reactive({
   allow_icmp: false,
 });
 let selectedSeriesRequest = 0;
+let targetComparisonRequest = 0;
 let probeStream: WebSocket | undefined;
 
 const settingsForm = reactive({
@@ -222,6 +244,31 @@ const selectedSeriesGeneratedAt = computed(() => {
   const generatedAt = selectedSeries.value?.generated_at;
   return generatedAt ? new Date(generatedAt * 1000).toLocaleString() : "";
 });
+const showTargetComparison = computed(
+  () => targetComparisonLoading.value || targetComparisonError.value || targetComparisonRows.value.length > 0,
+);
+const targetComparisonRows = computed<ProbeTargetComparisonRow[]>(() =>
+  targetComparisons.value
+    .map((target) => ({
+      key: target.key,
+      label: target.label,
+      healthLabel: `${target.healthy_count}/${target.server_count} healthy`,
+      averageLabel: optionalMilliseconds(target.average_ms),
+      bestLabel: optionalMilliseconds(target.best_ms),
+      worstLabel: optionalMilliseconds(target.worst_ms),
+      lossLabel: formatLoss(target.average_loss_pct),
+      averageMs: target.average_ms ?? null,
+      lossPct: target.average_loss_pct,
+      chart: buildSparkline(targetComparisonBucketValues(target), 320, 64, 6),
+      servers: target.servers,
+    }))
+    .sort(
+      (left, right) =>
+        right.lossPct - left.lossPct ||
+        (right.averageMs ?? -1) - (left.averageMs ?? -1) ||
+        left.label.localeCompare(right.label),
+    ),
+);
 const taskServerOptions = computed(() =>
   taskServers.value.map((server) => ({
     title: server.name,
@@ -323,8 +370,13 @@ watch([detailOpen, selectedServerIndex, selectedSeriesRange, selectedSeriesMetri
   }
 });
 
+watch(targetComparisonRange, () => {
+  void refreshProbeTargetComparisons();
+});
+
 onMounted(() => {
   void refreshProbe();
+  void refreshProbeTargetComparisons();
   void refreshProbeTasks();
   openProbeStream();
 });
@@ -343,6 +395,32 @@ async function refreshProbe() {
     errorMessage.value = error instanceof Error ? error.message : "Probe request failed.";
   } finally {
     loading.value = false;
+  }
+}
+
+async function refreshProbeTargetComparisons() {
+  const request = ++targetComparisonRequest;
+  targetComparisonLoading.value = true;
+  targetComparisonError.value = "";
+  try {
+    const response = await getPublicProbeTargets(targetComparisonRange.value);
+    if (request === targetComparisonRequest) {
+      targetComparisons.value = response.targets;
+      targetComparisonGeneratedAt.value = response.generated_at
+        ? new Date(response.generated_at * 1000).toLocaleString()
+        : "";
+    }
+  } catch (error) {
+    if (request === targetComparisonRequest) {
+      targetComparisons.value = [];
+      targetComparisonGeneratedAt.value = "";
+      targetComparisonError.value =
+        error instanceof Error ? error.message : "Probe target comparison failed.";
+    }
+  } finally {
+    if (request === targetComparisonRequest) {
+      targetComparisonLoading.value = false;
+    }
   }
 }
 
@@ -459,6 +537,7 @@ async function dispatchScheduledProbeTasks() {
   try {
     const response = await dispatchDueProbeTasks();
     await refreshProbeTasks();
+    await refreshProbeTargetComparisons();
     taskMessage.value = `${response.dispatched.length} due probe task(s) dispatched.`;
   } catch (error) {
     taskMessage.value =
@@ -785,6 +864,27 @@ function memoryPercentValues(
   return (usedPoints ?? []).map((point) => percent(point.value, totalByTime.get(point.t)));
 }
 
+function targetComparisonBucketValues(target: ProbeTargetComparison) {
+  const bucketCount = Math.max(0, ...target.servers.map((server) => server.buckets.length));
+  return Array.from({ length: bucketCount }, (_, index) => {
+    const values = target.servers
+      .map((server) => server.buckets[index]?.ms)
+      .filter((value): value is number => typeof value === "number" && value >= 0);
+    if (values.length === 0) {
+      return null;
+    }
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  });
+}
+
+function targetServerLatencyLabel(currentMs: number) {
+  return currentMs >= 0 ? formatMilliseconds(currentMs) : "failed";
+}
+
+function optionalMilliseconds(value: number | null | undefined) {
+  return value === null || value === undefined ? "No sample" : formatMilliseconds(value);
+}
+
 function renewalTone(server: ProbeServer) {
   if (isExpired(server)) {
     return "error";
@@ -975,6 +1075,103 @@ function formatBytes(value: number) {
         </div>
       </v-sheet>
     </section>
+
+    <v-sheet v-if="showTargetComparison" class="section-surface probe-target-compare" border>
+      <div class="section-head">
+        <div>
+          <div class="section-title">Target comparison</div>
+          <div class="section-subtitle">
+            {{ targetComparisonRows.length }} target(s) across public nodes
+          </div>
+        </div>
+        <div class="probe-target-compare-actions">
+          <v-btn-toggle
+            v-model="targetComparisonRange"
+            density="comfortable"
+            mandatory
+            variant="outlined"
+          >
+            <v-btn
+              v-for="option in seriesRangeOptions"
+              :key="option.value"
+              :value="option.value"
+              size="small"
+            >
+              {{ option.title }}
+            </v-btn>
+          </v-btn-toggle>
+          <v-tooltip text="Refresh target comparison">
+            <template #activator="{ props }">
+              <v-btn
+                v-bind="props"
+                :loading="targetComparisonLoading"
+                icon="mdi-refresh"
+                variant="text"
+                @click="refreshProbeTargetComparisons"
+              />
+            </template>
+          </v-tooltip>
+        </div>
+      </div>
+
+      <v-alert
+        v-if="targetComparisonError"
+        density="comfortable"
+        type="error"
+        variant="tonal"
+      >
+        {{ targetComparisonError }}
+      </v-alert>
+      <div v-else-if="targetComparisonLoading" class="probe-detail-loading">
+        <v-progress-circular color="primary" indeterminate size="28" width="3" />
+      </div>
+      <div v-else-if="targetComparisonRows.length > 0" class="probe-target-compare-list">
+        <div v-for="row in targetComparisonRows" :key="row.key" class="probe-target-compare-row">
+          <div class="probe-target-compare-main">
+            <strong>{{ row.label }}</strong>
+            <span>{{ row.healthLabel }} / {{ row.lossLabel }}</span>
+          </div>
+          <svg aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 320 64">
+            <polygon v-if="!row.chart.empty" :points="row.chart.areaPoints" />
+            <polyline v-if="!row.chart.empty" :points="row.chart.points" />
+          </svg>
+          <div class="probe-target-compare-stats">
+            <span>
+              <b>{{ row.averageLabel }}</b>
+              <small>average</small>
+            </span>
+            <span>
+              <b>{{ row.bestLabel }}</b>
+              <small>best</small>
+            </span>
+            <span>
+              <b>{{ row.worstLabel }}</b>
+              <small>worst</small>
+            </span>
+          </div>
+          <div class="probe-target-server-strip">
+            <v-chip
+              v-for="server in row.servers.slice(0, 5)"
+              :key="server.server_index"
+              :color="server.current_ms >= 0 ? 'success' : 'error'"
+              density="comfortable"
+              size="small"
+              variant="tonal"
+            >
+              {{ server.server_name ?? `Node ${server.server_index + 1}` }}
+              {{ targetServerLatencyLabel(server.current_ms) }}
+            </v-chip>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-state">
+        <v-icon icon="mdi-radar" size="28" />
+        <div>No target comparison samples.</div>
+      </div>
+      <div v-if="targetComparisonGeneratedAt" class="probe-detail-generated">
+        Updated {{ targetComparisonGeneratedAt }}
+      </div>
+    </v-sheet>
 
     <v-sheet class="section-surface" border>
       <div class="section-head">

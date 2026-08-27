@@ -319,6 +319,7 @@ license gates. The primary endpoints are:
 - `GET /api/v1/public/probe-settings`
 - `PUT /api/v1/public/probe-settings`
 - `GET /api/v1/public/probe-series`
+- `GET /api/v1/public/probe-targets`
 - `GET /api/v1/public/probe-ws`
 - `GET /api/v1/probe/tasks`
 - `POST /api/v1/probe/tasks`
@@ -332,6 +333,7 @@ are also mounted at:
 - `GET /api/public/probe-settings`
 - `PUT /api/public/probe-settings`
 - `GET /api/public/probe-series`
+- `GET /api/public/probe-targets`
 - `GET /api/public/probe-ws`
 
 Probe responses are built from persisted agent telemetry snapshots. The server
@@ -341,7 +343,9 @@ identifiers, IP addresses, bootstrap tokens, route entry hops, trace reasons,
 and agent secrets are not serialized. Daily traffic is calculated from Xray stat
 counters when present and falls back to system network counters across
 consecutive telemetry snapshots. Series lookups use the public server index
-from the sanitized list instead of private server IDs.
+from the sanitized list instead of private server IDs. Target comparison
+lookups group latency series by target key across all public nodes and return
+only public server indexes, names, regions, current latency, loss, and buckets.
 
 Server probe metadata can be supplied when a server is created or updated with
 `PATCH /api/v1/servers/{server_id}/probe-metadata`. The metadata covers region
@@ -360,9 +364,10 @@ can edit these settings and immediately uses the same public payload to render
 or hide table sections, status and region filters, region summaries, seven-day
 traffic bars, health chips, latency history buckets, quota meters,
 return-route badges, renewal badges, live traffic hotspot rows, and per-node
-drill-down charts. Drill-downs call the public series endpoint with the
-selected public server index, range, and metric mode, then render latency, loss,
-CPU, memory, and throughput history without revealing private server IDs.
+drill-down charts. It also calls the public target comparison endpoint to rank
+latency targets across nodes. Drill-downs call the public series endpoint with
+the selected public server index, range, and metric mode, then render latency,
+loss, CPU, memory, and throughput history without revealing private server IDs.
 
 Probe task schedules are private management data stored in SQLite. Each task
 targets one server and one active agent child operation: system info,

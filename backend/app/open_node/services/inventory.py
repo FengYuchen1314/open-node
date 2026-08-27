@@ -83,6 +83,9 @@ from open_node.domain.probe import (
     ProbeSettingsResponse,
     ProbeSettingsUpdate,
     ProbeSystemSeries,
+    ProbeTargetComparison,
+    ProbeTargetComparisonResponse,
+    ProbeTargetServerComparison,
     ProbeTaskCreate,
     ProbeTaskRead,
     ProbeTaskReturnRouteTarget,
@@ -1229,6 +1232,44 @@ class InventoryStore:
                     key=lambda item: (item.label, item.key or ""),
                 )
             return response
+
+    def public_probe_target_comparison(self, range_name: str) -> ProbeTargetComparisonResponse:
+        buckets, bucket_sec = _PROBE_SERIES_RANGES.get(range_name, _PROBE_SERIES_RANGES["1h"])
+        generated_at = int(datetime.now(tz=UTC).timestamp())
+
+        with self._session() as session:
+            if not self._probe_settings_read(session).enabled:
+                raise ProbeNotFoundError("probe is disabled")
+            servers = session.scalars(select(ServerModel).order_by(ServerModel.created_at)).all()
+            by_target: dict[str, list[ProbeTargetServerComparison]] = {}
+
+            for index, server in enumerate(servers):
+                series_by_key = self._probe_ping_series(session, server.id, buckets, bucket_sec)
+                for key, series in series_by_key.items():
+                    by_target.setdefault(key, []).append(
+                        ProbeTargetServerComparison(
+                            server_index=index,
+                            server_name=server.name,
+                            region=server.region
+                            or server.region_city
+                            or server.region_name
+                            or server.region_country,
+                            current_ms=series.current_ms,
+                            loss_pct=series.loss_pct,
+                            buckets=series.buckets,
+                        )
+                    )
+
+            targets = [
+                self._probe_target_comparison(key, rows)
+                for key, rows in sorted(by_target.items())
+            ]
+            return ProbeTargetComparisonResponse(
+                success=True,
+                targets=targets,
+                bucket_sec=bucket_sec,
+                generated_at=generated_at,
+            )
 
     def list_product_users(self) -> list[ProductUserRead]:
         with self._session() as session:
@@ -2624,6 +2665,34 @@ class InventoryStore:
             current_ms=current_ms,
             loss_pct=loss_pct,
             buckets=buckets,
+        )
+
+    @staticmethod
+    def _probe_target_comparison(
+        key: str,
+        rows: list[ProbeTargetServerComparison],
+    ) -> ProbeTargetComparison:
+        healthy = [row.current_ms for row in rows if row.current_ms >= 0]
+        sorted_rows = sorted(
+            rows,
+            key=lambda row: (
+                row.current_ms < 0,
+                row.current_ms if row.current_ms >= 0 else 0,
+                row.loss_pct,
+                row.server_name or "",
+                row.server_index,
+            ),
+        )
+        return ProbeTargetComparison(
+            key=key,
+            label=key,
+            server_count=len(rows),
+            healthy_count=len(healthy),
+            average_ms=int(sum(healthy) / len(healthy)) if healthy else None,
+            best_ms=min(healthy) if healthy else None,
+            worst_ms=max(healthy) if healthy else None,
+            average_loss_pct=sum(row.loss_pct for row in rows) / len(rows) if rows else 0,
+            servers=sorted_rows,
         )
 
     def _probe_system_series(
