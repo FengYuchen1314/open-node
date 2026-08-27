@@ -77,6 +77,8 @@ export interface ServerCreateRequest {
   domain_v6?: string | null;
   connection_mode?: ConnectionMode;
   listen_port?: number;
+  pull_address?: string | null;
+  pull_address_v6?: string | null;
   pull_port?: number;
   ipv6_enabled?: boolean;
   traffic_limit?: number;
@@ -120,6 +122,8 @@ export interface ServerSummary {
   domain_v6?: string | null;
   connection_mode: ConnectionMode;
   listen_port: number;
+  pull_address?: string | null;
+  pull_address_v6?: string | null;
   pull_port: number;
   ipv6_enabled: boolean;
   traffic_limit: number;
@@ -389,6 +393,45 @@ export interface XrayRuntimeTunnelChainCreateResponse {
   command_previews: XrayRuntimeTunnelChainCreateCommand[];
   commands: AgentCommand[];
   scan_commands: AgentCommand[];
+  command_count: number;
+  warnings: string[];
+  license_required: false;
+}
+
+export interface XrayRuntimeTunnelDeployRequest {
+  domain?: string | null;
+  proxy_domain?: string | null;
+  site_type?: "static" | "proxy";
+  site_value: string;
+  cert_name?: string | null;
+  clear_stream_port?: boolean;
+  restart_xray?: boolean;
+  force?: boolean;
+  queue_agent_commands?: boolean;
+  queue_scan_after_apply?: boolean;
+  command_timeout_ms?: number;
+}
+
+export interface XrayRuntimeTunnelDeployCommand {
+  step: string;
+  method: "POST";
+  path: string;
+  body?: Record<string, unknown> | null;
+}
+
+export interface XrayRuntimeTunnelDeployResponse {
+  server_id: string;
+  server_name: string;
+  domain: string;
+  proxy_domain?: string | null;
+  cert_name: string;
+  nginx_config: string;
+  domain_config: string;
+  xray_config: string;
+  command_previews: XrayRuntimeTunnelDeployCommand[];
+  commands: AgentCommand[];
+  scan_command_preview?: XrayRuntimeTunnelDeployCommand | null;
+  scan_command?: AgentCommand | null;
   command_count: number;
   warnings: string[];
   license_required: false;

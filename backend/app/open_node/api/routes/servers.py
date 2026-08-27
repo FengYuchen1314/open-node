@@ -54,6 +54,8 @@ from open_node.domain.inventory import (
     XrayRuntimeTunnelChainCreateResponse,
     XrayRuntimeTunnelDeleteRequest,
     XrayRuntimeTunnelDeleteResponse,
+    XrayRuntimeTunnelDeployRequest,
+    XrayRuntimeTunnelDeployResponse,
     XrayRuntimeTunnelInventoryResponse,
 )
 from open_node.domain.subscriptions import (
@@ -82,6 +84,7 @@ from open_node.services.inventory import (
     XrayRuntimeInboundNotFoundError,
     XrayRuntimeNodeDraftUnavailableError,
     XrayRuntimeTunnelChainUnavailableError,
+    XrayRuntimeTunnelDeployUnavailableError,
     XrayRuntimeTunnelNotFoundError,
 )
 
@@ -219,6 +222,56 @@ async def create_xray_runtime_tunnel_chain(
 
         response = response.model_copy(
             update={"commands": commands, "scan_commands": scan_commands}
+        )
+    return response
+
+
+@router.post(
+    "/{server_id}/xray/runtime/tunnel-deploy",
+    response_model=XrayRuntimeTunnelDeployResponse,
+)
+async def plan_xray_runtime_tunnel_deploy(
+    server_id: UUID,
+    payload: XrayRuntimeTunnelDeployRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> XrayRuntimeTunnelDeployResponse:
+    try:
+        response = store.plan_xray_runtime_tunnel_deploy(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except XrayRuntimeTunnelDeployUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if payload.queue_agent_commands:
+        commands = []
+        for preview in response.command_previews:
+            command = store.create_command(
+                server_id,
+                AgentCommandCreate(
+                    method=preview.method,
+                    path=preview.path,
+                    body=preview.body,
+                    timeout_ms=payload.command_timeout_ms,
+                ),
+            )
+            commands.append(await connections.dispatch_command(store, command))
+
+        scan_command = None
+        if response.scan_command_preview:
+            command = store.create_command(
+                server_id,
+                AgentCommandCreate(
+                    method=response.scan_command_preview.method,
+                    path=response.scan_command_preview.path,
+                    body=response.scan_command_preview.body,
+                    timeout_ms=payload.command_timeout_ms,
+                ),
+            )
+            scan_command = await connections.dispatch_command(store, command)
+
+        response = response.model_copy(
+            update={"commands": commands, "scan_command": scan_command}
         )
     return response
 

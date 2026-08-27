@@ -27,6 +27,7 @@ import type {
 import {
   createXrayRuntimeTunnelChain,
   deleteXrayRuntimeTunnel,
+  deployXrayRuntimeTunnel,
   getXrayRuntimeInventory,
   getXrayRuntimeTunnelInventory,
   listCommandStreamFrames,
@@ -68,6 +69,7 @@ const runtimeCredentialRepairing = ref(false);
 const runtimeCredentialCleaning = ref(false);
 const runtimeTunnelDeletingKey = ref("");
 const runtimeTunnelCreating = ref(false);
+const runtimeTunnelDeploying = ref(false);
 const savingOperation = ref<AgentOperationKind | "">("");
 const restoringSnapshotId = ref("");
 const errorMessage = ref("");
@@ -114,6 +116,16 @@ const runtimeTunnelChainForm = reactive({
   targetAddress: "127.0.0.1",
   targetPort: 443,
 });
+const runtimeTunnelDeployForm = reactive({
+  domain: "",
+  proxyDomain: "",
+  siteType: "static" as "static" | "proxy",
+  siteValue: "/usr/local/nginx/html",
+  certName: "",
+  clearStreamPort: true,
+  restartXray: true,
+  force: false,
+});
 const runtimeOperationOptions: Array<{ title: string; value: AgentOperationKind }> = [
   { title: "Manage inbounds", value: "inbounds_manage" },
   { title: "Manage outbounds", value: "outbounds_manage" },
@@ -131,6 +143,9 @@ const siteOperationOptions: Array<{ title: string; value: AgentOperationKind }> 
 
 const serverOptions = computed(() =>
   servers.value.map((server) => ({ title: server.name, value: server.id })),
+);
+const selectedServer = computed(
+  () => servers.value.find((server) => server.id === selectedServerId.value) ?? null,
 );
 const selectedCommands = computed(() => commandsByServer.value[selectedServerId.value] ?? []);
 const selectedCurrentSnapshot = computed(() =>
@@ -150,6 +165,7 @@ const runtimeTunnelWarnings = computed(() => xrayRuntimeTunnels.value?.warnings 
 const runtimeTunnelChainCreateDisabled = computed(
   () =>
     runtimeTunnelCreating.value ||
+    runtimeTunnelDeploying.value ||
     runtimeInventoryLoading.value ||
     runtimeNodeImporting.value ||
     Boolean(runtimeNodeSavingKey.value) ||
@@ -164,6 +180,21 @@ const runtimeTunnelChainCreateDisabled = computed(
     Number(runtimeTunnelChainForm.entryPort) > 65535 ||
     Number(runtimeTunnelChainForm.targetPort) <= 0 ||
     Number(runtimeTunnelChainForm.targetPort) > 65535,
+);
+const runtimeTunnelDeployDisabled = computed(
+  () =>
+    runtimeTunnelDeploying.value ||
+    runtimeTunnelCreating.value ||
+    runtimeInventoryLoading.value ||
+    runtimeNodeImporting.value ||
+    Boolean(runtimeNodeSavingKey.value) ||
+    Boolean(runtimeNodeSyncingId.value) ||
+    runtimeCredentialRepairing.value ||
+    runtimeCredentialCleaning.value ||
+    Boolean(runtimeTunnelDeletingKey.value) ||
+    !selectedServerId.value ||
+    !runtimeTunnelDeployForm.domain.trim() ||
+    !runtimeTunnelDeployForm.siteValue.trim(),
 );
 const runtimeNodeDraftsByIndex = computed(
   () => new Map(runtimeNodeDrafts.value.map((draft) => [draft.source_index, draft])),
@@ -239,9 +270,26 @@ onMounted(() => {
 watch(selectedServerId, () => {
   successMessage.value = "";
   syncRuntimeTunnelChainServerDefaults();
+  syncRuntimeTunnelDeployDefaults();
   void refreshXraySnapshots();
   void refreshXrayRuntimeInventory();
 });
+
+function syncRuntimeTunnelDeployDefaults() {
+  const server = selectedServer.value;
+  if (!server) {
+    runtimeTunnelDeployForm.domain = "";
+    runtimeTunnelDeployForm.proxyDomain = "";
+    return;
+  }
+
+  runtimeTunnelDeployForm.domain = server.domain ?? server.pull_address ?? "";
+  runtimeTunnelDeployForm.proxyDomain =
+    server.pull_address && server.pull_address !== runtimeTunnelDeployForm.domain
+      ? server.pull_address
+      : "";
+  runtimeTunnelDeployForm.certName = certDeployFilename(runtimeTunnelDeployForm.domain);
+}
 
 function syncRuntimeTunnelChainServerDefaults() {
   const validIds = new Set(servers.value.map((server) => server.id));
@@ -281,6 +329,7 @@ async function refresh() {
       selectedServerId.value = servers.value[0].id;
     }
     syncRuntimeTunnelChainServerDefaults();
+    syncRuntimeTunnelDeployDefaults();
     await refreshCommands();
     await Promise.all([refreshXraySnapshots(), refreshXrayRuntimeInventory()]);
   } catch (error) {
@@ -711,6 +760,9 @@ function runtimeTunnelChainKey(chain: XrayRuntimeTunnelChain) {
 }
 
 function runtimeTunnelDeleteTooltip(tunnel: XrayRuntimeTunnel) {
+  if (runtimeTunnelDeploying.value) {
+    return "Runtime tunnel deploy is running";
+  }
   if (runtimeTunnelCreating.value) {
     return "Runtime tunnel chain create is running";
   }
@@ -723,6 +775,9 @@ function runtimeTunnelDeleteTooltip(tunnel: XrayRuntimeTunnel) {
 }
 
 function runtimeTunnelChainDeleteTooltip(chain: XrayRuntimeTunnelChain) {
+  if (runtimeTunnelDeploying.value) {
+    return "Runtime tunnel deploy is running";
+  }
   if (runtimeTunnelCreating.value) {
     return "Runtime tunnel chain create is running";
   }
@@ -733,6 +788,9 @@ function runtimeTunnelChainDeleteTooltip(chain: XrayRuntimeTunnelChain) {
 }
 
 function runtimeTunnelChainCreateTooltip() {
+  if (runtimeTunnelDeploying.value) {
+    return "Runtime tunnel deploy is running";
+  }
   if (runtimeTunnelCreating.value) {
     return "Runtime tunnel chain create is running";
   }
@@ -774,6 +832,43 @@ function runtimeTunnelChainCreateTooltip() {
     return "Another runtime catalog action is running";
   }
   return "Queue runtime tunnel chain";
+}
+
+function runtimeTunnelDeployTooltip() {
+  if (runtimeTunnelDeploying.value) {
+    return "Runtime tunnel deploy is running";
+  }
+  if (runtimeTunnelCreating.value) {
+    return "Runtime tunnel chain create is running";
+  }
+  if (runtimeInventoryLoading.value) {
+    return "Runtime inventory is loading";
+  }
+  if (!selectedServerId.value) {
+    return "Target server is required";
+  }
+  if (!runtimeTunnelDeployForm.domain.trim()) {
+    return "Tunnel domain is required";
+  }
+  if (!runtimeTunnelDeployForm.siteValue.trim()) {
+    return "Camouflage site value is required";
+  }
+  if (
+    runtimeNodeImporting.value ||
+    runtimeNodeSavingKey.value ||
+    runtimeNodeSyncingId.value ||
+    runtimeCredentialRepairing.value ||
+    runtimeCredentialCleaning.value ||
+    runtimeTunnelDeletingKey.value
+  ) {
+    return "Another runtime catalog action is running";
+  }
+  return "Queue tunnel mode deployment";
+}
+
+function certDeployFilename(domain: string) {
+  const normalized = domain.trim().toLowerCase();
+  return normalized.startsWith("*.") ? `_.${normalized.slice(2)}` : normalized;
 }
 
 function remarkLabel(value: string) {
@@ -839,6 +934,9 @@ function runtimeNodeActionTooltip(inbound: XrayRuntimeInbound) {
   if (!draft.create_available) {
     return draft.warnings.map(remarkLabel).join(", ") || "Runtime node cannot be created";
   }
+  if (runtimeTunnelDeploying.value) {
+    return "Runtime tunnel deploy is running";
+  }
   if (runtimeTunnelCreating.value) {
     return "Runtime tunnel chain create is running";
   }
@@ -855,6 +953,7 @@ function runtimeNodeCreateDisabled(inbound: XrayRuntimeInbound) {
     Boolean(runtimeNodeSyncingId.value) ||
     runtimeCredentialRepairing.value ||
     runtimeCredentialCleaning.value ||
+    runtimeTunnelDeploying.value ||
     runtimeTunnelCreating.value ||
     Boolean(runtimeTunnelDeletingKey.value) ||
     (Boolean(runtimeNodeSavingKey.value) &&
@@ -881,6 +980,9 @@ function runtimeImportTooltip() {
   if (runtimeTunnelDeletingKey.value) {
     return "Runtime tunnel delete is running";
   }
+  if (runtimeTunnelDeploying.value) {
+    return "Runtime tunnel deploy is running";
+  }
   if (runtimeTunnelCreating.value) {
     return "Runtime tunnel chain create is running";
   }
@@ -902,6 +1004,7 @@ function runtimeCredentialRepairTooltip() {
     runtimeNodeSavingKey.value ||
     runtimeNodeSyncingId.value ||
     runtimeCredentialCleaning.value ||
+    runtimeTunnelDeploying.value ||
     runtimeTunnelCreating.value ||
     runtimeTunnelDeletingKey.value
   ) {
@@ -920,6 +1023,7 @@ function runtimeCredentialRepairDisabled() {
     runtimeNodeImporting.value ||
     Boolean(runtimeNodeSavingKey.value) ||
     Boolean(runtimeNodeSyncingId.value) ||
+    runtimeTunnelDeploying.value ||
     runtimeTunnelCreating.value ||
     Boolean(runtimeTunnelDeletingKey.value)
   );
@@ -940,6 +1044,7 @@ function runtimeCredentialCleanupTooltip() {
     runtimeNodeSavingKey.value ||
     runtimeNodeSyncingId.value ||
     runtimeCredentialRepairing.value ||
+    runtimeTunnelDeploying.value ||
     runtimeTunnelCreating.value ||
     runtimeTunnelDeletingKey.value
   ) {
@@ -958,6 +1063,7 @@ function runtimeCredentialCleanupDisabled() {
     Boolean(runtimeNodeSavingKey.value) ||
     Boolean(runtimeNodeSyncingId.value) ||
     runtimeCredentialRepairing.value ||
+    runtimeTunnelDeploying.value ||
     runtimeTunnelCreating.value ||
     Boolean(runtimeTunnelDeletingKey.value)
   );
@@ -1034,6 +1140,7 @@ function runtimeSyncDisabled(entry: XrayRuntimeNodeReconciliationManagedEntry) {
     Boolean(runtimeNodeSyncingId.value) ||
     runtimeCredentialRepairing.value ||
     runtimeCredentialCleaning.value ||
+    runtimeTunnelDeploying.value ||
     runtimeTunnelCreating.value ||
     Boolean(runtimeTunnelDeletingKey.value)
   );
@@ -1055,6 +1162,7 @@ function runtimeSyncTooltip(entry: XrayRuntimeNodeReconciliationManagedEntry) {
     runtimeNodeSyncingId.value ||
     runtimeCredentialRepairing.value ||
     runtimeCredentialCleaning.value ||
+    runtimeTunnelDeploying.value ||
     runtimeTunnelCreating.value ||
     runtimeTunnelDeletingKey.value
   ) {
@@ -1133,6 +1241,45 @@ async function cleanupExtraRuntimeCredentials() {
     errorMessage.value = readableError(error);
   } finally {
     runtimeCredentialCleaning.value = false;
+  }
+}
+
+async function deployRuntimeTunnel() {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  if (runtimeTunnelDeployDisabled.value) {
+    errorMessage.value = runtimeTunnelDeployTooltip();
+    return;
+  }
+
+  runtimeTunnelDeploying.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await deployXrayRuntimeTunnel(selectedServerId.value, {
+      domain: runtimeTunnelDeployForm.domain.trim(),
+      proxy_domain: runtimeTunnelDeployForm.proxyDomain.trim() || null,
+      site_type: runtimeTunnelDeployForm.siteType,
+      site_value: runtimeTunnelDeployForm.siteValue.trim(),
+      cert_name: runtimeTunnelDeployForm.certName.trim() || null,
+      clear_stream_port: runtimeTunnelDeployForm.clearStreamPort,
+      restart_xray: runtimeTunnelDeployForm.restartXray,
+      force: runtimeTunnelDeployForm.force,
+      queue_agent_commands: true,
+      queue_scan_after_apply: true,
+    });
+    const scanText = response.scan_command ? " Follow-up scan queued." : "";
+    const warningText = response.warnings.length
+      ? ` Warnings: ${response.warnings.map(remarkLabel).join(", ")}.`
+      : "";
+    successMessage.value = `Queued ${response.commands.length} tunnel deploy commands for ${response.domain}.${scanText}${warningText}`;
+    await Promise.all([refreshCommands(), refreshXrayRuntimeInventory()]);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    runtimeTunnelDeploying.value = false;
   }
 }
 
@@ -1633,6 +1780,7 @@ function formatDateTime(value: string) {
                             Boolean(runtimeNodeSyncingId) ||
                             runtimeCredentialRepairing ||
                             runtimeCredentialCleaning ||
+                            runtimeTunnelDeploying ||
                             runtimeTunnelCreating ||
                             Boolean(runtimeTunnelDeletingKey)
                           "
@@ -1696,6 +1844,96 @@ function formatDateTime(value: string) {
                   </v-tooltip>
                 </div>
               </div>
+
+              <v-form class="runtime-tunnel-deploy-form" @submit.prevent="deployRuntimeTunnel">
+                <div class="section-title compact-title">Deploy tunnel</div>
+                <div class="runtime-tunnel-deploy-grid">
+                  <v-text-field
+                    v-model="runtimeTunnelDeployForm.domain"
+                    density="comfortable"
+                    hide-details
+                    label="Domain"
+                    prepend-inner-icon="mdi-web"
+                    variant="outlined"
+                  />
+                  <v-text-field
+                    v-model="runtimeTunnelDeployForm.proxyDomain"
+                    density="comfortable"
+                    hide-details
+                    label="Proxy domain"
+                    prepend-inner-icon="mdi-arrow-decision-outline"
+                    variant="outlined"
+                  />
+                  <v-select
+                    v-model="runtimeTunnelDeployForm.siteType"
+                    density="comfortable"
+                    hide-details
+                    :items="[
+                      { title: 'Static', value: 'static' },
+                      { title: 'Proxy', value: 'proxy' },
+                    ]"
+                    label="Site type"
+                    prepend-inner-icon="mdi-file-tree-outline"
+                    variant="outlined"
+                  />
+                  <v-text-field
+                    v-model="runtimeTunnelDeployForm.siteValue"
+                    density="comfortable"
+                    hide-details
+                    label="Site value"
+                    prepend-inner-icon="mdi-folder-web-outline"
+                    variant="outlined"
+                  />
+                  <v-text-field
+                    v-model="runtimeTunnelDeployForm.certName"
+                    density="comfortable"
+                    hide-details
+                    label="Cert name"
+                    prepend-inner-icon="mdi-certificate-outline"
+                    variant="outlined"
+                  />
+                  <div class="runtime-deploy-toggle-row">
+                    <v-switch
+                      v-model="runtimeTunnelDeployForm.clearStreamPort"
+                      color="primary"
+                      density="compact"
+                      hide-details
+                      label="Clear 443"
+                    />
+                    <v-switch
+                      v-model="runtimeTunnelDeployForm.restartXray"
+                      color="primary"
+                      density="compact"
+                      hide-details
+                      label="Restart"
+                    />
+                    <v-checkbox
+                      v-model="runtimeTunnelDeployForm.force"
+                      color="warning"
+                      density="compact"
+                      hide-details
+                      label="Force"
+                    />
+                  </div>
+                  <v-tooltip :text="runtimeTunnelDeployTooltip()">
+                    <template #activator="{ props }">
+                      <span v-bind="props" class="runtime-node-action">
+                        <v-btn
+                          :disabled="runtimeTunnelDeployDisabled"
+                          :loading="runtimeTunnelDeploying"
+                          color="primary"
+                          prepend-icon="mdi-cloud-upload-outline"
+                          size="small"
+                          type="submit"
+                          variant="flat"
+                        >
+                          Deploy tunnel
+                        </v-btn>
+                      </span>
+                    </template>
+                  </v-tooltip>
+                </div>
+              </v-form>
 
               <v-form class="runtime-chain-form" @submit.prevent="createRuntimeTunnelChain">
                 <div class="section-title compact-title">Create chain</div>

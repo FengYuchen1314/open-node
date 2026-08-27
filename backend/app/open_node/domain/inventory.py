@@ -832,6 +832,63 @@ class XrayRuntimeTunnelChainCreateResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeTunnelDeployRequest(BaseModel):
+    domain: str | None = Field(default=None, max_length=255)
+    proxy_domain: str | None = Field(default=None, max_length=255)
+    site_type: Literal["static", "proxy"] = "static"
+    site_value: str = Field(default="/usr/local/nginx/html", max_length=512)
+    cert_name: str | None = Field(default=None, max_length=255)
+    clear_stream_port: bool = True
+    restart_xray: bool = True
+    force: bool = False
+    queue_agent_commands: bool = False
+    queue_scan_after_apply: bool = False
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @field_validator("domain", "proxy_domain", "cert_name")
+    @classmethod
+    def normalize_optional_domain(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = AgentDomainLatencyProbeRequest._normalize_domain(value).lower()
+        return _strip_optional_text(normalized, "domain") or None
+
+    @field_validator("site_type", mode="before")
+    @classmethod
+    def normalize_site_type(cls, value: Any) -> Any:
+        return _strip_lower_value(value)
+
+    @field_validator("site_value")
+    @classmethod
+    def validate_site_value(cls, value: str) -> str:
+        return _strip_required_text(value, "site_value")
+
+
+class XrayRuntimeTunnelDeployCommand(BaseModel):
+    step: str
+    method: Literal["POST"] = "POST"
+    path: str
+    body: dict[str, Any] | None = None
+
+
+class XrayRuntimeTunnelDeployResponse(BaseModel):
+    server_id: UUID
+    server_name: str
+    domain: str
+    proxy_domain: str | None = None
+    cert_name: str
+    nginx_config: str
+    domain_config: str
+    xray_config: str
+    command_previews: list[XrayRuntimeTunnelDeployCommand] = Field(default_factory=list)
+    commands: list[AgentCommandRead] = Field(default_factory=list)
+    scan_command_preview: XrayRuntimeTunnelDeployCommand | None = None
+    scan_command: AgentCommandRead | None = None
+    command_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
 class AgentDomainLatencyProbeRequest(BaseModel):
     domains: list[str] = Field(min_length=1, max_length=200)
     timeout_ms: int = Field(default=2_000, ge=200, le=10_000)

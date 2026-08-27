@@ -5,6 +5,7 @@ import {
   createServer,
   createServerCommand,
   deleteXrayRuntimeTunnel,
+  deployXrayRuntimeTunnel,
   getLatestScanResult,
   getLatestTelemetry,
   getXrayRuntimeInventory,
@@ -509,6 +510,82 @@ describe("inventory API client", () => {
         },
       },
     });
+  });
+
+  it("queues Xray runtime tunnel deploy plans for one server", async () => {
+    let requestUrl = "";
+    let method = "";
+    let headers: HeadersInit | undefined;
+    let body: unknown;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      method = init?.method ?? "";
+      headers = init?.headers;
+      body = JSON.parse(init?.body?.toString() ?? "{}") as unknown;
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          server_name: "edge",
+          domain: "gateway.example.com",
+          proxy_domain: "proxy.example.com",
+          cert_name: "_.example.com",
+          nginx_config: "http { include servers/*.conf; }",
+          domain_config: "server { server_name gateway.example.com; }",
+          xray_config: "{\"inbounds\":[]}",
+          command_previews: [
+            {
+              step: "setup_tunnel_nginx",
+              method: "POST",
+              path: "/api/child/nginx/setup-ssl",
+              body: { domain: "gateway.example.com" },
+            },
+          ],
+          commands: [],
+          scan_command_preview: { step: "scan_runtime", method: "POST", path: "/api/child/scan" },
+          scan_command: null,
+          command_count: 1,
+          warnings: ["current_config_has_user_content"],
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await deployXrayRuntimeTunnel(
+      "srv_1",
+      {
+        domain: "gateway.example.com",
+        proxy_domain: "proxy.example.com",
+        site_type: "proxy",
+        site_value: "http://127.0.0.1:12889",
+        cert_name: "*.example.com",
+        clear_stream_port: true,
+        restart_xray: true,
+        force: true,
+        queue_agent_commands: true,
+        queue_scan_after_apply: true,
+      },
+      fetcher,
+    );
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/xray/runtime/tunnel-deploy");
+    expect(method).toBe("POST");
+    expect(headers).toEqual({ "Content-Type": "application/json" });
+    expect(body).toEqual({
+      domain: "gateway.example.com",
+      proxy_domain: "proxy.example.com",
+      site_type: "proxy",
+      site_value: "http://127.0.0.1:12889",
+      cert_name: "*.example.com",
+      clear_stream_port: true,
+      restart_xray: true,
+      force: true,
+      queue_agent_commands: true,
+      queue_scan_after_apply: true,
+    });
+    expect(response.license_required).toBe(false);
+    expect(response.command_previews[0]?.path).toBe("/api/child/nginx/setup-ssl");
+    expect(response.scan_command_preview?.path).toBe("/api/child/scan");
   });
 
   it("lists Xray config snapshots with optional config bodies", async () => {

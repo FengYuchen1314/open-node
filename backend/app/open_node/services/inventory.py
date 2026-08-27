@@ -88,6 +88,9 @@ from open_node.domain.inventory import (
     XrayRuntimeTunnelDeleteCommand,
     XrayRuntimeTunnelDeleteRequest,
     XrayRuntimeTunnelDeleteResponse,
+    XrayRuntimeTunnelDeployCommand,
+    XrayRuntimeTunnelDeployRequest,
+    XrayRuntimeTunnelDeployResponse,
     XrayRuntimeTunnelHopRead,
     XrayRuntimeTunnelInventoryResponse,
     XrayRuntimeTunnelRead,
@@ -250,11 +253,167 @@ class XrayRuntimeTunnelChainUnavailableError(ValueError):
     """Raised when a runtime tunnel chain cannot be planned safely."""
 
 
+class XrayRuntimeTunnelDeployUnavailableError(ValueError):
+    """Raised when a runtime tunnel deployment cannot be planned safely."""
+
+
 _PROBE_SERIES_RANGES = {
     "1h": (12, 300),
     "6h": (36, 600),
     "24h": (48, 1800),
 }
+
+_TUNNEL_NGINX_CONFIG = """user root;
+worker_processes auto;
+
+error_log /var/log/nginx/error.log notice;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 4096;
+}
+
+http {
+    include       mime.types;
+    log_format main '[$time_local] $proxy_protocol_addr "$http_referer" "$http_user_agent"';
+    access_log /var/log/nginx/access.log main;
+
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ""      close;
+    }
+    map $proxy_protocol_addr $proxy_forwarded_elem {
+        ~^[0-9.]+$        "for=$proxy_protocol_addr";
+        ~^[0-9A-Fa-f:.]+$ "for=\\"[$proxy_protocol_addr]\\"";
+        default           "for=unknown";
+    }
+    map $http_forwarded $proxy_add_forwarded {
+        default "$proxy_forwarded_elem";
+    }
+    server {
+        listen 80;
+        listen [::]:80;
+        return 301 https://$host$request_uri;
+    }
+
+    server {
+        listen                  127.0.0.1:8001 ssl proxy_protocol default_server;
+        listen                  127.0.0.1:8001       quic;
+
+        ssl_reject_handshake    on;
+
+        ssl_protocols           TLSv1.2 TLSv1.3;
+
+        ssl_session_timeout     1h;
+        ssl_session_cache       shared:SSL:10m;
+    }
+
+    include servers/*.conf;
+}
+stream {
+    include stream_servers/*.conf;
+}
+"""
+
+_TUNNEL_SSL_CIPHERS = (
+    "TLS13_AES_128_GCM_SHA256:TLS13_AES_256_GCM_SHA384:"
+    "TLS13_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:"
+    "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305"
+)
+
+_TUNNEL_CORS_HEADERS = (
+    "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,"
+    "Content-Type,Range,Authorization"
+)
+
+_TUNNEL_DOMAIN_PROXY_CONFIG = """server {
+    listen                     127.0.0.1:8001 ssl proxy_protocol;
+    http2                      on;
+    client_max_body_size       512m;
+    set_real_ip_from           127.0.0.1;
+    real_ip_header             proxy_protocol;
+
+    server_name                {domain};
+    ssl_certificate            cert/{cert_name}.pem;
+    ssl_certificate_key        cert/{cert_name}.key;
+    ssl_protocols              TLSv1.2 TLSv1.3;
+    ssl_ciphers                {ssl_ciphers};
+    ssl_prefer_server_ciphers  on;
+    ssl_stapling               on;
+    ssl_stapling_verify        on;
+    resolver                   1.1.1.1 valid=60s;
+    resolver_timeout           2s;
+    location / {
+        proxy_pass              {site_value};
+        proxy_http_version      1.1;
+        proxy_cache_bypass      $http_upgrade;
+        proxy_set_header Host                 $host;
+        proxy_set_header Upgrade              $http_upgrade;
+        proxy_set_header Connection           $connection_upgrade;
+        proxy_set_header X-Real-IP            $proxy_protocol_addr;
+        proxy_set_header Forwarded            $proxy_add_forwarded;
+        proxy_set_header X-Forwarded-For      $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto    https;
+        proxy_set_header X-Forwarded-Host     $host;
+        proxy_set_header X-Forwarded-Port     $server_port;
+        proxy_connect_timeout   60s;
+        proxy_send_timeout      60s;
+        proxy_read_timeout      60s;
+    }
+}
+"""
+
+_TUNNEL_DOMAIN_STATIC_CONFIG = """server {
+    listen                     127.0.0.1:8001 http2 ssl proxy_protocol;
+    client_max_body_size       512m;
+    set_real_ip_from           127.0.0.1;
+    real_ip_header             proxy_protocol;
+
+    server_name                {domain};
+    ssl_certificate            cert/{cert_name}.pem;
+    ssl_certificate_key        cert/{cert_name}.key;
+    ssl_protocols              TLSv1.2 TLSv1.3;
+    ssl_ciphers                {ssl_ciphers};
+    ssl_prefer_server_ciphers  on;
+
+    ssl_stapling               on;
+    ssl_stapling_verify        on;
+    resolver                   1.1.1.1 valid=60s;
+    resolver_timeout           2s;
+    location / {
+        sub_filter                            $proxy_host $host;
+        sub_filter_once                       off;
+        root {site_value};
+        index index.html;
+        resolver                              1.1.1.1;
+
+        proxy_set_header Host                 $proxy_host;
+
+        proxy_http_version                    1.1;
+        proxy_cache_bypass                    $http_upgrade;
+        proxy_ssl_server_name                 on;
+        proxy_set_header Upgrade              $http_upgrade;
+        proxy_set_header Connection           $connection_upgrade;
+        proxy_set_header X-Real-IP            $proxy_protocol_addr;
+        proxy_set_header Forwarded            $proxy_add_forwarded;
+        proxy_set_header X-Forwarded-For      $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto    $scheme;
+        proxy_set_header X-Forwarded-Host     $host;
+        proxy_set_header X-Forwarded-Port     $server_port;
+        add_header 'X-Content-Type-Options' nosniff;
+        add_header 'Access-Control-Allow-Origin' '*';
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+        add_header 'Access-Control-Allow-Headers' '{cors_headers}';
+        proxy_connect_timeout                 60s;
+        proxy_send_timeout                    60s;
+        proxy_read_timeout                    60s;
+    }
+}
+"""
+
+_XRAY_TUNNEL_FORWARD_PORT = 46_174
+_XRAY_API_PORT = 46_736
+_XRAY_METRICS_PORT = 38_889
 
 _XRAY_CLIENT_CONTAINER_BY_PROTOCOL = {
     "vless": "clients",
@@ -1431,6 +1590,113 @@ class InventoryStore:
                 or payload.target_address,
                 hops=hops,
                 command_previews=previews,
+                command_count=len(previews),
+                warnings=self._dedupe_text(warnings),
+            )
+
+    def plan_xray_runtime_tunnel_deploy(
+        self,
+        server_id: UUID,
+        payload: XrayRuntimeTunnelDeployRequest,
+    ) -> XrayRuntimeTunnelDeployResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+
+            domain = payload.domain or self._normalize_runtime_domain(server.domain or "")
+            if not domain:
+                raise XrayRuntimeTunnelDeployUnavailableError(
+                    "server domain is required for tunnel deployment"
+                )
+
+            proxy_domain = (
+                payload.proxy_domain
+                if payload.proxy_domain is not None
+                else self._normalize_runtime_domain(server.pull_address or "")
+            )
+            if proxy_domain == domain:
+                proxy_domain = None
+            cert_name = self._cert_deploy_filename(payload.cert_name or domain)
+            warnings: list[str] = []
+
+            snapshot = self._current_xray_config_snapshot(session, server.id)
+            if snapshot is None:
+                warnings.append("current_config_snapshot_not_found")
+            elif self._xray_config_snapshot_has_user_content(snapshot):
+                warnings.append("current_config_has_user_content")
+                if payload.queue_agent_commands and not payload.force:
+                    raise XrayRuntimeTunnelDeployUnavailableError(
+                        "current Xray config has user content; "
+                        "set force=true to queue tunnel deploy"
+                    )
+
+            nginx_config = _TUNNEL_NGINX_CONFIG
+            domain_config = self._render_tunnel_domain_config(
+                payload.site_type,
+                payload.site_value,
+                domain,
+                cert_name,
+            )
+            xray_config = self._render_tunnel_xray_config(domain)
+            xray_config_text = json.dumps(xray_config, indent=4, ensure_ascii=False)
+
+            previews: list[XrayRuntimeTunnelDeployCommand] = []
+            if payload.clear_stream_port:
+                previews.append(
+                    XrayRuntimeTunnelDeployCommand(
+                        step="clear_stream_443",
+                        path="/api/child/nginx/clear-stream-port",
+                        body={"port": 443},
+                    )
+                )
+            previews.extend(
+                [
+                    XrayRuntimeTunnelDeployCommand(
+                        step="setup_tunnel_nginx",
+                        path="/api/child/nginx/setup-ssl",
+                        body={
+                            "domain": domain,
+                            "nginx_config": nginx_config,
+                            "domain_config": domain_config,
+                        },
+                    ),
+                    XrayRuntimeTunnelDeployCommand(
+                        step="write_tunnel_xray_config",
+                        path="/api/child/xray/config",
+                        body={"config": xray_config_text},
+                    ),
+                ]
+            )
+            if payload.restart_xray:
+                previews.append(
+                    XrayRuntimeTunnelDeployCommand(
+                        step="restart_xray",
+                        path="/api/child/services/control",
+                        body={"service": "xray", "action": "restart"},
+                    )
+                )
+
+            scan_preview = (
+                XrayRuntimeTunnelDeployCommand(
+                    step="scan_runtime",
+                    path="/api/child/scan",
+                )
+                if payload.queue_scan_after_apply
+                else None
+            )
+
+            return XrayRuntimeTunnelDeployResponse(
+                server_id=UUID(server.id),
+                server_name=server.name,
+                domain=domain,
+                proxy_domain=proxy_domain,
+                cert_name=cert_name,
+                nginx_config=nginx_config,
+                domain_config=domain_config,
+                xray_config=xray_config_text,
+                command_previews=previews,
+                scan_command_preview=scan_preview,
                 command_count=len(previews),
                 warnings=self._dedupe_text(warnings),
             )
@@ -6283,6 +6549,171 @@ class InventoryStore:
             if (port := cls._port_value(inbound.get("port"))) is not None
         }
         return ports, warnings
+
+    @classmethod
+    def _xray_config_snapshot_has_user_content(
+        cls,
+        snapshot: XrayConfigSnapshotModel,
+    ) -> bool:
+        try:
+            config = json.loads(snapshot.config)
+        except json.JSONDecodeError:
+            return True
+        if not isinstance(config, dict):
+            return True
+        for inbound in cls._list_value(config.get("inbounds")):
+            if not isinstance(inbound, dict):
+                continue
+            tag = cls._text_value(inbound.get("tag")) or ""
+            if tag not in {"api", "tunnel-in"}:
+                return True
+        for outbound in cls._list_value(config.get("outbounds")):
+            if not isinstance(outbound, dict):
+                continue
+            tag = cls._text_value(outbound.get("tag")) or ""
+            if tag and tag not in {"direct", "block", "nginx"}:
+                return True
+        return False
+
+    @staticmethod
+    def _normalize_runtime_domain(raw: str) -> str:
+        value = raw.strip().lower()
+        if not value:
+            return ""
+        if "://" in value:
+            value = value.split("://", 1)[1]
+        if "/" in value:
+            value = value.split("/", 1)[0]
+        if value.startswith("[") and value.endswith("]"):
+            value = value[1:-1]
+        return value.strip(" .")
+
+    @staticmethod
+    def _cert_deploy_filename(domain: str) -> str:
+        normalized = domain.strip().lower()
+        if normalized.startswith("*."):
+            return "_." + normalized[2:]
+        return normalized
+
+    @staticmethod
+    def _render_tunnel_domain_config(
+        site_type: Literal["static", "proxy"],
+        site_value: str,
+        domain: str,
+        cert_name: str,
+    ) -> str:
+        template = (
+            _TUNNEL_DOMAIN_PROXY_CONFIG
+            if site_type == "proxy"
+            else _TUNNEL_DOMAIN_STATIC_CONFIG
+        )
+        return (
+            template.replace("{domain}", domain)
+            .replace("{cert_name}", cert_name)
+            .replace("{site_value}", site_value)
+            .replace("{ssl_ciphers}", _TUNNEL_SSL_CIPHERS)
+            .replace("{cors_headers}", _TUNNEL_CORS_HEADERS)
+        )
+
+    @staticmethod
+    def _render_tunnel_xray_config(domain: str) -> dict[str, Any]:
+        return {
+            "log": {"loglevel": "error"},
+            "dns": {},
+            "api": {
+                "tag": "api",
+                "services": [
+                    "HandlerService",
+                    "LoggerService",
+                    "StatsService",
+                    "RoutingService",
+                ],
+            },
+            "stats": {},
+            "policy": {
+                "levels": {
+                    "0": {
+                        "handshake": 5,
+                        "connIdle": 300,
+                        "uplinkOnly": 2,
+                        "downlinkOnly": 2,
+                        "statsUserUplink": True,
+                        "statsUserDownlink": True,
+                    }
+                },
+                "system": {
+                    "statsInboundUplink": True,
+                    "statsInboundDownlink": True,
+                    "statsOutboundUplink": True,
+                    "statsOutboundDownlink": True,
+                },
+            },
+            "routing": {
+                "domainStrategy": "IPIfNonMatch",
+                "rules": [
+                    {
+                        "inboundTag": ["tunnel-in"],
+                        "domain": [domain],
+                        "outboundTag": "nginx",
+                    },
+                    {
+                        "inboundTag": ["tunnel-in"],
+                        "outboundTag": "direct",
+                    },
+                    {
+                        "type": "field",
+                        "inboundTag": ["api"],
+                        "outboundTag": "api",
+                    },
+                    {
+                        "type": "field",
+                        "ip": ["geoip:private"],
+                        "outboundTag": "block",
+                    },
+                ],
+            },
+            "inbounds": [
+                {
+                    "tag": "tunnel-in",
+                    "port": 443,
+                    "protocol": "tunnel",
+                    "settings": {
+                        "address": "127.0.0.1",
+                        "port": _XRAY_TUNNEL_FORWARD_PORT,
+                        "network": "tcp",
+                    },
+                    "sniffing": {
+                        "enabled": True,
+                        "destOverride": ["tls"],
+                        "routeOnly": True,
+                    },
+                },
+                {
+                    "tag": "api",
+                    "port": _XRAY_API_PORT,
+                    "listen": "127.0.0.1",
+                    "protocol": "tunnel",
+                    "settings": {"address": "127.0.0.1"},
+                },
+            ],
+            "outbounds": [
+                {"tag": "direct", "protocol": "freedom"},
+                {"tag": "block", "protocol": "blackhole"},
+                {
+                    "protocol": "freedom",
+                    "settings": {
+                        "redirect": "127.0.0.1:8001",
+                        "domainStrategy": "UseIP",
+                        "proxyProtocol": 1,
+                    },
+                    "tag": "nginx",
+                },
+            ],
+            "metrics": {
+                "tag": "Metrics",
+                "listen": f"127.0.0.1:{_XRAY_METRICS_PORT}",
+            },
+        }
 
     @staticmethod
     def _server_entry_host(server: ServerModel) -> str:

@@ -85,6 +85,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: ordered runtime tunnel chains can be planned across existing
      servers, with conflict-free hop ports, `/api/child/inbounds` previews,
      queued add commands, follow-up scans, and Vue Runtime tab controls.
+   - Done: tunnel-mode deployment can render and queue the active MMWX tunnel
+     Nginx/Xray baseline for a single server, with explicit `force` required
+     before overwriting snapshots that already contain user runtime content.
    - Done: scan-derived managed-node drafts and one-click catalog node creation
      from runtime inbounds, without importing UUIDs, passwords, PSKs, or account
      secrets from existing Xray config.

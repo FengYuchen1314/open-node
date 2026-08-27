@@ -346,6 +346,38 @@ body {
   padding-top: 10px;
 }
 
+.runtime-tunnel-deploy-form {
+  border-top: 1px solid #edf2ef;
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.runtime-tunnel-deploy-grid {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+}
+
+.runtime-deploy-toggle-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: 48px;
+}
+
+.runtime-tunnel-deploy-grid .runtime-node-action {
+  align-self: center;
+  width: 100%;
+}
+
+.runtime-tunnel-deploy-grid .v-btn {
+  min-width: 0;
+  width: 100%;
+}
+
 .runtime-chain-grid {
   align-items: start;
   display: grid;
@@ -1420,6 +1452,8 @@ body {
   .config-action-row,
   .config-file-grid,
   .runtime-chain-grid,
+  .runtime-deploy-toggle-row,
+  .runtime-tunnel-deploy-grid,
   .runtime-inbound-row,
   .runtime-reconcile-row,
   .snapshot-row,

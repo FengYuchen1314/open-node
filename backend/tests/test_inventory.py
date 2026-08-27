@@ -2831,6 +2831,168 @@ def test_xray_runtime_tunnel_chain_create_plans_and_queues_hops(
     assert all(command["timeout_ms"] == 45_000 for command in queued_payload["scan_commands"])
 
 
+def test_xray_runtime_tunnel_deploy_plans_template_and_requires_force(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={
+            "name": "edge-tunnel-deploy",
+            "domain": "Gateway.EXAMPLE.com",
+            "pull_address": "gateway-proxy.example.com",
+        },
+    ).json()
+    server_id = created["server"]["id"]
+    command = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config/read",
+    ).json()["command"]
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                "success": True,
+                "config": json.dumps(
+                    {
+                        "inbounds": [{"tag": "vless-443", "port": 443}],
+                        "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+                    }
+                ),
+            },
+        },
+    )
+    assert result.status_code == 200
+
+    request_body = {
+        "site_type": "proxy",
+        "site_value": "http://127.0.0.1:12889",
+        "cert_name": "*.example.com",
+        "queue_scan_after_apply": True,
+    }
+    preview = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/tunnel-deploy",
+        json=request_body,
+    )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["license_required"] is False
+    assert payload["domain"] == "gateway.example.com"
+    assert payload["proxy_domain"] == "gateway-proxy.example.com"
+    assert payload["cert_name"] == "_.example.com"
+    assert payload["command_count"] == 4
+    assert payload["commands"] == []
+    assert payload["scan_command_preview"]["path"] == "/api/child/scan"
+    assert payload["warnings"] == ["current_config_has_user_content"]
+    assert [command["path"] for command in payload["command_previews"]] == [
+        "/api/child/nginx/clear-stream-port",
+        "/api/child/nginx/setup-ssl",
+        "/api/child/xray/config",
+        "/api/child/services/control",
+    ]
+    setup_body = payload["command_previews"][1]["body"]
+    assert setup_body["domain"] == "gateway.example.com"
+    assert "include stream_servers/*.conf" in setup_body["nginx_config"]
+    assert "server_name                gateway.example.com;" in setup_body["domain_config"]
+    assert "proxy_pass              http://127.0.0.1:12889;" in setup_body["domain_config"]
+    assert "cert/_.example.com.pem" in setup_body["domain_config"]
+
+    config_body = payload["command_previews"][2]["body"]
+    xray_config = json.loads(config_body["config"])
+    assert xray_config["inbounds"][0]["tag"] == "tunnel-in"
+    assert xray_config["inbounds"][0]["port"] == 443
+    assert xray_config["inbounds"][0]["settings"]["port"] == 46_174
+    assert xray_config["routing"]["rules"][0] == {
+        "inboundTag": ["tunnel-in"],
+        "domain": ["gateway.example.com"],
+        "outboundTag": "nginx",
+    }
+    assert xray_config["routing"]["rules"][1] == {
+        "inboundTag": ["tunnel-in"],
+        "outboundTag": "direct",
+    }
+
+    blocked = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/tunnel-deploy",
+        json={**request_body, "queue_agent_commands": True},
+    )
+    assert blocked.status_code == 400
+
+    queued = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/tunnel-deploy",
+        json={
+            **request_body,
+            "queue_agent_commands": True,
+            "force": True,
+            "command_timeout_ms": 45_000,
+        },
+    )
+
+    assert queued.status_code == 200
+    queued_payload = queued.json()
+    assert [command["path"] for command in queued_payload["commands"]] == [
+        "/api/child/nginx/clear-stream-port",
+        "/api/child/nginx/setup-ssl",
+        "/api/child/xray/config",
+        "/api/child/services/control",
+    ]
+    assert all(command["timeout_ms"] == 45_000 for command in queued_payload["commands"])
+    assert queued_payload["scan_command"]["path"] == "/api/child/scan"
+    assert queued_payload["scan_command"]["timeout_ms"] == 45_000
+
+
+def test_xray_runtime_tunnel_deploy_protects_existing_tunnel_inbounds(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-existing-tunnel", "domain": "edge.example.com"},
+    ).json()
+    server_id = created["server"]["id"]
+    command = client.post(
+        f"/api/v1/servers/{server_id}/operations/xray/config/read",
+    ).json()["command"]
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                "success": True,
+                "config": json.dumps(
+                    {
+                        "inbounds": [
+                            {
+                                "tag": "runtime-chain-hop",
+                                "protocol": "tunnel",
+                                "port": 20_001,
+                            }
+                        ],
+                        "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+                    }
+                ),
+            },
+        },
+    )
+    assert result.status_code == 200
+
+    preview = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/tunnel-deploy",
+        json={},
+    )
+    assert preview.status_code == 200
+    assert preview.json()["warnings"] == ["current_config_has_user_content"]
+
+    blocked = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/tunnel-deploy",
+        json={"queue_agent_commands": True},
+    )
+    assert blocked.status_code == 400
+
+
 def test_xray_runtime_tunnel_inventory_handles_missing_config_snapshot(
     tmp_path: Path,
 ) -> None:

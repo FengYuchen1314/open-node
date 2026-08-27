@@ -88,6 +88,13 @@ tunnel chain through `/api/v1/servers/xray/runtime/tunnel-chains`, which picks
 conflict-free hop ports from current snapshots, previews the
 `/api/child/inbounds` add commands, and can queue those commands plus
 follow-up scans for every hop server.
+The single-server tunnel-mode deployment endpoint
+`/api/v1/servers/{server_id}/xray/runtime/tunnel-deploy` renders the tunnel
+Nginx main config, the selected static/proxy camouflage domain config, and the
+baseline Xray `tunnel-in` config. By default it previews the clear-stream,
+Nginx setup, Xray config write, and restart commands; when queueing against a
+snapshot that already contains user inbounds or custom outbounds, callers must
+set `force=true` to make the overwrite explicit.
 It can also derive managed-node drafts from those inbounds at
 `/api/v1/servers/{server_id}/xray/runtime/node-drafts` and create catalog nodes
 through `/api/v1/servers/{server_id}/xray/runtime/nodes`. Operators can also
@@ -218,6 +225,7 @@ routes, while common agent actions also have stable control-plane wrappers:
 - `GET /api/v1/servers/{server_id}/xray/runtime/tunnels`
 - `POST /api/v1/servers/{server_id}/xray/runtime/tunnels/delete`
 - `POST /api/v1/servers/xray/runtime/tunnel-chains`
+- `POST /api/v1/servers/{server_id}/xray/runtime/tunnel-deploy`
 - `GET /api/v1/servers/{server_id}/xray/runtime/node-drafts`
 - `POST /api/v1/servers/{server_id}/xray/runtime/nodes`
 - `POST /api/v1/servers/{server_id}/xray/runtime/nodes/import`
