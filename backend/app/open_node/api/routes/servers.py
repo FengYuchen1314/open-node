@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from open_node.api.dependencies import get_inventory_store
+from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.inventory import (
     AgentCommandCreate,
     AgentCommandCreateResponse,
@@ -13,6 +13,7 @@ from open_node.domain.inventory import (
     ServerRead,
     ServerTelemetryResponse,
 )
+from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
     DuplicateServerNameError,
     InventoryStore,
@@ -71,13 +72,15 @@ def list_server_commands(
     response_model=AgentCommandCreateResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_server_command(
+async def create_server_command(
     server_id: UUID,
     payload: AgentCommandCreate,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentCommandCreateResponse:
     try:
         command = store.create_command(server_id, payload)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    command = await connections.dispatch_command(store, command)
     return AgentCommandCreateResponse(command=command)

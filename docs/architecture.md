@@ -69,3 +69,16 @@ HTTP-like results to `/api/v1/agents/commands/{command_id}/result`.
 
 The first implementation is intentionally queue-based so pull-mode agents and
 future WebSocket RPC can share one persisted state machine.
+
+## Agent WebSocket RPC
+
+Agents can connect to `/api/v1/agents/ws` and authenticate with the same
+server bootstrap token used by HTTP registration. The first message must be
+`auth`; after that, the socket accepts `heartbeat`, `traffic`/`telemetry`,
+`ping`, and `rpc_reply` messages. Successful auth registers or refreshes the
+agent record and stores its capability flags.
+
+When a command is created for a server with an active RPC-capable socket, Open
+Node leases that persisted command and immediately sends an MMWX-compatible
+`rpc_call` payload. The agent can complete it over the socket with `rpc_reply`;
+offline or non-RPC agents still use the HTTP lease/result endpoints.

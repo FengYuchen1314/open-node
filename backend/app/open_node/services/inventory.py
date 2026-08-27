@@ -439,19 +439,48 @@ class InventoryStore:
             if not command or command.server_id != server.id:
                 raise CommandNotFoundError(f"command not found: {command_id}")
 
-            now = datetime.now(tz=UTC)
-            command.status = (
-                AgentCommandStatus.FAILED.value
-                if payload.error or payload.status >= 400
-                else AgentCommandStatus.SUCCEEDED.value
+            self._apply_command_result(server, command, payload)
+            session.commit()
+            session.refresh(command)
+            return self._command_read(command)
+
+    def complete_command_by_request_id(
+        self,
+        request_id: str,
+        payload: AgentCommandResultRequest,
+    ) -> AgentCommandRead:
+        with self._session() as session:
+            server = self._server_by_token(session, payload.token)
+            command = session.scalar(
+                select(CommandModel).where(
+                    CommandModel.request_id == request_id,
+                    CommandModel.server_id == server.id,
+                )
             )
-            command.result_status = payload.status
-            command.result_body = payload.body
-            command.result_error = payload.error
-            command.completed_at = now
+            if not command:
+                raise CommandNotFoundError(f"command not found: {request_id}")
+
+            self._apply_command_result(server, command, payload)
+            session.commit()
+            session.refresh(command)
+            return self._command_read(command)
+
+    def lease_command_for_push(self, command_id: UUID) -> AgentCommandRead:
+        with self._session() as session:
+            command = session.get(CommandModel, str(command_id))
+            if not command:
+                raise CommandNotFoundError(f"command not found: {command_id}")
+            if command.status in {
+                AgentCommandStatus.SUCCEEDED.value,
+                AgentCommandStatus.FAILED.value,
+            }:
+                return self._command_read(command)
+
+            now = datetime.now(tz=UTC)
+            command.status = AgentCommandStatus.LEASED.value
+            command.attempts += 1
+            command.leased_at = now
             command.updated_at = now
-            server.last_heartbeat = now
-            server.updated_at = now
             session.commit()
             session.refresh(command)
             return self._command_read(command)
@@ -637,6 +666,26 @@ class InventoryStore:
         leased_at = InventoryStore._aware_datetime(command.leased_at)
         elapsed_ms = (now - leased_at).total_seconds() * 1000
         return elapsed_ms >= command.timeout_ms
+
+    @staticmethod
+    def _apply_command_result(
+        server: ServerModel,
+        command: CommandModel,
+        payload: AgentCommandResultRequest,
+    ) -> None:
+        now = datetime.now(tz=UTC)
+        command.status = (
+            AgentCommandStatus.FAILED.value
+            if payload.error or payload.status >= 400
+            else AgentCommandStatus.SUCCEEDED.value
+        )
+        command.result_status = payload.status
+        command.result_body = payload.body
+        command.result_error = payload.error
+        command.completed_at = now
+        command.updated_at = now
+        server.last_heartbeat = now
+        server.updated_at = now
 
 
 def create_inventory_engine(database_url: str) -> Engine:

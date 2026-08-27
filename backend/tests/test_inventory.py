@@ -370,3 +370,111 @@ def test_create_command_for_unknown_server_returns_404(tmp_path: Path) -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "server not found: 00000000-0000-0000-0000-000000000000"
+
+
+def test_agent_websocket_auth_registers_agent_and_acks_heartbeat(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws"}).json()
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-host",
+                    "agent_version": "0.5.0",
+                    "public_ipv4": "198.51.100.88",
+                    "capabilities": {"rpc": True, "stream": True},
+                    "xray_mode": "embedded",
+                },
+            }
+        )
+        auth = websocket.receive_json()
+
+        assert auth["type"] == "auth_result"
+        assert auth["payload"]["success"] is True
+        assert auth["payload"]["license_required"] is False
+        assert auth["payload"]["server_id"] == created["server"]["id"]
+
+        websocket.send_json(
+            {
+                "type": "heartbeat",
+                "payload": {"listen_port": 28888, "public_ipv4": "198.51.100.89"},
+            }
+        )
+        heartbeat = websocket.receive_json()
+
+        assert heartbeat["type"] == "heartbeat_ack"
+        assert heartbeat["payload"]["server_time"] > 0
+
+    agents = client.get("/api/v1/agents").json()
+    servers = client.get("/api/v1/servers").json()
+    assert agents[0]["hostname"] == "edge-ws-host"
+    assert agents[0]["capabilities"]["rpc"] is True
+    assert servers[0]["status"] == "connected"
+    assert servers[0]["ip_address"] == "198.51.100.89"
+
+
+def test_online_agent_websocket_receives_rpc_call_and_completes_command(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-rpc"}).json()
+    server_id = created["server"]["id"]
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-rpc-host",
+                    "capabilities": {"rpc": True},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+
+        queued = client.post(
+            f"/api/v1/servers/{server_id}/commands",
+            json={"method": "GET", "path": "/api/child/system/info", "timeout_ms": 5000},
+        )
+        assert queued.status_code == 201
+        command = queued.json()["command"]
+        assert command["status"] == "leased"
+        assert command["attempts"] == 1
+
+        rpc_call = websocket.receive_json()
+        assert rpc_call["type"] == "rpc_call"
+        assert rpc_call["payload"]["request_id"] == command["request_id"]
+        assert rpc_call["payload"]["path"] == "/api/child/system/info"
+
+        websocket.send_json(
+            {
+                "type": "rpc_reply",
+                "payload": {
+                    "request_id": command["request_id"],
+                    "status": 200,
+                    "body": {"hostname": "edge-ws-rpc-host"},
+                },
+            }
+        )
+        reply_ack = websocket.receive_json()
+        assert reply_ack["type"] == "rpc_reply_ack"
+        assert reply_ack["payload"]["status"] == "succeeded"
+
+    commands = client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"]
+    assert commands[0]["status"] == "succeeded"
+    assert commands[0]["result_body"] == {"hostname": "edge-ws-rpc-host"}
+
+
+def test_agent_websocket_invalid_token_returns_auth_failure(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json({"type": "auth", "payload": {"token": "not-a-real-token"}})
+        auth = websocket.receive_json()
+
+        assert auth["type"] == "auth_result"
+        assert auth["payload"]["success"] is False
+        assert auth["payload"]["license_required"] is False
+        assert "invalid agent token" in auth["payload"]["message"]
