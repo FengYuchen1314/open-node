@@ -11,11 +11,14 @@ import type {
   SubscriptionCatalogExportResponse,
   SubscriptionCatalogImportRequest,
   SubscriptionCatalogImportResponse,
+  SubscriptionDueTrafficResetRequest,
+  SubscriptionDueTrafficResetResponse,
   SubscriptionPlanAssignRequest,
   SubscriptionPlanAssignResponse,
   SubscriptionPlanCreateRequest,
   SubscriptionPlanResponse,
   SubscriptionPlansResponse,
+  SubscriptionQuotaStatusResponse,
   SubscriptionTemplatePresetApplyRequest,
   SubscriptionTemplatePresetsResponse,
 } from "../domain/subscriptions";
@@ -118,6 +121,54 @@ export async function getProductUserTraffic(
     throw await apiError(response, "Product user traffic request failed");
   }
   return response.json() as Promise<ProductUserTrafficResponse>;
+}
+
+export async function getProductUserQuota(
+  username: string,
+  now?: string | null,
+  fetcher = fetch,
+): Promise<SubscriptionQuotaStatusResponse> {
+  const query = now ? `?now=${encodeURIComponent(now)}` : "";
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/quota${query}`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Product user quota request failed");
+  }
+  return response.json() as Promise<SubscriptionQuotaStatusResponse>;
+}
+
+export async function resetProductUserTraffic(
+  username: string,
+  now?: string | null,
+  fetcher = fetch,
+): Promise<SubscriptionQuotaStatusResponse> {
+  const query = now ? `?now=${encodeURIComponent(now)}` : "";
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/traffic/reset${query}`,
+    {
+      method: "POST",
+    },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Product user traffic reset request failed");
+  }
+  return response.json() as Promise<SubscriptionQuotaStatusResponse>;
+}
+
+export async function resetDueProductUserTraffic(
+  payload: SubscriptionDueTrafficResetRequest = {},
+  fetcher = fetch,
+): Promise<SubscriptionDueTrafficResetResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/traffic/reset-due`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await apiError(response, "Due traffic reset request failed");
+  }
+  return response.json() as Promise<SubscriptionDueTrafficResetResponse>;
 }
 
 export async function listSubscriptionTemplatePresets(

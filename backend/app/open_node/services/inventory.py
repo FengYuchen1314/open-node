@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from calendar import monthrange
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -25,7 +26,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    inspect,
     select,
+    text,
 )
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -91,10 +94,14 @@ from open_node.domain.subscriptions import (
     SubscriptionCatalogUserEntry,
     SubscriptionClientFormat,
     SubscriptionCredentialRead,
+    SubscriptionDueTrafficResetRequest,
+    SubscriptionDueTrafficResetResponse,
+    SubscriptionDueTrafficResetSummary,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanCreate,
     SubscriptionPlanRead,
     SubscriptionProvisionBatch,
+    SubscriptionQuotaStatusRead,
     SubscriptionTemplatePresetApplyRequest,
     SubscriptionTemplatePresetRead,
     SubscriptionTrafficEntryRead,
@@ -500,6 +507,10 @@ class ProductUserModel(Base):
     )
     is_reset: Mapped[bool] = mapped_column(Boolean, default=False)
     reset_day: Mapped[int] = mapped_column(Integer, default=0)
+    last_traffic_reset_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -630,6 +641,20 @@ class InventoryStore:
 
     def create_schema(self) -> None:
         Base.metadata.create_all(self._engine)
+        self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        if self._engine.dialect.name != "sqlite":
+            return
+        inspector = inspect(self._engine)
+        if "product_users" not in inspector.get_table_names():
+            return
+        columns = {column["name"] for column in inspector.get_columns("product_users")}
+        if "last_traffic_reset_at" not in columns:
+            with self._engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE product_users ADD COLUMN last_traffic_reset_at DATETIME")
+                )
 
     def list_servers(self) -> list[ServerRead]:
         with self._session() as session:
@@ -884,6 +909,7 @@ class InventoryStore:
                 plan_expires_at=None,
                 is_reset=False,
                 reset_day=0,
+                last_traffic_reset_at=None,
                 created_at=now,
                 updated_at=now,
             )
@@ -1024,6 +1050,7 @@ class InventoryStore:
                         plan_expires_at=user.plan_expires_at,
                         is_reset=user.is_reset,
                         reset_day=user.reset_day,
+                        last_traffic_reset_at=user.last_traffic_reset_at,
                     )
                     for user in users
                 ],
@@ -1067,6 +1094,7 @@ class InventoryStore:
                     existing.is_active = user_entry.is_active
                     existing.is_reset = user_entry.is_reset
                     existing.reset_day = user_entry.reset_day
+                    existing.last_traffic_reset_at = user_entry.last_traffic_reset_at
                     existing.updated_at = now
                     summary.updated_users += 1
                     continue
@@ -1082,6 +1110,7 @@ class InventoryStore:
                         plan_expires_at=None,
                         is_reset=user_entry.is_reset,
                         reset_day=user_entry.reset_day,
+                        last_traffic_reset_at=user_entry.last_traffic_reset_at,
                         created_at=now,
                         updated_at=now,
                     )
@@ -1148,6 +1177,7 @@ class InventoryStore:
                 )
                 user.plan_started_at = user_entry.plan_started_at
                 user.plan_expires_at = user_entry.plan_expires_at
+                user.last_traffic_reset_at = user_entry.last_traffic_reset_at
                 user.updated_at = now
 
             if payload.import_credentials:
@@ -1352,6 +1382,14 @@ class InventoryStore:
             plan = session.get(SubscriptionPlanModel, user.current_plan_id)
             if not plan:
                 raise SubscriptionUnavailableError("subscription plan is missing")
+            quota = self._subscription_quota_status(
+                session,
+                user,
+                plan,
+                datetime.now(tz=UTC),
+            )
+            if quota.over_quota:
+                raise SubscriptionUnavailableError("subscription traffic quota exceeded")
 
             proxies, warnings = self._subscription_proxy_configs(session, user, plan)
             if not proxies:
@@ -1393,6 +1431,73 @@ class InventoryStore:
                 total=upload + download,
                 entries=[self._subscription_traffic_entry_read(entry) for entry in entries],
             )
+
+    def subscription_user_quota(
+        self,
+        username: str,
+        now: datetime | None = None,
+    ) -> SubscriptionQuotaStatusRead:
+        active_now = self._aware_datetime(now or datetime.now(tz=UTC))
+        with self._session() as session:
+            user = session.get(ProductUserModel, username)
+            if not user:
+                raise ProductUserNotFoundError(f"user not found: {username}")
+            plan = (
+                session.get(SubscriptionPlanModel, user.current_plan_id)
+                if user.current_plan_id
+                else None
+            )
+            return self._subscription_quota_status(session, user, plan, active_now)
+
+    def reset_subscription_traffic(
+        self,
+        username: str,
+        now: datetime | None = None,
+    ) -> SubscriptionQuotaStatusRead:
+        active_now = self._aware_datetime(now or datetime.now(tz=UTC))
+        with self._session() as session:
+            user = session.get(ProductUserModel, username)
+            if not user:
+                raise ProductUserNotFoundError(f"user not found: {username}")
+            self._reset_subscription_traffic_for_user(session, user, active_now)
+            plan = (
+                session.get(SubscriptionPlanModel, user.current_plan_id)
+                if user.current_plan_id
+                else None
+            )
+            session.commit()
+            session.refresh(user)
+            return self._subscription_quota_status(session, user, plan, active_now)
+
+    def reset_due_subscription_traffic(
+        self,
+        payload: SubscriptionDueTrafficResetRequest,
+    ) -> SubscriptionDueTrafficResetResponse:
+        active_now = self._aware_datetime(payload.now or datetime.now(tz=UTC))
+        summary = SubscriptionDueTrafficResetSummary(dry_run=payload.dry_run)
+        with self._session() as session:
+            users = session.scalars(
+                select(ProductUserModel).order_by(ProductUserModel.username)
+            ).all()
+            for user in users:
+                summary.checked_users += 1
+                plan = (
+                    session.get(SubscriptionPlanModel, user.current_plan_id)
+                    if user.current_plan_id
+                    else None
+                )
+                quota = self._subscription_quota_status(session, user, plan, active_now)
+                if not quota.reset_due:
+                    summary.skipped_users += 1
+                    continue
+                summary.reset_users += 1
+                summary.usernames.append(user.username)
+                if not payload.dry_run:
+                    self._reset_subscription_traffic_for_user(session, user, active_now)
+
+            if not payload.dry_run:
+                session.commit()
+        return SubscriptionDueTrafficResetResponse(summary=summary)
 
     def list_change_sets(self) -> list[AgentChangeSetRead]:
         with self._session() as session:
@@ -2103,11 +2208,19 @@ class InventoryStore:
         credentials = session.scalars(select(SubscriptionCredentialModel)).all()
         index: dict[str, str] = {}
         for credential in credentials:
-            index[credential.email] = credential.username
-            raw_email = credential.credential.get("email")
-            if isinstance(raw_email, str) and raw_email:
-                index[raw_email] = credential.username
+            for email in InventoryStore._subscription_credential_emails(credential):
+                index[email] = credential.username
         return index
+
+    @staticmethod
+    def _subscription_credential_emails(
+        credential: SubscriptionCredentialModel,
+    ) -> list[str]:
+        emails = [credential.email]
+        raw_email = credential.credential.get("email")
+        if isinstance(raw_email, str) and raw_email and raw_email not in emails:
+            emails.append(raw_email)
+        return emails
 
     @staticmethod
     def _traffic_counter_value(value: object) -> int:
@@ -2146,6 +2259,9 @@ class InventoryStore:
             plan_expires_at=user.plan_expires_at,
             is_reset=user.is_reset,
             reset_day=user.reset_day,
+            last_traffic_reset_at=InventoryStore._aware_datetime(user.last_traffic_reset_at)
+            if user.last_traffic_reset_at
+            else None,
             created_at=user.created_at,
             updated_at=user.updated_at,
         )
@@ -3084,6 +3200,215 @@ class InventoryStore:
             f"upload={upload}; download={download}; total={plan.traffic_limit_bytes}; "
             f"expire={expire}"
         )
+
+    def _subscription_quota_status(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel | None,
+        now: datetime,
+    ) -> SubscriptionQuotaStatusRead:
+        upload, download = self._subscription_user_traffic(session, user.username)
+        traffic_mode = SubscriptionTrafficMode(plan.traffic_mode) if plan else None
+        traffic_limit_bytes = plan.traffic_limit_bytes if plan else 0
+        charged_usage_bytes = (
+            download
+            if traffic_mode == SubscriptionTrafficMode.ONEWAY
+            else upload + download
+        )
+        expired = bool(
+            user.plan_expires_at and now > self._aware_datetime(user.plan_expires_at)
+        )
+        over_quota = bool(
+            plan and traffic_limit_bytes > 0 and charged_usage_bytes >= traffic_limit_bytes
+        )
+        reset_due_at, next_reset_at = self._subscription_reset_boundaries(user, now)
+        reset_due = self._subscription_reset_due(
+            user,
+            plan,
+            expired=expired,
+            reset_due_at=reset_due_at,
+        )
+        remaining_bytes = (
+            max(traffic_limit_bytes - charged_usage_bytes, 0) if traffic_limit_bytes else 0
+        )
+        percent_used = (
+            round((charged_usage_bytes / traffic_limit_bytes) * 100, 2)
+            if traffic_limit_bytes
+            else 0
+        )
+        return SubscriptionQuotaStatusRead(
+            username=user.username,
+            is_active=user.is_active,
+            has_plan=plan is not None,
+            available=bool(user.is_active and plan and not expired and not over_quota),
+            expired=expired,
+            over_quota=over_quota,
+            reset_enabled=user.is_reset,
+            reset_due=reset_due,
+            upload=upload,
+            download=download,
+            charged_usage_bytes=charged_usage_bytes,
+            traffic_limit_bytes=traffic_limit_bytes,
+            remaining_bytes=remaining_bytes,
+            percent_used=percent_used,
+            reset_day=user.reset_day,
+            plan_id=UUID(plan.id) if plan else None,
+            plan_name=plan.name if plan else None,
+            traffic_mode=traffic_mode,
+            plan_started_at=self._aware_datetime(user.plan_started_at)
+            if user.plan_started_at
+            else None,
+            plan_expires_at=self._aware_datetime(user.plan_expires_at)
+            if user.plan_expires_at
+            else None,
+            reset_due_at=reset_due_at,
+            next_reset_at=next_reset_at,
+            last_traffic_reset_at=self._aware_datetime(user.last_traffic_reset_at)
+            if user.last_traffic_reset_at
+            else None,
+        )
+
+    def _reset_subscription_traffic_for_user(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        now: datetime,
+    ) -> int:
+        ledgers = session.scalars(
+            select(SubscriptionTrafficLedgerModel).where(
+                SubscriptionTrafficLedgerModel.username == user.username
+            )
+        ).all()
+        ledger_keys = {(ledger.server_id, ledger.email) for ledger in ledgers}
+        for ledger in ledgers:
+            baseline = self._subscription_traffic_baseline(
+                session,
+                ledger.server_id,
+                ledger.email,
+            )
+            if baseline:
+                last_uplink, last_downlink, reported_at = baseline
+                ledger.last_uplink = last_uplink
+                ledger.last_downlink = last_downlink
+                ledger.last_reported_at = reported_at
+            ledger.upload = 0
+            ledger.download = 0
+            ledger.updated_at = now
+
+        touched = len(ledgers)
+        credentials = session.scalars(
+            select(SubscriptionCredentialModel).where(
+                SubscriptionCredentialModel.username == user.username
+            )
+        ).all()
+        for credential in credentials:
+            email, last_uplink, last_downlink, reported_at = self._subscription_credential_baseline(
+                session,
+                credential,
+            )
+            key = (credential.server_id, email)
+            if key in ledger_keys:
+                continue
+            session.add(
+                SubscriptionTrafficLedgerModel(
+                    id=str(uuid4()),
+                    username=user.username,
+                    server_id=credential.server_id,
+                    email=email,
+                    upload=0,
+                    download=0,
+                    last_uplink=last_uplink,
+                    last_downlink=last_downlink,
+                    last_reported_at=reported_at,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            ledger_keys.add(key)
+            touched += 1
+
+        user.last_traffic_reset_at = now
+        user.updated_at = now
+        return touched
+
+    def _subscription_credential_baseline(
+        self,
+        session: Session,
+        credential: SubscriptionCredentialModel,
+    ) -> tuple[str, int, int, datetime | None]:
+        for email in self._subscription_credential_emails(credential):
+            baseline = self._subscription_traffic_baseline(session, credential.server_id, email)
+            if baseline:
+                last_uplink, last_downlink, reported_at = baseline
+                return email, last_uplink, last_downlink, reported_at
+        return credential.email, 0, 0, None
+
+    def _subscription_traffic_baseline(
+        self,
+        session: Session,
+        server_id: str,
+        email: str,
+    ) -> tuple[int, int, datetime] | None:
+        latest = self._latest_telemetry_model(session, server_id)
+        user_stats = latest.stats.get("user") if latest and latest.stats else None
+        if not isinstance(user_stats, dict):
+            return None
+        item = user_stats.get(email)
+        if not isinstance(item, dict):
+            return None
+        return (
+            self._traffic_counter_value(item.get("uplink")),
+            self._traffic_counter_value(item.get("downlink")),
+            self._aware_datetime(latest.reported_at),
+        )
+
+    @classmethod
+    def _subscription_reset_due(
+        cls,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel | None,
+        expired: bool,
+        reset_due_at: datetime | None,
+    ) -> bool:
+        if not user.is_active or not plan or expired or not user.is_reset or not reset_due_at:
+            return False
+        active_since = cls._aware_datetime(user.plan_started_at or user.created_at)
+        if reset_due_at <= active_since:
+            return False
+        last_reset = (
+            cls._aware_datetime(user.last_traffic_reset_at)
+            if user.last_traffic_reset_at
+            else None
+        )
+        return last_reset is None or last_reset < reset_due_at
+
+    @classmethod
+    def _subscription_reset_boundaries(
+        cls,
+        user: ProductUserModel,
+        now: datetime,
+    ) -> tuple[datetime | None, datetime | None]:
+        if not user.is_reset or user.reset_day <= 0:
+            return None, None
+        current = cls._monthly_reset_at(now.year, now.month, user.reset_day)
+        if now >= current:
+            next_year, next_month = cls._month_delta(now.year, now.month, 1)
+            return current, cls._monthly_reset_at(next_year, next_month, user.reset_day)
+        previous_year, previous_month = cls._month_delta(now.year, now.month, -1)
+        return (
+            cls._monthly_reset_at(previous_year, previous_month, user.reset_day),
+            current,
+        )
+
+    @staticmethod
+    def _month_delta(year: int, month: int, delta: int) -> tuple[int, int]:
+        absolute = year * 12 + month - 1 + delta
+        return absolute // 12, absolute % 12 + 1
+
+    @staticmethod
+    def _monthly_reset_at(year: int, month: int, day: int) -> datetime:
+        return datetime(year, month, min(day, monthrange(year, month)[1]), tzinfo=UTC)
 
     def _subscription_user_traffic(self, session: Session, username: str) -> tuple[int, int]:
         ledgers = session.scalars(

@@ -261,6 +261,9 @@ Users can receive a full token URL or short-code URL at:
 - `POST /api/v1/users/{username}/subscription-token`
 - `POST /api/v1/users/{username}/subscription-token/reset`
 - `GET /api/v1/users/{username}/credentials`
+- `GET /api/v1/users/{username}/quota`
+- `POST /api/v1/users/{username}/traffic/reset`
+- `POST /api/v1/traffic/reset-due`
 - `GET /api/v1/subscribe/{token_or_short_code}`
 
 The public subscription endpoint renders from managed node proxy configs,
@@ -283,10 +286,25 @@ counter resets are treated as a new epoch. The ledger backs both
 databases without ledger entries still fall back to the latest telemetry
 snapshot until new telemetry arrives.
 
+Quota status compares ledger usage against the assigned plan using the plan's
+traffic mode: `oneway` charges download traffic only, while `twoway` charges
+upload plus download. Expired, inactive, unassigned, and over-quota users are
+reported as unavailable, and over-quota users cannot render public
+subscriptions until usage is reset or the plan changes.
+
+Traffic reset keeps Xray counter baselines instead of deleting ledger rows, so
+the next telemetry report only counts post-reset deltas. Operators can reset a
+single user's ledger or run `POST /api/v1/traffic/reset-due` from an external
+cron/automation job. Due resets use each user's monthly `reset_day` and
+`last_traffic_reset_at` so repeated automation calls in the same reset window
+are idempotent. SQLite databases created before this field existed are
+upgraded in place during schema creation.
+
 The frontend exposes this in `/subscriptions`, where operators can create users,
 catalog nodes, plans, assignments, public links, generated credentials, format
-URLs, traffic ledger summaries, preset-created nodes, and catalog export/import
-bundles, then inspect the last calculated batch before or after dispatching it.
+URLs, traffic ledger summaries, quota status, traffic resets, preset-created
+nodes, and catalog export/import bundles, then inspect the last calculated
+batch before or after dispatching it.
 
 ## Public Probe API
 

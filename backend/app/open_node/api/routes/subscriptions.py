@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -20,11 +21,14 @@ from open_node.domain.subscriptions import (
     SubscriptionCatalogImportRequest,
     SubscriptionCatalogImportResponse,
     SubscriptionClientFormat,
+    SubscriptionDueTrafficResetRequest,
+    SubscriptionDueTrafficResetResponse,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanAssignResponse,
     SubscriptionPlanCreate,
     SubscriptionPlanResponse,
     SubscriptionPlansResponse,
+    SubscriptionQuotaStatusResponse,
     SubscriptionTemplatePresetApplyRequest,
     SubscriptionTemplatePresetsResponse,
 )
@@ -141,6 +145,46 @@ def get_subscription_traffic(
         return store.subscription_user_traffic(username)
     except ProductUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get(
+    "/users/{username}/quota",
+    response_model=SubscriptionQuotaStatusResponse,
+)
+def get_subscription_quota(
+    username: str,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    now: Annotated[datetime | None, Query()] = None,
+) -> SubscriptionQuotaStatusResponse:
+    try:
+        quota = store.subscription_user_quota(username, now=now)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return SubscriptionQuotaStatusResponse(quota=quota)
+
+
+@router.post(
+    "/users/{username}/traffic/reset",
+    response_model=SubscriptionQuotaStatusResponse,
+)
+def reset_subscription_traffic(
+    username: str,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    now: Annotated[datetime | None, Query()] = None,
+) -> SubscriptionQuotaStatusResponse:
+    try:
+        quota = store.reset_subscription_traffic(username, now=now)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return SubscriptionQuotaStatusResponse(quota=quota)
+
+
+@router.post("/traffic/reset-due", response_model=SubscriptionDueTrafficResetResponse)
+def reset_due_subscription_traffic(
+    payload: SubscriptionDueTrafficResetRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> SubscriptionDueTrafficResetResponse:
+    return store.reset_due_subscription_traffic(payload)
 
 
 @router.get("/node-presets", response_model=SubscriptionTemplatePresetsResponse)

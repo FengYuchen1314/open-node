@@ -80,6 +80,7 @@ class ProductUserRead(BaseModel):
     plan_expires_at: datetime | None = None
     is_reset: bool = False
     reset_day: int = 0
+    last_traffic_reset_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -206,6 +207,56 @@ class ProductUserTrafficResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class SubscriptionQuotaStatusRead(BaseModel):
+    username: str
+    is_active: bool
+    has_plan: bool
+    available: bool
+    expired: bool
+    over_quota: bool
+    reset_enabled: bool
+    reset_due: bool
+    upload: int
+    download: int
+    charged_usage_bytes: int
+    traffic_limit_bytes: int
+    remaining_bytes: int
+    percent_used: float
+    reset_day: int = 0
+    plan_id: UUID | None = None
+    plan_name: str | None = None
+    traffic_mode: SubscriptionTrafficMode | None = None
+    plan_started_at: datetime | None = None
+    plan_expires_at: datetime | None = None
+    reset_due_at: datetime | None = None
+    next_reset_at: datetime | None = None
+    last_traffic_reset_at: datetime | None = None
+
+
+class SubscriptionQuotaStatusResponse(BaseModel):
+    quota: SubscriptionQuotaStatusRead
+    license_required: Literal[False] = False
+
+
+class SubscriptionDueTrafficResetRequest(BaseModel):
+    now: datetime | None = None
+    dry_run: bool = False
+
+
+class SubscriptionDueTrafficResetSummary(BaseModel):
+    checked_users: int = 0
+    reset_users: int = 0
+    skipped_users: int = 0
+    usernames: list[str] = Field(default_factory=list)
+    dry_run: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+
+class SubscriptionDueTrafficResetResponse(BaseModel):
+    summary: SubscriptionDueTrafficResetSummary
+    license_required: Literal[False] = False
+
+
 class SubscriptionTemplatePresetRead(BaseModel):
     id: str
     name: str
@@ -276,6 +327,7 @@ class SubscriptionCatalogUserEntry(BaseModel):
     plan_expires_at: datetime | None = None
     is_reset: bool = False
     reset_day: int = Field(default=0, ge=0, le=31)
+    last_traffic_reset_at: datetime | None = None
 
     @field_validator("username")
     @classmethod

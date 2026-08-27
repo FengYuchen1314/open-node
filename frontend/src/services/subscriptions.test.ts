@@ -16,6 +16,7 @@ import {
   createProductUserSubscriptionToken,
   createSubscriptionPlan,
   exportSubscriptionCatalog,
+  getProductUserQuota,
   getProductUserSubscriptionToken,
   getProductUserTraffic,
   importSubscriptionCatalog,
@@ -24,6 +25,8 @@ import {
   listProductUserCredentials,
   listProductUsers,
   listSubscriptionPlans,
+  resetDueProductUserTraffic,
+  resetProductUserTraffic,
   resetProductUserSubscriptionToken,
 } from "./subscriptions";
 
@@ -408,6 +411,99 @@ describe("subscriptions API client", () => {
         url: "/api/v1/catalog/import",
         headers: { "Content-Type": "application/json" },
         body: { catalog: catalogBundle, server_map: { edge: "srv_1" } },
+      },
+    ]);
+  });
+
+  it("reads quota status and resets subscription traffic", async () => {
+    const calls: Array<{ body?: unknown; method?: string; headers: HeadersInit | undefined; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = input.toString();
+      calls.push({
+        url,
+        method: init?.method,
+        headers: init?.headers,
+        body: init?.body ? JSON.parse(init.body.toString()) : undefined,
+      });
+      if (url.includes("/traffic/reset-due")) {
+        return jsonResponse({
+          summary: {
+            checked_users: 1,
+            reset_users: 1,
+            skipped_users: 0,
+            usernames: ["alice@example.com"],
+            dry_run: true,
+            warnings: [],
+          },
+          license_required: false,
+        });
+      }
+      return jsonResponse({
+        quota: {
+          username: "alice@example.com",
+          is_active: true,
+          has_plan: true,
+          available: true,
+          expired: false,
+          over_quota: false,
+          reset_enabled: true,
+          reset_due: false,
+          upload: 20,
+          download: 30,
+          charged_usage_bytes: 50,
+          traffic_limit_bytes: 137_438_953_472,
+          remaining_bytes: 137_438_953_422,
+          percent_used: 0.01,
+          reset_day: 1,
+          plan_id: "plan_1",
+          plan_name: "Premium",
+          traffic_mode: "twoway",
+          plan_started_at: timestamp,
+          plan_expires_at: null,
+          reset_due_at: null,
+          next_reset_at: timestamp,
+          last_traffic_reset_at: null,
+        },
+        license_required: false,
+      });
+    };
+
+    const quota = await getProductUserQuota(
+      "alice@example.com",
+      "2026-09-01T00:00:00Z",
+      fetcher,
+    );
+    const reset = await resetProductUserTraffic(
+      "alice@example.com",
+      "2026-09-01T00:01:00Z",
+      fetcher,
+    );
+    const due = await resetDueProductUserTraffic(
+      { now: "2026-09-01T00:00:00Z", dry_run: true },
+      fetcher,
+    );
+
+    expect(quota.quota.remaining_bytes).toBe(137_438_953_422);
+    expect(reset.license_required).toBe(false);
+    expect(due.summary.usernames).toEqual(["alice@example.com"]);
+    expect(calls).toEqual([
+      {
+        url: "/api/v1/users/alice%40example.com/quota?now=2026-09-01T00%3A00%3A00Z",
+        method: undefined,
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/users/alice%40example.com/traffic/reset?now=2026-09-01T00%3A01%3A00Z",
+        method: "POST",
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/traffic/reset-due",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { now: "2026-09-01T00:00:00Z", dry_run: true },
       },
     ]);
   });

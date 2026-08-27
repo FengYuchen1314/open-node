@@ -15,10 +15,12 @@ import type {
   SubscriptionCatalogBundle,
   SubscriptionCatalogImportResponse,
   SubscriptionClientFormat,
+  SubscriptionDueTrafficResetResponse,
   SubscriptionPlan,
   SubscriptionPlanAssignRequest,
   SubscriptionPlanAssignResponse,
   SubscriptionPlanCreateRequest,
+  SubscriptionQuotaStatus,
   SubscriptionTemplatePreset,
   SubscriptionTrafficMode,
 } from "../domain/subscriptions";
@@ -31,6 +33,7 @@ import {
   createProductUserSubscriptionToken,
   createSubscriptionPlan,
   exportSubscriptionCatalog,
+  getProductUserQuota,
   getProductUserTraffic,
   importSubscriptionCatalog,
   listProductUserCredentials,
@@ -38,6 +41,8 @@ import {
   listProductUsers,
   listSubscriptionPlans,
   listSubscriptionTemplatePresets,
+  resetDueProductUserTraffic,
+  resetProductUserTraffic,
   resetProductUserSubscriptionToken,
 } from "../services/subscriptions";
 
@@ -55,6 +60,9 @@ const savingAction = ref<
   | "node"
   | "plan"
   | "preset"
+  | "quota"
+  | "reset-due"
+  | "reset-traffic"
   | "token"
   | "traffic"
   | "user"
@@ -67,7 +75,9 @@ const lastAssignment = ref<SubscriptionPlanAssignResponse | null>(null);
 const subscriptionToken = ref<ProductUserSubscriptionToken | null>(null);
 const subscriptionCredentials = ref<SubscriptionCredential[]>([]);
 const subscriptionTraffic = ref<ProductUserTrafficResponse | null>(null);
+const subscriptionQuota = ref<SubscriptionQuotaStatus | null>(null);
 const lastCatalogImport = ref<SubscriptionCatalogImportResponse | null>(null);
+const lastDueTrafficReset = ref<SubscriptionDueTrafficResetResponse | null>(null);
 
 const userForm = reactive({
   username: "",
@@ -381,6 +391,7 @@ async function submitAssignment() {
       : `Assigned ${response.plan.name}.`;
     await loadSubscriptionCredentials(false);
     await loadSubscriptionTraffic(false);
+    await loadSubscriptionQuota(false);
     await refresh();
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -469,6 +480,72 @@ async function loadSubscriptionTraffic(showSuccess = true) {
     if (showSuccess) {
       successMessage.value = `Loaded ${formatBytes(subscriptionTraffic.value.total)} traffic.`;
     }
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+async function loadSubscriptionQuota(showSuccess = true) {
+  if (!assignForm.username) {
+    errorMessage.value = "User is required.";
+    return;
+  }
+
+  savingAction.value = "quota";
+  errorMessage.value = "";
+  if (showSuccess) {
+    successMessage.value = "";
+  }
+  try {
+    const response = await getProductUserQuota(assignForm.username);
+    subscriptionQuota.value = response.quota;
+    if (showSuccess) {
+      successMessage.value = `Loaded ${formatBytes(response.quota.remaining_bytes)} remaining.`;
+    }
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+async function resetSubscriptionTrafficForUser() {
+  if (!assignForm.username) {
+    errorMessage.value = "User is required.";
+    return;
+  }
+
+  savingAction.value = "reset-traffic";
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await resetProductUserTraffic(assignForm.username);
+    subscriptionQuota.value = response.quota;
+    await loadSubscriptionTraffic(false);
+    await refresh();
+    successMessage.value = `Traffic reset for ${response.quota.username}.`;
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+async function resetDueTraffic() {
+  savingAction.value = "reset-due";
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await resetDueProductUserTraffic({});
+    lastDueTrafficReset.value = response;
+    if (assignForm.username) {
+      await loadSubscriptionTraffic(false);
+      await loadSubscriptionQuota(false);
+    }
+    await refresh();
+    successMessage.value = `Reset ${response.summary.reset_users} due users.`;
   } catch (error) {
     errorMessage.value = readableError(error);
   } finally {
@@ -617,6 +694,43 @@ function serverName(serverId: string) {
 
 function formatTraffic(plan: SubscriptionPlan) {
   return `${plan.traffic_limit_gb.toFixed(plan.traffic_limit_gb >= 10 ? 0 : 1)} GB`;
+}
+
+function quotaStatusColor(quota: SubscriptionQuotaStatus) {
+  if (quota.over_quota || quota.expired || !quota.is_active || !quota.has_plan) {
+    return "error";
+  }
+  if (quota.reset_due) {
+    return "warning";
+  }
+  return "success";
+}
+
+function quotaStatusLabel(quota: SubscriptionQuotaStatus) {
+  if (!quota.is_active) {
+    return "Inactive";
+  }
+  if (!quota.has_plan) {
+    return "No plan";
+  }
+  if (quota.expired) {
+    return "Expired";
+  }
+  if (quota.over_quota) {
+    return "Over quota";
+  }
+  if (quota.reset_due) {
+    return "Reset due";
+  }
+  return "Available";
+}
+
+function quotaLimitLabel(quota: SubscriptionQuotaStatus) {
+  return quota.traffic_limit_bytes ? formatBytes(quota.traffic_limit_bytes) : "No limit";
+}
+
+function formatPercent(value: number) {
+  return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
 }
 
 function formatDate(value?: string | null) {
@@ -1182,6 +1296,39 @@ function formatBytes(value: number) {
               Traffic
             </v-btn>
           </div>
+          <div class="subscription-action-row">
+            <v-btn
+              :disabled="!assignForm.username"
+              :loading="savingAction === 'quota'"
+              prepend-icon="mdi-gauge"
+              size="small"
+              variant="tonal"
+              @click="loadSubscriptionQuota()"
+            >
+              Quota
+            </v-btn>
+            <v-btn
+              :disabled="!assignForm.username"
+              :loading="savingAction === 'reset-traffic'"
+              color="warning"
+              prepend-icon="mdi-countertop-outline"
+              size="small"
+              variant="tonal"
+              @click="resetSubscriptionTrafficForUser"
+            >
+              Reset traffic
+            </v-btn>
+            <v-btn
+              :loading="savingAction === 'reset-due'"
+              color="secondary"
+              prepend-icon="mdi-calendar-sync-outline"
+              size="small"
+              variant="tonal"
+              @click="resetDueTraffic"
+            >
+              Reset due
+            </v-btn>
+          </div>
           <template v-if="subscriptionToken">
             <v-text-field
               :model-value="subscriptionToken.subscription_url"
@@ -1218,6 +1365,64 @@ function formatBytes(value: number) {
               />
             </div>
           </template>
+          <div v-if="subscriptionQuota" class="assignment-summary">
+            <div class="catalog-item">
+              <div>
+                <div class="server-name">Quota status</div>
+                <div class="server-subline">
+                  {{ formatBytes(subscriptionQuota.charged_usage_bytes) }} /
+                  {{ quotaLimitLabel(subscriptionQuota) }}
+                </div>
+              </div>
+              <v-chip
+                :color="quotaStatusColor(subscriptionQuota)"
+                size="small"
+                variant="tonal"
+              >
+                {{ quotaStatusLabel(subscriptionQuota) }}
+              </v-chip>
+            </div>
+            <v-progress-linear
+              :color="quotaStatusColor(subscriptionQuota)"
+              :model-value="Math.min(subscriptionQuota.percent_used, 100)"
+              height="8"
+              rounded
+            />
+            <div class="catalog-import-grid">
+              <v-chip color="info" prepend-icon="mdi-download-network-outline" variant="tonal">
+                Down {{ formatBytes(subscriptionQuota.download) }}
+              </v-chip>
+              <v-chip color="secondary" prepend-icon="mdi-upload-network-outline" variant="tonal">
+                Up {{ formatBytes(subscriptionQuota.upload) }}
+              </v-chip>
+              <v-chip color="primary" prepend-icon="mdi-database-arrow-down" variant="tonal">
+                Left {{ formatBytes(subscriptionQuota.remaining_bytes) }}
+              </v-chip>
+              <v-chip color="warning" prepend-icon="mdi-percent-outline" variant="tonal">
+                Used {{ formatPercent(subscriptionQuota.percent_used) }}
+              </v-chip>
+            </div>
+            <div class="catalog-meta">
+              Reset {{ formatDate(subscriptionQuota.last_traffic_reset_at) }} / Next
+              {{ formatDate(subscriptionQuota.next_reset_at) }}
+            </div>
+          </div>
+          <div v-if="lastDueTrafficReset" class="catalog-import-grid">
+            <v-chip color="secondary" prepend-icon="mdi-calendar-check-outline" variant="tonal">
+              Due {{ lastDueTrafficReset.summary.reset_users }}
+            </v-chip>
+            <v-chip color="default" prepend-icon="mdi-account-search-outline" variant="tonal">
+              Checked {{ lastDueTrafficReset.summary.checked_users }}
+            </v-chip>
+          </div>
+          <v-alert
+            v-if="lastDueTrafficReset && lastDueTrafficReset.summary.warnings.length > 0"
+            color="warning"
+            density="compact"
+            variant="tonal"
+          >
+            {{ lastDueTrafficReset.summary.warnings.join(", ") }}
+          </v-alert>
           <div v-if="subscriptionTraffic" class="assignment-summary">
             <div class="catalog-item">
               <div>

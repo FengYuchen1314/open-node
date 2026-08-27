@@ -60,8 +60,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: Clash, sing-box, URI-list, and base64 subscription rendering plus
      durable per-user traffic ledgering from agent telemetry.
    - Done: richer subscription template presets and import/export workflows.
-   - Next: quota enforcement/reset automation and deeper Xray runtime
-     integration.
+   - Done: quota status, over-limit subscription blocking, manual traffic
+     reset, and idempotent monthly reset-due automation.
+   - Next: deeper Xray runtime integration.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.

@@ -274,6 +274,145 @@ def test_subscription_traffic_ledger_tracks_deltas_and_counter_resets(tmp_path: 
     assert header == f"upload=170; download=300; total={128 * 1024 * 1024 * 1024}; expire={expire}"
 
 
+def test_subscription_quota_blocks_over_limit_and_resets_ledger(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    agent_token, _server_id, node_id, _plan_id = create_catalog_fixture(client)
+    tiny_plan = client.post(
+        "/api/v1/plans",
+        json={
+            "name": "Tiny",
+            "traffic_limit_gb": 0.0000001,
+            "node_ids": [node_id],
+            "traffic_mode": "twoway",
+        },
+    ).json()["plan"]
+    assigned = client.post(
+        "/api/v1/users/alice/plan",
+        json={
+            "plan_id": tiny_plan["id"],
+            "start_date": "2026-08-27",
+            "expire_date": "2026-09-30",
+            "is_reset": True,
+            "reset_day": 1,
+        },
+    ).json()
+    client_email = assigned["provisioning_batches"][0]["body"]["inbound_clients"][0]["client"][
+        "email"
+    ]
+    client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": agent_token,
+            "reported_at": "2026-08-27T00:00:00Z",
+            "stats": {"user": {client_email: {"uplink": 80, "downlink": 80}}},
+        },
+    )
+
+    quota_response = client.get(
+        "/api/v1/users/alice/quota",
+        params={"now": "2026-08-27T00:01:00Z"},
+    ).json()
+    assert quota_response["license_required"] is False
+    quota = quota_response["quota"]
+    assert quota["traffic_limit_bytes"] == tiny_plan["traffic_limit_bytes"]
+    assert quota["charged_usage_bytes"] == 160
+    assert quota["remaining_bytes"] == 0
+    assert quota["over_quota"] is True
+    assert quota["available"] is False
+
+    token = client.post("/api/v1/users/alice/subscription-token").json()["subscription"]["token"]
+    blocked = client.get(f"/api/v1/subscribe/{token}")
+    assert blocked.status_code == 404
+    assert blocked.json()["detail"] == "subscription traffic quota exceeded"
+
+    reset = client.post(
+        "/api/v1/users/alice/traffic/reset",
+        params={"now": "2026-08-27T00:02:00Z"},
+    ).json()
+    assert reset["license_required"] is False
+    assert reset["quota"]["charged_usage_bytes"] == 0
+    assert reset["quota"]["over_quota"] is False
+    assert reset["quota"]["last_traffic_reset_at"] == "2026-08-27T00:02:00Z"
+    assert client.get(f"/api/v1/subscribe/{token}").status_code == 200
+
+    client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": agent_token,
+            "reported_at": "2026-08-27T00:05:00Z",
+            "stats": {"user": {client_email: {"uplink": 100, "downlink": 100}}},
+        },
+    )
+    traffic = client.get("/api/v1/users/alice/traffic").json()
+    assert traffic["upload"] == 20
+    assert traffic["download"] == 20
+
+
+def test_subscription_due_reset_runs_once_per_reset_window(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    agent_token, _server_id, _node_id, plan_id = create_catalog_fixture(client)
+    assigned = client.post(
+        "/api/v1/users/alice/plan",
+        json={
+            "plan_id": plan_id,
+            "start_date": "2026-08-27",
+            "expire_date": "2026-10-31",
+            "is_reset": True,
+            "reset_day": 1,
+        },
+    ).json()
+    client_email = assigned["provisioning_batches"][0]["body"]["inbound_clients"][0]["client"][
+        "email"
+    ]
+    client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": agent_token,
+            "reported_at": "2026-08-31T23:50:00Z",
+            "stats": {"user": {client_email: {"uplink": 200, "downlink": 300}}},
+        },
+    )
+
+    quota = client.get(
+        "/api/v1/users/alice/quota",
+        params={"now": "2026-09-01T00:00:00Z"},
+    ).json()["quota"]
+    assert quota["reset_due"] is True
+    assert quota["reset_due_at"] == "2026-09-01T00:00:00Z"
+
+    dry_run = client.post(
+        "/api/v1/traffic/reset-due",
+        json={"now": "2026-09-01T00:00:00Z", "dry_run": True},
+    ).json()["summary"]
+    assert dry_run == {
+        "checked_users": 1,
+        "reset_users": 1,
+        "skipped_users": 0,
+        "usernames": ["alice"],
+        "dry_run": True,
+        "warnings": [],
+    }
+    assert client.get("/api/v1/users/alice/traffic").json()["total"] == 500
+
+    reset = client.post(
+        "/api/v1/traffic/reset-due",
+        json={"now": "2026-09-01T00:00:00Z"},
+    ).json()["summary"]
+    assert reset["reset_users"] == 1
+    assert reset["usernames"] == ["alice"]
+    assert client.get("/api/v1/users/alice/traffic").json()["total"] == 0
+    assert client.get("/api/v1/users").json()["users"][0]["last_traffic_reset_at"] == (
+        "2026-09-01T00:00:00Z"
+    )
+
+    repeated = client.post(
+        "/api/v1/traffic/reset-due",
+        json={"now": "2026-09-01T00:05:00Z"},
+    ).json()["summary"]
+    assert repeated["reset_users"] == 0
+    assert repeated["skipped_users"] == 1
+
+
 def test_subscription_node_preset_creates_renderable_node(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     server = client.post(
