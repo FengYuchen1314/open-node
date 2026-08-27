@@ -47,6 +47,26 @@ The backend serves JSON APIs under `/api/v1`. The frontend is a Vite application
 that can point to the backend with `VITE_API_BASE_URL` or use same-origin API
 paths in production.
 
+## Administrator Sessions
+
+Management routes use a shared FastAPI administrator dependency. Public
+subscription rendering and Agent transport routes are explicitly separate;
+Agent inventory listing and both probe-settings write aliases remain private.
+An unconfigured installation is closed to management access, with account
+creation and recovery available only through the local administrator CLI.
+
+Authentication uses an Argon2id password hash and opaque cookie sessions.
+Only session-secret hashes are persisted; session-bound CSRF tokens, absolute
+expiry, idle expiry, revocation, and login-rate windows are persisted alongside
+the inventory database. Credential-version checks prevent a password-reset
+race from issuing a session with an obsolete password. Changing a password
+revokes every session. The Vue shell waits for a session before mounting
+management views and returns to sign-in when an API request reports expiry.
+No authentication state is a paid entitlement or licensing gate.
+
+See [administrator access](administrator-access.md) for deployment settings
+and the HTTP contract.
+
 ## Agent Telemetry
 
 Open Node accepts agent telemetry through `/api/v1/agents/telemetry` and the

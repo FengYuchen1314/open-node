@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
+from open_node.api.auth import require_administrator
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.inventory import (
     AgentCommandLeaseRequest,
@@ -33,7 +34,7 @@ from open_node.services.inventory import (
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
-@router.get("", response_model=list[AgentRead])
+@router.get("", response_model=list[AgentRead], dependencies=[Depends(require_administrator)])
 def list_agents(store: Annotated[InventoryStore, Depends(get_inventory_store)]) -> list[AgentRead]:
     return store.list_agents()
 

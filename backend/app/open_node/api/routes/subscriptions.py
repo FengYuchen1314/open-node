@@ -48,6 +48,7 @@ from open_node.services.inventory import (
 )
 
 router = APIRouter(tags=["subscriptions"])
+public_router = APIRouter(tags=["subscriptions"])
 
 
 @router.get("/users", response_model=ProductUsersResponse)
@@ -271,7 +272,7 @@ def create_subscription_plan(
     return SubscriptionPlanResponse(plan=plan)
 
 
-@router.get("/subscribe/{subscription_key}", name="render_user_subscription")
+@public_router.get("/subscribe/{subscription_key}", name="render_user_subscription")
 def render_user_subscription(
     subscription_key: str,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],

@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "./auth";
 import type {
   ProbeAccessTokenCreateResponse,
   ProbePayload,
@@ -29,7 +30,7 @@ export interface ProbeSeriesOptions {
 export type ProbeRange = "1h" | "6h" | "24h";
 
 export async function getPublicProbePayload(
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
   accessToken?: string,
 ): Promise<ProbePayload> {
   const response = await fetcher(
@@ -42,7 +43,7 @@ export async function getPublicProbePayload(
   return response.json() as Promise<ProbePayload>;
 }
 
-export async function getPublicProbeSettings(fetcher = fetch): Promise<ProbeSettingsResponse> {
+export async function getPublicProbeSettings(fetcher = authenticatedFetch): Promise<ProbeSettingsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-settings`);
   if (!response.ok) {
     throw await apiError(response, "Public probe settings request failed");
@@ -52,7 +53,7 @@ export async function getPublicProbeSettings(fetcher = fetch): Promise<ProbeSett
 
 export async function updatePublicProbeSettings(
   payload: ProbeSettingsUpdate,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProbeSettingsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-settings`, {
     method: "PUT",
@@ -68,7 +69,7 @@ export async function updatePublicProbeSettings(
 export async function getPublicProbeSeries(
   serverIndex: number,
   options: ProbeSeriesOptions = {},
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
   accessToken?: string,
 ): Promise<ProbeSeriesResponse> {
   const params = new URLSearchParams({
@@ -95,7 +96,7 @@ export async function getPublicProbeSeries(
 
 export async function getPublicProbeTargets(
   range: ProbeRange = "1h",
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
   accessToken?: string,
 ): Promise<ProbeTargetComparisonResponse> {
   const params = new URLSearchParams({ range });
@@ -109,7 +110,7 @@ export async function getPublicProbeTargets(
   return response.json() as Promise<ProbeTargetComparisonResponse>;
 }
 
-export async function listProbeTasks(fetcher = fetch): Promise<ProbeTaskListResponse> {
+export async function listProbeTasks(fetcher = authenticatedFetch): Promise<ProbeTaskListResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/probe/tasks`);
   if (!response.ok) {
     throw await apiError(response, "Probe task list request failed");
@@ -119,7 +120,7 @@ export async function listProbeTasks(fetcher = fetch): Promise<ProbeTaskListResp
 
 export async function createProbeTask(
   payload: ProbeTaskCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProbeTaskResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/probe/tasks`, {
     method: "POST",
@@ -135,7 +136,7 @@ export async function createProbeTask(
 export async function updateProbeTask(
   taskId: string,
   payload: ProbeTaskUpdateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProbeTaskResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/probe/tasks/${taskId}`, {
     method: "PATCH",
@@ -149,7 +150,7 @@ export async function updateProbeTask(
 }
 
 export async function dispatchDueProbeTasks(
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProbeTaskDispatchResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/probe/tasks/dispatch-due`, {
     method: "POST",
@@ -161,7 +162,7 @@ export async function dispatchDueProbeTasks(
 }
 
 export async function createProbeAccessToken(
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProbeAccessTokenCreateResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/probe/access-token`, {
     method: "POST",
@@ -173,7 +174,7 @@ export async function createProbeAccessToken(
 }
 
 export async function clearProbeAccessToken(
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProbeSettingsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/probe/access-token`, {
     method: "DELETE",

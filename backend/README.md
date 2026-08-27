@@ -2,6 +2,10 @@
 
 FastAPI backend package for the Open Node MMWX refactor.
 
-The backend starts with system metadata and an explicit no-activation-license
-contract. Product modules will be added as migration slices are ported from the
-active MMWX repositories.
+The backend provides server/Agent inventory, queued runtime operations,
+subscriptions, public probe data, and an explicit no-activation-license contract.
+Management APIs require a local administrator session. Create an account with
+`open-node-admin create` before signing in; there is no default password.
+
+See [administrator access](../docs/administrator-access.md) for database
+configuration, account recovery, HTTPS deployment requirements, and API access.

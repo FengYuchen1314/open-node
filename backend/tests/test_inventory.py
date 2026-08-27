@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
+from conftest import authenticated_client
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from open_node.core.config import Settings
@@ -23,7 +24,7 @@ def sqlite_url(path: Path) -> str:
 
 def make_client(tmp_path: Path) -> TestClient:
     settings = Settings(database_url=sqlite_url(tmp_path / "open-node-test.db"))
-    return TestClient(create_app(settings))
+    return authenticated_client(create_app(settings))
 
 
 def scan_result_payload() -> dict[str, object]:
@@ -265,7 +266,7 @@ def test_invalid_agent_token_is_rejected_as_auth_not_license(tmp_path: Path) -> 
 
 def test_server_inventory_persists_across_app_instances(tmp_path: Path) -> None:
     db_path = tmp_path / "open-node-test.db"
-    first_client = TestClient(create_app(Settings(database_url=sqlite_url(db_path))))
+    first_client = authenticated_client(create_app(Settings(database_url=sqlite_url(db_path))))
 
     created = first_client.post(
         "/api/v1/servers",
@@ -273,7 +274,7 @@ def test_server_inventory_persists_across_app_instances(tmp_path: Path) -> None:
     )
     assert created.status_code == 201
 
-    second_client = TestClient(create_app(Settings(database_url=sqlite_url(db_path))))
+    second_client = authenticated_client(create_app(Settings(database_url=sqlite_url(db_path))))
     response = second_client.get("/api/v1/servers")
 
     assert response.status_code == 200
@@ -286,7 +287,7 @@ def test_server_inventory_persists_across_app_instances(tmp_path: Path) -> None:
 
 def test_agent_registration_persists_across_app_instances(tmp_path: Path) -> None:
     db_path = tmp_path / "open-node-test.db"
-    first_client = TestClient(create_app(Settings(database_url=sqlite_url(db_path))))
+    first_client = authenticated_client(create_app(Settings(database_url=sqlite_url(db_path))))
     created = first_client.post("/api/v1/servers", json={"name": "edge-agent"}).json()
 
     registered = first_client.post(
@@ -300,7 +301,7 @@ def test_agent_registration_persists_across_app_instances(tmp_path: Path) -> Non
     )
     assert registered.status_code == 201
 
-    second_client = TestClient(create_app(Settings(database_url=sqlite_url(db_path))))
+    second_client = authenticated_client(create_app(Settings(database_url=sqlite_url(db_path))))
     agents = second_client.get("/api/v1/agents")
     servers = second_client.get("/api/v1/servers")
 

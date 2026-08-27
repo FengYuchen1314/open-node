@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import UUID
 
 import yaml
+from conftest import authenticated_client
 from fastapi.testclient import TestClient
 from open_node.core.config import Settings
 from open_node.main import create_app
@@ -16,7 +17,7 @@ def sqlite_url(path: Path) -> str:
 
 def make_client(tmp_path: Path) -> TestClient:
     settings = Settings(database_url=sqlite_url(tmp_path / "open-node-test.db"))
-    return TestClient(create_app(settings))
+    return authenticated_client(create_app(settings))
 
 
 def create_catalog_fixture(client: TestClient) -> tuple[str, str, str, str]:
@@ -653,7 +654,9 @@ def test_xray_fork_protocols_provision_and_render_subscriptions(tmp_path: Path) 
 
 
 def test_subscription_catalog_export_import_round_trips_by_names(tmp_path: Path) -> None:
-    source = TestClient(create_app(Settings(database_url=sqlite_url(tmp_path / "source.db"))))
+    source = authenticated_client(
+        create_app(Settings(database_url=sqlite_url(tmp_path / "source.db")))
+    )
     _agent_token, _server_id, _node_id, plan_id = create_catalog_fixture(source)
     assigned = source.post(
         "/api/v1/users/alice/plan",
@@ -669,7 +672,9 @@ def test_subscription_catalog_export_import_round_trips_by_names(tmp_path: Path)
     assert catalog["plans"][0]["node_names"] == ["Tokyo vless"]
     assert catalog["credentials"][0]["credential"]["id"] == client_id
 
-    target = TestClient(create_app(Settings(database_url=sqlite_url(tmp_path / "target.db"))))
+    target = authenticated_client(
+        create_app(Settings(database_url=sqlite_url(tmp_path / "target.db")))
+    )
     target.post("/api/v1/servers", json={"name": "edge-sub"}).json()
     import_response = target.post(
         "/api/v1/catalog/import",

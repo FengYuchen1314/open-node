@@ -22,6 +22,11 @@ This document records the starting source map for the Open Node refactor.
 
 1. Keep the no-license contract permanent and test-covered.
 2. Port control-plane identity, server inventory, and agent registration models.
+   - Done: local administrator creation/recovery, Argon2id password storage,
+     persistent cookie sessions with expiry/revocation, CSRF and Origin checks,
+     and persistent login rate limits. Management APIs require sign-in; Agent
+     tokens and public subscription/probe access remain separate.
+   - Done: Vue sign-in, sign-out, password change, and responsive navigation.
 3. Port agent heartbeat, telemetry, and command execution contracts.
    - Done: HTTP heartbeat plus telemetry/traffic reports with Xray stats,
      system counters, sysmetrics, latency samples, user speeds, and connection
@@ -192,5 +197,6 @@ These passing command and snapshot checks do not prove a complete replacement:
 - Extend dependency coordination to multi-server change sets and rollback,
   including interactions with already-running commands. The new dependencies
   cover the server recovery/runtime workflows, not arbitrary concurrent jobs.
-- Complete control-plane authentication, deployable packaging, and end-to-end
-  operator workflows before calling the product ready for public deployment.
+- Complete deployable packaging and broader end-to-end operator workflows
+  before calling the product ready for public deployment. Local administrator
+  authentication is implemented; this alone is not a complete deployment audit.

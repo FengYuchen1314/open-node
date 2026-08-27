@@ -60,17 +60,45 @@ key-exchange configuration. It does not prove forwarding traffic, embedded
 runtime behavior, or migration from an encrypted MMWX connection. It also
 does not make the reference image the distributable Open Node agent.
 
+## Operator Browser Smoke
+
+Install the optional browser dependencies and Chromium on the VPS, then run:
+
+```bash
+backend/.venv/bin/pip install -e 'backend[browser]'
+backend/.venv/bin/python -m playwright install --with-deps chromium
+backend/.venv/bin/python scripts/vps/smoke-operator-ui.py --output /tmp/open-node-ui-artifacts
+```
+
+The script creates a temporary administrator/database and starts disposable
+FastAPI and Vite processes on loopback ports. It checks that private views do
+not load before sign-in, rejects an incorrect password, creates a server
+through the UI, verifies session persistence across reloads, changes the
+password on mobile, checks rejection of the old password, signs out, and
+expires a session to verify the UI returns to sign-in. It captures desktop
+and mobile login/access screenshots and checks horizontal overflow and form
+control bounds. Services and database files are removed on completion; only
+the requested screenshots remain. No existing administrator is changed.
+
+The reference-agent smoke also creates a temporary administrator and signs in
+as the operator; the reference agent still authenticates only with its own
+bootstrap token. No test disables management authentication.
+
 ## Latest Verification
 
-On 2026-08-28, the dependent-command worktree passed on the VPS:
+On 2026-08-28, the administrator-access worktree passed on the VPS:
 
-- Backend: 128 tests, including lease/result contention, dependency persistence,
-  old SQLite schema migration, and validation failure stopping later commands.
-- Frontend: 65 tests, including waiting/skipped Vuetify component rendering,
-  and the production build.
+- Backend: 141 tests, including anonymous management-route rejection, session
+  persistence/expiry/revocation, CSRF/Origin rejection, concurrent login limiting,
+  a password-reset/login race, administrator CLI recovery, and the existing
+  inventory, dependency, migration, subscription, and change-set suites.
+- Frontend: 74 tests, including session/CSRF request handling, expired-session
+  transitions, waiting/skipped Vuetify component rendering, and the production build.
 - Probe Worker: TypeScript checks.
-- Ruff: backend and reference-agent smoke script.
+- Ruff: backend and both smoke scripts.
 - Reference-agent smoke: all ten stages, with the pinned image.
+- Chromium operator smoke: desktop 1440x900 and mobile 390x844 sign-in/access,
+  server creation, reload persistence, password change, logout, and expiry.
 
 The backend test run still reports a Starlette/httpx deprecation warning, and
 the frontend build reports a large bundle warning. Neither is a failed check.

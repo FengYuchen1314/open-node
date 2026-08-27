@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import UUID
 
+from conftest import authenticated_client
 from fastapi.testclient import TestClient
 from open_node.core.config import Settings
 from open_node.main import create_app
@@ -12,7 +13,7 @@ def sqlite_url(path: Path) -> str:
 
 def make_client(tmp_path: Path) -> TestClient:
     settings = Settings(database_url=sqlite_url(tmp_path / "open-node-test.db"))
-    return TestClient(create_app(settings))
+    return authenticated_client(create_app(settings))
 
 
 def test_change_set_plans_dispatches_and_rolls_back_commands(tmp_path: Path) -> None:

@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "./auth";
 import type {
   AgentCommandCreateRequest,
   AgentCommandCreateResponse,
@@ -96,7 +97,7 @@ const operationPaths: Record<AgentOperationKind, string> = {
   agent_uninstall: "agent/uninstall",
 };
 
-export async function listServers(fetcher = fetch): Promise<ServerSummary[]> {
+export async function listServers(fetcher = authenticatedFetch): Promise<ServerSummary[]> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers`);
   if (!response.ok) {
     throw await apiError(response, "Server list request failed");
@@ -106,7 +107,7 @@ export async function listServers(fetcher = fetch): Promise<ServerSummary[]> {
 
 export async function createServer(
   payload: ServerCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ServerCreateResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers`, {
     method: "POST",
@@ -122,7 +123,7 @@ export async function createServer(
 export async function updateServerProbeMetadata(
   serverId: string,
   payload: ServerProbeMetadataUpdate,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ServerResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/probe-metadata`, {
     method: "PATCH",
@@ -137,7 +138,7 @@ export async function updateServerProbeMetadata(
 
 export async function getLatestTelemetry(
   serverId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ServerTelemetryResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/telemetry/latest`);
   if (!response.ok) {
@@ -148,7 +149,7 @@ export async function getLatestTelemetry(
 
 export async function getLatestScanResult(
   serverId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ServerScanResultResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/scan/latest`);
   if (!response.ok) {
@@ -159,7 +160,7 @@ export async function getLatestScanResult(
 
 export async function getXrayRuntimeInventory(
   serverId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeInventoryResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime`);
   if (!response.ok) {
@@ -170,7 +171,7 @@ export async function getXrayRuntimeInventory(
 
 export async function getXrayRuntimeTunnelInventory(
   serverId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeTunnelInventoryResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/tunnels`);
   if (!response.ok) {
@@ -182,7 +183,7 @@ export async function getXrayRuntimeTunnelInventory(
 export async function deleteXrayRuntimeTunnel(
   serverId: string,
   payload: XrayRuntimeTunnelDeleteRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeTunnelDeleteResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/tunnels/delete`,
@@ -200,7 +201,7 @@ export async function deleteXrayRuntimeTunnel(
 
 export async function createXrayRuntimeTunnelChain(
   payload: XrayRuntimeTunnelChainCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeTunnelChainCreateResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/xray/runtime/tunnel-chains`, {
     method: "POST",
@@ -216,7 +217,7 @@ export async function createXrayRuntimeTunnelChain(
 export async function deployXrayRuntimeTunnel(
   serverId: string,
   payload: XrayRuntimeTunnelDeployRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeTunnelDeployResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/tunnel-deploy`,
@@ -240,7 +241,7 @@ export interface XrayConfigSnapshotListOptions {
 export async function listXrayConfigSnapshots(
   serverId: string,
   options: XrayConfigSnapshotListOptions = {},
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ServerXrayConfigSnapshotsResponse> {
   const query = new URLSearchParams();
   if (options.limit !== undefined) {
@@ -263,7 +264,7 @@ export async function listXrayConfigSnapshots(
 export async function getXrayConfigSnapshotRecovery(
   serverId: string,
   options: { withConfig?: boolean } = {},
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayConfigSnapshotRecoveryStatusResponse> {
   const query = new URLSearchParams();
   if (options.withConfig) {
@@ -282,7 +283,7 @@ export async function getXrayConfigSnapshotRecovery(
 
 export async function acceptXrayConfigPendingRecovery(
   serverId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayConfigSnapshotRecoveryAcceptResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots/recovery/accept`,
@@ -297,7 +298,7 @@ export async function acceptXrayConfigPendingRecovery(
 export async function applyXrayConfigRecovery(
   serverId: string,
   payload: XrayConfigSnapshotRecoveryApplyRequest = {},
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayConfigSnapshotRecoveryApplyResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots/recovery/apply`,
@@ -315,7 +316,7 @@ export async function applyXrayConfigRecovery(
 
 export async function listServerCommands(
   serverId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ServerCommandsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/commands`);
   if (!response.ok) {
@@ -327,7 +328,7 @@ export async function listServerCommands(
 export async function createServerCommand(
   serverId: string,
   payload: AgentCommandCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<AgentCommandCreateResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/commands`, {
     method: "POST",
@@ -344,7 +345,7 @@ export async function queueAgentOperation(
   serverId: string,
   operation: AgentOperationKind,
   payload?: AgentOperationPayload,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<AgentCommandCreateResponse> {
   const request: RequestInit = { method: "POST" };
   if (payload) {
@@ -365,7 +366,7 @@ export async function queueAgentOperation(
 export async function restoreXrayConfigSnapshot(
   serverId: string,
   snapshotId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<AgentCommandCreateResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots/${snapshotId}/restore`,
@@ -380,7 +381,7 @@ export async function restoreXrayConfigSnapshot(
 export async function listCommandStreamFrames(
   serverId: string,
   commandId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<AgentCommandStreamFramesResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/commands/${commandId}/stream`,

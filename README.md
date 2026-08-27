@@ -25,6 +25,14 @@ intentionally out of scope for this refactor.
   `docs/`, and `scripts/`.
 - Verification target: tests are run on the VPS at `185.99.135.224` over SSH.
 
+## Administrator Access
+
+Management APIs require a local administrator session. There is no default
+password or activation key. Create the account with `open-node-admin create`
+using the same database configuration as the backend, then sign in through
+the Vue interface. [Administrator setup and recovery](docs/administrator-access.md)
+also covers HTTPS cookies, local previews, session expiry, and API clients.
+
 ## Current Milestone
 
 The first milestone establishes the project skeleton, the no-license contract,
@@ -94,6 +102,8 @@ cd backend
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install -e ".[dev]"
+open-node-admin create --username admin
+export OPEN_NODE_SESSION_COOKIE_SECURE=false  # Loopback HTTP development only.
 uvicorn open_node.main:app --reload
 ```
 

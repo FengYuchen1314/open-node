@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -63,6 +64,18 @@ def run(image: str) -> None:
         ]
         with tempfile.TemporaryDirectory(prefix="open-node-agent-smoke-") as temporary:
             work = Path(temporary)
+            password = secrets.token_urlsafe(32)
+            backend_env = {
+                **os.environ,
+                "PYTHONPATH": str(root / "backend" / "app"),
+                "OPEN_NODE_DATABASE_URL": f"sqlite:///{work / 'open-node.db'}",
+                "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+            }
+            subprocess.run(
+                [sys.executable, "-m", "open_node.admin", "create", "--password-stdin"],
+                input=password + "\n", text=True, env=backend_env, cwd=work,
+                check=True, capture_output=True, timeout=30,
+            )
             agent_dir = work / "agent"
             xray_dir = work / "xray"
             agent_dir.mkdir()
@@ -91,11 +104,7 @@ def run(image: str) -> None:
                         str(listener.fileno()),
                     ],
                     cwd=work,
-                    env={
-                        **os.environ,
-                        "PYTHONPATH": str(root / "backend" / "app"),
-                        "OPEN_NODE_DATABASE_URL": f"sqlite:///{work / 'open-node.db'}",
-                    },
+                    env=backend_env,
                     pass_fds=(listener.fileno(),),
                     stdout=log,
                     stderr=log,
@@ -106,6 +115,12 @@ def run(image: str) -> None:
                         lambda: client.get("/healthz"),
                         lambda response: response.status_code == 200,
                     )
+                    signed_in = client.post(
+                        "/api/v1/auth/login", json={"username": "admin", "password": password},
+                        headers={"X-Open-Node-Client": "browser"},
+                    )
+                    signed_in.raise_for_status()
+                    client.headers["X-CSRF-Token"] = signed_in.json()["csrf_token"]
                     response = client.post(
                         "/api/v1/servers", json={"name": "reference-agent-smoke"}
                     )

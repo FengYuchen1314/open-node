@@ -13,6 +13,49 @@ body {
   min-width: 320px;
 }
 
+.auth-page {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 32px 20px;
+}
+
+.auth-workspace {
+  display: grid;
+  gap: 20px;
+  max-width: 380px;
+  min-width: 0;
+  width: 100%;
+}
+
+.auth-workspace h1 {
+  font-size: 28px;
+  overflow-wrap: anywhere;
+}
+
+.auth-workspace h2 {
+  color: #66736f;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.auth-form .v-btn {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.password-form {
+  max-width: 440px;
+  width: 100%;
+}
+
 .brand-block {
   align-items: center;
   display: flex;

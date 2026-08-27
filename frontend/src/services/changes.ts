@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "./auth";
 import type {
   AgentChangeSetCreateRequest,
   AgentChangeSetResponse,
@@ -12,7 +13,7 @@ const jsonHeaders = {
   "Content-Type": "application/json",
 };
 
-export async function listChangeSets(fetcher = fetch): Promise<AgentChangeSetsResponse> {
+export async function listChangeSets(fetcher = authenticatedFetch): Promise<AgentChangeSetsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets`);
   if (!response.ok) {
     throw await apiError(response, "Change set list request failed");
@@ -22,7 +23,7 @@ export async function listChangeSets(fetcher = fetch): Promise<AgentChangeSetsRe
 
 export async function getChangeSet(
   changeSetId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<AgentChangeSetResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/${changeSetId}`);
   if (!response.ok) {
@@ -33,7 +34,7 @@ export async function getChangeSet(
 
 export async function createChangeSet(
   payload: AgentChangeSetCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<AgentChangeSetResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets`, {
     method: "POST",
@@ -48,7 +49,7 @@ export async function createChangeSet(
 
 export async function createRoutedOutboundChangeSet(
   payload: AgentRoutedOutboundChangeSetCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<AgentChangeSetResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/routed-outbound`, {
     method: "POST",
@@ -63,7 +64,7 @@ export async function createRoutedOutboundChangeSet(
 
 export async function dispatchChangeSet(
   changeSetId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<AgentChangeSetResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/${changeSetId}/dispatch`, {
     method: "POST",
@@ -77,7 +78,7 @@ export async function dispatchChangeSet(
 export async function rollbackChangeSet(
   changeSetId: string,
   payload: AgentChangeSetRollbackRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<AgentChangeSetResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/${changeSetId}/rollback`, {
     method: "POST",

@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "./auth";
 export interface LicenseStatus {
   edition: "free";
   license_required: false;
@@ -9,7 +10,7 @@ export interface LicenseStatus {
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 
-export async function fetchLicenseStatus(fetcher = fetch): Promise<LicenseStatus> {
+export async function fetchLicenseStatus(fetcher = authenticatedFetch): Promise<LicenseStatus> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/license/status`);
   if (!response.ok) {
     throw new Error(`License status request failed with ${response.status}`);

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, Query, WebSocket, WebSocketDisco
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from open_node.api.auth import require_administrator
 from open_node.api.dependencies import get_inventory_store
 from open_node.domain.probe import (
     ProbePayload,
@@ -47,6 +48,7 @@ def get_public_probe_settings(
 
 @router.put(
     "/probe-settings",
+    dependencies=[Depends(require_administrator)],
     response_model=ProbeSettingsResponse,
     response_model_exclude_none=True,
 )

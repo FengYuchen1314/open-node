@@ -16,9 +16,13 @@ dependencies = [
   "fastapi>=0.115,<1.0",
   "pyyaml>=6.0,<7.0",
   "pydantic-settings>=2.6,<3.0",
+  "pwdlib[argon2]>=0.3,<1.0",
   "sqlalchemy>=2.0,<3.0",
   "uvicorn[standard]>=0.32,<1.0"
 ]
+
+[project.scripts]
+open-node-admin = "open_node.admin:main"
 
 [project.optional-dependencies]
 dev = [
@@ -27,6 +31,8 @@ dev = [
   "pytest-asyncio>=0.24,<1.0",
   "ruff>=0.8,<1.0"
 ]
+
+browser = ["playwright>=1.55,<2.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app/open_node"]

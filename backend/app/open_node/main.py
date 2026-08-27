@@ -7,6 +7,7 @@ from open_node.api.routes.public import router as public_router
 from open_node.api.routes.system import healthz
 from open_node.core.config import Settings, get_settings
 from open_node.services.agent_ws import AgentConnectionManager
+from open_node.services.auth import AuthStore
 from open_node.services.inventory import InventoryStore
 from open_node.services.probe_stream import PublicProbeStreamManager
 
@@ -27,6 +28,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.state.settings = active_settings
+    app.state.auth = AuthStore(active_settings.database_url)
     app.state.inventory = InventoryStore(active_settings.database_url)
     app.state.inventory.create_schema()
     app.state.agent_connections = AgentConnectionManager()

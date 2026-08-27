@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "./auth";
 import type {
   ManagedNodeCreateRequest,
   ManagedNodeResponse,
@@ -41,7 +42,7 @@ const jsonHeaders = {
   "Content-Type": "application/json",
 };
 
-export async function listProductUsers(fetcher = fetch): Promise<ProductUsersResponse> {
+export async function listProductUsers(fetcher = authenticatedFetch): Promise<ProductUsersResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/users`);
   if (!response.ok) {
     throw await apiError(response, "Product users request failed");
@@ -51,7 +52,7 @@ export async function listProductUsers(fetcher = fetch): Promise<ProductUsersRes
 
 export async function createProductUser(
   payload: ProductUserCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProductUserResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/users`, {
     method: "POST",
@@ -66,7 +67,7 @@ export async function createProductUser(
 
 export async function getProductUserSubscriptionToken(
   username: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProductUserSubscriptionTokenResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-token`,
@@ -79,7 +80,7 @@ export async function getProductUserSubscriptionToken(
 
 export async function createProductUserSubscriptionToken(
   username: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProductUserSubscriptionTokenResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-token`,
@@ -95,7 +96,7 @@ export async function createProductUserSubscriptionToken(
 
 export async function resetProductUserSubscriptionToken(
   username: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProductUserSubscriptionTokenResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-token/reset`,
@@ -111,7 +112,7 @@ export async function resetProductUserSubscriptionToken(
 
 export async function listProductUserCredentials(
   username: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProductUserCredentialsResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/credentials`,
@@ -124,7 +125,7 @@ export async function listProductUserCredentials(
 
 export async function getProductUserTraffic(
   username: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ProductUserTrafficResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/traffic`,
@@ -138,7 +139,7 @@ export async function getProductUserTraffic(
 export async function getProductUserQuota(
   username: string,
   now?: string | null,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<SubscriptionQuotaStatusResponse> {
   const query = now ? `?now=${encodeURIComponent(now)}` : "";
   const response = await fetcher(
@@ -153,7 +154,7 @@ export async function getProductUserQuota(
 export async function resetProductUserTraffic(
   username: string,
   now?: string | null,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<SubscriptionQuotaStatusResponse> {
   const query = now ? `?now=${encodeURIComponent(now)}` : "";
   const response = await fetcher(
@@ -170,7 +171,7 @@ export async function resetProductUserTraffic(
 
 export async function resetDueProductUserTraffic(
   payload: SubscriptionDueTrafficResetRequest = {},
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<SubscriptionDueTrafficResetResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/traffic/reset-due`, {
     method: "POST",
@@ -184,7 +185,7 @@ export async function resetDueProductUserTraffic(
 }
 
 export async function listSubscriptionTemplatePresets(
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<SubscriptionTemplatePresetsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/node-presets`);
   if (!response.ok) {
@@ -196,7 +197,7 @@ export async function listSubscriptionTemplatePresets(
 export async function createManagedNodeFromPreset(
   presetId: string,
   payload: SubscriptionTemplatePresetApplyRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ManagedNodeResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/node-presets/${encodeURIComponent(presetId)}/nodes`,
@@ -214,7 +215,7 @@ export async function createManagedNodeFromPreset(
 
 export async function exportSubscriptionCatalog(
   includeCredentials = false,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<SubscriptionCatalogExportResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/catalog/export?include_credentials=${includeCredentials}`,
@@ -227,7 +228,7 @@ export async function exportSubscriptionCatalog(
 
 export async function importSubscriptionCatalog(
   payload: SubscriptionCatalogImportRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<SubscriptionCatalogImportResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/catalog/import`, {
     method: "POST",
@@ -240,7 +241,7 @@ export async function importSubscriptionCatalog(
   return response.json() as Promise<SubscriptionCatalogImportResponse>;
 }
 
-export async function listManagedNodes(fetcher = fetch): Promise<ManagedNodesResponse> {
+export async function listManagedNodes(fetcher = authenticatedFetch): Promise<ManagedNodesResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/nodes`);
   if (!response.ok) {
     throw await apiError(response, "Managed nodes request failed");
@@ -250,7 +251,7 @@ export async function listManagedNodes(fetcher = fetch): Promise<ManagedNodesRes
 
 export async function createManagedNode(
   payload: ManagedNodeCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ManagedNodeResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/nodes`, {
     method: "POST",
@@ -265,7 +266,7 @@ export async function createManagedNode(
 
 export async function listXrayRuntimeNodeDrafts(
   serverId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeNodeDraftsResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/node-drafts`,
@@ -279,7 +280,7 @@ export async function listXrayRuntimeNodeDrafts(
 export async function createManagedNodeFromRuntimeInbound(
   serverId: string,
   payload: XrayRuntimeNodeCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<ManagedNodeResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/nodes`, {
     method: "POST",
@@ -295,7 +296,7 @@ export async function createManagedNodeFromRuntimeInbound(
 export async function importManagedNodesFromRuntimeInbounds(
   serverId: string,
   payload: XrayRuntimeNodeImportRequest = {},
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeNodeImportResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/nodes/import`,
@@ -313,7 +314,7 @@ export async function importManagedNodesFromRuntimeInbounds(
 
 export async function getXrayRuntimeNodeReconciliation(
   serverId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeNodeReconciliationResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/nodes/reconciliation`,
@@ -328,7 +329,7 @@ export async function syncManagedNodeFromRuntime(
   serverId: string,
   nodeId: string,
   payload: XrayRuntimeNodeSyncRequest = {},
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeNodeSyncResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/nodes/${nodeId}/sync`,
@@ -346,7 +347,7 @@ export async function syncManagedNodeFromRuntime(
 
 export async function getXrayRuntimeCredentialReconciliation(
   serverId: string,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeCredentialReconciliationResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/credentials/reconciliation`,
@@ -360,7 +361,7 @@ export async function getXrayRuntimeCredentialReconciliation(
 export async function repairMissingXrayRuntimeCredentials(
   serverId: string,
   payload: XrayRuntimeCredentialRepairRequest = {},
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeCredentialRepairResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/credentials/repair-missing`,
@@ -379,7 +380,7 @@ export async function repairMissingXrayRuntimeCredentials(
 export async function cleanupExtraXrayRuntimeCredentials(
   serverId: string,
   payload: XrayRuntimeCredentialCleanupRequest = {},
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<XrayRuntimeCredentialCleanupResponse> {
   const response = await fetcher(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/credentials/cleanup-extra`,
@@ -396,7 +397,7 @@ export async function cleanupExtraXrayRuntimeCredentials(
 }
 
 export async function listSubscriptionPlans(
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<SubscriptionPlansResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/plans`);
   if (!response.ok) {
@@ -407,7 +408,7 @@ export async function listSubscriptionPlans(
 
 export async function createSubscriptionPlan(
   payload: SubscriptionPlanCreateRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<SubscriptionPlanResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/plans`, {
     method: "POST",
@@ -423,7 +424,7 @@ export async function createSubscriptionPlan(
 export async function assignSubscriptionPlan(
   username: string,
   payload: SubscriptionPlanAssignRequest,
-  fetcher = fetch,
+  fetcher = authenticatedFetch,
 ): Promise<SubscriptionPlanAssignResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/plan`, {
     method: "POST",
