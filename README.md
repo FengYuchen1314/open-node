@@ -45,7 +45,8 @@ dispatch, domain-latency result ingestion, cross-node target comparison, and
 external Xray takeover for legacy `-config` plus `-confdir` nodes, plus latest
 agent scan-result persistence for Xray runtime status and inbound inventory
 with sanitized runtime summaries plus latest traffic counters and
-snapshot-derived tunnel inventory, managed-node drafts, and runtime/catalog
+snapshot-derived tunnel inventory/delete dispatch, managed-node drafts, and
+runtime/catalog
 reconciliation plus stale-node public-field sync and credential email drift
 checks plus missing-client repair and extra-client cleanup dispatch with
 follow-up runtime scans, agent
@@ -59,8 +60,9 @@ preset, and import/export management, probe settings, metadata, and task
 controls, probe status/region filters, health scoring, latency buckets,
 traffic hotspots, three-carrier route badges, probe network drill-down charts,
 target comparison rows, external Xray takeover controls, Xray scan status in
-the inventory table, runtime inventory summaries and tunnel lists in the
-config workspace, latest runtime traffic counters, runtime-to-managed-node
+the inventory table, runtime inventory summaries, tunnel lists, and tunnel
+delete controls in the config workspace, latest runtime traffic counters,
+runtime-to-managed-node
 creation, missing-node bulk import, and catalog drift status plus stale-node
 sync and credential drift controls, log-file and nginx
 stream cleanup controls, missing runtime client repair and extra runtime client

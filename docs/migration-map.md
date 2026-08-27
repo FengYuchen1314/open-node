@@ -79,6 +79,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: current Xray config snapshots now derive sanitized runtime tunnel
      inventory for `protocol=tunnel` inbounds, `tunnel-*` routed forwarding
      rules, and grouped chain hops without exposing outbound secrets.
+   - Done: tunnel inventory entries can preview or queue delete commands:
+     inbound and chain hops remove tunnel inbounds, while routed tunnel cleanup
+     removes the routing rule before removing the matching outbound.
    - Done: scan-derived managed-node drafts and one-click catalog node creation
      from runtime inbounds, without importing UUIDs, passwords, PSKs, or account
      secrets from existing Xray config.

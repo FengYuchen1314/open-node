@@ -319,6 +319,37 @@ export interface XrayRuntimeTunnelInventoryResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeTunnelDeleteRequest {
+  kind: "inbound" | "routed" | "chain";
+  tag?: string | null;
+  label?: string | null;
+  rule_index?: number | null;
+  queue_agent_commands?: boolean;
+  queue_scan_after_apply?: boolean;
+  command_timeout_ms?: number;
+}
+
+export interface XrayRuntimeTunnelDeleteCommand {
+  method: "POST";
+  path: string;
+  body: Record<string, unknown>;
+}
+
+export interface XrayRuntimeTunnelDeleteResponse {
+  server_id: string;
+  has_config: boolean;
+  source_snapshot_id?: string | null;
+  target_kind: "inbound" | "routed" | "chain";
+  target_tag?: string | null;
+  target_label?: string | null;
+  command_previews: XrayRuntimeTunnelDeleteCommand[];
+  commands: AgentCommand[];
+  scan_command?: AgentCommand | null;
+  command_count: number;
+  warnings: string[];
+  license_required: false;
+}
+
 export interface XrayConfigSnapshot {
   id: string;
   server_id: string;

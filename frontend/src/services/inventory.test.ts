@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createServer,
   createServerCommand,
+  deleteXrayRuntimeTunnel,
   getLatestScanResult,
   getLatestTelemetry,
   getXrayRuntimeInventory,
@@ -324,6 +325,89 @@ describe("inventory API client", () => {
     expect(response.license_required).toBe(false);
     expect(response.tunnels[0]?.target_address).toBe("2001:db8::10");
     expect(response.chains[0]?.label).toBe("relay");
+  });
+
+  it("queues Xray runtime tunnel deletes with JSON body", async () => {
+    let requestUrl = "";
+    let method = "";
+    let headers: HeadersInit | undefined;
+    let body: unknown;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      method = init?.method ?? "";
+      headers = init?.headers;
+      body = JSON.parse(init?.body?.toString() ?? "{}") as unknown;
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          has_config: true,
+          source_snapshot_id: "snap_1",
+          target_kind: "routed",
+          target_tag: "tunnel-routed",
+          target_label: null,
+          command_previews: [
+            {
+              method: "POST",
+              path: "/api/child/routing",
+              body: { action: "remove_rule", index: 0 },
+            },
+            {
+              method: "POST",
+              path: "/api/child/outbounds",
+              body: { action: "remove", tag: "tunnel-routed" },
+            },
+          ],
+          commands: [
+            {
+              id: "cmd_1",
+              server_id: "srv_1",
+              request_id: "srv_1-tunnel-delete",
+              method: "POST",
+              path: "/api/child/routing",
+              query: "",
+              body: { action: "remove_rule", index: 0 },
+              timeout_ms: 60000,
+              stream: false,
+              status: "pending",
+              attempts: 0,
+              created_at: "2026-08-27T00:00:00Z",
+              updated_at: "2026-08-27T00:00:00Z",
+            },
+          ],
+          scan_command: null,
+          command_count: 2,
+          warnings: [],
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await deleteXrayRuntimeTunnel(
+      "srv_1",
+      {
+        kind: "routed",
+        tag: "tunnel-routed",
+        rule_index: 0,
+        queue_agent_commands: true,
+      },
+      fetcher,
+    );
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/xray/runtime/tunnels/delete");
+    expect(method).toBe("POST");
+    expect(headers).toEqual({ "Content-Type": "application/json" });
+    expect(body).toEqual({
+      kind: "routed",
+      tag: "tunnel-routed",
+      rule_index: 0,
+      queue_agent_commands: true,
+    });
+    expect(response.license_required).toBe(false);
+    expect(response.command_previews[1]?.body).toEqual({
+      action: "remove",
+      tag: "tunnel-routed",
+    });
   });
 
   it("lists Xray config snapshots with optional config bodies", async () => {

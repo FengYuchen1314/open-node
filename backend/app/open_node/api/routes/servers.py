@@ -50,6 +50,8 @@ from open_node.domain.inventory import (
     ServerTelemetryResponse,
     ServerXrayConfigSnapshotsResponse,
     XrayRuntimeInventoryResponse,
+    XrayRuntimeTunnelDeleteRequest,
+    XrayRuntimeTunnelDeleteResponse,
     XrayRuntimeTunnelInventoryResponse,
 )
 from open_node.domain.subscriptions import (
@@ -77,6 +79,7 @@ from open_node.services.inventory import (
     XrayConfigSnapshotNotFoundError,
     XrayRuntimeInboundNotFoundError,
     XrayRuntimeNodeDraftUnavailableError,
+    XrayRuntimeTunnelNotFoundError,
 )
 
 router = APIRouter(prefix="/servers", tags=["servers"])
@@ -162,6 +165,51 @@ def xray_runtime_tunnel_inventory(
         return store.xray_runtime_tunnel_inventory(server_id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{server_id}/xray/runtime/tunnels/delete",
+    response_model=XrayRuntimeTunnelDeleteResponse,
+)
+async def delete_xray_runtime_tunnel(
+    server_id: UUID,
+    payload: XrayRuntimeTunnelDeleteRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> XrayRuntimeTunnelDeleteResponse:
+    try:
+        response = store.delete_xray_runtime_tunnel(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except XrayRuntimeTunnelNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    if payload.queue_agent_commands:
+        commands = []
+        for preview in response.command_previews:
+            command = store.create_command(
+                server_id,
+                AgentCommandCreate(
+                    method=preview.method,
+                    path=preview.path,
+                    body=preview.body,
+                    timeout_ms=payload.command_timeout_ms,
+                ),
+            )
+            commands.append(await connections.dispatch_command(store, command))
+        scan_command = None
+        if payload.queue_scan_after_apply and commands:
+            command = store.create_command(
+                server_id,
+                AgentCommandCreate(
+                    method="POST",
+                    path="/api/child/scan",
+                    timeout_ms=payload.command_timeout_ms,
+                ),
+            )
+            scan_command = await connections.dispatch_command(store, command)
+        response = response.model_copy(update={"commands": commands, "scan_command": scan_command})
+    return response
 
 
 @router.get("/{server_id}/xray/runtime/node-drafts", response_model=XrayRuntimeNodeDraftsResponse)

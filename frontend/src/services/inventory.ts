@@ -15,6 +15,8 @@ import type {
   ServerSummary,
   ServerXrayConfigSnapshotsResponse,
   XrayRuntimeInventoryResponse,
+  XrayRuntimeTunnelDeleteRequest,
+  XrayRuntimeTunnelDeleteResponse,
   XrayRuntimeTunnelInventoryResponse,
 } from "../domain/inventory";
 
@@ -167,6 +169,25 @@ export async function getXrayRuntimeTunnelInventory(
     throw await apiError(response, "Xray runtime tunnel inventory request failed");
   }
   return response.json() as Promise<XrayRuntimeTunnelInventoryResponse>;
+}
+
+export async function deleteXrayRuntimeTunnel(
+  serverId: string,
+  payload: XrayRuntimeTunnelDeleteRequest,
+  fetcher = fetch,
+): Promise<XrayRuntimeTunnelDeleteResponse> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/tunnels/delete`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Xray runtime tunnel delete request failed");
+  }
+  return response.json() as Promise<XrayRuntimeTunnelDeleteResponse>;
 }
 
 export interface XrayConfigSnapshotListOptions {

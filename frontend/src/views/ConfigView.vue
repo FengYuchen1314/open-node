@@ -13,6 +13,7 @@ import type {
   XrayRuntimeInbound,
   XrayRuntimeInventoryResponse,
   XrayRuntimeTunnel,
+  XrayRuntimeTunnelChain,
   XrayRuntimeTunnelInventoryResponse,
 } from "../domain/inventory";
 import type {
@@ -24,6 +25,7 @@ import type {
   XrayRuntimeNodeReconciliationRuntimeEntry,
 } from "../domain/subscriptions";
 import {
+  deleteXrayRuntimeTunnel,
   getXrayRuntimeInventory,
   getXrayRuntimeTunnelInventory,
   listCommandStreamFrames,
@@ -63,6 +65,7 @@ const runtimeNodeSavingKey = ref("");
 const runtimeNodeSyncingId = ref("");
 const runtimeCredentialRepairing = ref(false);
 const runtimeCredentialCleaning = ref(false);
+const runtimeTunnelDeletingKey = ref("");
 const savingOperation = ref<AgentOperationKind | "">("");
 const restoringSnapshotId = ref("");
 const errorMessage = ref("");
@@ -641,6 +644,30 @@ function tunnelSource(tunnel: XrayRuntimeTunnel) {
   return tunnel.inbound_tag ? `from ${tunnel.inbound_tag}` : "No inbound rule source";
 }
 
+function runtimeTunnelKey(tunnel: XrayRuntimeTunnel) {
+  return `${tunnel.kind}:${tunnel.tag}:${tunnel.rule_index ?? "inbound"}`;
+}
+
+function runtimeTunnelChainKey(chain: XrayRuntimeTunnelChain) {
+  return `chain:${chain.label}`;
+}
+
+function runtimeTunnelDeleteTooltip(tunnel: XrayRuntimeTunnel) {
+  if (runtimeTunnelDeletingKey.value) {
+    return "Runtime tunnel delete is running";
+  }
+  return tunnel.kind === "routed"
+    ? `Queue routing and outbound delete for ${tunnel.tag}`
+    : `Queue inbound delete for ${tunnel.tag}`;
+}
+
+function runtimeTunnelChainDeleteTooltip(chain: XrayRuntimeTunnelChain) {
+  if (runtimeTunnelDeletingKey.value) {
+    return "Runtime tunnel delete is running";
+  }
+  return `Queue ${chain.hops.length} chain hop deletes`;
+}
+
 function remarkLabel(value: string) {
   return value.replace(/_/g, " ");
 }
@@ -717,6 +744,7 @@ function runtimeNodeCreateDisabled(inbound: XrayRuntimeInbound) {
     Boolean(runtimeNodeSyncingId.value) ||
     runtimeCredentialRepairing.value ||
     runtimeCredentialCleaning.value ||
+    Boolean(runtimeTunnelDeletingKey.value) ||
     (Boolean(runtimeNodeSavingKey.value) &&
       runtimeNodeSavingKey.value !== runtimeNodeSavingId(inbound))
   );
@@ -738,6 +766,9 @@ function runtimeImportTooltip() {
   if (runtimeCredentialCleaning.value) {
     return "Runtime credential cleanup is running";
   }
+  if (runtimeTunnelDeletingKey.value) {
+    return "Runtime tunnel delete is running";
+  }
   return `Import ${runtimeMissingNodeCount.value} missing runtime nodes`;
 }
 
@@ -755,7 +786,8 @@ function runtimeCredentialRepairTooltip() {
     runtimeNodeImporting.value ||
     runtimeNodeSavingKey.value ||
     runtimeNodeSyncingId.value ||
-    runtimeCredentialCleaning.value
+    runtimeCredentialCleaning.value ||
+    runtimeTunnelDeletingKey.value
   ) {
     return "Another runtime catalog action is running";
   }
@@ -771,7 +803,8 @@ function runtimeCredentialRepairDisabled() {
     !runtimeCredentialReconciliation.value?.missing_runtime_client_count ||
     runtimeNodeImporting.value ||
     Boolean(runtimeNodeSavingKey.value) ||
-    Boolean(runtimeNodeSyncingId.value)
+    Boolean(runtimeNodeSyncingId.value) ||
+    Boolean(runtimeTunnelDeletingKey.value)
   );
 }
 
@@ -789,7 +822,8 @@ function runtimeCredentialCleanupTooltip() {
     runtimeNodeImporting.value ||
     runtimeNodeSavingKey.value ||
     runtimeNodeSyncingId.value ||
-    runtimeCredentialRepairing.value
+    runtimeCredentialRepairing.value ||
+    runtimeTunnelDeletingKey.value
   ) {
     return "Another runtime catalog action is running";
   }
@@ -805,7 +839,8 @@ function runtimeCredentialCleanupDisabled() {
     runtimeNodeImporting.value ||
     Boolean(runtimeNodeSavingKey.value) ||
     Boolean(runtimeNodeSyncingId.value) ||
-    runtimeCredentialRepairing.value
+    runtimeCredentialRepairing.value ||
+    Boolean(runtimeTunnelDeletingKey.value)
   );
 }
 
@@ -879,7 +914,8 @@ function runtimeSyncDisabled(entry: XrayRuntimeNodeReconciliationManagedEntry) {
     Boolean(runtimeNodeSavingKey.value) ||
     Boolean(runtimeNodeSyncingId.value) ||
     runtimeCredentialRepairing.value ||
-    runtimeCredentialCleaning.value
+    runtimeCredentialCleaning.value ||
+    Boolean(runtimeTunnelDeletingKey.value)
   );
 }
 
@@ -898,7 +934,8 @@ function runtimeSyncTooltip(entry: XrayRuntimeNodeReconciliationManagedEntry) {
     runtimeNodeSavingKey.value ||
     runtimeNodeSyncingId.value ||
     runtimeCredentialRepairing.value ||
-    runtimeCredentialCleaning.value
+    runtimeCredentialCleaning.value ||
+    runtimeTunnelDeletingKey.value
   ) {
     return "Another runtime catalog action is running";
   }
@@ -1000,6 +1037,57 @@ async function syncRuntimeManagedNode(entry: XrayRuntimeNodeReconciliationManage
     errorMessage.value = readableError(error);
   } finally {
     runtimeNodeSyncingId.value = "";
+  }
+}
+
+async function deleteRuntimeTunnel(tunnel: XrayRuntimeTunnel) {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  const key = runtimeTunnelKey(tunnel);
+  runtimeTunnelDeletingKey.value = key;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await deleteXrayRuntimeTunnel(selectedServerId.value, {
+      kind: tunnel.kind,
+      tag: tunnel.tag,
+      rule_index: tunnel.rule_index,
+      queue_agent_commands: true,
+      queue_scan_after_apply: true,
+    });
+    successMessage.value = `Queued ${response.commands.length} tunnel delete commands.`;
+    await Promise.all([refreshCommands(), refreshXrayRuntimeInventory()]);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    runtimeTunnelDeletingKey.value = "";
+  }
+}
+
+async function deleteRuntimeTunnelChain(chain: XrayRuntimeTunnelChain) {
+  if (!selectedServerId.value) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+  const key = runtimeTunnelChainKey(chain);
+  runtimeTunnelDeletingKey.value = key;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const response = await deleteXrayRuntimeTunnel(selectedServerId.value, {
+      kind: "chain",
+      label: chain.label,
+      queue_agent_commands: true,
+      queue_scan_after_apply: true,
+    });
+    successMessage.value = `Queued ${response.commands.length} chain delete commands.`;
+    await Promise.all([refreshCommands(), refreshXrayRuntimeInventory()]);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    runtimeTunnelDeletingKey.value = "";
   }
 }
 
@@ -1388,7 +1476,8 @@ function formatDateTime(value: string) {
                             Boolean(runtimeNodeSavingKey) ||
                             Boolean(runtimeNodeSyncingId) ||
                             runtimeCredentialRepairing ||
-                            runtimeCredentialCleaning
+                            runtimeCredentialCleaning ||
+                            Boolean(runtimeTunnelDeletingKey)
                           "
                           :loading="runtimeNodeImporting"
                           color="primary"
@@ -1776,6 +1865,26 @@ function formatDateTime(value: string) {
                       >
                         ip {{ ip }}
                       </v-chip>
+                      <v-tooltip :text="runtimeTunnelDeleteTooltip(tunnel)">
+                        <template #activator="{ props }">
+                          <span v-bind="props" class="runtime-node-action">
+                            <v-btn
+                              :disabled="
+                                Boolean(runtimeTunnelDeletingKey) &&
+                                runtimeTunnelDeletingKey !== runtimeTunnelKey(tunnel)
+                              "
+                              :loading="runtimeTunnelDeletingKey === runtimeTunnelKey(tunnel)"
+                              color="warning"
+                              prepend-icon="mdi-delete-outline"
+                              size="small"
+                              variant="tonal"
+                              @click="deleteRuntimeTunnel(tunnel)"
+                            >
+                              Delete
+                            </v-btn>
+                          </span>
+                        </template>
+                      </v-tooltip>
                     </div>
                   </div>
                 </div>
@@ -1807,6 +1916,28 @@ function formatDateTime(value: string) {
                         {{ hop.tag }} :{{ hop.listen_port ?? "-" }} ->
                         {{ tunnelTarget(hop.target_address, hop.target_port) }}
                       </v-chip>
+                      <v-tooltip :text="runtimeTunnelChainDeleteTooltip(chain)">
+                        <template #activator="{ props }">
+                          <span v-bind="props" class="runtime-node-action">
+                            <v-btn
+                              :disabled="
+                                Boolean(runtimeTunnelDeletingKey) &&
+                                runtimeTunnelDeletingKey !== runtimeTunnelChainKey(chain)
+                              "
+                              :loading="
+                                runtimeTunnelDeletingKey === runtimeTunnelChainKey(chain)
+                              "
+                              color="warning"
+                              prepend-icon="mdi-delete-outline"
+                              size="small"
+                              variant="tonal"
+                              @click="deleteRuntimeTunnelChain(chain)"
+                            >
+                              Delete chain
+                            </v-btn>
+                          </span>
+                        </template>
+                      </v-tooltip>
                     </div>
                   </div>
                 </div>

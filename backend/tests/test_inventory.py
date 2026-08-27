@@ -2631,6 +2631,64 @@ def test_xray_runtime_tunnel_inventory_reads_current_config_snapshot(
     assert [hop["tag"] for hop in chain["hops"]] == ["tunnel-relay-h0", "tunnel-relay-h1"]
     assert "secret-should-not-leak" not in json.dumps(payload)
 
+    routed_preview = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/tunnels/delete",
+        json={"kind": "routed", "tag": "tunnel-routed", "rule_index": 0},
+    )
+    assert routed_preview.status_code == 200
+    routed_payload = routed_preview.json()
+    assert routed_payload["license_required"] is False
+    assert routed_payload["has_config"] is True
+    assert routed_payload["command_count"] == 2
+    assert routed_payload["commands"] == []
+    assert routed_payload["scan_command"] is None
+    assert routed_payload["command_previews"] == [
+        {
+            "method": "POST",
+            "path": "/api/child/routing",
+            "body": {"action": "remove_rule", "index": 0},
+        },
+        {
+            "method": "POST",
+            "path": "/api/child/outbounds",
+            "body": {"action": "remove", "tag": "tunnel-routed"},
+        },
+    ]
+
+    stale_index = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/tunnels/delete",
+        json={"kind": "routed", "tag": "tunnel-routed", "rule_index": 3},
+    )
+    assert stale_index.status_code == 404
+    assert "rule index changed" in stale_index.json()["detail"]
+
+    queued_chain = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/tunnels/delete",
+        json={
+            "kind": "chain",
+            "label": "relay",
+            "queue_agent_commands": True,
+            "queue_scan_after_apply": True,
+            "command_timeout_ms": 45_000,
+        },
+    )
+    assert queued_chain.status_code == 200
+    queued_payload = queued_chain.json()
+    assert queued_payload["target_kind"] == "chain"
+    assert queued_payload["target_label"] == "relay"
+    assert queued_payload["command_count"] == 2
+    assert [command["path"] for command in queued_payload["commands"]] == [
+        "/api/child/inbounds",
+        "/api/child/inbounds",
+    ]
+    assert [command["body"]["tag"] for command in queued_payload["commands"]] == [
+        "tunnel-relay-h0",
+        "tunnel-relay-h1",
+    ]
+    assert all(command["timeout_ms"] == 45_000 for command in queued_payload["commands"])
+    assert queued_payload["scan_command"]["path"] == "/api/child/scan"
+    assert queued_payload["scan_command"]["timeout_ms"] == 45_000
+
 
 def test_xray_runtime_tunnel_inventory_handles_missing_config_snapshot(
     tmp_path: Path,
@@ -2647,6 +2705,14 @@ def test_xray_runtime_tunnel_inventory_handles_missing_config_snapshot(
     assert payload["has_config"] is False
     assert payload["tunnels"] == []
     assert payload["chains"] == []
+
+    delete_response = client.post(
+        f"/api/v1/servers/{server_id}/xray/runtime/tunnels/delete",
+        json={"kind": "inbound", "tag": "tunnel-web"},
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json()["warnings"] == ["current_config_snapshot_not_found"]
+    assert delete_response.json()["command_previews"] == []
 
 
 def test_xray_config_snapshots_ignore_empty_and_failed_results(tmp_path: Path) -> None:

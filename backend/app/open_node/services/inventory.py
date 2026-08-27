@@ -81,6 +81,9 @@ from open_node.domain.inventory import (
     XrayRuntimeInboundRead,
     XrayRuntimeInventoryResponse,
     XrayRuntimeTunnelChainRead,
+    XrayRuntimeTunnelDeleteCommand,
+    XrayRuntimeTunnelDeleteRequest,
+    XrayRuntimeTunnelDeleteResponse,
     XrayRuntimeTunnelHopRead,
     XrayRuntimeTunnelInventoryResponse,
     XrayRuntimeTunnelRead,
@@ -233,6 +236,10 @@ class XrayRuntimeInboundNotFoundError(ValueError):
 
 class XrayRuntimeNodeDraftUnavailableError(ValueError):
     """Raised when a scan-derived inbound cannot become a managed node."""
+
+
+class XrayRuntimeTunnelNotFoundError(ValueError):
+    """Raised when a snapshot-derived runtime tunnel target is unavailable."""
 
 
 _PROBE_SERIES_RANGES = {
@@ -1290,6 +1297,40 @@ class InventoryStore:
                 raise ServerNotFoundError(f"server not found: {server_id}")
             snapshot = self._current_xray_config_snapshot(session, server.id)
             return self._xray_runtime_tunnel_inventory_response(server_id, snapshot)
+
+    def delete_xray_runtime_tunnel(
+        self,
+        server_id: UUID,
+        payload: XrayRuntimeTunnelDeleteRequest,
+    ) -> XrayRuntimeTunnelDeleteResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            inventory = self._xray_runtime_tunnel_inventory_response(
+                server_id,
+                self._current_xray_config_snapshot(session, server.id),
+            )
+            if not inventory.has_config:
+                return XrayRuntimeTunnelDeleteResponse(
+                    server_id=server_id,
+                    target_kind=payload.kind,
+                    target_tag=payload.tag,
+                    target_label=payload.label,
+                    warnings=["current_config_snapshot_not_found"],
+                )
+            previews = self._xray_runtime_tunnel_delete_commands(inventory, payload)
+            return XrayRuntimeTunnelDeleteResponse(
+                server_id=server_id,
+                has_config=True,
+                source_snapshot_id=inventory.source_snapshot_id,
+                target_kind=payload.kind,
+                target_tag=payload.tag,
+                target_label=payload.label,
+                command_previews=previews,
+                command_count=len(previews),
+                warnings=inventory.warnings,
+            )
 
     def list_xray_runtime_node_drafts(
         self,
@@ -6051,6 +6092,68 @@ class InventoryStore:
 
         chains, flat_tunnels = cls._group_xray_tunnel_chains(tunnels)
         return flat_tunnels, chains, cls._dedupe_text(warnings)
+
+    @staticmethod
+    def _xray_runtime_tunnel_delete_commands(
+        inventory: XrayRuntimeTunnelInventoryResponse,
+        payload: XrayRuntimeTunnelDeleteRequest,
+    ) -> list[XrayRuntimeTunnelDeleteCommand]:
+        if payload.kind == "chain":
+            chain = next(
+                (item for item in inventory.chains if item.label == payload.label),
+                None,
+            )
+            if chain is None:
+                raise XrayRuntimeTunnelNotFoundError(
+                    f"runtime tunnel chain not found: {payload.label}"
+                )
+            return [
+                XrayRuntimeTunnelDeleteCommand(
+                    path="/api/child/inbounds",
+                    body={"action": "remove", "tag": hop.tag},
+                )
+                for hop in chain.hops
+            ]
+
+        tunnel = next(
+            (
+                item
+                for item in inventory.tunnels
+                if item.kind == payload.kind and item.tag == payload.tag
+            ),
+            None,
+        )
+        if tunnel is None:
+            raise XrayRuntimeTunnelNotFoundError(
+                f"runtime {payload.kind} tunnel not found: {payload.tag}"
+            )
+
+        if payload.kind == "inbound":
+            return [
+                XrayRuntimeTunnelDeleteCommand(
+                    path="/api/child/inbounds",
+                    body={"action": "remove", "tag": tunnel.tag},
+                )
+            ]
+
+        if tunnel.rule_index is None:
+            raise XrayRuntimeTunnelNotFoundError(
+                f"runtime routed tunnel has no routing rule index: {tunnel.tag}"
+            )
+        if payload.rule_index is not None and payload.rule_index != tunnel.rule_index:
+            raise XrayRuntimeTunnelNotFoundError(
+                f"runtime routed tunnel rule index changed: {tunnel.tag}"
+            )
+        return [
+            XrayRuntimeTunnelDeleteCommand(
+                path="/api/child/routing",
+                body={"action": "remove_rule", "index": tunnel.rule_index},
+            ),
+            XrayRuntimeTunnelDeleteCommand(
+                path="/api/child/outbounds",
+                body={"action": "remove", "tag": tunnel.tag},
+            ),
+        ]
 
     @classmethod
     def _group_xray_tunnel_chains(

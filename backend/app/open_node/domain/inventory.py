@@ -646,6 +646,35 @@ class XrayRuntimeTunnelInventoryResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeTunnelDeleteRequest(BaseModel):
+    kind: Literal["inbound", "routed", "chain"]
+    tag: str | None = Field(default=None, max_length=120)
+    label: str | None = Field(default=None, max_length=80)
+    rule_index: int | None = Field(default=None, ge=0)
+    queue_agent_commands: bool = False
+    queue_scan_after_apply: bool = False
+    command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @field_validator("tag", "label")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "target")
+
+    @model_validator(mode="after")
+    def validate_target(self) -> Self:
+        if self.kind in {"inbound", "routed"} and not self.tag:
+            raise ValueError("tag is required for inbound and routed tunnel deletes")
+        if self.kind == "chain" and not self.label:
+            raise ValueError("label is required for chain tunnel deletes")
+        return self
+
+
+class XrayRuntimeTunnelDeleteCommand(BaseModel):
+    method: Literal["POST"] = "POST"
+    path: str
+    body: dict[str, Any]
+
+
 class XrayConfigSnapshotRead(BaseModel):
     id: UUID
     server_id: UUID
@@ -722,6 +751,21 @@ class AgentCommandStreamFrameRead(BaseModel):
 
 class AgentCommandCreateResponse(BaseModel):
     command: AgentCommandRead
+    license_required: Literal[False] = False
+
+
+class XrayRuntimeTunnelDeleteResponse(BaseModel):
+    server_id: UUID
+    has_config: bool = False
+    source_snapshot_id: UUID | None = None
+    target_kind: Literal["inbound", "routed", "chain"]
+    target_tag: str | None = None
+    target_label: str | None = None
+    command_previews: list[XrayRuntimeTunnelDeleteCommand] = Field(default_factory=list)
+    commands: list[AgentCommandRead] = Field(default_factory=list)
+    scan_command: AgentCommandRead | None = None
+    command_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
     license_required: Literal[False] = False
 
 
