@@ -117,6 +117,75 @@ class AgentHeartbeatRequest(BaseModel):
     public_ipv6: str | None = Field(default=None, max_length=255)
 
 
+class TrafficData(BaseModel):
+    uplink: int = Field(default=0, ge=0)
+    downlink: int = Field(default=0, ge=0)
+
+
+class XrayStats(BaseModel):
+    inbound: dict[str, TrafficData] = Field(default_factory=dict)
+    outbound: dict[str, TrafficData] = Field(default_factory=dict)
+    user: dict[str, TrafficData] = Field(default_factory=dict)
+
+
+class SystemTraffic(BaseModel):
+    rx_total: int = Field(ge=0)
+    tx_total: int = Field(ge=0)
+    boot_time_unix: int = Field(ge=0)
+
+
+class ProbeSysMetrics(BaseModel):
+    cpu_pct: float = Field(default=0, ge=0)
+    loadavg: str = ""
+    mem_used: int = Field(default=0, ge=0)
+    mem_total: int = Field(default=0, ge=0)
+    disk_used: int = Field(default=0, ge=0)
+    disk_total: int = Field(default=0, ge=0)
+    uptime: int = Field(default=0, ge=0)
+    cpu_model: str = ""
+    cpu_cores: int = Field(default=0, ge=0)
+    cpu_threads: int = Field(default=0, ge=0)
+    os: str = ""
+    kernel: str = ""
+    arch: str = ""
+    has_cpu: bool = False
+    has_mem: bool = False
+    has_disk: bool = False
+
+
+class ProbeLatencySample(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    success: bool
+    latency_ms: int = Field(default=0, ge=0)
+    at: int | None = Field(default=None, ge=0)
+
+
+class AgentTelemetryReport(BaseModel):
+    token: str = Field(min_length=1)
+    reported_at: datetime | None = None
+    stats: XrayStats | None = None
+    online_users: dict[str, list[str]] = Field(default_factory=dict)
+    user_speeds: dict[str, int] = Field(default_factory=dict)
+    conn_counts: dict[str, int] = Field(default_factory=dict)
+    system: SystemTraffic | None = None
+    sysmetrics: ProbeSysMetrics | None = None
+    latency: list[ProbeLatencySample] = Field(default_factory=list)
+
+
+class AgentTelemetryRead(BaseModel):
+    id: UUID
+    server_id: UUID
+    reported_at: datetime
+    received_at: datetime
+    stats: XrayStats | None = None
+    online_users: dict[str, list[str]] = Field(default_factory=dict)
+    user_speeds: dict[str, int] = Field(default_factory=dict)
+    conn_counts: dict[str, int] = Field(default_factory=dict)
+    system: SystemTraffic | None = None
+    sysmetrics: ProbeSysMetrics | None = None
+    latency: list[ProbeLatencySample] = Field(default_factory=list)
+
+
 class AgentRead(BaseModel):
     id: UUID
     server_id: UUID
@@ -143,4 +212,17 @@ class AgentRegistrationResponse(BaseModel):
 class AgentHeartbeatResponse(BaseModel):
     server: ServerRead
     accepted_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    license_required: Literal[False] = False
+
+
+class AgentTelemetryResponse(BaseModel):
+    server: ServerRead
+    telemetry: AgentTelemetryRead
+    accepted_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    license_required: Literal[False] = False
+
+
+class ServerTelemetryResponse(BaseModel):
+    server_id: UUID
+    latest: AgentTelemetryRead | None = None
     license_required: Literal[False] = False

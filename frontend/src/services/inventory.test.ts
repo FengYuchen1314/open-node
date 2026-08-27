@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createServer, listServers } from "./inventory";
+import { createServer, getLatestTelemetry, listServers } from "./inventory";
 
 describe("inventory API client", () => {
   it("creates servers without sending license headers", async () => {
@@ -61,6 +61,38 @@ describe("inventory API client", () => {
     const response = await listServers(fetcher);
 
     expect(response[0].name).toBe("edge");
+    expect(headers).toBeUndefined();
+  });
+
+  it("reads latest telemetry without sending license headers", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          latest: {
+            id: "tel_1",
+            server_id: "srv_1",
+            reported_at: "2026-08-27T00:00:00Z",
+            received_at: "2026-08-27T00:00:01Z",
+            online_users: {},
+            user_speeds: {},
+            conn_counts: {},
+            latency: [],
+          },
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await getLatestTelemetry("srv_1", fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/telemetry/latest");
+    expect(response.license_required).toBe(false);
     expect(headers).toBeUndefined();
   });
 });

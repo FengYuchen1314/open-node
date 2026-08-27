@@ -1,4 +1,5 @@
 import type {
+  ServerTelemetryResponse,
   ServerCreateRequest,
   ServerCreateResponse,
   ServerSummary,
@@ -31,6 +32,17 @@ export async function createServer(
     throw await apiError(response, "Server create request failed");
   }
   return response.json() as Promise<ServerCreateResponse>;
+}
+
+export async function getLatestTelemetry(
+  serverId: string,
+  fetcher = fetch,
+): Promise<ServerTelemetryResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/telemetry/latest`);
+  if (!response.ok) {
+    throw await apiError(response, "Server telemetry request failed");
+  }
+  return response.json() as Promise<ServerTelemetryResponse>;
 }
 
 async function apiError(response: Response, fallback: string): Promise<Error> {

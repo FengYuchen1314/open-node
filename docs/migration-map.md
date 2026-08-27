@@ -23,5 +23,9 @@ This document records the starting source map for the Open Node refactor.
 1. Keep the no-license contract permanent and test-covered.
 2. Port control-plane identity, server inventory, and agent registration models.
 3. Port agent heartbeat, telemetry, and command execution contracts.
+   - Done: HTTP heartbeat plus telemetry/traffic reports with Xray stats,
+     system counters, sysmetrics, latency samples, user speeds, and connection
+     counts.
+   - Next: command queue and WebSocket/RPC transport.
 4. Port probe read-only API and public status UI.
 5. Revisit Xray integration once the agent protocol surface is stable.

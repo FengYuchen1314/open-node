@@ -3,9 +3,20 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from secrets import token_urlsafe
+from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, create_engine, select
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    create_engine,
+    select,
+)
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -14,14 +25,20 @@ from open_node.domain.inventory import (
     AgentHeartbeatRequest,
     AgentRead,
     AgentRegistrationRequest,
+    AgentTelemetryRead,
+    AgentTelemetryReport,
     ConnectionMode,
+    ProbeLatencySample,
+    ProbeSysMetrics,
     ServerCreate,
     ServerRead,
     ServerRecord,
     ServerStatus,
+    SystemTraffic,
     TrafficSource,
     TrafficStatsMode,
     XrayMode,
+    XrayStats,
 )
 
 
@@ -31,6 +48,10 @@ class InvalidAgentTokenError(ValueError):
 
 class DuplicateServerNameError(ValueError):
     """Raised when a server name would no longer be a stable inventory key."""
+
+
+class ServerNotFoundError(ValueError):
+    """Raised when an inventory lookup targets an unknown server."""
 
 
 class Base(DeclarativeBase):
@@ -89,6 +110,28 @@ class AgentModel(Base):
     same_host_as_master: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TelemetrySnapshotModel(Base):
+    __tablename__ = "telemetry_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    stats: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    online_users: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    user_speeds: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    conn_counts: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    system_rx_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    system_tx_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    system_boot_time_unix: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    sysmetrics: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    latency: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
 
 
 class InventoryStore:
@@ -218,6 +261,56 @@ class InventoryStore:
             session.refresh(server)
             return self._public_server(server)
 
+    def record_telemetry(
+        self,
+        payload: AgentTelemetryReport,
+    ) -> tuple[ServerRead, AgentTelemetryRead]:
+        with self._session() as session:
+            server = self._server_by_token(session, payload.token)
+            now = datetime.now(tz=UTC)
+            reported_at = self._aware_datetime(payload.reported_at or now)
+            previous = self._latest_telemetry_model(session, server.id)
+
+            server.status = ServerStatus.CONNECTED.value
+            server.last_heartbeat = now
+            server.updated_at = now
+            self._update_server_speed_from_system_traffic(server, previous, payload)
+
+            agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
+            if agent:
+                agent.last_seen_at = now
+
+            telemetry = TelemetrySnapshotModel(
+                id=str(uuid4()),
+                server_id=server.id,
+                reported_at=reported_at,
+                received_at=now,
+                stats=payload.stats.model_dump(mode="json") if payload.stats else None,
+                online_users=payload.online_users,
+                user_speeds=payload.user_speeds,
+                conn_counts=payload.conn_counts,
+                system_rx_total=payload.system.rx_total if payload.system else None,
+                system_tx_total=payload.system.tx_total if payload.system else None,
+                system_boot_time_unix=payload.system.boot_time_unix if payload.system else None,
+                sysmetrics=payload.sysmetrics.model_dump(mode="json")
+                if payload.sysmetrics
+                else None,
+                latency=[sample.model_dump(mode="json") for sample in payload.latency],
+            )
+            session.add(telemetry)
+            session.commit()
+            session.refresh(server)
+            session.refresh(telemetry)
+            return self._public_server(server), self._telemetry_read(telemetry)
+
+    def latest_telemetry(self, server_id: UUID) -> AgentTelemetryRead | None:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            telemetry = self._latest_telemetry_model(session, str(server_id))
+            return self._telemetry_read(telemetry) if telemetry else None
+
     def _session(self) -> Session:
         return self._session_factory()
 
@@ -278,11 +371,96 @@ class InventoryStore:
         )
 
     @staticmethod
+    def _telemetry_read(snapshot: TelemetrySnapshotModel) -> AgentTelemetryRead:
+        system = None
+        if (
+            snapshot.system_rx_total is not None
+            and snapshot.system_tx_total is not None
+            and snapshot.system_boot_time_unix is not None
+        ):
+            system = SystemTraffic(
+                rx_total=snapshot.system_rx_total,
+                tx_total=snapshot.system_tx_total,
+                boot_time_unix=snapshot.system_boot_time_unix,
+            )
+
+        return AgentTelemetryRead(
+            id=UUID(snapshot.id),
+            server_id=UUID(snapshot.server_id),
+            reported_at=snapshot.reported_at,
+            received_at=snapshot.received_at,
+            stats=XrayStats.model_validate(snapshot.stats) if snapshot.stats else None,
+            online_users=snapshot.online_users or {},
+            user_speeds=snapshot.user_speeds or {},
+            conn_counts=snapshot.conn_counts or {},
+            system=system,
+            sysmetrics=ProbeSysMetrics.model_validate(snapshot.sysmetrics)
+            if snapshot.sysmetrics
+            else None,
+            latency=[
+                ProbeLatencySample.model_validate(sample) for sample in (snapshot.latency or [])
+            ],
+        )
+
+    @staticmethod
     def _server_by_token(session: Session, token: str) -> ServerModel:
         server = session.scalar(select(ServerModel).where(ServerModel.agent_token == token))
         if server:
             return server
         raise InvalidAgentTokenError("invalid agent token")
+
+    @staticmethod
+    def _latest_telemetry_model(
+        session: Session,
+        server_id: str,
+    ) -> TelemetrySnapshotModel | None:
+        return session.scalar(
+            select(TelemetrySnapshotModel)
+            .where(TelemetrySnapshotModel.server_id == server_id)
+            .order_by(
+                TelemetrySnapshotModel.reported_at.desc(),
+                TelemetrySnapshotModel.received_at.desc(),
+            )
+            .limit(1)
+        )
+
+    @staticmethod
+    def _update_server_speed_from_system_traffic(
+        server: ServerModel,
+        previous: TelemetrySnapshotModel | None,
+        payload: AgentTelemetryReport,
+    ) -> None:
+        if not payload.system or not previous:
+            return
+        if (
+            previous.system_rx_total is None
+            or previous.system_tx_total is None
+            or previous.system_boot_time_unix != payload.system.boot_time_unix
+        ):
+            return
+        if (
+            payload.system.rx_total < previous.system_rx_total
+            or payload.system.tx_total < previous.system_tx_total
+        ):
+            return
+
+        current_at = InventoryStore._aware_datetime(payload.reported_at or datetime.now(tz=UTC))
+        previous_at = InventoryStore._aware_datetime(previous.reported_at)
+        elapsed = (current_at - previous_at).total_seconds()
+        if elapsed <= 0:
+            return
+        server.current_download_speed = int(
+            (payload.system.rx_total - previous.system_rx_total) / elapsed
+        )
+        server.current_upload_speed = int(
+            (payload.system.tx_total - previous.system_tx_total) / elapsed
+        )
+
+    @staticmethod
+    def _aware_datetime(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
 
 
 def create_inventory_engine(database_url: str) -> Engine:

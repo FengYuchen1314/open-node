@@ -43,6 +43,69 @@ export interface ServerCreateResponse {
   license_required: false;
 }
 
+export interface TrafficData {
+  uplink: number;
+  downlink: number;
+}
+
+export interface XrayStats {
+  inbound: Record<string, TrafficData>;
+  outbound: Record<string, TrafficData>;
+  user: Record<string, TrafficData>;
+}
+
+export interface SystemTraffic {
+  rx_total: number;
+  tx_total: number;
+  boot_time_unix: number;
+}
+
+export interface ProbeSysMetrics {
+  cpu_pct: number;
+  loadavg: string;
+  mem_used: number;
+  mem_total: number;
+  disk_used: number;
+  disk_total: number;
+  uptime: number;
+  cpu_model: string;
+  cpu_cores: number;
+  cpu_threads: number;
+  os: string;
+  kernel: string;
+  arch: string;
+  has_cpu: boolean;
+  has_mem: boolean;
+  has_disk: boolean;
+}
+
+export interface ProbeLatencySample {
+  key: string;
+  success: boolean;
+  latency_ms: number;
+  at?: number | null;
+}
+
+export interface AgentTelemetry {
+  id: string;
+  server_id: string;
+  reported_at: string;
+  received_at: string;
+  stats?: XrayStats | null;
+  online_users: Record<string, string[]>;
+  user_speeds: Record<string, number>;
+  conn_counts: Record<string, number>;
+  system?: SystemTraffic | null;
+  sysmetrics?: ProbeSysMetrics | null;
+  latency: ProbeLatencySample[];
+}
+
+export interface ServerTelemetryResponse {
+  server_id: string;
+  latest?: AgentTelemetry | null;
+  license_required: false;
+}
+
 export const defaultServerCreateRequest = (): ServerCreateRequest => ({
   name: "",
   connection_mode: "auto",

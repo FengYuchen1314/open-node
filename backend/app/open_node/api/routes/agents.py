@@ -9,6 +9,8 @@ from open_node.domain.inventory import (
     AgentRead,
     AgentRegistrationRequest,
     AgentRegistrationResponse,
+    AgentTelemetryReport,
+    AgentTelemetryResponse,
 )
 from open_node.services.inventory import InvalidAgentTokenError, InventoryStore
 
@@ -46,3 +48,16 @@ def record_agent_heartbeat(
     except InvalidAgentTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     return AgentHeartbeatResponse(server=server)
+
+
+@router.post("/traffic", response_model=AgentTelemetryResponse)
+@router.post("/telemetry", response_model=AgentTelemetryResponse)
+def record_agent_telemetry(
+    payload: AgentTelemetryReport,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> AgentTelemetryResponse:
+    try:
+        server, telemetry = store.record_telemetry(payload)
+    except InvalidAgentTokenError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    return AgentTelemetryResponse(server=server, telemetry=telemetry)

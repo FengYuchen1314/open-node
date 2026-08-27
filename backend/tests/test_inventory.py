@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -153,3 +154,103 @@ def test_duplicate_server_names_are_rejected(tmp_path: Path) -> None:
     assert first.status_code == 201
     assert second.status_code == 409
     assert second.json()["detail"] == "server name already exists: edge-unique"
+
+
+def test_agent_telemetry_records_xray_and_system_metrics(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-telemetry"}).json()
+
+    response = client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": created["agent_token"],
+            "stats": {
+                "inbound": {"vmess-in": {"uplink": 100, "downlink": 200}},
+                "outbound": {"direct": {"uplink": 40, "downlink": 80}},
+                "user": {"alice@example.com": {"uplink": 12, "downlink": 34}},
+            },
+            "online_users": {"alice@example.com": ["198.51.100.2"]},
+            "user_speeds": {"alice@example.com": 4096},
+            "conn_counts": {"alice|node-1": 2},
+            "system": {"rx_total": 1_000_000, "tx_total": 2_000_000, "boot_time_unix": 42},
+            "sysmetrics": {
+                "cpu_pct": 12.5,
+                "loadavg": "0.12 0.20 0.30",
+                "mem_used": 1024,
+                "mem_total": 4096,
+                "disk_used": 2048,
+                "disk_total": 8192,
+                "has_cpu": True,
+                "has_mem": True,
+                "has_disk": True,
+            },
+            "latency": [{"key": "cmcc", "success": True, "latency_ms": 28, "at": 1798330000}],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["license_required"] is False
+    assert payload["server"]["status"] == "connected"
+    assert payload["telemetry"]["stats"]["inbound"]["vmess-in"]["uplink"] == 100
+    assert payload["telemetry"]["system"]["tx_total"] == 2_000_000
+    assert payload["telemetry"]["sysmetrics"]["cpu_pct"] == 12.5
+    assert payload["telemetry"]["latency"][0]["key"] == "cmcc"
+
+    latest = client.get(f"/api/v1/servers/{created['server']['id']}/telemetry/latest")
+    assert latest.status_code == 200
+    assert latest.json()["latest"]["user_speeds"]["alice@example.com"] == 4096
+    assert latest.json()["latest"]["conn_counts"]["alice|node-1"] == 2
+
+
+def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-traffic"}).json()
+    first_at = datetime(2026, 8, 27, 4, 0, tzinfo=UTC)
+    second_at = first_at + timedelta(seconds=10)
+
+    first = client.post(
+        "/api/v1/agents/traffic",
+        json={
+            "token": created["agent_token"],
+            "reported_at": first_at.isoformat(),
+            "system": {"rx_total": 1_000, "tx_total": 2_000, "boot_time_unix": 900},
+        },
+    )
+    second = client.post(
+        "/api/v1/agents/traffic",
+        json={
+            "token": created["agent_token"],
+            "reported_at": second_at.isoformat(),
+            "system": {"rx_total": 1_120, "tx_total": 2_250, "boot_time_unix": 900},
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["server"]["current_download_speed"] == 12
+    assert second.json()["server"]["current_upload_speed"] == 25
+
+
+def test_invalid_telemetry_token_is_rejected_as_auth_not_license(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": "not-a-real-token",
+            "system": {"rx_total": 1, "tx_total": 2, "boot_time_unix": 3},
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid agent token"
+
+
+def test_latest_telemetry_for_unknown_server_returns_404(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/api/v1/servers/00000000-0000-0000-0000-000000000000/telemetry/latest")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "server not found: 00000000-0000-0000-0000-000000000000"

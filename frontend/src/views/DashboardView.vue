@@ -3,15 +3,17 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import {
   defaultServerCreateRequest,
+  type AgentTelemetry,
   type ConnectionMode,
   type ServerCreateRequest,
   type ServerStatus,
   type ServerSummary,
   type XrayMode,
 } from "../domain/inventory";
-import { createServer, listServers } from "../services/inventory";
+import { createServer, getLatestTelemetry, listServers } from "../services/inventory";
 
 const servers = ref<ServerSummary[]>([]);
+const telemetryByServer = ref<Record<string, AgentTelemetry | null>>({});
 const loading = ref(false);
 const saving = ref(false);
 const errorMessage = ref("");
@@ -42,6 +44,9 @@ const totalUpload = computed(() =>
 const totalDownload = computed(() =>
   servers.value.reduce((sum, server) => sum + server.current_download_speed, 0),
 );
+const telemetryCount = computed(
+  () => servers.value.filter((server) => telemetryByServer.value[server.id]).length,
+);
 const metrics = computed(() => [
   {
     label: "Servers",
@@ -60,7 +65,7 @@ const metrics = computed(() => [
   {
     label: "Speed",
     value: `${formatBytesPerSecond(totalUpload.value)} / ${formatBytesPerSecond(totalDownload.value)}`,
-    note: "Upload and download heartbeat totals",
+    note: `${telemetryCount.value} telemetry snapshots`,
     icon: "mdi-speedometer",
     color: "info",
   },
@@ -75,12 +80,28 @@ async function refreshServers() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    servers.value = await listServers();
+    const nextServers = await listServers();
+    servers.value = nextServers;
+    await refreshTelemetry(nextServers);
   } catch (error) {
     errorMessage.value = readableError(error);
   } finally {
     loading.value = false;
   }
+}
+
+async function refreshTelemetry(nextServers: ServerSummary[]) {
+  const entries = await Promise.all(
+    nextServers.map(async (server) => {
+      try {
+        const response = await getLatestTelemetry(server.id);
+        return [server.id, response.latest ?? null] as const;
+      } catch {
+        return [server.id, null] as const;
+      }
+    }),
+  );
+  telemetryByServer.value = Object.fromEntries(entries);
 }
 
 async function submitServer() {
@@ -143,6 +164,41 @@ function formatBytesPerSecond(value: number) {
 
 function endpointFor(server: ServerSummary) {
   return server.domain ?? server.ip_address ?? server.domain_v6 ?? server.ip_address_v6 ?? "Unassigned";
+}
+
+function telemetryFor(server: ServerSummary) {
+  return telemetryByServer.value[server.id] ?? null;
+}
+
+function systemSummary(server: ServerSummary) {
+  const telemetry = telemetryFor(server);
+  const metrics = telemetry?.sysmetrics;
+  if (!metrics) {
+    return "No telemetry";
+  }
+  const cpu = metrics.has_cpu ? `${metrics.cpu_pct.toFixed(1)}% CPU` : "CPU n/a";
+  const mem =
+    metrics.has_mem && metrics.mem_total > 0
+      ? `${formatPercent(metrics.mem_used, metrics.mem_total)} mem`
+      : "mem n/a";
+  return `${cpu}, ${mem}`;
+}
+
+function latencySummary(server: ServerSummary) {
+  const latency = telemetryFor(server)?.latency ?? [];
+  if (latency.length === 0) {
+    return "No probe";
+  }
+  const ok = latency.filter((sample) => sample.success);
+  if (ok.length === 0) {
+    return "probe failed";
+  }
+  const avg = ok.reduce((sum, sample) => sum + sample.latency_ms, 0) / ok.length;
+  return `${avg.toFixed(0)} ms avg`;
+}
+
+function formatPercent(used: number, total: number) {
+  return `${((used / total) * 100).toFixed(0)}%`;
 }
 </script>
 
@@ -217,6 +273,7 @@ function endpointFor(server: ServerSummary) {
               <th>Name</th>
               <th>Status</th>
               <th>Endpoint</th>
+              <th>Telemetry</th>
               <th>Mode</th>
               <th class="number-cell">Port</th>
               <th class="number-cell">Up</th>
@@ -241,6 +298,10 @@ function endpointFor(server: ServerSummary) {
                 </v-chip>
               </td>
               <td>{{ endpointFor(server) }}</td>
+              <td class="telemetry-cell">
+                <div class="server-name">{{ systemSummary(server) }}</div>
+                <div class="server-subline">{{ latencySummary(server) }}</div>
+              </td>
               <td>{{ server.connection_mode }}</td>
               <td class="number-cell">{{ server.listen_port }}</td>
               <td class="number-cell">

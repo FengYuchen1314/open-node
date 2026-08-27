@@ -45,3 +45,15 @@ configuration, or compatibility states. It must not introduce paid unlocks.
 The backend serves JSON APIs under `/api/v1`. The frontend is a Vite application
 that can point to the backend with `VITE_API_BASE_URL` or use same-origin API
 paths in production.
+
+## Agent Telemetry
+
+Open Node accepts agent telemetry through `/api/v1/agents/telemetry` and the
+traffic-compatible `/api/v1/agents/traffic` alias. Reports are authenticated
+only with the server bootstrap token and remain license-free. The payload shape
+tracks the active MMWX agent wire format: Xray traffic stats, system network
+counters, probe system metrics, latency samples, user speeds, and connection
+counts.
+
+The backend persists telemetry snapshots in SQLite and exposes the latest
+snapshot at `/api/v1/servers/{server_id}/telemetry/latest`.
