@@ -18,7 +18,7 @@ intentionally out of scope for this refactor.
 
 ## Stack
 
-- Backend: FastAPI on Python 3.12+.
+- Backend: FastAPI on Python 3.11+.
 - Frontend: Vue 3, Vuetify, Vite, TypeScript.
 - Repository shape: one monorepo with `backend/`, `frontend/`, `docs/`, and
   `scripts/`.

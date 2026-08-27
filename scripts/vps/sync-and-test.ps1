@@ -13,6 +13,9 @@ if ($RemoteDir -notmatch "^/opt/open-node(/[-A-Za-z0-9._]+)?$") {
 }
 
 git push -u origin $Branch
+if ($LASTEXITCODE -ne 0) {
+  exit $LASTEXITCODE
+}
 
 $remoteCommand = @"
 set -euo pipefail
@@ -41,3 +44,7 @@ bash "`$REMOTE_DIR/scripts/vps/run-tests.sh"
 "@
 
 ssh $HostName $remoteCommand
+$sshExitCode = $LASTEXITCODE
+if ($sshExitCode -ne 0) {
+  exit $sshExitCode
+}

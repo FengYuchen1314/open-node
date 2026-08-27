@@ -7,7 +7,7 @@ name = "open-node-backend"
 version = "0.1.0"
 description = "FastAPI backend for the Open Node MMWX refactor"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [
   { name = "FengYuchen1314" }
@@ -35,7 +35,7 @@ addopts = "-q"
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
