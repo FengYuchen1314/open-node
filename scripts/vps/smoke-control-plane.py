@@ -39,8 +39,9 @@ runtime = nginx_fixture.runtime
 
 
 def command(args, *, env=None, input=None, check=True):
+    stdin = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
     result = subprocess.run(
-        args, env=env, input=input, capture_output=True, check=False, timeout=180
+        args, env=env, capture_output=True, check=False, timeout=180, **stdin
     )
     if check and result.returncode:
         raise RuntimeError(
