@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createServer,
   createServerCommand,
+  getLatestScanResult,
   getLatestTelemetry,
   listCommandStreamFrames,
   listServerCommands,
@@ -162,6 +163,44 @@ describe("inventory API client", () => {
 
     expect(requestUrl).toBe("/api/v1/servers/srv_1/telemetry/latest");
     expect(response.license_required).toBe(false);
+    expect(headers).toBeUndefined();
+  });
+
+  it("reads latest scan results without sending license headers", async () => {
+    let requestUrl = "";
+    let headers: HeadersInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      requestUrl = input.toString();
+      headers = init?.headers;
+      return new Response(
+        JSON.stringify({
+          server_id: "srv_1",
+          scan: {
+            server_id: "srv_1",
+            xray_running: true,
+            xray_version: "Xray 1.8.24",
+            api_port: 46736,
+            config_path: "/usr/local/etc/xray/config.json",
+            inbounds: [{ tag: "vless-443", port: 443 }],
+            device_kicks: { "alice@example.com": 2 },
+            config_modified: true,
+            config_added_sections: ["api", "stats"],
+            message: "Xray is running, found 1 inbound(s)",
+            reported_at: "2026-08-27T00:00:00Z",
+            updated_at: "2026-08-27T00:00:01Z",
+          },
+          license_required: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const response = await getLatestScanResult("srv_1", fetcher);
+
+    expect(requestUrl).toBe("/api/v1/servers/srv_1/scan/latest");
+    expect(response.license_required).toBe(false);
+    expect(response.scan?.xray_running).toBe(true);
+    expect(response.scan?.inbounds[0]?.tag).toBe("vless-443");
     expect(headers).toBeUndefined();
   });
 

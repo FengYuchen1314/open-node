@@ -6,6 +6,7 @@ import type {
   AgentOperationPayload,
   AgentOperationKind,
   ServerCommandsResponse,
+  ServerScanResultResponse,
   ServerTelemetryResponse,
   ServerCreateRequest,
   ServerCreateResponse,
@@ -123,6 +124,17 @@ export async function getLatestTelemetry(
     throw await apiError(response, "Server telemetry request failed");
   }
   return response.json() as Promise<ServerTelemetryResponse>;
+}
+
+export async function getLatestScanResult(
+  serverId: string,
+  fetcher = fetch,
+): Promise<ServerScanResultResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/scan/latest`);
+  if (!response.ok) {
+    throw await apiError(response, "Server scan result request failed");
+  }
+  return response.json() as Promise<ServerScanResultResponse>;
 }
 
 export async function listServerCommands(

@@ -64,6 +64,9 @@ This document records the starting source map for the Open Node refactor.
      reset, and idempotent monthly reset-due automation.
    - Done: external Xray takeover command wrapper for merging an existing
      `-config` plus `-confdir` runtime into the MMWX-managed single config.
+   - Done: latest agent scan-result persistence from WebSocket `scan_result`
+     and successful `/api/child/scan` command results, exposed to the Vue
+     inventory table as Xray runtime status.
    - Next: deeper Xray runtime integration.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
@@ -91,5 +94,7 @@ This document records the starting source map for the Open Node refactor.
      rows using public server indexes and sanitized latency buckets.
    - Done: external Xray takeover command wrapper for migrating public nodes
      that still run multi-file external Xray configs.
+   - Done: latest agent scan-result ingestion for Xray running state, version,
+     API port, inbound inventory, and config-repair metadata.
    - Next: deeper Xray runtime integration.
 5. Revisit Xray integration once the agent protocol surface is stable.

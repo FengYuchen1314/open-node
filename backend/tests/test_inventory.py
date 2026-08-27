@@ -16,6 +16,20 @@ def make_client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(settings))
 
 
+def scan_result_payload() -> dict[str, object]:
+    return {
+        "xray_running": True,
+        "xray_version": "Xray 1.8.24",
+        "api_port": 46736,
+        "config_path": "/usr/local/etc/xray/config.json",
+        "inbounds": [{"tag": "vless-443", "port": 443, "protocol": "vless"}],
+        "device_kicks": {"alice@example.com": 2},
+        "config_modified": True,
+        "config_added_sections": ["api", "stats"],
+        "message": "Xray is running, found 1 inbound(s)",
+    }
+
+
 def test_server_create_issues_agent_token_without_license_header(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 
@@ -266,6 +280,45 @@ def test_agent_telemetry_records_xray_and_system_metrics(tmp_path: Path) -> None
     assert latest.status_code == 200
     assert latest.json()["latest"]["user_speeds"]["alice@example.com"] == 4096
     assert latest.json()["latest"]["conn_counts"]["alice|node-1"] == 2
+
+
+def test_latest_scan_result_for_unknown_server_returns_404(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/api/v1/servers/00000000-0000-0000-0000-000000000000/scan/latest")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "server not found: 00000000-0000-0000-0000-000000000000"
+
+
+def test_scan_command_result_updates_latest_scan_without_license(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-scan-result"}).json()
+    server_id = created["server"]["id"]
+
+    command = client.post(f"/api/v1/servers/{server_id}/operations/scan").json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={"token": created["agent_token"], "status": 200, "body": scan_result_payload()},
+    )
+
+    assert result.status_code == 200
+    assert result.json()["command"]["status"] == "succeeded"
+
+    latest = client.get(f"/api/v1/servers/{server_id}/scan/latest")
+    payload = latest.json()
+
+    assert latest.status_code == 200
+    assert payload["license_required"] is False
+    assert payload["scan"]["xray_running"] is True
+    assert payload["scan"]["xray_version"] == "Xray 1.8.24"
+    assert payload["scan"]["api_port"] == 46736
+    assert payload["scan"]["inbounds"][0]["tag"] == "vless-443"
+    assert payload["scan"]["device_kicks"] == {"alice@example.com": 2}
+    assert payload["scan"]["config_modified"] is True
+    assert payload["scan"]["config_added_sections"] == ["api", "stats"]
 
 
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:
@@ -1646,6 +1699,43 @@ def test_agent_websocket_auth_registers_agent_and_acks_heartbeat(tmp_path: Path)
     assert agents[0]["capabilities"]["rpc"] is True
     assert servers[0]["status"] == "connected"
     assert servers[0]["ip_address"] == "198.51.100.89"
+
+
+def test_agent_websocket_scan_result_updates_latest_without_license(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-scan"}).json()
+    server_id = created["server"]["id"]
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-scan-host",
+                    "capabilities": {"rpc": True},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+
+        websocket.send_json({"type": "scan_result", "payload": scan_result_payload()})
+        ack = websocket.receive_json()
+
+        assert ack["type"] == "scan_result_ack"
+        assert ack["payload"]["server_id"] == server_id
+        assert ack["payload"]["license_required"] is False
+        assert ack["payload"]["reported_at"]
+
+    latest = client.get(f"/api/v1/servers/{server_id}/scan/latest")
+    payload = latest.json()
+
+    assert latest.status_code == 200
+    assert payload["license_required"] is False
+    assert payload["scan"]["server_id"] == server_id
+    assert payload["scan"]["xray_running"] is True
+    assert payload["scan"]["config_path"] == "/usr/local/etc/xray/config.json"
+    assert payload["scan"]["message"] == "Xray is running, found 1 inbound(s)"
 
 
 def test_online_agent_websocket_receives_rpc_call_and_completes_command(tmp_path: Path) -> None:

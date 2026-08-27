@@ -58,6 +58,18 @@ counts.
 The backend persists telemetry snapshots in SQLite and exposes the latest
 snapshot at `/api/v1/servers/{server_id}/telemetry/latest`.
 
+## Agent Scan Results
+
+The active `mmw-agent` sends Xray runtime discovery as `scan_result` messages
+over the authenticated WebSocket, and the same scan body can arrive later as a
+successful `/api/child/scan` command result. Open Node stores the latest scan
+per server in SQLite, including Xray running state, version, API port, config
+path, inbound objects, device kick counters, and config-repair metadata.
+
+The control plane exposes that latest snapshot at
+`/api/v1/servers/{server_id}/scan/latest`. Scan records are operational health
+data only; they do not contain or imply licensing state.
+
 ## Agent Commands
 
 Open Node models master-to-agent work as a transport-neutral command queue.
@@ -75,8 +87,8 @@ future WebSocket RPC can share one persisted state machine.
 Agents can connect to `/api/v1/agents/ws` and authenticate with the same
 server bootstrap token used by HTTP registration. The first message must be
 `auth`; after that, the socket accepts `heartbeat`, `traffic`/`telemetry`,
-`ping`, and `rpc_reply` messages. Successful auth registers or refreshes the
-agent record and stores its capability flags.
+`scan_result`, `ping`, and `rpc_reply` messages. Successful auth registers or
+refreshes the agent record and stores its capability flags.
 
 When a command is created for a server with an active RPC-capable socket, Open
 Node leases that persisted command and immediately sends an MMWX-compatible
@@ -162,6 +174,9 @@ NIC enumeration, service logs, agent-side scan, and Xray config validation. The
 service-control wrapper only accepts the active agent's `xray` and `nginx`
 targets with `start`, `stop`, or `restart`; the logs wrapper clamps requests to
 the agent-supported `1..2000` line range before building the child query.
+Successful scan command results update the same latest scan-result record used
+by WebSocket `scan_result` messages, so dashboard runtime status stays
+transport-neutral.
 
 Config wrappers cover the active agent's Xray and nginx main config and
 `config-files` routes. Control-plane requests serialize structured Xray JSON

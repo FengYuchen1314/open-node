@@ -44,6 +44,7 @@ from open_node.domain.inventory import (
     ServerProbeMetadataUpdate,
     ServerRead,
     ServerResponse,
+    ServerScanResultResponse,
     ServerTelemetryResponse,
 )
 from open_node.services.agent_ws import AgentConnectionManager
@@ -100,6 +101,18 @@ def latest_server_telemetry(
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ServerTelemetryResponse(server_id=server_id, latest=latest)
+
+
+@router.get("/{server_id}/scan/latest", response_model=ServerScanResultResponse)
+def latest_server_scan(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ServerScanResultResponse:
+    try:
+        scan = store.latest_scan_result(server_id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return ServerScanResultResponse(server_id=server_id, scan=scan)
 
 
 @router.get("/{server_id}/commands", response_model=ServerCommandsResponse)

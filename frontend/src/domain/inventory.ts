@@ -208,6 +208,27 @@ export interface ServerTelemetryResponse {
   license_required: false;
 }
 
+export interface AgentScanResult {
+  server_id: string;
+  xray_running: boolean;
+  xray_version?: string | null;
+  api_port?: number | null;
+  config_path?: string | null;
+  inbounds: Record<string, unknown>[];
+  device_kicks: Record<string, number>;
+  config_modified: boolean;
+  config_added_sections: string[];
+  message?: string | null;
+  reported_at: string;
+  updated_at: string;
+}
+
+export interface ServerScanResultResponse {
+  server_id: string;
+  scan?: AgentScanResult | null;
+  license_required: false;
+}
+
 export interface AgentCommandCreateRequest {
   method: string;
   path: string;

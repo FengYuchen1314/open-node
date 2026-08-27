@@ -10,6 +10,7 @@ import {
   type AgentOperationKind,
   type AgentServiceName,
   type AgentOperationPayload,
+  type AgentScanResult,
   type AgentTelemetry,
   type ConnectionMode,
   type RenewalCycle,
@@ -22,6 +23,7 @@ import {
 import {
   createServer,
   createServerCommand,
+  getLatestScanResult,
   getLatestTelemetry,
   listCommandStreamFrames,
   listServerCommands,
@@ -32,6 +34,7 @@ import {
 
 const servers = ref<ServerSummary[]>([]);
 const telemetryByServer = ref<Record<string, AgentTelemetry | null>>({});
+const scanResultsByServer = ref<Record<string, AgentScanResult | null>>({});
 const commandsByServer = ref<Record<string, AgentCommand[]>>({});
 const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({});
 const loading = ref(false);
@@ -276,7 +279,11 @@ async function refreshServers() {
     servers.value = nextServers;
     syncCommandTarget(nextServers);
     syncMetadataTarget(nextServers);
-    await Promise.all([refreshTelemetry(nextServers), refreshCommands(nextServers)]);
+    await Promise.all([
+      refreshTelemetry(nextServers),
+      refreshScanResults(nextServers),
+      refreshCommands(nextServers),
+    ]);
   } catch (error) {
     errorMessage.value = readableError(error);
   } finally {
@@ -296,6 +303,20 @@ async function refreshTelemetry(nextServers: ServerSummary[]) {
     }),
   );
   telemetryByServer.value = Object.fromEntries(entries);
+}
+
+async function refreshScanResults(nextServers: ServerSummary[]) {
+  const entries = await Promise.all(
+    nextServers.map(async (server) => {
+      try {
+        const response = await getLatestScanResult(server.id);
+        return [server.id, response.scan ?? null] as const;
+      } catch {
+        return [server.id, null] as const;
+      }
+    }),
+  );
+  scanResultsByServer.value = Object.fromEntries(entries);
 }
 
 async function refreshCommands(nextServers: ServerSummary[]) {
@@ -722,6 +743,50 @@ function telemetryFor(server: ServerSummary) {
   return telemetryByServer.value[server.id] ?? null;
 }
 
+function scanFor(server: ServerSummary) {
+  return scanResultsByServer.value[server.id] ?? null;
+}
+
+function scanStatusLabel(server: ServerSummary) {
+  const scan = scanFor(server);
+  if (!scan) {
+    return "No scan";
+  }
+  return scan.xray_running ? "Running" : "Stopped";
+}
+
+function scanStatusColor(server: ServerSummary) {
+  const scan = scanFor(server);
+  if (!scan) {
+    return "grey";
+  }
+  return scan.xray_running ? "success" : "warning";
+}
+
+function scanStatusIcon(server: ServerSummary) {
+  const scan = scanFor(server);
+  if (!scan) {
+    return "mdi-radar";
+  }
+  return scan.xray_running ? "mdi-check-network-outline" : "mdi-alert-circle-outline";
+}
+
+function scanSummary(server: ServerSummary) {
+  const scan = scanFor(server);
+  if (!scan) {
+    return "Scan not reported";
+  }
+  const parts = [
+    scan.xray_version ?? "",
+    `${scan.inbounds.length} inbound${scan.inbounds.length === 1 ? "" : "s"}`,
+    scan.api_port ? `api ${scan.api_port}` : "",
+  ].filter(Boolean);
+  if (parts.length > 0) {
+    return parts.join(" / ");
+  }
+  return scan.message ? truncateText(scan.message, 80) : "No scan details";
+}
+
 function systemSummary(server: ServerSummary) {
   const telemetry = telemetryFor(server);
   const metrics = telemetry?.sysmetrics;
@@ -751,6 +816,10 @@ function latencySummary(server: ServerSummary) {
 
 function formatPercent(used: number, total: number) {
   return `${((used / total) * 100).toFixed(0)}%`;
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value;
 }
 
 </script>
@@ -837,6 +906,7 @@ function formatPercent(used: number, total: number) {
               <th>Endpoint</th>
               <th>Probe</th>
               <th>Telemetry</th>
+              <th>Xray</th>
               <th>Mode</th>
               <th class="number-cell">Port</th>
               <th class="number-cell">Up</th>
@@ -870,6 +940,18 @@ function formatPercent(used: number, total: number) {
               <td class="telemetry-cell">
                 <div class="server-name">{{ systemSummary(server) }}</div>
                 <div class="server-subline">{{ latencySummary(server) }}</div>
+              </td>
+              <td class="scan-cell">
+                <v-chip
+                  :color="scanStatusColor(server)"
+                  :prepend-icon="scanStatusIcon(server)"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  {{ scanStatusLabel(server) }}
+                </v-chip>
+                <div class="server-subline">{{ scanSummary(server) }}</div>
               </td>
               <td>{{ server.connection_mode }}</td>
               <td class="number-cell">{{ server.listen_port }}</td>

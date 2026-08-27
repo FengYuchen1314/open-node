@@ -172,7 +172,7 @@ body {
 }
 
 .server-table {
-  min-width: 920px;
+  min-width: 1040px;
 }
 
 .server-table th {
@@ -201,6 +201,10 @@ body {
 
 .telemetry-cell {
   min-width: 172px;
+}
+
+.scan-cell {
+  min-width: 176px;
 }
 
 .number-cell {

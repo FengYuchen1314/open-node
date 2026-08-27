@@ -17,6 +17,7 @@ from open_node.domain.inventory import (
     AgentRead,
     AgentRegistrationRequest,
     AgentRegistrationResponse,
+    AgentScanResultReport,
     AgentTelemetryReport,
     AgentTelemetryResponse,
 )
@@ -213,6 +214,26 @@ async def _handle_agent_ws_message(
                     "server_id": str(server.id),
                     "telemetry_id": str(telemetry.id),
                     "server_time": _server_time(),
+                },
+            }
+        )
+        return
+
+    if message_type == "scan_result":
+        try:
+            report = AgentScanResultReport.model_validate({**payload, "token": token})
+            server, scan = store.record_scan_result(report)
+        except (InvalidAgentTokenError, ValidationError) as exc:
+            await _send_ws_error(websocket, str(exc))
+            return
+        await websocket.send_json(
+            {
+                "type": "scan_result_ack",
+                "payload": {
+                    "server_id": str(server.id),
+                    "reported_at": scan.reported_at.isoformat(),
+                    "server_time": _server_time(),
+                    "license_required": False,
                 },
             }
         )

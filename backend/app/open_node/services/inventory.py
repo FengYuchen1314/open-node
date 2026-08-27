@@ -14,6 +14,7 @@ from urllib.parse import quote, urlencode
 from uuid import UUID, uuid4
 
 import yaml
+from pydantic import ValidationError
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -52,6 +53,9 @@ from open_node.domain.inventory import (
     AgentHeartbeatRequest,
     AgentRead,
     AgentRegistrationRequest,
+    AgentScanResultPayload,
+    AgentScanResultRead,
+    AgentScanResultReport,
     AgentTelemetryRead,
     AgentTelemetryReport,
     ConnectionMode,
@@ -414,6 +418,27 @@ class TelemetrySnapshotModel(Base):
     system_boot_time_unix: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     sysmetrics: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     latency: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+
+class AgentScanResultModel(Base):
+    __tablename__ = "agent_scan_results"
+
+    server_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    xray_running: Mapped[bool] = mapped_column(Boolean, default=False)
+    xray_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    api_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    config_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    inbounds: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    device_kicks: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    config_modified: Mapped[bool] = mapped_column(Boolean, default=False)
+    config_added_sections: Mapped[list[str]] = mapped_column(JSON, default=list)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class CommandModel(Base):
@@ -1005,6 +1030,37 @@ class InventoryStore:
                 raise ServerNotFoundError(f"server not found: {server_id}")
             telemetry = self._latest_telemetry_model(session, str(server_id))
             return self._telemetry_read(telemetry) if telemetry else None
+
+    def record_scan_result(
+        self,
+        payload: AgentScanResultReport,
+    ) -> tuple[ServerRead, AgentScanResultRead]:
+        with self._session() as session:
+            server = self._server_by_token(session, payload.token)
+            now = datetime.now(tz=UTC)
+            reported_at = self._aware_datetime(payload.reported_at or now)
+
+            server.status = ServerStatus.CONNECTED.value
+            server.last_heartbeat = now
+            server.updated_at = now
+
+            agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
+            if agent:
+                agent.last_seen_at = now
+
+            scan = self._upsert_agent_scan_result(session, server, payload, reported_at, now)
+            session.commit()
+            session.refresh(server)
+            session.refresh(scan)
+            return self._public_server(server), self._scan_result_read(scan)
+
+    def latest_scan_result(self, server_id: UUID) -> AgentScanResultRead | None:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            scan = session.get(AgentScanResultModel, str(server_id))
+            return self._scan_result_read(scan) if scan else None
 
     def public_probe_payload(self) -> ProbePayload:
         with self._session() as session:
@@ -4525,6 +4581,49 @@ class InventoryStore:
         return command
 
     @staticmethod
+    def _upsert_agent_scan_result(
+        session: Session,
+        server: ServerModel,
+        payload: AgentScanResultPayload,
+        reported_at: datetime,
+        updated_at: datetime,
+    ) -> AgentScanResultModel:
+        values = payload.model_dump(mode="json", exclude={"token", "reported_at"})
+        scan = session.get(AgentScanResultModel, server.id)
+        if scan is None:
+            scan = AgentScanResultModel(
+                server_id=server.id,
+                reported_at=reported_at,
+                updated_at=updated_at,
+                **values,
+            )
+            session.add(scan)
+            return scan
+
+        for field, value in values.items():
+            setattr(scan, field, value)
+        scan.reported_at = reported_at
+        scan.updated_at = updated_at
+        return scan
+
+    @staticmethod
+    def _scan_result_read(scan: AgentScanResultModel) -> AgentScanResultRead:
+        return AgentScanResultRead(
+            server_id=UUID(scan.server_id),
+            xray_running=scan.xray_running,
+            xray_version=scan.xray_version,
+            api_port=scan.api_port,
+            config_path=scan.config_path,
+            inbounds=scan.inbounds or [],
+            device_kicks=scan.device_kicks or {},
+            config_modified=scan.config_modified,
+            config_added_sections=scan.config_added_sections or [],
+            message=scan.message,
+            reported_at=scan.reported_at,
+            updated_at=scan.updated_at,
+        )
+
+    @staticmethod
     def _telemetry_read(snapshot: TelemetrySnapshotModel) -> AgentTelemetryRead:
         system = None
         if (
@@ -4684,6 +4783,29 @@ class InventoryStore:
         server.updated_at = now
         self._upsert_return_route_results(session, server, command, payload, now)
         self._record_domain_latency_result(session, server, command, payload, now)
+        self._record_scan_result_from_command(session, server, command, payload, now)
+
+    def _record_scan_result_from_command(
+        self,
+        session: Session,
+        server: ServerModel,
+        command: CommandModel,
+        payload: AgentCommandResultRequest,
+        received_at: datetime,
+    ) -> None:
+        if command.path != "/api/child/scan" or payload.error or payload.status >= 400:
+            return
+        if not isinstance(payload.body, dict):
+            return
+        try:
+            scan_payload = AgentScanResultPayload.model_validate(payload.body)
+        except ValidationError:
+            return
+        server.status = ServerStatus.CONNECTED.value
+        agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
+        if agent:
+            agent.last_seen_at = received_at
+        self._upsert_agent_scan_result(session, server, scan_payload, received_at, received_at)
 
     def _upsert_return_route_results(
         self,

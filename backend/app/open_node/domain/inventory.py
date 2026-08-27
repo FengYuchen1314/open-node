@@ -424,6 +424,68 @@ class AgentTelemetryRead(BaseModel):
     latency: list[ProbeLatencySample] = Field(default_factory=list)
 
 
+class AgentScanResultPayload(BaseModel):
+    xray_running: bool = False
+    xray_version: str | None = Field(default=None, max_length=120)
+    api_port: int | None = Field(default=None, ge=0, le=65535)
+    config_path: str | None = Field(default=None, max_length=512)
+    inbounds: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
+    device_kicks: dict[str, int] = Field(default_factory=dict)
+    config_modified: bool = False
+    config_added_sections: list[str] = Field(default_factory=list, max_length=100)
+    message: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("xray_version", "config_path", "message")
+    @classmethod
+    def validate_optional_scan_text(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "scan field") or None
+
+    @field_validator("inbounds")
+    @classmethod
+    def validate_inbounds(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("inbound entries must be objects")
+            normalized.append(_ensure_json_serializable_config(item, "inbound"))
+        return normalized
+
+    @field_validator("device_kicks")
+    @classmethod
+    def validate_device_kicks(cls, value: dict[str, int]) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for raw_key, count in value.items():
+            key = _strip_required_text(raw_key, "device kick key")
+            if count < 0:
+                raise ValueError("device kick counts must be non-negative")
+            normalized[key] = count
+        return normalized
+
+    @field_validator("config_added_sections")
+    @classmethod
+    def validate_added_sections(cls, value: list[str]) -> list[str]:
+        sections: list[str] = []
+        seen: set[str] = set()
+        for raw_section in value:
+            section = _strip_required_text(raw_section, "config section")
+            if section in seen:
+                continue
+            seen.add(section)
+            sections.append(section)
+        return sections
+
+
+class AgentScanResultReport(AgentScanResultPayload):
+    token: str = Field(min_length=1)
+    reported_at: datetime | None = None
+
+
+class AgentScanResultRead(AgentScanResultPayload):
+    server_id: UUID
+    reported_at: datetime
+    updated_at: datetime
+
+
 class AgentRead(BaseModel):
     id: UUID
     server_id: UUID
@@ -463,6 +525,12 @@ class AgentTelemetryResponse(BaseModel):
 class ServerTelemetryResponse(BaseModel):
     server_id: UUID
     latest: AgentTelemetryRead | None = None
+    license_required: Literal[False] = False
+
+
+class ServerScanResultResponse(BaseModel):
+    server_id: UUID
+    scan: AgentScanResultRead | None = None
     license_required: Literal[False] = False
 
 
