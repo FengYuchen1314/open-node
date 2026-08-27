@@ -28,6 +28,15 @@ This document records the starting source map for the Open Node refactor.
      tokens and public subscription/probe access remain separate.
    - Done: Vue sign-in, sign-out, password change, and responsive navigation.
 3. Port agent heartbeat, telemetry, and command execution contracts.
+   - Done: an independently implemented Linux agent in `agent/`, distributed
+     as a Python wheel without activation checks or the reference Agent source.
+     It supports WebSocket/HTTP, persistent deduplication, host telemetry,
+     Xray config validation/edits, service control, and client provisioning.
+   - Done: HTTP `/api/v1/agents/scan` accepts node-token-authenticated scan
+     reports without requiring an operator session.
+   - Done: the installed independent wheel has exercised real VLESS forwarding,
+     new-user provisioning, user traffic reporting, failed-restart rollback,
+     ordered recovery, and restart persistence over both transports on the VPS.
    - Done: HTTP heartbeat plus telemetry/traffic reports with Xray stats,
      system counters, sysmetrics, latency samples, user speeds, and connection
      counts.
@@ -188,12 +197,18 @@ This document records the starting source map for the Open Node refactor.
 
 These passing command and snapshot checks do not prove a complete replacement:
 
-- Distribute an Open Node agent without the reference agent's legacy license
-  quota switches, and verify its install, upgrade, and uninstall lifecycle.
+- Complete the independent Open Node agent's host install, upgrade, and
+  uninstall lifecycle, including service ownership and rollback. Wheel build
+  and fresh-environment installation are verified, but not host lifecycle.
 - Support or explicitly migrate existing agents that use MMWX `securechan`
   key exchange; JSON RPC compatibility alone does not cover them.
-- Verify actual proxy traffic and the fork-specific runtime protocols. The
-  current reference-agent smoke uses external mode without a running Xray.
+- Complete Nginx/WARP, certificate, diagnostics, and remaining host operations
+  in the independent agent. Unimplemented operations currently return 501.
+- Verify the fork-specific runtime protocols and migration from fork-only
+  configurations. Actual VLESS traffic is verified using official Xray with
+  the independent agent; the reference-agent smoke still uses external mode
+  without a running Xray. Neither proves full fork protocol compatibility.
+- Verify systemd runtime mode and wider OS/architecture deployment coverage.
 - Extend dependency coordination to multi-server change sets and rollback,
   including interactions with already-running commands. The new dependencies
   cover the server recovery/runtime workflows, not arbitrary concurrent jobs.

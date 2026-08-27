@@ -94,6 +94,18 @@ def lease_agent_commands(
     return AgentCommandLeaseResponse(server=server, commands=commands)
 
 
+@router.post("/scan")
+def record_agent_scan(
+    payload: AgentScanResultReport,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> dict:
+    try:
+        server, scan = store.record_scan_result(payload)
+    except InvalidAgentTokenError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    return {"server_id": server.id, "reported_at": scan.reported_at, "license_required": False}
+
+
 @router.post("/commands/{command_id}/result", response_model=AgentCommandResultResponse)
 async def complete_agent_command(
     command_id: UUID,

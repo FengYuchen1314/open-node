@@ -69,6 +69,25 @@ and the HTTP contract.
 
 ## Agent Telemetry
 
+The `agent/` package is an independent Linux implementation, not a repackaged
+MMWX Agent. It uses an operator-provided Xray binary, verifies HTTPS by default,
+and supports WebSocket plus HTTP polling/fallback. Commands are serialized and
+journaled in a private SQLite database before their results are transmitted.
+Completed requests are replayed from the journal after redelivery; interrupted
+requests return a conflict requiring reconciliation rather than an automatic
+second execution. A local exclusive lock prevents two agents sharing a journal.
+
+Managed mode owns one Xray subprocess. Systemd mode controls only its configured
+service. Candidate configs are validated by Xray before atomic file replacement;
+edit-and-restart operations restore the previous config if restart fails.
+Service-stop intent is persisted separately from process liveness. The installed
+wheel has been tested with live VLESS traffic in managed mode; the broader
+host lifecycle and systemd runtime path remain release gates.
+
+The control-plane operation wrappers cover more endpoints than this agent
+currently implements. See [the agent contract](../agent/README.md) for its
+supported operations. Unsupported operations return 501, never simulated success.
+
 Open Node accepts agent telemetry through `/api/v1/agents/telemetry` and the
 traffic-compatible `/api/v1/agents/traffic` alias. Reports are authenticated
 only with the server bootstrap token and remain license-free. The payload shape
@@ -80,6 +99,10 @@ The backend persists telemetry snapshots in SQLite and exposes the latest
 snapshot at `/api/v1/servers/{server_id}/telemetry/latest`.
 
 ## Agent Scan Results
+
+The independent agent also sends the same node-token-authenticated payload to
+`POST /api/v1/agents/scan` when using HTTP transport. This endpoint is separate
+from operator-only inventory inspection and does not echo the token.
 
 The active `mmw-agent` sends Xray runtime discovery as `scan_result` messages
 over the authenticated WebSocket, and the same scan body can arrive later as a

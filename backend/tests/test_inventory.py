@@ -41,6 +41,21 @@ def scan_result_payload() -> dict[str, object]:
     }
 
 
+def test_agent_can_report_scan_over_http_without_operator_session(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "http-scan"}).json()
+    public = TestClient(client.app)
+    payload = {"token": created["agent_token"], **scan_result_payload()}
+    response = public.post("/api/v1/agents/scan", json=payload)
+    assert response.status_code == 200
+    assert response.json()["server_id"] == created["server"]["id"]
+    assert created["agent_token"] not in response.text
+    stored = client.get(f"/api/v1/servers/{created['server']['id']}/scan/latest").json()
+    assert stored["scan"]["xray_running"] is True
+    rejected = public.post("/api/v1/agents/scan", json={**payload, "token": "invalid"})
+    assert rejected.status_code == 401
+
+
 def queue_recovery(client: TestClient) -> tuple[dict, dict]:
     created = client.post("/api/v1/servers", json={"name": "edge-ordered-recovery"}).json()
     server_id = created["server"]["id"]

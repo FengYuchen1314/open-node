@@ -18,10 +18,11 @@ runs:
 1. Python venv and Node.js bootstrap;
 2. backend dependency installation;
 3. backend pytest suite;
-4. frontend dependency installation;
-5. frontend Vitest suite;
-6. frontend production build;
-7. probe Worker dependency installation and TypeScript checks.
+4. independent-agent dependency installation, Ruff, pytest, and wheel build;
+5. frontend dependency installation;
+6. frontend Vitest suite;
+7. frontend production build;
+8. probe Worker dependency installation and TypeScript checks.
 
 ## Direct VPS Command
 
@@ -31,6 +32,42 @@ If the repository is already checked out on the VPS:
 cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
+
+## Independent-Agent Smoke
+
+After the normal test runner, install the built wheel into a separate environment
+and run the real-runtime smoke on the VPS (Linux x86-64, Python 3.11+, and curl):
+
+```bash
+AGENT_ENV="$(mktemp -d /tmp/open-node-agent-wheel.XXXXXX)"
+python3 -m venv "$AGENT_ENV"
+"$AGENT_ENV/bin/pip" install agent/dist/open_node_agent-0.1.0-py3-none-any.whl
+backend/.venv/bin/python scripts/vps/smoke-open-node-agent.py --agent-python "$AGENT_ENV/bin/python"
+```
+
+The smoke downloads the official
+[Xray v26.3.27 Linux 64-bit release](https://github.com/XTLS/Xray-core/releases/tag/v26.3.27)
+and verifies the archive SHA-256
+`23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae`.
+`--xray-archive /absolute/path/Xray-linux-64.zip` can reuse a downloaded archive;
+the same digest check is mandatory. It extracts only the binary into a private
+temporary directory, never installs over a host Xray binary, and deletes its
+runtime fixtures on completion. The separate wheel environment remains available
+for inspection. No MMWX image or activation server is involved.
+
+For each transport (WebSocket and HTTP), the test starts disposable FastAPI,
+Agent, Xray server/client, and HTTP fixture processes. All listeners use loopback
+and ephemeral ports. It checks actual SOCKS-to-VLESS forwarding, new-client
+provisioning and revocation without removing other users, per-user traffic
+reporting, invalid config rejection with protocol-sized error messages, failed
+runtime restart with file/traffic rollback, recovery test/write/restart, and
+persistence of users and stop intent across Agent restarts. Redelivery is
+simulated by requeuing one completed non-idempotent command only in the fixture
+database; a second execution would fail, so a cached successful result proves
+restart deduplication. Owned process groups are terminated on exit.
+
+This proves the managed official-Xray VLESS path, not every protocol, encrypted
+legacy-agent migration, systemd mode, or host install/upgrade/uninstall lifecycle.
 
 ## Reference-Agent Smoke
 
@@ -86,16 +123,24 @@ bootstrap token. No test disables management authentication.
 
 ## Latest Verification
 
-On 2026-08-28, the administrator-access worktree passed on the VPS:
+On 2026-08-28, the independent-agent worktree passed on the VPS:
 
-- Backend: 141 tests, including anonymous management-route rejection, session
+- Backend: 142 tests, including HTTP agent scan reporting, anonymous management-route rejection, session
   persistence/expiry/revocation, CSRF/Origin rejection, concurrent login limiting,
   a password-reset/login race, administrator CLI recovery, and the existing
   inventory, dependency, migration, subscription, and change-set suites.
+- Independent agent: 26 tests, including private state/lock protection, TLS
+  configuration, persistent deduplication, transport reconnects, heartbeats
+  during commands, interrupted execution, bounded errors/subprocesses, atomic
+  rollback, client edits, stop intent, and network rate calculation.
+- Agent wheel: isolated build and installation into a separate environment;
+  real Xray smoke passed over WebSocket and HTTP, including provisioning,
+  revocation, actual forwarding/statistics, failed-start rollback, recovery,
+  restart deduplication, and preserved stop intent.
 - Frontend: 74 tests, including session/CSRF request handling, expired-session
   transitions, waiting/skipped Vuetify component rendering, and the production build.
 - Probe Worker: TypeScript checks.
-- Ruff: backend and both smoke scripts.
+- Ruff: backend, independent agent, and all three smoke scripts.
 - Reference-agent smoke: all ten stages, with the pinned image.
 - Chromium operator smoke: desktop 1440x900 and mobile 390x844 sign-in/access,
   server creation, reload persistence, password change, logout, and expiry.

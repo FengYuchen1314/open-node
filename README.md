@@ -19,9 +19,10 @@ intentionally out of scope for this refactor.
 ## Stack
 
 - Backend: FastAPI on Python 3.11+.
+- Agent: independent Python 3.11+ Linux package with an operator-provided Xray runtime.
 - Frontend: Vue 3, Vuetify, Vite, TypeScript.
 - Probe worker: Cloudflare Worker with Workers Static Assets.
-- Repository shape: one monorepo with `backend/`, `frontend/`, `probe-worker/`,
+- Repository shape: one monorepo with `backend/`, `agent/`, `frontend/`, `probe-worker/`,
   `docs/`, and `scripts/`.
 - Verification target: tests are run on the VPS at `185.99.135.224` over SSH.
 
@@ -34,6 +35,15 @@ the Vue interface. [Administrator setup and recovery](docs/administrator-access.
 also covers HTTPS cookies, local previews, session expiry, and API clients.
 
 ## Current Milestone
+
+The independent [Open Node Agent](agent/README.md) now handles WebSocket and
+HTTP control connections, durable command execution, host telemetry, and Xray
+configuration and client management without activation or license checks.
+Its built wheel has been exercised against real Xray forwarding on the VPS,
+including newly provisioned users, failed-restart rollback, and restart-safe
+command deduplication. Host installation/upgrade/removal, Nginx/WARP, and
+fork-specific runtime workflows are still incomplete; control-plane wrappers
+for those operations do not imply the independent agent implements them.
 
 The first milestone establishes the project skeleton, the no-license contract,
 persisted server/agent inventory, agent telemetry and command slices, initial
@@ -87,6 +97,7 @@ does not yet replace the full MMWX product.
 
 ```text
 backend/   FastAPI app, no-license API, inventory, telemetry, scan results, commands, changes, subscriptions, probe
+agent/     Independent Linux agent, persistent command journal, owned/systemd Xray runtime
 frontend/  Vue 3 + Vuetify shell, server, config, change, subscription, command, and probe views
 probe-worker/  Cloudflare Worker for the standalone public probe surface
 docs/      migration and architecture notes
@@ -123,13 +134,16 @@ After pushing a branch to GitHub, run all tests on the VPS:
 .\scripts\vps\sync-and-test.ps1
 ```
 
-The remote runner installs backend and frontend dependencies, runs backend
-tests, runs frontend tests, builds the frontend, and type-checks the probe
+The remote runner installs dependencies, runs backend, independent-agent, and
+frontend tests, builds the agent wheel and frontend, and type-checks the probe
 worker on the VPS.
 
 An additional isolated reference-agent smoke test verifies the real
 `mmw-agent` JSON WebSocket path, config writes, automatic snapshot refreshes,
 reconnect recovery, and validation failure preventing writes or restarts.
-Its pinned image, VPS commands, and coverage limits
+An independent-agent smoke installs the built wheel into a separate environment
+and verifies real VLESS traffic, provisioning, telemetry, rollback, recovery,
+and restart persistence over both WebSocket and HTTP. The pinned runtime,
+VPS commands, and coverage limits
 are documented in [docs/testing.md](docs/testing.md). Outstanding runtime and
 release gates are recorded in [docs/migration-map.md](docs/migration-map.md).

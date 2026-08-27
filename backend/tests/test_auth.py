@@ -63,6 +63,7 @@ def test_every_management_route_requires_an_operator(tmp_path: Path):
                 "heartbeat",
                 "traffic",
                 "telemetry",
+                "scan",
                 "commands/lease",
                 "commands/{command_id}/result",
             ]

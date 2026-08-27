@@ -11,6 +11,12 @@ python -m pip install -e "backend[dev]"
 pytest backend/tests
 deactivate
 
+python3 -m venv agent/.venv
+agent/.venv/bin/python -m pip install -e "agent[dev]"
+agent/.venv/bin/ruff check agent
+agent/.venv/bin/pytest agent/tests
+agent/.venv/bin/python -m build --wheel --outdir agent/dist agent
+
 if [ -f frontend/package-lock.json ]; then
   npm --prefix frontend ci
 else
