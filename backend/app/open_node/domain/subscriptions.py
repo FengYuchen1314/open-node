@@ -272,6 +272,54 @@ class XrayRuntimeNodeImportResponse(BaseModel):
     license_required: Literal[False] = False
 
 
+class XrayRuntimeNodeReconciliationDrift(BaseModel):
+    field: str
+    runtime_value: str | int | bool | list[str] | None = None
+    managed_value: str | int | bool | list[str] | None = None
+
+
+class XrayRuntimeNodeReconciliationRuntimeEntry(BaseModel):
+    source_index: int = Field(ge=0)
+    source_tag: str | None = None
+    source_display_name: str
+    protocol: str
+    port: int | None = None
+    status: Literal["managed", "unmanaged", "unavailable"]
+    managed_node_id: UUID | None = None
+    managed_node_name: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class XrayRuntimeNodeReconciliationManagedEntry(BaseModel):
+    node_id: UUID
+    node_name: str
+    protocol: str
+    node_type: ManagedNodeType
+    inbound_tag: str | None = None
+    enabled: bool
+    status: Literal["in_sync", "stale", "missing_runtime", "catalog_only"]
+    runtime_source_index: int | None = Field(default=None, ge=0)
+    runtime_display_name: str | None = None
+    drifts: list[XrayRuntimeNodeReconciliationDrift] = Field(default_factory=list)
+
+
+class XrayRuntimeNodeReconciliationResponse(BaseModel):
+    server_id: UUID
+    has_scan: bool = False
+    runtime_count: int = 0
+    managed_node_count: int = 0
+    managed_runtime_count: int = 0
+    unmanaged_runtime_count: int = 0
+    unavailable_runtime_count: int = 0
+    in_sync_count: int = 0
+    stale_count: int = 0
+    missing_runtime_count: int = 0
+    catalog_only_count: int = 0
+    runtime_entries: list[XrayRuntimeNodeReconciliationRuntimeEntry] = Field(default_factory=list)
+    managed_entries: list[XrayRuntimeNodeReconciliationManagedEntry] = Field(default_factory=list)
+    license_required: Literal[False] = False
+
+
 class SubscriptionCredentialRead(BaseModel):
     id: UUID
     username: str

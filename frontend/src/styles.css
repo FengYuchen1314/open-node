@@ -344,6 +344,13 @@ body {
   gap: 10px;
 }
 
+.runtime-reconcile-list {
+  border-top: 1px solid #edf2ef;
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+}
+
 .runtime-inbound-row {
   align-items: start;
   border-top: 1px solid #edf2ef;
@@ -351,6 +358,11 @@ body {
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) auto;
   padding-top: 10px;
+}
+
+.runtime-reconcile-row {
+  display: grid;
+  min-width: 0;
 }
 
 .runtime-inbound-main {

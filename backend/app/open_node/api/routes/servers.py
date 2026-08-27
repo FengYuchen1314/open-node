@@ -57,6 +57,7 @@ from open_node.domain.subscriptions import (
     XrayRuntimeNodeDraftsResponse,
     XrayRuntimeNodeImportRequest,
     XrayRuntimeNodeImportResponse,
+    XrayRuntimeNodeReconciliationResponse,
 )
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
@@ -184,6 +185,20 @@ def import_managed_nodes_from_xray_runtime(
 ) -> XrayRuntimeNodeImportResponse:
     try:
         return store.import_managed_nodes_from_xray_runtime(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{server_id}/xray/runtime/nodes/reconciliation",
+    response_model=XrayRuntimeNodeReconciliationResponse,
+)
+def xray_runtime_node_reconciliation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> XrayRuntimeNodeReconciliationResponse:
+    try:
+        return store.xray_runtime_node_reconciliation(server_id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

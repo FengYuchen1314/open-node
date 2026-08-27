@@ -13,7 +13,12 @@ import type {
   XrayRuntimeInbound,
   XrayRuntimeInventoryResponse,
 } from "../domain/inventory";
-import type { XrayRuntimeNodeDraft } from "../domain/subscriptions";
+import type {
+  XrayRuntimeNodeDraft,
+  XrayRuntimeNodeReconciliationManagedEntry,
+  XrayRuntimeNodeReconciliationResponse,
+  XrayRuntimeNodeReconciliationRuntimeEntry,
+} from "../domain/subscriptions";
 import {
   getXrayRuntimeInventory,
   listCommandStreamFrames,
@@ -25,6 +30,7 @@ import {
 } from "../services/inventory";
 import {
   createManagedNodeFromRuntimeInbound,
+  getXrayRuntimeNodeReconciliation,
   importManagedNodesFromRuntimeInbounds,
   listXrayRuntimeNodeDrafts,
 } from "../services/subscriptions";
@@ -36,6 +42,7 @@ const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({})
 const xraySnapshots = ref<XrayConfigSnapshot[]>([]);
 const xrayRuntimeInventory = ref<XrayRuntimeInventoryResponse | null>(null);
 const runtimeNodeDrafts = ref<XrayRuntimeNodeDraft[]>([]);
+const runtimeNodeReconciliation = ref<XrayRuntimeNodeReconciliationResponse | null>(null);
 const loading = ref(false);
 const snapshotsLoading = ref(false);
 const runtimeInventoryLoading = ref(false);
@@ -115,6 +122,20 @@ const runtimeMissingNodeCount = computed(
     runtimeNodeDrafts.value.filter(
       (draft) => draft.create_available && !draft.existing_node_id,
     ).length,
+);
+const runtimeReconciliationIssues = computed(() =>
+  (runtimeNodeReconciliation.value?.managed_entries ?? []).filter((entry) =>
+    ["stale", "missing_runtime"].includes(entry.status),
+  ),
+);
+const runtimeEntriesByIndex = computed(
+  () =>
+    new Map(
+      (runtimeNodeReconciliation.value?.runtime_entries ?? []).map((entry) => [
+        entry.source_index,
+        entry,
+      ]),
+    ),
 );
 const runtimeStatusLabel = computed(() => {
   if (!xrayRuntimeInventory.value?.has_scan) {
@@ -247,22 +268,26 @@ async function refreshXrayRuntimeInventory(reportErrors = false) {
   if (!selectedServerId.value) {
     xrayRuntimeInventory.value = null;
     runtimeNodeDrafts.value = [];
+    runtimeNodeReconciliation.value = null;
     return;
   }
   const serverId = selectedServerId.value;
   runtimeInventoryLoading.value = true;
   try {
-    const [inventoryResponse, draftsResponse] = await Promise.all([
+    const [inventoryResponse, draftsResponse, reconciliationResponse] = await Promise.all([
       getXrayRuntimeInventory(serverId),
       listXrayRuntimeNodeDrafts(serverId),
+      getXrayRuntimeNodeReconciliation(serverId),
     ]);
     if (serverId === selectedServerId.value) {
       xrayRuntimeInventory.value = inventoryResponse;
       runtimeNodeDrafts.value = draftsResponse.drafts;
+      runtimeNodeReconciliation.value = reconciliationResponse;
     }
   } catch (error) {
     xrayRuntimeInventory.value = null;
     runtimeNodeDrafts.value = [];
+    runtimeNodeReconciliation.value = null;
     if (reportErrors) {
       errorMessage.value = readableError(error);
     }
@@ -554,8 +579,36 @@ function runtimeNodeDraftFor(inbound: XrayRuntimeInbound) {
   return runtimeNodeDraftsByIndex.value.get(inbound.source_index) ?? null;
 }
 
+function runtimeEntryFor(inbound: XrayRuntimeInbound) {
+  return runtimeEntriesByIndex.value.get(inbound.source_index) ?? null;
+}
+
 function runtimeNodeSavingId(inbound: XrayRuntimeInbound) {
   return String(inbound.source_index);
+}
+
+function runtimeEntryStatusLabel(entry: XrayRuntimeNodeReconciliationRuntimeEntry | null) {
+  if (!entry) {
+    return "Unknown";
+  }
+  const labels = {
+    managed: "Managed",
+    unmanaged: "Unmanaged",
+    unavailable: "Unavailable",
+  };
+  return labels[entry.status];
+}
+
+function runtimeEntryStatusColor(entry: XrayRuntimeNodeReconciliationRuntimeEntry | null) {
+  if (!entry) {
+    return "grey";
+  }
+  const colors = {
+    managed: "success",
+    unmanaged: "warning",
+    unavailable: "error",
+  };
+  return colors[entry.status];
 }
 
 function runtimeNodeWarnings(inbound: XrayRuntimeInbound) {
@@ -607,6 +660,44 @@ function runtimeImportTooltip() {
     return "All available runtime inbounds are already managed";
   }
   return `Import ${runtimeMissingNodeCount.value} missing runtime nodes`;
+}
+
+function managedEntryStatusLabel(entry: XrayRuntimeNodeReconciliationManagedEntry) {
+  const labels = {
+    in_sync: "In sync",
+    stale: "Stale",
+    missing_runtime: "Missing runtime",
+    catalog_only: "Catalog only",
+  };
+  return labels[entry.status];
+}
+
+function managedEntryStatusColor(entry: XrayRuntimeNodeReconciliationManagedEntry) {
+  const colors = {
+    in_sync: "success",
+    stale: "warning",
+    missing_runtime: "error",
+    catalog_only: "grey",
+  };
+  return colors[entry.status];
+}
+
+function driftLabel(
+  drift: XrayRuntimeNodeReconciliationManagedEntry["drifts"][number],
+) {
+  return `${drift.field}: ${displayDriftValue(drift.managed_value)} -> ${displayDriftValue(
+    drift.runtime_value,
+  )}`;
+}
+
+function displayDriftValue(value: string | number | boolean | string[] | null | undefined) {
+  if (Array.isArray(value)) {
+    return value.join(",");
+  }
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return String(value);
 }
 
 async function importRuntimeManagedNodes() {
@@ -1039,6 +1130,42 @@ function formatDateTime(value: string) {
                   {{ xrayRuntimeInventory?.client_count ?? 0 }} clients
                 </v-chip>
                 <v-chip
+                  v-if="runtimeNodeReconciliation"
+                  color="success"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Managed {{ runtimeNodeReconciliation.managed_runtime_count }}
+                </v-chip>
+                <v-chip
+                  v-if="runtimeNodeReconciliation?.unmanaged_runtime_count"
+                  color="warning"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Unmanaged {{ runtimeNodeReconciliation.unmanaged_runtime_count }}
+                </v-chip>
+                <v-chip
+                  v-if="runtimeNodeReconciliation?.stale_count"
+                  color="warning"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Stale {{ runtimeNodeReconciliation.stale_count }}
+                </v-chip>
+                <v-chip
+                  v-if="runtimeNodeReconciliation?.missing_runtime_count"
+                  color="error"
+                  density="comfortable"
+                  size="small"
+                  variant="tonal"
+                >
+                  Missing {{ runtimeNodeReconciliation.missing_runtime_count }}
+                </v-chip>
+                <v-chip
                   v-if="xrayRuntimeInventory?.config_modified"
                   color="warning"
                   density="comfortable"
@@ -1092,6 +1219,14 @@ function formatDateTime(value: string) {
                     </div>
                   </div>
                   <div class="runtime-inbound-side">
+                    <v-chip
+                      :color="runtimeEntryStatusColor(runtimeEntryFor(inbound))"
+                      density="comfortable"
+                      size="small"
+                      variant="tonal"
+                    >
+                      {{ runtimeEntryStatusLabel(runtimeEntryFor(inbound)) }}
+                    </v-chip>
                     <v-chip
                       :color="inbound.sniffing_enabled ? 'success' : 'grey'"
                       density="comfortable"
@@ -1154,6 +1289,47 @@ function formatDateTime(value: string) {
                         </span>
                       </template>
                     </v-tooltip>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="runtimeReconciliationIssues.length > 0" class="runtime-reconcile-list">
+                <div class="section-title compact-title">Catalog reconciliation</div>
+                <div
+                  v-for="entry in runtimeReconciliationIssues"
+                  :key="entry.node_id"
+                  class="runtime-reconcile-row"
+                >
+                  <div class="runtime-inbound-main">
+                    <div class="runtime-inbound-title">
+                      <span>{{ entry.node_name }}</span>
+                      <v-chip
+                        :color="managedEntryStatusColor(entry)"
+                        density="comfortable"
+                        size="small"
+                        variant="tonal"
+                      >
+                        {{ managedEntryStatusLabel(entry) }}
+                      </v-chip>
+                    </div>
+                    <div class="snapshot-detail">
+                      {{ entry.protocol }} / {{ entry.inbound_tag ?? "No inbound tag" }}
+                    </div>
+                    <div v-if="entry.runtime_display_name" class="snapshot-detail">
+                      Runtime {{ entry.runtime_display_name }}
+                    </div>
+                    <div v-if="entry.drifts.length > 0" class="runtime-chip-row">
+                      <v-chip
+                        v-for="drift in entry.drifts"
+                        :key="drift.field"
+                        color="warning"
+                        density="comfortable"
+                        size="x-small"
+                        variant="tonal"
+                      >
+                        {{ driftLabel(drift) }}
+                      </v-chip>
+                    </div>
                   </div>
                 </div>
               </div>

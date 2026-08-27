@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from secrets import token_bytes, token_urlsafe
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote, urlencode
 from uuid import UUID, uuid4
 
@@ -140,6 +140,10 @@ from open_node.domain.subscriptions import (
     XrayRuntimeNodeImportRequest,
     XrayRuntimeNodeImportResponse,
     XrayRuntimeNodeImportSkipped,
+    XrayRuntimeNodeReconciliationDrift,
+    XrayRuntimeNodeReconciliationManagedEntry,
+    XrayRuntimeNodeReconciliationResponse,
+    XrayRuntimeNodeReconciliationRuntimeEntry,
 )
 
 
@@ -1394,6 +1398,73 @@ class InventoryStore:
             created_count=len(created_nodes),
             existing_count=len(existing_nodes),
             skipped_count=len(skipped),
+        )
+
+    def xray_runtime_node_reconciliation(
+        self,
+        server_id: UUID,
+    ) -> XrayRuntimeNodeReconciliationResponse:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            scan = session.get(AgentScanResultModel, str(server_id))
+            managed_nodes = session.scalars(
+                select(ManagedNodeModel)
+                .where(ManagedNodeModel.server_id == server.id)
+                .order_by(ManagedNodeModel.created_at)
+            ).all()
+            drafts = (
+                [
+                    self._xray_runtime_node_draft(
+                        session=session,
+                        server=server,
+                        inbound=inbound,
+                        index=index,
+                    )
+                    for index, inbound in enumerate(scan.inbounds or [])
+                ]
+                if scan
+                else []
+            )
+            nodes_by_id = {node.id: node for node in managed_nodes}
+            runtime_entries = [
+                self._runtime_reconciliation_entry(draft, nodes_by_id) for draft in drafts
+            ]
+            drafts_by_node_id = {
+                str(draft.existing_node_id): draft
+                for draft in drafts
+                if draft.existing_node_id
+            }
+            managed_entries = [
+                self._managed_node_reconciliation_entry(node, drafts_by_node_id.get(node.id))
+                for node in managed_nodes
+            ]
+
+        return XrayRuntimeNodeReconciliationResponse(
+            server_id=server_id,
+            has_scan=scan is not None,
+            runtime_count=len(runtime_entries),
+            managed_node_count=len(managed_entries),
+            managed_runtime_count=sum(
+                1 for entry in runtime_entries if entry.status == "managed"
+            ),
+            unmanaged_runtime_count=sum(
+                1 for entry in runtime_entries if entry.status == "unmanaged"
+            ),
+            unavailable_runtime_count=sum(
+                1 for entry in runtime_entries if entry.status == "unavailable"
+            ),
+            in_sync_count=sum(1 for entry in managed_entries if entry.status == "in_sync"),
+            stale_count=sum(1 for entry in managed_entries if entry.status == "stale"),
+            missing_runtime_count=sum(
+                1 for entry in managed_entries if entry.status == "missing_runtime"
+            ),
+            catalog_only_count=sum(
+                1 for entry in managed_entries if entry.status == "catalog_only"
+            ),
+            runtime_entries=runtime_entries,
+            managed_entries=managed_entries,
         )
 
     def list_xray_config_snapshots(
@@ -5898,6 +5969,154 @@ class InventoryStore:
             config = candidate.config if isinstance(candidate.config, dict) else {}
             if cls._int_value(config.get("port")) == port:
                 return candidate
+        return None
+
+    @staticmethod
+    def _runtime_reconciliation_entry(
+        draft: XrayRuntimeNodeDraft,
+        nodes_by_id: dict[str, ManagedNodeModel],
+    ) -> XrayRuntimeNodeReconciliationRuntimeEntry:
+        status: Literal["managed", "unmanaged", "unavailable"]
+        managed_node = (
+            nodes_by_id.get(str(draft.existing_node_id)) if draft.existing_node_id else None
+        )
+        if not draft.create_available:
+            status = "unavailable"
+        elif managed_node:
+            status = "managed"
+        else:
+            status = "unmanaged"
+        return XrayRuntimeNodeReconciliationRuntimeEntry(
+            source_index=draft.source_index,
+            source_tag=draft.source_tag,
+            source_display_name=draft.source_display_name,
+            protocol=draft.draft.tag or draft.draft.protocol,
+            port=draft.draft.config.get("port")
+            if isinstance(draft.draft.config.get("port"), int)
+            else None,
+            status=status,
+            managed_node_id=UUID(managed_node.id) if managed_node else None,
+            managed_node_name=managed_node.name if managed_node else None,
+            warnings=draft.warnings,
+        )
+
+    @classmethod
+    def _managed_node_reconciliation_entry(
+        cls,
+        node: ManagedNodeModel,
+        draft: XrayRuntimeNodeDraft | None,
+    ) -> XrayRuntimeNodeReconciliationManagedEntry:
+        status: Literal["in_sync", "stale", "missing_runtime", "catalog_only"]
+        drifts: list[XrayRuntimeNodeReconciliationDrift] = []
+        if node.node_type != ManagedNodeType.PHYSICAL.value:
+            status = "catalog_only"
+        elif draft is None:
+            status = "missing_runtime"
+        else:
+            drifts = cls._runtime_managed_node_drifts(draft.draft, node)
+            status = "stale" if drifts else "in_sync"
+        return XrayRuntimeNodeReconciliationManagedEntry(
+            node_id=UUID(node.id),
+            node_name=node.name,
+            protocol=node.protocol,
+            node_type=node.node_type,
+            inbound_tag=node.inbound_tag,
+            enabled=node.enabled,
+            status=status,
+            runtime_source_index=draft.source_index if draft else None,
+            runtime_display_name=draft.source_display_name if draft else None,
+            drifts=drifts,
+        )
+
+    @classmethod
+    def _runtime_managed_node_drifts(
+        cls,
+        draft: ManagedNodeCreate,
+        node: ManagedNodeModel,
+    ) -> list[XrayRuntimeNodeReconciliationDrift]:
+        managed_config = cls._record_value(node.config)
+        managed_template = cls._record_value(node.client_template)
+        comparisons = [
+            ("protocol", draft.protocol, node.protocol),
+            ("inbound_tag", draft.inbound_tag, node.inbound_tag),
+            ("config.type", draft.config.get("type"), managed_config.get("type")),
+            ("config.port", draft.config.get("port"), managed_config.get("port")),
+            ("config.network", draft.config.get("network"), managed_config.get("network")),
+            ("config.tls", draft.config.get("tls"), managed_config.get("tls")),
+            ("config.sni", draft.config.get("sni"), managed_config.get("sni")),
+            ("config.alpn", draft.config.get("alpn"), managed_config.get("alpn")),
+            (
+                "config.ws_path",
+                cls._nested_config_value(draft.config, "ws-opts", "path"),
+                cls._nested_config_value(managed_config, "ws-opts", "path"),
+            ),
+            (
+                "config.grpc_service",
+                cls._nested_config_value(draft.config, "grpc-opts", "grpc-service-name"),
+                cls._nested_config_value(managed_config, "grpc-opts", "grpc-service-name"),
+            ),
+            (
+                "config.http_path",
+                cls._nested_config_value(draft.config, "http-opts", "path"),
+                cls._nested_config_value(managed_config, "http-opts", "path"),
+            ),
+            ("config.cipher", draft.config.get("cipher"), managed_config.get("cipher")),
+            (
+                "client_template.flow",
+                draft.client_template.get("flow"),
+                managed_template.get("flow"),
+            ),
+            (
+                "client_template.version",
+                draft.client_template.get("version"),
+                managed_template.get("version"),
+            ),
+            (
+                "client_template.obfsMode",
+                draft.client_template.get("obfsMode"),
+                managed_template.get("obfsMode"),
+            ),
+            (
+                "client_template.obfsHost",
+                draft.client_template.get("obfsHost"),
+                managed_template.get("obfsHost"),
+            ),
+        ]
+        drifts: list[XrayRuntimeNodeReconciliationDrift] = []
+        for field, runtime_value, managed_value in comparisons:
+            runtime_public = cls._reconciliation_public_value(runtime_value)
+            managed_public = cls._reconciliation_public_value(managed_value)
+            if runtime_public == managed_public:
+                continue
+            drifts.append(
+                XrayRuntimeNodeReconciliationDrift(
+                    field=field,
+                    runtime_value=runtime_public,
+                    managed_value=managed_public,
+                )
+            )
+        return drifts
+
+    @staticmethod
+    def _nested_config_value(config: dict[str, Any], *keys: str) -> Any:
+        current: Any = config
+        for key in keys:
+            if not isinstance(current, dict):
+                return None
+            current = current.get(key)
+        return current
+
+    @staticmethod
+    def _reconciliation_public_value(value: Any) -> str | int | bool | list[str] | None:
+        if value is None:
+            return None
+        if isinstance(value, bool | int | str):
+            return value
+        if isinstance(value, float):
+            return int(value) if value.is_integer() else str(value)
+        if isinstance(value, list):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            return items or None
         return None
 
     @staticmethod

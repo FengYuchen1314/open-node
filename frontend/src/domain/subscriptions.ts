@@ -407,6 +407,54 @@ export interface XrayRuntimeNodeImportResponse {
   license_required: false;
 }
 
+export interface XrayRuntimeNodeReconciliationDrift {
+  field: string;
+  runtime_value?: string | number | boolean | string[] | null;
+  managed_value?: string | number | boolean | string[] | null;
+}
+
+export interface XrayRuntimeNodeReconciliationRuntimeEntry {
+  source_index: number;
+  source_tag?: string | null;
+  source_display_name: string;
+  protocol: string;
+  port?: number | null;
+  status: "managed" | "unmanaged" | "unavailable";
+  managed_node_id?: string | null;
+  managed_node_name?: string | null;
+  warnings: string[];
+}
+
+export interface XrayRuntimeNodeReconciliationManagedEntry {
+  node_id: string;
+  node_name: string;
+  protocol: string;
+  node_type: ManagedNodeType;
+  inbound_tag?: string | null;
+  enabled: boolean;
+  status: "in_sync" | "stale" | "missing_runtime" | "catalog_only";
+  runtime_source_index?: number | null;
+  runtime_display_name?: string | null;
+  drifts: XrayRuntimeNodeReconciliationDrift[];
+}
+
+export interface XrayRuntimeNodeReconciliationResponse {
+  server_id: string;
+  has_scan: boolean;
+  runtime_count: number;
+  managed_node_count: number;
+  managed_runtime_count: number;
+  unmanaged_runtime_count: number;
+  unavailable_runtime_count: number;
+  in_sync_count: number;
+  stale_count: number;
+  missing_runtime_count: number;
+  catalog_only_count: number;
+  runtime_entries: XrayRuntimeNodeReconciliationRuntimeEntry[];
+  managed_entries: XrayRuntimeNodeReconciliationManagedEntry[];
+  license_required: false;
+}
+
 export interface SubscriptionPlansResponse {
   plans: SubscriptionPlan[];
   license_required: false;

@@ -691,6 +691,122 @@ def test_xray_runtime_node_import_creates_only_missing_available_nodes(
     assert repeated["skipped_count"] == 1
 
 
+def test_xray_runtime_node_reconciliation_reports_catalog_drift_and_gaps(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers",
+        json={"name": "edge-runtime-reconcile", "domain": "edge.example.com"},
+    ).json()
+    server_id = created["server"]["id"]
+    command = client.post(f"/api/v1/servers/{server_id}/operations/scan").json()["command"]
+    client.post("/api/v1/agents/commands/lease", json={"token": created["agent_token"]})
+    result = client.post(
+        f"/api/v1/agents/commands/{command['id']}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                **scan_result_payload(),
+                "inbounds": [
+                    {
+                        "tag": "vless-443",
+                        "port": 443,
+                        "protocol": "vless",
+                        "settings": {
+                            "clients": [
+                                {"email": "old@example.com", "flow": "xtls-rprx-vision"}
+                            ]
+                        },
+                        "streamSettings": {
+                            "network": "ws",
+                            "security": "tls",
+                            "wsSettings": {"path": "/runtime"},
+                        },
+                    },
+                    {"tag": "anytls-8443", "port": 8443, "protocol": "anytls"},
+                    {"tag": "dokodemo", "protocol": "dokodemo-door"},
+                ],
+            },
+        },
+    )
+    assert result.status_code == 200
+    stale = client.post(
+        "/api/v1/nodes",
+        json={
+            "name": "Stale vless",
+            "server_id": server_id,
+            "protocol": "vless",
+            "inbound_tag": "vless-443",
+            "client_template": {"email": "{username}__vless-443", "flow": "xtls-rprx-vision"},
+            "config": {
+                "type": "vless",
+                "server": "edge.example.com",
+                "port": 8443,
+                "network": "ws",
+                "tls": True,
+                "ws-opts": {"path": "/runtime"},
+            },
+        },
+    ).json()["node"]
+    missing = client.post(
+        "/api/v1/nodes",
+        json={
+            "name": "Missing trojan",
+            "server_id": server_id,
+            "protocol": "trojan",
+            "inbound_tag": "trojan-443",
+            "config": {"type": "trojan", "server": "edge.example.com", "port": 443},
+        },
+    ).json()["node"]
+    routed = client.post(
+        "/api/v1/nodes",
+        json={
+            "name": "Routed catalog",
+            "server_id": server_id,
+            "protocol": "vless",
+            "node_type": "routed",
+            "routed_outbound_tag": "proxy-out",
+            "routed_rule_marktag": "route-proxy",
+            "config": {"type": "vless", "server": "edge.example.com", "port": 443},
+        },
+    ).json()["node"]
+
+    response = client.get(f"/api/v1/servers/{server_id}/xray/runtime/nodes/reconciliation")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["license_required"] is False
+    assert payload["has_scan"] is True
+    assert payload["runtime_count"] == 3
+    assert payload["managed_node_count"] == 3
+    assert payload["managed_runtime_count"] == 1
+    assert payload["unmanaged_runtime_count"] == 1
+    assert payload["unavailable_runtime_count"] == 1
+    assert payload["in_sync_count"] == 0
+    assert payload["stale_count"] == 1
+    assert payload["missing_runtime_count"] == 1
+    assert payload["catalog_only_count"] == 1
+    runtime_entries = {entry["source_display_name"]: entry for entry in payload["runtime_entries"]}
+    assert runtime_entries["vless-443"]["status"] == "managed"
+    assert runtime_entries["vless-443"]["managed_node_id"] == stale["id"]
+    assert runtime_entries["anytls-8443"]["status"] == "unmanaged"
+    assert runtime_entries["dokodemo"]["status"] == "unavailable"
+    managed_entries = {entry["node_name"]: entry for entry in payload["managed_entries"]}
+    assert managed_entries["Stale vless"]["status"] == "stale"
+    assert managed_entries["Stale vless"]["node_id"] == stale["id"]
+    assert managed_entries["Stale vless"]["runtime_display_name"] == "vless-443"
+    assert managed_entries["Stale vless"]["drifts"] == [
+        {"field": "config.port", "runtime_value": 443, "managed_value": 8443}
+    ]
+    assert managed_entries["Missing trojan"]["status"] == "missing_runtime"
+    assert managed_entries["Missing trojan"]["node_id"] == missing["id"]
+    assert managed_entries["Routed catalog"]["status"] == "catalog_only"
+    assert managed_entries["Routed catalog"]["node_id"] == routed["id"]
+    assert "old@example.com" not in json.dumps(payload)
+
+
 def test_agent_traffic_alias_updates_system_derived_speed(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-traffic"}).json()

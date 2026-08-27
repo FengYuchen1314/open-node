@@ -20,6 +20,7 @@ import {
   getProductUserQuota,
   getProductUserSubscriptionToken,
   getProductUserTraffic,
+  getXrayRuntimeNodeReconciliation,
   importSubscriptionCatalog,
   importManagedNodesFromRuntimeInbounds,
   listXrayRuntimeNodeDrafts,
@@ -406,6 +407,49 @@ describe("subscriptions API client", () => {
           license_required: false,
         });
       }
+      if (url.endsWith("/xray/runtime/nodes/reconciliation")) {
+        return jsonResponse({
+          server_id: "srv_1",
+          has_scan: true,
+          runtime_count: 1,
+          managed_node_count: 1,
+          managed_runtime_count: 1,
+          unmanaged_runtime_count: 0,
+          unavailable_runtime_count: 0,
+          in_sync_count: 0,
+          stale_count: 1,
+          missing_runtime_count: 0,
+          catalog_only_count: 0,
+          runtime_entries: [
+            {
+              source_index: 0,
+              source_tag: "vless-443",
+              source_display_name: "vless-443",
+              protocol: "vless",
+              port: 443,
+              status: "managed",
+              managed_node_id: "node_1",
+              managed_node_name: "Tokyo vless",
+              warnings: [],
+            },
+          ],
+          managed_entries: [
+            {
+              node_id: "node_1",
+              node_name: "Tokyo vless",
+              protocol: "vless",
+              node_type: "physical",
+              inbound_tag: "vless-443",
+              enabled: true,
+              status: "stale",
+              runtime_source_index: 0,
+              runtime_display_name: "vless-443",
+              drifts: [{ field: "config.port", runtime_value: 443, managed_value: 8443 }],
+            },
+          ],
+          license_required: false,
+        });
+      }
       if (url.endsWith("/xray/runtime/nodes/import")) {
         return jsonResponse({
           server_id: "srv_1",
@@ -423,6 +467,7 @@ describe("subscriptions API client", () => {
     };
 
     const drafts = await listXrayRuntimeNodeDrafts("srv_1", fetcher);
+    const reconciliation = await getXrayRuntimeNodeReconciliation("srv_1", fetcher);
     const node = await createManagedNodeFromRuntimeInbound(
       "srv_1",
       { source_index: 0, host: "public.example.com" },
@@ -436,11 +481,17 @@ describe("subscriptions API client", () => {
 
     expect(drafts.license_required).toBe(false);
     expect(drafts.drafts[0].draft.inbound_tag).toBe("vless-443");
+    expect(reconciliation.stale_count).toBe(1);
     expect(node.node.id).toBe("node_1");
     expect(imported.created_count).toBe(1);
     expect(calls).toEqual([
       {
         url: "/api/v1/servers/srv_1/xray/runtime/node-drafts",
+        headers: undefined,
+        body: undefined,
+      },
+      {
+        url: "/api/v1/servers/srv_1/xray/runtime/nodes/reconciliation",
         headers: undefined,
         body: undefined,
       },
