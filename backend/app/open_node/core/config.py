@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "Open Node"
     api_prefix: str = "/api/v1"
+    database_url: str = "sqlite:///./data/open-node.db"
     license_required: bool = False
     cors_origins: list[str] = ["http://localhost:5173"]
 

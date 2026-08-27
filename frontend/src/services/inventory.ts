@@ -13,7 +13,7 @@ const jsonHeaders = {
 export async function listServers(fetcher = fetch): Promise<ServerSummary[]> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers`);
   if (!response.ok) {
-    throw new Error(`Server list request failed with ${response.status}`);
+    throw await apiError(response, "Server list request failed");
   }
   return response.json() as Promise<ServerSummary[]>;
 }
@@ -28,7 +28,19 @@ export async function createServer(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw new Error(`Server create request failed with ${response.status}`);
+    throw await apiError(response, "Server create request failed");
   }
   return response.json() as Promise<ServerCreateResponse>;
+}
+
+async function apiError(response: Response, fallback: string): Promise<Error> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string" && body.detail.length > 0) {
+      return new Error(body.detail);
+    }
+  } catch {
+    // The backend normally returns JSON errors, but network proxies may not.
+  }
+  return new Error(`${fallback} with ${response.status}`);
 }

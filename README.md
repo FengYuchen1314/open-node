@@ -26,12 +26,13 @@ intentionally out of scope for this refactor.
 
 ## Current Milestone
 
-The first milestone establishes the project skeleton and the no-license
-contract as executable tests. It does not yet replace the full MMWX product.
+The first milestone establishes the project skeleton, the no-license contract,
+and a persisted server/agent inventory slice. It does not yet replace the full
+MMWX product.
 
 ```text
-backend/   FastAPI app, system metadata, no-license contract API
-frontend/  Vue 3 + Vuetify shell, frontend no-license contract
+backend/   FastAPI app, no-license contract API, SQLite-backed inventory
+frontend/  Vue 3 + Vuetify shell, server list/create workflow
 docs/      migration and architecture notes
 scripts/   VPS test runner
 ```

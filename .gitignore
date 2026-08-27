@@ -6,6 +6,8 @@ __pycache__/
 .venv/
 backend/.venv/
 backend/*.egg-info/
+backend/data/
+data/
 
 # Node
 node_modules/

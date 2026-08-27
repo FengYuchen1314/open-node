@@ -23,7 +23,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.state.inventory = InventoryStore()
+    app.state.inventory = InventoryStore(active_settings.database_url)
+    app.state.inventory.create_schema()
     app.include_router(api_router, prefix=active_settings.api_prefix)
     app.add_api_route("/healthz", healthz, methods=["GET"], include_in_schema=False)
     return app

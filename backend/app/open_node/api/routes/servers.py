@@ -1,10 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from open_node.api.dependencies import get_inventory_store
 from open_node.domain.inventory import ServerCreate, ServerCreateResponse, ServerRead
-from open_node.services.inventory import InventoryStore
+from open_node.services.inventory import DuplicateServerNameError, InventoryStore
 
 router = APIRouter(prefix="/servers", tags=["servers"])
 
@@ -21,6 +21,9 @@ def create_server(
     payload: ServerCreate,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
 ) -> ServerCreateResponse:
-    server = store.create_server(payload)
-    public_server = store._public_server(server)
+    try:
+        server = store.create_server(payload)
+    except DuplicateServerNameError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    public_server = store.public_server(server)
     return ServerCreateResponse(server=public_server, agent_token=server.agent_token)
