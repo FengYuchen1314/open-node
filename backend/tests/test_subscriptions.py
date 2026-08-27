@@ -716,6 +716,7 @@ def test_plan_assignment_dispatches_agent_batch_apply(tmp_path: Path) -> None:
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         response = client.post(
             "/api/v1/users/alice/plan",

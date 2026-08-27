@@ -52,7 +52,8 @@ runtime/catalog
 reconciliation plus stale-node public-field sync and credential email drift
 checks plus missing-client repair and extra-client cleanup dispatch with
 follow-up runtime scans, Xray config pending-recovery decisions and
-post-mutation snapshot refreshes, agent
+post-mutation snapshot refreshes, first-connect/reconnect config synchronization
+with WebSocket queue delivery, agent
 log-file listing/cleanup, nginx stream-port cleanup, and
 compatibility wrappers for non-stream Xray/nginx install/remove agent routes,
 plus optional standalone probe Worker token access for hiding direct public
@@ -114,3 +115,9 @@ After pushing a branch to GitHub, run all tests on the VPS:
 The remote runner installs backend and frontend dependencies, runs backend
 tests, runs frontend tests, builds the frontend, and type-checks the probe
 worker on the VPS.
+
+An additional isolated reference-agent smoke test verifies the real
+`mmw-agent` JSON WebSocket path, config writes, automatic snapshot refreshes,
+and reconnect recovery. Its pinned image, VPS commands, and coverage limits
+are documented in [docs/testing.md](docs/testing.md). Outstanding runtime and
+release gates are recorded in [docs/migration-map.md](docs/migration-map.md).

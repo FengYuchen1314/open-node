@@ -32,6 +32,7 @@ from sqlalchemy import (
     inspect,
     select,
     text,
+    update,
 )
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -422,6 +423,7 @@ _XRAY_API_PORT = 46_736
 _XRAY_METRICS_PORT = 38_889
 _XRAY_SNAPSHOT_REFRESH_QUERY = "snapshot_source=master_write"
 _XRAY_SNAPSHOT_REFRESH_TIMEOUT_MS = 60_000
+_XRAY_RECONNECT_SYNC_TIMEOUT_MS = 60_000
 _XRAY_MUTATING_PATH_PREFIXES = (
     "/api/child/inbounds",
     "/api/child/outbounds",
@@ -1311,6 +1313,10 @@ class InventoryStore:
             agents = session.scalars(select(AgentModel).order_by(AgentModel.registered_at)).all()
             return [self._agent_read(agent) for agent in agents]
 
+    def authenticate_agent(self, token: str) -> ServerRead:
+        with self._session() as session:
+            return self._public_server(self._server_by_token(session, token))
+
     def register_agent(self, payload: AgentRegistrationRequest) -> tuple[AgentRead, ServerRead]:
         with self._session() as session:
             server = self._server_by_token(session, payload.token)
@@ -1351,6 +1357,8 @@ class InventoryStore:
             agent.warp_installed = payload.warp_installed
             agent.same_host_as_master = payload.same_host_as_master
             agent.last_seen_at = now
+
+            self._queue_xray_snapshot_sync_on_agent_register(session, server, now)
 
             session.commit()
             session.refresh(agent)
@@ -3600,6 +3608,26 @@ class InventoryStore:
             ).all()
             return [self._stream_frame_read(frame, command) for frame in frames]
 
+    def list_dispatchable_commands(self, server_id: UUID) -> list[AgentCommandRead]:
+        now = datetime.now(tz=UTC)
+        with self._session() as session:
+            commands = session.scalars(
+                select(CommandModel)
+                .where(
+                    CommandModel.server_id == str(server_id),
+                    CommandModel.status.in_(
+                        [AgentCommandStatus.PENDING.value, AgentCommandStatus.LEASED.value]
+                    ),
+                )
+                .order_by(CommandModel.created_at)
+            ).all()
+            return [
+                self._command_read(command)
+                for command in commands
+                if command.status == AgentCommandStatus.PENDING.value
+                or self._lease_expired(command, now)
+            ]
+
     def lease_commands(
         self,
         token: str,
@@ -3623,16 +3651,8 @@ class InventoryStore:
             for command in candidates:
                 if len(leased) >= max_commands:
                     break
-                if command.status == AgentCommandStatus.LEASED.value and not self._lease_expired(
-                    command,
-                    now,
-                ):
-                    continue
-                command.status = AgentCommandStatus.LEASED.value
-                command.attempts += 1
-                command.leased_at = now
-                command.updated_at = now
-                leased.append(command)
+                if self._claim_command_lease(session, command, now):
+                    leased.append(command)
 
             server.status = ServerStatus.CONNECTED.value
             server.last_heartbeat = now
@@ -3730,22 +3750,36 @@ class InventoryStore:
             session.refresh(command)
             return self._stream_frame_read(frame, command)
 
-    def lease_command_for_push(self, command_id: UUID) -> AgentCommandRead:
+    def lease_command_for_push(self, command_id: UUID) -> AgentCommandRead | None:
         with self._session() as session:
             command = session.get(CommandModel, str(command_id))
             if not command:
                 raise CommandNotFoundError(f"command not found: {command_id}")
-            if command.status in {
-                AgentCommandStatus.SUCCEEDED.value,
-                AgentCommandStatus.FAILED.value,
-            }:
-                return self._command_read(command)
-
             now = datetime.now(tz=UTC)
-            command.status = AgentCommandStatus.LEASED.value
-            command.attempts += 1
-            command.leased_at = now
-            command.updated_at = now
+            if not self._claim_command_lease(session, command, now):
+                return None
+            session.commit()
+            session.refresh(command)
+            return self._command_read(command)
+
+    def release_command_lease(self, command_id: UUID, attempts: int) -> AgentCommandRead:
+        with self._session() as session:
+            command = session.get(CommandModel, str(command_id))
+            if not command:
+                raise CommandNotFoundError(f"command not found: {command_id}")
+            session.execute(
+                update(CommandModel)
+                .where(
+                    CommandModel.id == str(command_id),
+                    CommandModel.status == AgentCommandStatus.LEASED.value,
+                    CommandModel.attempts == attempts,
+                )
+                .values(
+                    status=AgentCommandStatus.PENDING.value,
+                    leased_at=None,
+                    updated_at=datetime.now(tz=UTC),
+                )
+            )
             session.commit()
             session.refresh(command)
             return self._command_read(command)
@@ -6343,6 +6377,7 @@ class InventoryStore:
                 created_at=created_at,
             )
         if current.config_hash == config_hash:
+            InventoryStore._discard_pending_xray_recovery(session, server.id)
             return current
 
         InventoryStore._discard_pending_xray_recovery(session, server.id)
@@ -6371,6 +6406,36 @@ class InventoryStore:
         ).all()
         for snapshot in pending_snapshots:
             session.delete(snapshot)
+
+    @classmethod
+    def _queue_xray_snapshot_sync_on_agent_register(
+        cls,
+        session: Session,
+        server: ServerModel,
+        now: datetime,
+    ) -> None:
+        existing = session.scalar(
+            select(CommandModel)
+            .where(
+                CommandModel.server_id == server.id,
+                CommandModel.method == "GET",
+                CommandModel.path == "/api/child/xray/config",
+                CommandModel.query == "",
+                CommandModel.status.in_(
+                    [AgentCommandStatus.PENDING.value, AgentCommandStatus.LEASED.value]
+                ),
+            )
+            .order_by(CommandModel.created_at.desc())
+        )
+        if existing is not None:
+            return
+
+        sync = AgentCommandCreate(
+            method="GET",
+            path="/api/child/xray/config",
+            timeout_ms=_XRAY_RECONNECT_SYNC_TIMEOUT_MS,
+        )
+        cls._create_command_model(session, server, sync, now=now)
 
     @classmethod
     def _queue_xray_snapshot_refresh_after_mutation(
@@ -8182,6 +8247,31 @@ class InventoryStore:
         leased_at = InventoryStore._aware_datetime(command.leased_at)
         elapsed_ms = (now - leased_at).total_seconds() * 1000
         return elapsed_ms >= command.timeout_ms
+
+    @staticmethod
+    def _claim_command_lease(session: Session, command: CommandModel, now: datetime) -> bool:
+        if command.status != AgentCommandStatus.PENDING.value and (
+            command.status != AgentCommandStatus.LEASED.value
+            or not InventoryStore._lease_expired(command, now)
+        ):
+            return False
+        # Both transports must claim the same persisted version before dispatching.
+        result = session.execute(
+            update(CommandModel)
+            .where(
+                CommandModel.id == command.id,
+                CommandModel.status == command.status,
+                CommandModel.attempts == command.attempts,
+            )
+            .values(
+                status=AgentCommandStatus.LEASED.value,
+                attempts=CommandModel.attempts + 1,
+                leased_at=now,
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount == 1
 
     def _apply_command_result(
         self,

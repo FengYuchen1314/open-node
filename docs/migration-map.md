@@ -121,6 +121,14 @@ This document records the starting source map for the Open Node refactor.
      deduplicated config refresh, so snapshots and runtime inventory catch up
      after inbound, outbound, routing, batch, config-file, system-config, and
      external-takeover changes.
+   - Done: first registration and reconnect queue deduplicated Xray config
+     reads. WebSocket authentication, heartbeats, and results dispatch queued
+     work and expired leases, including automatic post-write refreshes. HTTP
+     and WebSocket transports claim leases atomically to avoid duplicate pushes.
+   - Done: the reference agent's `/api/remote/ws` address and non-registering
+     `probe` authentication are supported. A pinned, unmodified `mmw-agent`
+     container has exercised initial sync, validated config writes, pushed
+     refreshes, reconnect drift, and manual recovery acceptance on the VPS.
    - Done: active agent log-file list/delete wrappers and nginx stream-port
      cleanup wrapper, with Vue command controls and path/port validation.
    - Done: compatibility wrappers for the active non-stream Xray/nginx
@@ -161,3 +169,18 @@ This document records the starting source map for the Open Node refactor.
      command wrapper or documented stream/default equivalent.
    - Next: deeper Xray runtime integration.
 5. Revisit Xray integration once the agent protocol surface is stable.
+
+## Remaining Runtime Gates
+
+These passing command and snapshot checks do not prove a complete replacement:
+
+- Distribute an Open Node agent without the reference agent's legacy license
+  quota switches, and verify its install, upgrade, and uninstall lifecycle.
+- Support or explicitly migrate existing agents that use MMWX `securechan`
+  key exchange; JSON RPC compatibility alone does not cover them.
+- Verify actual proxy traffic and the fork-specific runtime protocols. The
+  current reference-agent smoke uses external mode without a running Xray.
+- Gate dependent test/write/restart workflows on successful preceding results;
+  queue order alone does not prove safe execution order in the reference agent.
+- Complete control-plane authentication, deployable packaging, and end-to-end
+  operator workflows before calling the product ready for public deployment.

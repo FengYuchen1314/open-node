@@ -1,11 +1,20 @@
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Barrier
+from unittest.mock import AsyncMock
+from uuid import UUID
 
+import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from open_node.core.config import Settings
+from open_node.domain.inventory import AgentCapabilities
 from open_node.main import create_app
+from open_node.services.inventory import CommandModel
+from sqlalchemy import update
 
 
 def sqlite_url(path: Path) -> str:
@@ -141,6 +150,62 @@ def test_agent_registration_connects_server_without_license_header(tmp_path: Pat
     assert payload["agent"]["capabilities"]["rpc"] is True
     assert payload["server"]["status"] == "connected"
     assert payload["server"]["ip_address"] == "198.51.100.22"
+
+
+def test_agent_registration_syncs_config_and_deduplicates_active_reads(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-register-sync"}).json()
+    server_id = created["server"]["id"]
+    registration = {"token": created["agent_token"], "hostname": "edge-register-sync"}
+    commands_url = f"/api/v1/servers/{server_id}/commands"
+    recovery_url = f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery?with_config=true"
+
+    for _ in range(2):
+        assert client.post("/api/v1/agents/register", json=registration).status_code == 201
+    commands = client.get(commands_url).json()["commands"]
+    assert len(commands) == 1
+    sync = commands[0]
+    assert sync["status"] == "pending"
+    assert (sync["method"], sync["path"], sync["query"]) == (
+        "GET", "/api/child/xray/config", "",
+    )
+    assert sync["timeout_ms"] == 60_000
+
+    leased = client.post("/api/v1/agents/commands/lease", json=registration).json()["commands"]
+    assert [command["id"] for command in leased] == [sync["id"]]
+    assert client.post("/api/v1/agents/register", json=registration).status_code == 201
+    commands = client.get(commands_url).json()["commands"]
+    assert len(commands) == 1
+    assert commands[0]["status"] == "leased"
+    assert commands[0]["attempts"] == 1
+    assert client.post("/api/v1/agents/commands/lease", json=registration).json()["commands"] == []
+
+    current_config = '{"inbounds":[{"tag":"vless-443"}],"outbounds":[]}'
+    drift_config = '{"inbounds":[],"outbounds":[]}'
+    for config, has_pending in [
+        (current_config, False), (drift_config, True), (current_config, False),
+    ]:
+        result = client.post(
+            f"/api/v1/agents/commands/{sync['id']}/result",
+            json={
+                "token": created["agent_token"],
+                "status": 200,
+                "body": {"success": True, "config": config},
+            },
+        )
+        assert result.status_code == 200
+        recovery = client.get(recovery_url).json()
+        assert recovery["has_current"] is True
+        assert recovery["current"]["config"] == current_config
+        assert recovery["has_pending"] is has_pending
+        if has_pending:
+            assert recovery["pending"]["config"] == drift_config
+            assert recovery["pending"]["source"] == "agent_report"
+            assert recovery["pending"]["source_command_id"] == sync["id"]
+        assert client.post("/api/v1/agents/register", json=registration).status_code == 201
+        sync = client.post(
+            "/api/v1/agents/commands/lease", json=registration,
+        ).json()["commands"][0]
 
 
 def test_agent_heartbeat_updates_speed_without_license_header(tmp_path: Path) -> None:
@@ -1183,6 +1248,7 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
         queued = client.post(
             f"/api/v1/servers/{server_id}/xray/runtime/credentials/repair-missing",
             json={
@@ -3710,6 +3776,7 @@ def test_agent_websocket_auth_registers_agent_and_acks_heartbeat(tmp_path: Path)
         assert auth["payload"]["success"] is True
         assert auth["payload"]["license_required"] is False
         assert auth["payload"]["server_id"] == created["server"]["id"]
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         websocket.send_json(
             {
@@ -3747,6 +3814,7 @@ def test_agent_websocket_scan_result_updates_latest_without_license(tmp_path: Pa
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         websocket.send_json({"type": "scan_result", "payload": scan_result_payload()})
         ack = websocket.receive_json()
@@ -3784,6 +3852,7 @@ def test_online_agent_websocket_receives_rpc_call_and_completes_command(tmp_path
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         queued = client.post(
             f"/api/v1/servers/{server_id}/commands",
@@ -3835,6 +3904,7 @@ def test_online_agent_websocket_receives_specialized_operation(tmp_path: Path) -
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         queued = client.post(f"/api/v1/servers/{server_id}/operations/speed")
 
@@ -3863,6 +3933,7 @@ def test_online_agent_websocket_receives_diagnostic_operation(tmp_path: Path) ->
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         queued = client.post(f"/api/v1/servers/{server_id}/operations/services/status")
 
@@ -3891,6 +3962,7 @@ def test_online_agent_websocket_receives_agent_setting_operation(tmp_path: Path)
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         queued = client.post(
             f"/api/v1/servers/{server_id}/operations/agent/update-master-url",
@@ -3926,6 +3998,7 @@ def test_online_agent_websocket_receives_high_level_operation(tmp_path: Path) ->
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         queued = client.post(
             f"/api/v1/servers/{server_id}/operations/routing/manage",
@@ -3969,6 +4042,7 @@ def test_online_agent_websocket_receives_stream_maintenance_operation(tmp_path: 
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         queued = client.post(f"/api/v1/servers/{server_id}/operations/xray/install")
 
@@ -3998,6 +4072,7 @@ def test_online_agent_websocket_persists_stream_data_until_reply(tmp_path: Path)
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         queued = client.post(
             f"/api/v1/servers/{server_id}/commands",
@@ -4080,6 +4155,7 @@ def test_stream_command_stays_queued_when_agent_lacks_stream_capability(tmp_path
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         queued = client.post(
             f"/api/v1/servers/{server_id}/commands",
@@ -4096,11 +4172,282 @@ def test_stream_command_stays_queued_when_agent_lacks_stream_capability(tmp_path
     assert command["attempts"] == 0
 
 
-def test_agent_websocket_invalid_token_returns_auth_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize("ws_path", ["/api/v1/agents/ws", "/api/remote/ws"])
+@pytest.mark.parametrize("result_transport", ["websocket", "http"])
+def test_websocket_sync_refresh_and_reconnect_recovery(
+    tmp_path: Path, result_transport: str, ws_path: str,
+) -> None:
     client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-sync"}).json()
+    server_id = created["server"]["id"]
+    recovery_url = f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery?with_config=true"
+    auth = {"type": "auth", "payload": {
+        "token": created["agent_token"], "capabilities": {"rpc": True},
+    }}
+    current_config = '{"inbounds":[{"tag":"vless-443"}],"outbounds":[]}'
+    changed_config = '{"inbounds":[{"tag":"trojan-8443"}],"outbounds":[]}'
+
+    with client.websocket_connect(ws_path) as websocket:
+        websocket.send_json(auth)
+        assert websocket.receive_json()["type"] == "auth_result"
+        sync = websocket.receive_json()
+        assert sync["type"] == "rpc_call"
+        assert sync["payload"]["path"] == "/api/child/xray/config"
+        assert sync["payload"]["query"] == ""
+        websocket.send_json({"type": "rpc_reply", "payload": {
+            "request_id": sync["payload"]["request_id"], "status": 200,
+            "body": {"success": True, "config": current_config},
+        }})
+        assert websocket.receive_json()["type"] == "rpc_reply_ack"
+        recovery = client.get(recovery_url).json()
+        assert recovery["current"]["config"] == current_config
+        assert recovery["has_pending"] is False
+
+        mutation = client.post(
+            f"/api/v1/servers/{server_id}/commands",
+            json={"method": "POST", "path": "/api/child/inbounds", "body": {"action": "add"}},
+        ).json()["command"]
+        assert websocket.receive_json()["payload"]["request_id"] == mutation["request_id"]
+        if result_transport == "http":
+            result = client.post(
+                f"/api/v1/agents/commands/{mutation['id']}/result",
+                json={"token": created["agent_token"], "status": 200, "body": {"success": True}},
+            )
+            assert result.status_code == 200
+        else:
+            websocket.send_json({"type": "rpc_reply", "payload": {
+                "request_id": mutation["request_id"], "status": 200, "body": {"success": True},
+            }})
+            assert websocket.receive_json()["type"] == "rpc_reply_ack"
+
+        refresh = websocket.receive_json()
+        assert refresh["type"] == "rpc_call"
+        assert refresh["payload"]["path"] == "/api/child/xray/config"
+        assert refresh["payload"]["query"] == "snapshot_source=master_write"
+        websocket.send_json({"type": "rpc_reply", "payload": {
+            "request_id": refresh["payload"]["request_id"], "status": 200,
+            "body": {"success": True, "config": changed_config},
+        }})
+        assert websocket.receive_json()["type"] == "rpc_reply_ack"
+        recovery = client.get(recovery_url).json()
+        assert recovery["current"]["config"] == changed_config
+        assert recovery["current"]["source"] == "master_write"
+        assert recovery["has_pending"] is False
+
+    with client.websocket_connect(ws_path) as websocket:
+        websocket.send_json(auth)
+        assert websocket.receive_json()["type"] == "auth_result"
+        sync = websocket.receive_json()
+        assert sync["payload"]["query"] == ""
+        websocket.send_json({"type": "rpc_reply", "payload": {
+            "request_id": sync["payload"]["request_id"], "status": 200,
+            "body": {"success": True, "config": current_config},
+        }})
+        assert websocket.receive_json()["type"] == "rpc_reply_ack"
+
+    recovery = client.get(recovery_url).json()
+    assert recovery["current"]["config"] == changed_config
+    assert recovery["pending"]["config"] == current_config
+    assert recovery["pending"]["status"] == "pending_recovery"
+    assert recovery["pending"]["source"] == "agent_report"
+
+
+@pytest.mark.parametrize("status, body", [
+    (404, {"success": False, "error": "Xray config not found"}),
+    (200, {"success": False, "config": '{"inbounds":[]}'}),
+    (200, {"success": True, "config": ""}),
+])
+def test_websocket_sync_failure_keeps_connection_and_retries_on_reconnect(
+    tmp_path: Path, status: int, body: dict,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-no-xray"}).json()
+    server_id = created["server"]["id"]
+    auth = {"type": "auth", "payload": {
+        "token": created["agent_token"], "capabilities": {"rpc": True},
+    }}
+    request_ids = []
+    for _ in range(2):
+        with client.websocket_connect("/api/v1/agents/ws") as websocket:
+            websocket.send_json(auth)
+            assert websocket.receive_json()["payload"]["success"] is True
+            sync = websocket.receive_json()["payload"]
+            request_ids.append(sync["request_id"])
+            websocket.send_json({"type": "rpc_reply", "payload": {
+                "request_id": sync["request_id"], "status": status, "body": body,
+            }})
+            assert websocket.receive_json()["type"] == "rpc_reply_ack"
+            websocket.send_json({"type": "heartbeat", "payload": {}})
+            assert websocket.receive_json()["type"] == "heartbeat_ack"
+    assert len(set(request_ids)) == 2
+    snapshots = client.get(f"/api/v1/servers/{server_id}/xray/config-snapshots").json()
+    assert snapshots["snapshots"] == []
+
+
+def test_websocket_dispatches_backlog_and_expired_leases_without_duplicate_pushes(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-backlog"}).json()
+    server_id = created["server"]["id"]
+    first = client.post(f"/api/v1/servers/{server_id}/operations/system-info").json()["command"]
+    stream = client.post(f"/api/v1/servers/{server_id}/operations/xray/install").json()["command"]
 
     with client.websocket_connect("/api/v1/agents/ws") as websocket:
-        websocket.send_json({"type": "auth", "payload": {"token": "not-a-real-token"}})
+        websocket.send_json({"type": "auth", "payload": {
+            "token": created["agent_token"], "capabilities": {"rpc": True, "stream": False},
+        }})
+        assert websocket.receive_json()["type"] == "auth_result"
+        assert websocket.receive_json()["payload"]["request_id"] == first["request_id"]
+        sync = websocket.receive_json()["payload"]
+        assert sync["path"] == "/api/child/xray/config"
+        websocket.send_json({"type": "ping"})
+        assert websocket.receive_json()["type"] == "pong"
+
+        http_leases = client.post(
+            "/api/v1/agents/commands/lease", json={"token": created["agent_token"]},
+        ).json()["commands"]
+        assert [command["id"] for command in http_leases] == [stream["id"]]
+        with client.app.state.inventory._session() as session:
+            session.execute(update(CommandModel).where(
+                CommandModel.request_id == sync["request_id"],
+            ).values(leased_at=datetime.now(tz=UTC) - timedelta(minutes=2)))
+            session.commit()
+
+        websocket.send_json({"type": "heartbeat", "payload": {}})
+        assert websocket.receive_json()["type"] == "heartbeat_ack"
+        retry = websocket.receive_json()
+        assert retry["payload"]["request_id"] == sync["request_id"]
+        websocket.send_json({"type": "ping"})
+        assert websocket.receive_json()["type"] == "pong"
+
+    commands = client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"]
+    synced = next(command for command in commands if command["request_id"] == sync["request_id"])
+    assert synced["attempts"] == 2
+
+
+def test_non_rpc_websocket_keeps_sync_available_for_http_lease(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-no-rpc"}).json()
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json({"type": "auth", "payload": {"token": created["agent_token"]}})
+        assert websocket.receive_json()["type"] == "auth_result"
+        websocket.send_json({"type": "ping"})
+        assert websocket.receive_json()["type"] == "pong"
+        commands = client.post(
+            "/api/v1/agents/commands/lease", json={"token": created["agent_token"]},
+        ).json()["commands"]
+        assert len(commands) == 1
+        assert commands[0]["path"] == "/api/child/xray/config"
+        assert commands[0]["attempts"] == 1
+
+
+def test_http_and_websocket_lease_race_has_one_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-lease-race"}).json()
+    server_id = created["server"]["id"]
+    command = client.post(f"/api/v1/servers/{server_id}/operations/system-info").json()["command"]
+    store = client.app.state.inventory
+    original_claim = store._claim_command_lease
+    barrier = Barrier(2)
+
+    def concurrent_claim(session, candidate, now):
+        barrier.wait(timeout=5)
+        return original_claim(session, candidate, now)
+
+    monkeypatch.setattr(store, "_claim_command_lease", concurrent_claim)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        http = pool.submit(store.lease_commands, created["agent_token"], 1)
+        push = pool.submit(store.lease_command_for_push, UUID(command["id"]))
+        http_commands = http.result(timeout=10)[1]
+        push_command = push.result(timeout=10)
+    assert len(http_commands) + int(push_command is not None) == 1
+    persisted = store.list_commands(UUID(server_id))[0]
+    assert persisted.status == "leased"
+    assert persisted.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_websocket_send_releases_lease_without_replaying_completed_commands(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-send-failed"}).json()
+    server_id = UUID(created["server"]["id"])
+    queued = client.post(f"/api/v1/servers/{server_id}/operations/system-info").json()["command"]
+    store = client.app.state.inventory
+    manager = client.app.state.agent_connections
+    command = store.list_commands(server_id)[0]
+    websocket = AsyncMock()
+    websocket.send_json.side_effect = WebSocketDisconnect()
+    manager.register(server_id, websocket, AgentCapabilities(rpc=True))
+    failed = await manager.dispatch_command(store, command)
+    assert failed.status == "pending"
+    assert failed.attempts == 1
+    assert manager.is_connected(server_id) is False
+
+    websocket.send_json.side_effect = None
+    manager.register(server_id, websocket, AgentCapabilities(rpc=True))
+    leased = await manager.dispatch_command(store, failed)
+    assert leased.status == "leased"
+    assert leased.attempts == 2
+    assert store.release_command_lease(leased.id, 1).status == "leased"
+    assert store.lease_commands(created["agent_token"], 1)[1] == []
+    await manager.dispatch_command(store, command)
+    assert websocket.send_json.await_count == 2
+
+    assert client.post(
+        f"/api/v1/agents/commands/{queued['id']}/result",
+        json={"token": created["agent_token"], "status": 200},
+    ).status_code == 200
+    await manager.dispatch_command(store, command)
+    assert websocket.send_json.await_count == 2
+
+
+def test_websocket_auth_probe_has_no_inventory_or_connection_side_effects(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-probe"}).json()
+    server_id = created["server"]["id"]
+    probe = {"type": "auth", "payload": {
+        "token": created["agent_token"], "probe": True, "capabilities": {"rpc": True},
+    }}
+    with client.websocket_connect("/api/remote/ws") as websocket:
+        websocket.send_json(probe)
+        auth = websocket.receive_json()
+        assert auth["type"] == "auth_result"
+        assert auth["payload"]["success"] is True
+        assert websocket.receive()["type"] == "websocket.close"
+    assert client.get("/api/v1/agents").json() == []
+    assert client.get("/api/v1/servers").json()[0]["status"] == "pending"
+    assert client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"] == []
+
+    with client.websocket_connect("/api/remote/ws") as live:
+        live.send_json({"type": "auth", "payload": {**probe["payload"], "probe": False}})
+        assert live.receive_json()["type"] == "auth_result"
+        assert live.receive_json()["payload"]["path"] == "/api/child/xray/config"
+        with client.websocket_connect("/api/remote/ws") as websocket:
+            websocket.send_json(probe)
+            assert websocket.receive_json()["payload"]["success"] is True
+        command = client.post(
+            f"/api/v1/servers/{server_id}/operations/system-info",
+        ).json()["command"]
+        assert live.receive_json()["payload"]["request_id"] == command["request_id"]
+        assert len(client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"]) == 2
+
+
+@pytest.mark.parametrize("probe", [True, False])
+@pytest.mark.parametrize("ws_path", ["/api/v1/agents/ws", "/api/remote/ws"])
+def test_agent_websocket_invalid_token_returns_auth_failure(
+    tmp_path: Path, probe: bool, ws_path: str,
+) -> None:
+    client = make_client(tmp_path)
+
+    with client.websocket_connect(ws_path) as websocket:
+        websocket.send_json({"type": "auth", "payload": {
+            "token": "not-a-real-token", "probe": probe,
+        }})
         auth = websocket.receive_json()
 
         assert auth["type"] == "auth_result"

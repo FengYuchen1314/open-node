@@ -4,8 +4,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
-from open_node.api.dependencies import get_inventory_store
+from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.inventory import (
     AgentCommandLeaseRequest,
     AgentCommandLeaseResponse,
@@ -41,14 +42,16 @@ def list_agents(store: Annotated[InventoryStore, Depends(get_inventory_store)]) 
     response_model=AgentRegistrationResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def register_agent(
+async def register_agent(
     payload: AgentRegistrationRequest,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentRegistrationResponse:
     try:
-        agent, server = store.register_agent(payload)
+        agent, server = await run_in_threadpool(store.register_agent, payload)
     except InvalidAgentTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    await connections.dispatch_pending_commands(store, server.id)
     return AgentRegistrationResponse(agent=agent, server=server)
 
 
@@ -90,17 +93,19 @@ def lease_agent_commands(
 
 
 @router.post("/commands/{command_id}/result", response_model=AgentCommandResultResponse)
-def complete_agent_command(
+async def complete_agent_command(
     command_id: UUID,
     payload: AgentCommandResultRequest,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentCommandResultResponse:
     try:
-        command = store.complete_command(command_id, payload)
+        command = await run_in_threadpool(store.complete_command, command_id, payload)
     except InvalidAgentTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     except CommandNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await connections.dispatch_pending_commands(store, command.server_id)
     return AgentCommandResultResponse(command=command)
 
 
@@ -122,6 +127,11 @@ async def agent_websocket(websocket: WebSocket) -> None:
 
         token = str(auth_payload.get("token") or "")
         try:
+            if auth_payload.get("probe") is True:
+                server = store.authenticate_agent(token)
+                await _send_auth_result(websocket, True, "authenticated", server.id)
+                await websocket.close(code=1000)
+                return
             agent, server = store.register_agent(_registration_from_ws_payload(auth_payload))
         except (InvalidAgentTokenError, ValidationError) as exc:
             await _send_auth_result(websocket, False, str(exc))
@@ -129,12 +139,14 @@ async def agent_websocket(websocket: WebSocket) -> None:
             return
 
         server_id = server.id
-        connections.register(server.id, websocket, agent.capabilities)
         await _send_auth_result(websocket, True, "authenticated", server.id)
+        connections.register(server.id, websocket, agent.capabilities)
+        await connections.dispatch_pending_commands(store, server.id)
 
         while True:
             message = await websocket.receive_json()
             await _handle_agent_ws_message(websocket, store, token, message)
+            await connections.dispatch_pending_commands(store, server.id)
     except WebSocketDisconnect:
         pass
     finally:

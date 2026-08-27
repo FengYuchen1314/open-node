@@ -87,6 +87,7 @@ def test_change_set_plans_dispatches_and_rolls_back_commands(tmp_path: Path) -> 
             }
         )
         assert websocket.receive_json()["payload"]["success"] is True
+        assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
 
         dispatch_response = client.post(f"/api/v1/change-sets/{change_set_id}/dispatch")
         assert dispatch_response.status_code == 200

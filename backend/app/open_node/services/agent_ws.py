@@ -40,6 +40,15 @@ class AgentConnectionManager:
         if current and current.websocket is websocket:
             self._connections.pop(server_id, None)
 
+    async def dispatch_pending_commands(self, store: InventoryStore, server_id: UUID) -> None:
+        connection = self._connections.get(server_id)
+        if not connection or not connection.capabilities.rpc:
+            return
+        for command in store.list_dispatchable_commands(server_id):
+            if self._connections.get(server_id) is not connection:
+                break
+            await self.dispatch_command(store, command)
+
     async def dispatch_command(
         self,
         store: InventoryStore,
@@ -54,6 +63,8 @@ class AgentConnectionManager:
         try:
             leased = store.lease_command_for_push(command.id)
         except CommandNotFoundError:
+            return command
+        if leased is None:
             return command
 
         try:
@@ -71,6 +82,7 @@ class AgentConnectionManager:
                     },
                 }
             )
-        except (RuntimeError, WebSocketDisconnect):
+        except (OSError, RuntimeError, WebSocketDisconnect):
             self.unregister(connection.server_id, connection.websocket)
+            return store.release_command_lease(leased.id, leased.attempts)
         return leased

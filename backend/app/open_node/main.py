@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from open_node.api.router import api_router
+from open_node.api.routes.agents import agent_websocket
 from open_node.api.routes.public import router as public_router
 from open_node.api.routes.system import healthz
 from open_node.core.config import Settings, get_settings
@@ -31,6 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.agent_connections = AgentConnectionManager()
     app.state.public_probe_streams = PublicProbeStreamManager()
     app.include_router(api_router, prefix=active_settings.api_prefix)
+    app.add_api_websocket_route("/api/remote/ws", agent_websocket)
     app.include_router(public_router, prefix="/api")
     app.add_api_route("/healthz", healthz, methods=["GET"], include_in_schema=False)
     return app

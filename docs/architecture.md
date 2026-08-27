@@ -136,21 +136,39 @@ active MMWX WebSocket RPC payload. Agents lease pending commands through
 `/api/v1/agents/commands/lease` with their bootstrap token and submit
 HTTP-like results to `/api/v1/agents/commands/{command_id}/result`.
 
-The first implementation is intentionally queue-based so pull-mode agents and
-future WebSocket RPC can share one persisted state machine.
+HTTP leasing and WebSocket RPC share one persisted state machine. A conditional
+database update claims each lease for one transport; completed commands and
+unexpired leases cannot be pushed again. Failed socket sends release their own
+lease without resetting a newer attempt. Expired leases can be retried, so
+execution is at-least-once rather than exactly-once.
 
 ## Agent WebSocket RPC
 
-Agents can connect to `/api/v1/agents/ws` and authenticate with the same
+Agents can connect to `/api/v1/agents/ws` or the active MMWX agent's
+`/api/remote/ws` address and authenticate with the same
 server bootstrap token used by HTTP registration. The first message must be
 `auth`; after that, the socket accepts `heartbeat`, `traffic`/`telemetry`,
 `scan_result`, `ping`, and `rpc_reply` messages. Successful auth registers or
 refreshes the agent record and stores its capability flags.
+An auth payload with `probe=true` only verifies the token and closes after the
+auth response. It does not change inventory, enqueue work, or replace a live
+agent connection.
 
 When a command is created for a server with an active RPC-capable socket, Open
 Node leases that persisted command and immediately sends an MMWX-compatible
 `rpc_call` payload. The agent can complete it over the socket with `rpc_reply`;
 offline or non-RPC agents still use the HTTP lease/result endpoints.
+After authentication, after incoming socket messages, and after HTTP command
+completion, the connection manager also dispatches queued work and expired
+leases. This delivers offline backlog and automatically generated config
+refreshes to connected RPC agents. Unsupported stream commands remain queued
+for a compatible transport. An authentication response is always sent before
+any RPC work on that socket.
+
+The compatibility address currently supports JSON auth and RPC. MMWX's optional
+`securechan` key-exchange handshake is not implemented yet; existing agents
+configured to require it are not covered by this compatibility slice. Public
+deployment also requires transport TLS and control-plane access protection.
 
 Stream-capable agents can also receive `rpc_call` payloads with `stream=true`.
 They may send any number of MMWX-compatible `rpc_stream_data` text frames before
@@ -288,6 +306,13 @@ takeover also enqueue one deduplicated `GET /api/child/xray/config` refresh.
 That follow-up read is marked as a master-write refresh, so it updates the
 current snapshot and runtime inventory instead of creating a false drift
 warning from the master's own operation.
+Every normal HTTP registration or WebSocket authentication also queues a
+deduplicated agent-report config read, including the first connection before
+any snapshot exists. Repeated registration reuses a pending or leased read.
+Missing, empty, and failed reads do not create snapshots or interrupt the
+authenticated connection, and the next registration can try again. A report
+matching the current snapshot clears an obsolete pending recovery. A differing
+report preserves the current snapshot and awaits an operator decision.
 
 The Xray external takeover wrapper queues the active agent's
 `/api/child/external-xray/takeover` route. It lets an operator merge an
