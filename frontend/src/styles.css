@@ -223,6 +223,13 @@ body {
   margin: 22px 0;
 }
 
+.quick-command-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
 .command-list {
   margin-top: 14px;
 }
@@ -258,6 +265,10 @@ body {
   }
 
   .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-command-grid {
     grid-template-columns: 1fr;
   }
 }

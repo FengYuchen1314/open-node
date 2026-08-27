@@ -32,7 +32,10 @@ This document records the starting source map for the Open Node refactor.
      `rpc_call` dispatch, and `rpc_reply` command completion.
    - Done: streaming `rpc_stream_data` frame persistence for `stream=true`
      WebSocket RPC commands.
-   - Next: specialized child command workflows.
+   - Done: specialized child operation wrappers for system info, traffic,
+     speed, and domain latency probes.
+   - Next: install/remove/config child workflows for Xray, nginx, WARP, and
+     agent lifecycle tasks.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.

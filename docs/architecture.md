@@ -88,6 +88,22 @@ They may send any number of MMWX-compatible `rpc_stream_data` text frames before
 the final `rpc_reply`. Open Node persists each frame in command sequence order
 and exposes them at `/api/v1/servers/{server_id}/commands/{command_id}/stream`.
 
+## Agent Operations
+
+The generic command queue remains available for low-level and future MMWX child
+routes, while common agent actions also have stable control-plane wrappers:
+
+- `POST /api/v1/servers/{server_id}/operations/system-info`
+- `POST /api/v1/servers/{server_id}/operations/traffic`
+- `POST /api/v1/servers/{server_id}/operations/speed`
+- `POST /api/v1/servers/{server_id}/operations/domain-latency`
+
+These wrappers enqueue the active `mmw-agent` child paths
+(`/api/child/system/info`, `/api/child/traffic`, `/api/child/speed`, and
+`/api/child/domains/latency`) and then reuse the same WebSocket RPC dispatch,
+HTTP lease, result, and stream-frame persistence contracts as generic commands.
+They do not introduce separate execution state or license checks.
+
 ## Public Probe API
 
 Open Node exposes the read-only public probe surface without authentication or

@@ -27,8 +27,9 @@ intentionally out of scope for this refactor.
 ## Current Milestone
 
 The first milestone establishes the project skeleton, the no-license contract,
-persisted server/agent inventory, agent telemetry and command slices, and the
-public probe read-only surface. It does not yet replace the full MMWX product.
+persisted server/agent inventory, agent telemetry and command slices, initial
+agent operation wrappers, and the public probe read-only surface. It does not
+yet replace the full MMWX product.
 
 ```text
 backend/   FastAPI app, no-license API, inventory, telemetry, commands, probe

@@ -8,6 +8,7 @@ from open_node.domain.inventory import (
     AgentCommandCreate,
     AgentCommandCreateResponse,
     AgentCommandStreamFramesResponse,
+    AgentDomainLatencyProbeRequest,
     ServerCommandsResponse,
     ServerCreate,
     ServerCreateResponse,
@@ -101,6 +102,96 @@ async def create_server_command(
     payload: AgentCommandCreate,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(server_id, payload, store, connections)
+
+
+@router.post(
+    "/{server_id}/operations/system-info",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_system_info_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/system/info"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/traffic",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_traffic_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/traffic"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/speed",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_speed_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/speed"),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/domain-latency",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_domain_latency_operation(
+    server_id: UUID,
+    payload: AgentDomainLatencyProbeRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/domains/latency",
+            body=payload.model_dump(
+                mode="json",
+                include={"domains", "timeout_ms", "allow_icmp"},
+            ),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+async def _queue_server_command(
+    server_id: UUID,
+    payload: AgentCommandCreate,
+    store: InventoryStore,
+    connections: AgentConnectionManager,
 ) -> AgentCommandCreateResponse:
     try:
         command = store.create_command(server_id, payload)

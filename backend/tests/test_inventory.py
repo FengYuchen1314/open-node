@@ -515,6 +515,72 @@ def test_agent_command_result_error_marks_command_failed(tmp_path: Path) -> None
     assert response.json()["command"]["result_error"] == "agent handler panic"
 
 
+def test_system_info_operation_queues_mmwx_child_command(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-operation"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/system-info"
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["license_required"] is False
+    command = payload["command"]
+    assert command["method"] == "GET"
+    assert command["path"] == "/api/child/system/info"
+    assert command["stream"] is False
+
+
+def test_pull_data_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-pull-ops"}).json()
+    server_id = created["server"]["id"]
+
+    traffic = client.post(f"/api/v1/servers/{server_id}/operations/traffic")
+    speed = client.post(f"/api/v1/servers/{server_id}/operations/speed")
+
+    assert traffic.status_code == 201
+    assert speed.status_code == 201
+    assert traffic.json()["command"]["path"] == "/api/child/traffic"
+    assert speed.json()["command"]["path"] == "/api/child/speed"
+    commands = client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"]
+    assert [command["path"] for command in commands] == [
+        "/api/child/speed",
+        "/api/child/traffic",
+    ]
+
+
+def test_domain_latency_operation_normalizes_probe_targets(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-domain-op"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/domain-latency",
+        json={
+            "domains": [
+                " https://example.com/path",
+                "example.com",
+                "[2001:db8::1]",
+            ],
+            "timeout_ms": 500,
+            "allow_icmp": True,
+            "command_timeout_ms": 12_000,
+        },
+    )
+
+    assert response.status_code == 201
+    command = response.json()["command"]
+    assert command["method"] == "POST"
+    assert command["path"] == "/api/child/domains/latency"
+    assert command["timeout_ms"] == 12_000
+    assert command["body"] == {
+        "domains": ["example.com", "2001:db8::1"],
+        "timeout_ms": 500,
+        "allow_icmp": True,
+    }
+
+
 def test_agent_command_rejects_non_child_paths(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-command-path"}).json()
@@ -644,6 +710,34 @@ def test_online_agent_websocket_receives_rpc_call_and_completes_command(tmp_path
     commands = client.get(f"/api/v1/servers/{server_id}/commands").json()["commands"]
     assert commands[0]["status"] == "succeeded"
     assert commands[0]["result_body"] == {"hostname": "edge-ws-rpc-host"}
+
+
+def test_online_agent_websocket_receives_specialized_operation(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-ws-operation"}).json()
+    server_id = created["server"]["id"]
+
+    with client.websocket_connect("/api/v1/agents/ws") as websocket:
+        websocket.send_json(
+            {
+                "type": "auth",
+                "payload": {
+                    "token": created["agent_token"],
+                    "hostname": "edge-ws-operation-host",
+                    "capabilities": {"rpc": True},
+                },
+            }
+        )
+        assert websocket.receive_json()["payload"]["success"] is True
+
+        queued = client.post(f"/api/v1/servers/{server_id}/operations/speed")
+
+        assert queued.status_code == 201
+        assert queued.json()["command"]["status"] == "leased"
+        rpc_call = websocket.receive_json()
+        assert rpc_call["type"] == "rpc_call"
+        assert rpc_call["payload"]["path"] == "/api/child/speed"
+        assert rpc_call["payload"]["method"] == "GET"
 
 
 def test_online_agent_websocket_persists_stream_data_until_reply(tmp_path: Path) -> None:

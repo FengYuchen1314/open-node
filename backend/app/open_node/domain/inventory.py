@@ -42,6 +42,13 @@ class AgentCommandStatus(StrEnum):
     FAILED = "failed"
 
 
+class AgentOperationKind(StrEnum):
+    SYSTEM_INFO = "system_info"
+    TRAFFIC = "traffic"
+    SPEED = "speed"
+    DOMAIN_LATENCY = "domain_latency"
+
+
 class AgentCapabilities(BaseModel):
     rpc: bool = False
     stream: bool = False
@@ -294,6 +301,43 @@ class AgentCommandStreamFrameRead(BaseModel):
 class AgentCommandCreateResponse(BaseModel):
     command: AgentCommandRead
     license_required: Literal[False] = False
+
+
+class AgentDomainLatencyProbeRequest(BaseModel):
+    domains: list[str] = Field(min_length=1, max_length=200)
+    timeout_ms: int = Field(default=2_000, ge=200, le=10_000)
+    allow_icmp: bool = False
+    command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
+
+    @field_validator("domains")
+    @classmethod
+    def normalize_domains(cls, value: list[str]) -> list[str]:
+        domains: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            normalized = cls._normalize_domain(raw)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            domains.append(normalized)
+
+        if not domains:
+            raise ValueError("at least one domain target is required")
+        return domains
+
+    @staticmethod
+    def _normalize_domain(raw: str) -> str:
+        value = raw.strip()
+        if not value:
+            return ""
+        if "://" in value:
+            value = value.split("://", 1)[1]
+        if "/" in value:
+            value = value.split("/", 1)[0]
+        value = value.strip()
+        if value.startswith("[") and value.endswith("]"):
+            value = value[1:-1]
+        return value
 
 
 class ServerCommandsResponse(BaseModel):

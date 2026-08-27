@@ -5,6 +5,7 @@ import {
   defaultServerCreateRequest,
   type AgentCommand,
   type AgentCommandStreamFrame,
+  type AgentOperationKind,
   type AgentTelemetry,
   type ConnectionMode,
   type ServerCreateRequest,
@@ -19,6 +20,7 @@ import {
   listCommandStreamFrames,
   listServerCommands,
   listServers,
+  queueAgentOperation,
 } from "../services/inventory";
 
 const servers = ref<ServerSummary[]>([]);
@@ -28,6 +30,7 @@ const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({})
 const loading = ref(false);
 const saving = ref(false);
 const savingCommand = ref(false);
+const savingOperation = ref<AgentOperationKind | "">("");
 const errorMessage = ref("");
 const latestToken = ref<{ serverName: string; token: string } | null>(null);
 const form = reactive<ServerCreateRequest>(defaultServerCreateRequest());
@@ -39,6 +42,11 @@ const commandForm = reactive({
   bodyText: "",
   timeout_ms: 30_000,
   stream: false,
+});
+const domainLatencyForm = reactive({
+  domainsText: "",
+  timeout_ms: 2_000,
+  allow_icmp: false,
 });
 
 const connectionModes: Array<{ title: string; value: ConnectionMode }> = [
@@ -54,6 +62,15 @@ const xrayModes: Array<{ title: string; value: XrayMode }> = [
 ];
 
 const commandMethods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+const quickOperations: Array<{
+  title: string;
+  icon: string;
+  kind: Exclude<AgentOperationKind, "domain_latency">;
+}> = [
+  { title: "System info", icon: "mdi-monitor-dashboard", kind: "system_info" },
+  { title: "Traffic", icon: "mdi-swap-vertical", kind: "traffic" },
+  { title: "Speed", icon: "mdi-speedometer", kind: "speed" },
+];
 
 const statusMeta: Record<ServerStatus, { color: string; icon: string; label: string }> = {
   pending: { color: "warning", icon: "mdi-timer-sand", label: "Pending" },
@@ -254,8 +271,62 @@ async function submitCommand() {
   }
 }
 
+async function queueQuickOperation(kind: Exclude<AgentOperationKind, "domain_latency">) {
+  if (!commandForm.server_id) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+
+  savingOperation.value = kind;
+  errorMessage.value = "";
+  try {
+    await queueAgentOperation(commandForm.server_id, kind);
+    await refreshCommands(servers.value);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingOperation.value = "";
+  }
+}
+
+async function submitDomainLatency() {
+  if (!commandForm.server_id) {
+    errorMessage.value = "Target server is required.";
+    return;
+  }
+
+  const domains = parseDomainTargets(domainLatencyForm.domainsText);
+  if (domains.length === 0) {
+    errorMessage.value = "At least one latency target is required.";
+    return;
+  }
+
+  savingOperation.value = "domain_latency";
+  errorMessage.value = "";
+  try {
+    await queueAgentOperation(commandForm.server_id, "domain_latency", {
+      domains,
+      timeout_ms: domainLatencyForm.timeout_ms,
+      allow_icmp: domainLatencyForm.allow_icmp,
+    });
+    domainLatencyForm.domainsText = "";
+    await refreshCommands(servers.value);
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingOperation.value = "";
+  }
+}
+
 function resetForm() {
   Object.assign(form, defaultServerCreateRequest());
+}
+
+function parseDomainTargets(value: string) {
+  return value
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function blankToNull(value: string | null | undefined) {
@@ -541,6 +612,63 @@ function latestStreamData(command: AgentCommand) {
         <v-divider class="command-divider" />
 
         <div class="section-title">Command queue</div>
+        <div class="quick-command-grid">
+          <v-btn
+            v-for="operation in quickOperations"
+            :key="operation.kind"
+            :disabled="serverOptions.length === 0"
+            :loading="savingOperation === operation.kind"
+            :prepend-icon="operation.icon"
+            color="primary"
+            size="small"
+            variant="tonal"
+            @click="queueQuickOperation(operation.kind)"
+          >
+            {{ operation.title }}
+          </v-btn>
+        </div>
+        <v-form class="server-form" @submit.prevent="submitDomainLatency">
+          <v-textarea
+            v-model="domainLatencyForm.domainsText"
+            auto-grow
+            density="comfortable"
+            label="Latency targets"
+            prepend-inner-icon="mdi-crosshairs-gps"
+            rows="2"
+            variant="outlined"
+          />
+          <div class="form-row">
+            <v-text-field
+              v-model.number="domainLatencyForm.timeout_ms"
+              density="comfortable"
+              label="Timeout"
+              min="200"
+              max="10000"
+              type="number"
+              variant="outlined"
+            />
+            <v-switch
+              v-model="domainLatencyForm.allow_icmp"
+              color="primary"
+              density="comfortable"
+              hide-details
+              label="ICMP"
+            />
+          </div>
+          <v-btn
+            :disabled="serverOptions.length === 0"
+            :loading="savingOperation === 'domain_latency'"
+            block
+            color="primary"
+            prepend-icon="mdi-radar"
+            type="submit"
+            variant="tonal"
+          >
+            Queue latency probe
+          </v-btn>
+        </v-form>
+        <v-divider class="command-divider" />
+
         <v-form class="server-form" @submit.prevent="submitCommand">
           <v-select
             v-model="commandForm.server_id"

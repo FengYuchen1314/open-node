@@ -2,6 +2,7 @@ export type ConnectionMode = "auto" | "websocket" | "http" | "pull";
 export type ServerStatus = "pending" | "connected" | "offline";
 export type XrayMode = "external" | "embedded";
 export type AgentCommandStatus = "pending" | "leased" | "succeeded" | "failed";
+export type AgentOperationKind = "system_info" | "traffic" | "speed" | "domain_latency";
 
 export interface ServerCreateRequest {
   name: string;
@@ -150,6 +151,13 @@ export interface AgentCommandStreamFrame {
 export interface AgentCommandCreateResponse {
   command: AgentCommand;
   license_required: false;
+}
+
+export interface AgentDomainLatencyProbeRequest {
+  domains: string[];
+  timeout_ms?: number;
+  allow_icmp?: boolean;
+  command_timeout_ms?: number;
 }
 
 export interface ServerCommandsResponse {
