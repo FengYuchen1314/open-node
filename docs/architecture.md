@@ -447,8 +447,11 @@ optional rollback payload.
 
 Creating a change set can be a dry plan or an immediate dispatch. Dispatch
 creates one persisted `agent_commands` row per forward step and reuses the same
-WebSocket RPC and HTTP lease/result paths as ordinary commands. Repeated
-dispatch calls only create missing forward commands.
+WebSocket RPC and HTTP lease/result paths as ordinary commands. Atomic target
+reservations and persisted cross-node dependencies serialize execution. Repeat
+dispatch while active is idempotent; terminal changes cannot be redispatched.
+Already-started ordinary dependency sequences finish before the new change,
+while new unrelated work waits for reservations to be released.
 
 `POST /api/v1/change-sets/routed-outbound` builds an MMWX-compatible routed
 outbound plan for one inventory server. The planner generates the routed
@@ -461,16 +464,19 @@ prefix is used as a stable fallback. Rollback avoids the agent's index-based
 then removes the outbound and admin client. Additive sniffing excludes are left
 in place by design because the active agent has no remove-exclude operation.
 
-Rollback queues rollback commands in reverse step order, again through
-`agent_commands`, and records the operator-provided reason on the change set.
-Steps without rollback payloads are skipped and returned as warnings. The
-current state machine is intentionally small: `planned`, `dispatched`, and
-`rollback_queued`. Automatic failure detection can be layered on later without
-changing the command transport.
+Forward failures stop unsent successors and optionally start automatic
+compensation. Rollback waits for in-flight forward outcomes, then executes
+compensators only for attempted steps, in reverse dependency order. Failed
+compensation retains reservations; retries preserve history and do not repeat
+successful compensation. Missing compensation is explicitly incomplete.
+Terminal states distinguish success, rollback, cancellation and operator
+acceptance. SQLite upgrades pause legacy executions for review.
 
 The frontend exposes this in `/changes`, where operators can use the guided
 routed-outbound form or raw JSON step plans, dispatch them, queue reverse
-rollback, and inspect each step's forward and rollback command status.
+rollback, inspect command results and retry history, or explicitly accept a
+partial state with an audit reason. See [change-sets.md](change-sets.md) for
+state transitions, concurrency boundaries and upgrade procedures.
 
 ## Subscription Catalog
 

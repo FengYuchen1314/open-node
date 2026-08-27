@@ -121,7 +121,7 @@ async def complete_agent_command(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except CommandNotReadyError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await connections.dispatch_pending_commands(store, command.server_id)
+    await connections.dispatch_ready_commands(store)
     return AgentCommandResultResponse(command=command)
 
 
@@ -162,7 +162,10 @@ async def agent_websocket(websocket: WebSocket) -> None:
         while True:
             message = await websocket.receive_json()
             await _handle_agent_ws_message(websocket, store, token, message)
-            await connections.dispatch_pending_commands(store, server.id)
+            if isinstance(message, dict) and message.get("type") == "rpc_reply":
+                await connections.dispatch_ready_commands(store)
+            else:
+                await connections.dispatch_pending_commands(store, server.id)
     except WebSocketDisconnect:
         pass
     finally:

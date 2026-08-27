@@ -91,6 +91,20 @@ export async function rollbackChangeSet(
   return response.json() as Promise<AgentChangeSetResponse>;
 }
 
+export async function acceptChangeSet(
+  changeSetId: string,
+  reason: string,
+  fetcher = authenticatedFetch,
+): Promise<AgentChangeSetResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/${changeSetId}/accept`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ acknowledge: true, reason }),
+  });
+  if (!response.ok) throw await apiError(response, "Change set acceptance failed");
+  return response.json() as Promise<AgentChangeSetResponse>;
+}
+
 async function apiError(response: Response, fallback: string): Promise<Error> {
   try {
     const body = (await response.json()) as { detail?: unknown };

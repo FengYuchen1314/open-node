@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { changeSetActions } from "../domain/changes";
+import CommandInspector from "../components/CommandInspector.vue";
 
 import type {
   AgentChangeSet,
@@ -16,18 +18,24 @@ import {
   dispatchChangeSet,
   listChangeSets,
   rollbackChangeSet,
+  acceptChangeSet,
 } from "../services/changes";
 
 const servers = ref<ServerSummary[]>([]);
 const changeSets = ref<AgentChangeSet[]>([]);
 const selectedChangeSetId = ref("");
 const loading = ref(false);
-const savingAction = ref<"create" | "routed" | "dispatch" | "rollback" | "">("");
+const savingAction = ref<"create" | "routed" | "dispatch" | "rollback" | "accept" | "">("");
 const errorMessage = ref("");
 const successMessage = ref("");
 const lastCommands = ref<AgentCommand[]>([]);
 const warnings = ref<string[]>([]);
 const planMode = ref<"routed" | "raw">("routed");
+const acceptDialog = ref(false);
+const acceptanceReason = ref("");
+const acceptanceConfirmed = ref(false);
+let refreshTimer: ReturnType<typeof setInterval> | undefined;
+let refreshRevision = 0;
 
 const inboundProtocolOptions = [
   "vless",
@@ -75,6 +83,14 @@ const changeStatusMeta: Record<AgentChangeSetStatus, { color: string; icon: stri
   planned: { color: "grey", icon: "mdi-clipboard-text-clock-outline" },
   dispatched: { color: "info", icon: "mdi-send-clock-outline" },
   rollback_queued: { color: "warning", icon: "mdi-undo-variant" },
+  succeeded: { color: "success", icon: "mdi-check-circle-outline" },
+  failed: { color: "error", icon: "mdi-alert-circle-outline" },
+  rolled_back: { color: "success", icon: "mdi-backup-restore" },
+  rollback_failed: { color: "error", icon: "mdi-alert-octagon-outline" },
+  rollback_incomplete: { color: "warning", icon: "mdi-alert-outline" },
+  cancelled: { color: "grey", icon: "mdi-cancel" },
+  accepted: { color: "secondary", icon: "mdi-check-decagram-outline" },
+  needs_review: { color: "warning", icon: "mdi-clipboard-alert-outline" },
 };
 
 const commandStatusMeta = {
@@ -92,29 +108,49 @@ const serverOptions = computed(() =>
 const selectedChangeSet = computed(
   () => changeSets.value.find((changeSet) => changeSet.id === selectedChangeSetId.value) ?? null,
 );
+const availableActions = computed(() => changeSetActions(selectedChangeSet.value));
 const lastCommandsJson = computed(() =>
   lastCommands.value.length > 0 ? JSON.stringify(lastCommands.value, null, 2) : "",
 );
 
 onMounted(() => {
   void refresh();
+  refreshTimer = setInterval(() => {
+    const active = changeSets.value.some((change) =>
+      ["dispatched", "rollback_queued"].includes(change.status) || change.blocking_command_ids?.length,
+    );
+    if (active && !loading.value && !savingAction.value && !acceptDialog.value) void refresh(true);
+  }, 2500);
 });
+onBeforeUnmount(() => clearInterval(refreshTimer));
 
-async function refresh() {
+async function refresh(background = false) {
+  if (loading.value) return;
+  const revision = ++refreshRevision;
   loading.value = true;
-  errorMessage.value = "";
+  if (!background) errorMessage.value = "";
   try {
     const [serverList, changeSetResponse] = await Promise.all([listServers(), listChangeSets()]);
+    if (revision !== refreshRevision) return;
     servers.value = serverList;
     changeSets.value = changeSetResponse.change_sets;
     syncStepSample();
     syncRoutedServer();
     syncSelectedChangeSet();
   } catch (error) {
-    errorMessage.value = readableError(error);
+    if (!background && revision === refreshRevision) errorMessage.value = readableError(error);
   } finally {
     loading.value = false;
   }
+}
+
+function rememberChange(change: AgentChangeSet) {
+  // A list request started before this mutation must not restore its old state.
+  refreshRevision += 1;
+  const index = changeSets.value.findIndex((item) => item.id === change.id);
+  if (index < 0) changeSets.value.unshift(change);
+  else changeSets.value[index] = change;
+  selectedChangeSetId.value = change.id;
 }
 
 async function submitRoutedOutbound() {
@@ -164,6 +200,7 @@ async function submitRoutedOutbound() {
       dispatch: routedForm.dispatch,
     };
     const response = await createRoutedOutboundChangeSet(payload);
+    rememberChange(response.change_set);
     selectedChangeSetId.value = response.change_set.id;
     lastCommands.value = response.commands;
     warnings.value = response.warnings;
@@ -199,6 +236,7 @@ async function submitChangeSet() {
       steps: parseStepsText(),
     };
     const response = await createChangeSet(payload);
+    rememberChange(response.change_set);
     selectedChangeSetId.value = response.change_set.id;
     lastCommands.value = response.commands;
     warnings.value = response.warnings;
@@ -227,6 +265,7 @@ async function dispatchSelected() {
   warnings.value = [];
   try {
     const response = await dispatchChangeSet(selectedChangeSet.value.id);
+    rememberChange(response.change_set);
     selectedChangeSetId.value = response.change_set.id;
     lastCommands.value = response.commands;
     successMessage.value = response.commands.length
@@ -254,6 +293,7 @@ async function rollbackSelected() {
     const response = await rollbackChangeSet(selectedChangeSet.value.id, {
       reason: form.rollbackReason.trim(),
     });
+    rememberChange(response.change_set);
     selectedChangeSetId.value = response.change_set.id;
     lastCommands.value = response.commands;
     warnings.value = response.warnings;
@@ -262,6 +302,29 @@ async function rollbackSelected() {
       : "No new rollback commands.";
     await refresh();
     selectedChangeSetId.value = response.change_set.id;
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    savingAction.value = "";
+  }
+}
+
+function openAcceptance() {
+  acceptanceReason.value = "";
+  acceptanceConfirmed.value = false;
+  acceptDialog.value = true;
+}
+
+async function acceptSelected() {
+  if (!selectedChangeSet.value || !acceptanceConfirmed.value || !acceptanceReason.value.trim()) return;
+  savingAction.value = "accept";
+  errorMessage.value = "";
+  try {
+    const response = await acceptChangeSet(selectedChangeSet.value.id, acceptanceReason.value.trim());
+    rememberChange(response.change_set);
+    acceptDialog.value = false;
+    successMessage.value = "Current state accepted. Node reservations released.";
+    await refresh();
   } catch (error) {
     errorMessage.value = readableError(error);
   } finally {
@@ -451,7 +514,7 @@ function readableError(error: unknown) {
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell change-page">
     <section class="page-heading">
       <div>
         <div class="eyebrow">Changes</div>
@@ -462,10 +525,11 @@ function readableError(error: unknown) {
         <template #activator="{ props }">
           <v-btn
             v-bind="props"
+            aria-label="Refresh change sets"
             :loading="loading"
             icon="mdi-refresh"
             variant="text"
-            @click="refresh"
+            @click="refresh()"
           />
         </template>
       </v-tooltip>
@@ -490,7 +554,7 @@ function readableError(error: unknown) {
       {{ successMessage }}
     </v-alert>
     <v-alert
-      v-for="warning in warnings"
+      v-for="warning in warnings.filter((item) => !selectedChangeSet?.warnings?.includes(item))"
       :key="warning"
       class="status-alert"
       color="warning"
@@ -501,7 +565,7 @@ function readableError(error: unknown) {
     </v-alert>
 
     <section class="change-layout">
-      <v-sheet class="section-surface change-plan-surface" border>
+      <v-sheet class="section-surface change-plan-surface">
         <div class="section-head">
           <div>
             <div class="section-title">Plan</div>
@@ -770,7 +834,7 @@ function readableError(error: unknown) {
         </v-window>
       </v-sheet>
 
-      <v-sheet class="section-surface change-runs-surface" border>
+      <v-sheet class="section-surface change-runs-surface">
         <div class="section-head">
           <div>
             <div class="section-title">Runs</div>
@@ -810,7 +874,7 @@ function readableError(error: unknown) {
                   size="small"
                   variant="tonal"
                 >
-                  {{ changeSet.status }}
+                  {{ changeSet.status.replaceAll('_', ' ') }}
                 </v-chip>
               </template>
             </v-list-item>
@@ -831,12 +895,13 @@ function readableError(error: unknown) {
                 density="comfortable"
                 variant="tonal"
               >
-                {{ selectedChangeSet.status }}
+                {{ selectedChangeSet.status.replaceAll('_', ' ') }}
               </v-chip>
             </div>
 
             <div class="change-control-row">
               <v-btn
+                :disabled="!availableActions.dispatch || !!savingAction"
                 :loading="savingAction === 'dispatch'"
                 prepend-icon="mdi-send"
                 variant="tonal"
@@ -853,22 +918,39 @@ function readableError(error: unknown) {
                 variant="outlined"
               />
               <v-btn
+                :disabled="!availableActions.rollback || !!savingAction"
                 :loading="savingAction === 'rollback'"
                 color="warning"
                 prepend-icon="mdi-undo-variant"
                 variant="tonal"
                 @click="rollbackSelected"
               >
-                Rollback
+                {{ availableActions.retry ? "Retry rollback" : selectedChangeSet.status === "planned" ? "Cancel plan" : "Rollback" }}
               </v-btn>
             </div>
 
+            <div class="change-coordination-status">
+              <span v-if="selectedChangeSet.held_server_ids?.length">
+                {{ selectedChangeSet.held_server_ids.length }} nodes reserved
+              </span>
+              <v-btn v-if="availableActions.accept" prepend-icon="mdi-check-decagram-outline"
+                color="warning" variant="tonal" :disabled="!!savingAction" @click="openAcceptance">
+                Accept current state
+              </v-btn>
+            </div>
+            <v-alert v-if="selectedChangeSet.blocking_command_ids?.length" type="info" variant="tonal" class="status-alert">
+              Waiting for command results: {{ selectedChangeSet.blocking_command_ids.join(', ') }}
+            </v-alert>
+            <v-alert v-for="warning in selectedChangeSet.warnings || []" :key="warning"
+              type="warning" variant="tonal" class="status-alert">{{ warning }}</v-alert>
+            <p v-if="selectedChangeSet.rollback_reason" class="change-reason">{{ selectedChangeSet.rollback_reason }}</p>
+            <p v-if="selectedChangeSet.resolution_reason" class="change-reason">{{ selectedChangeSet.resolution_reason }}</p>
+
             <div class="change-step-list">
-              <v-sheet
+              <article
                 v-for="step in selectedChangeSet.steps"
                 :key="step.id"
                 class="change-step-item"
-                border
               >
                 <div class="change-step-title-row">
                   <div>
@@ -921,7 +1003,11 @@ function readableError(error: unknown) {
                     </v-chip>
                   </div>
                 </div>
-              </v-sheet>
+                <CommandInspector
+                  :commands="[step.forward_command, ...(step.rollback_history || []), step.rollback_command].filter((command): command is AgentCommand => !!command)"
+                  :stream-frames-by-command="{}"
+                />
+              </article>
             </div>
 
             <div v-if="lastCommandsJson" class="change-command-output">
@@ -932,5 +1018,44 @@ function readableError(error: unknown) {
         </template>
       </v-sheet>
     </section>
+    <v-dialog v-model="acceptDialog" max-width="560" :persistent="savingAction === 'accept'">
+      <v-card class="accept-state-dialog" title="Accept current state">
+        <v-card-text>
+          <v-textarea v-model="acceptanceReason" label="Resolution reason" rows="3" variant="outlined" />
+          <v-checkbox v-model="acceptanceConfirmed" label="I have checked the nodes and accept any remaining changes" hide-details />
+        </v-card-text>
+        <v-card-actions>
+          <v-btn :disabled="savingAction === 'accept'" @click="acceptDialog = false">Cancel</v-btn>
+          <v-btn color="warning" :loading="savingAction === 'accept'"
+            :disabled="!acceptanceConfirmed || !acceptanceReason.trim()" @click="acceptSelected">Accept state</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
+
+<style scoped>
+.change-page { grid-template-columns: minmax(0, 1fr); }
+.change-page :deep(.v-btn), .accept-state-dialog :deep(.v-btn) { letter-spacing: 0; }
+.change-page .page-heading { min-width: 0; }
+.change-layout > .section-surface { border: 0; border-radius: 0; background: transparent; min-width: 0; }
+.change-detail, .change-step-list { grid-template-columns: minmax(0, 1fr); }
+.section-head { gap: 12px; }
+.section-head > div { min-width: 0; }
+.section-title, .section-subtitle, .compact-title, .change-body-snippet { overflow-wrap: anywhere; }
+.change-step-item { border-radius: 0; border-top: 1px solid #dfe5e2; padding: 16px 0; min-width: 0; }
+.change-step-item :deep(.command-inspector) { grid-template-columns: minmax(0, 1fr); margin-top: 12px; }
+.change-step-item :deep(.command-json), .change-step-item :deep(.command-result-alert) { overflow-wrap: anywhere; }
+.change-coordination-status { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 16px 0; }
+.change-reason, .status-alert { overflow-wrap: anywhere; }
+.accept-state-dialog { border-radius: 8px; }
+.accept-state-dialog :deep(.v-label) { white-space: normal; }
+@media (max-width: 960px) {
+  .change-page { padding: 20px; }
+  .change-page .page-heading { grid-template-columns: minmax(0, 1fr) auto; }
+  .change-page .page-title { font-size: 24px; overflow-wrap: anywhere; }
+  .change-layout, .change-command-pair { grid-template-columns: minmax(0, 1fr); }
+  .change-layout > .section-surface { padding: 12px 0; }
+  .change-detail > .section-head { align-items: flex-start; flex-direction: column; }
+}
+</style>

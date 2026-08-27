@@ -18,6 +18,14 @@ class AgentChangeSetStatus(StrEnum):
     PLANNED = "planned"
     DISPATCHED = "dispatched"
     ROLLBACK_QUEUED = "rollback_queued"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    ROLLED_BACK = "rolled_back"
+    ROLLBACK_FAILED = "rollback_failed"
+    ROLLBACK_INCOMPLETE = "rollback_incomplete"
+    CANCELLED = "cancelled"
+    ACCEPTED = "accepted"
+    NEEDS_REVIEW = "needs_review"
 
 
 class AgentChangeSetStepCreate(BaseModel):
@@ -133,6 +141,16 @@ class AgentChangeSetRollbackRequest(BaseModel):
         return value.strip()
 
 
+class AgentChangeSetAcceptRequest(BaseModel):
+    acknowledge: Literal[True]
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def nonempty_reason(cls, value: str) -> str:
+        return _strip_required_text(value, "resolution reason")
+
+
 class AgentChangeSetStepRead(BaseModel):
     id: UUID
     change_set_id: UUID
@@ -143,6 +161,7 @@ class AgentChangeSetStepRead(BaseModel):
     rollback: AgentCommandCreate | None = None
     forward_command: AgentCommandRead | None = None
     rollback_command: AgentCommandRead | None = None
+    rollback_history: list[AgentCommandRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -154,6 +173,10 @@ class AgentChangeSetRead(BaseModel):
     status: AgentChangeSetStatus
     rollback_on_failure: bool
     rollback_reason: str = ""
+    resolution_reason: str = ""
+    held_server_ids: list[UUID] = Field(default_factory=list)
+    blocking_command_ids: list[UUID] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     steps: list[AgentChangeSetStepRead]
     created_at: datetime
     updated_at: datetime

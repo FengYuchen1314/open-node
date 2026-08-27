@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.changes import (
+    AgentChangeSetAcceptRequest,
     AgentChangeSetCreate,
     AgentChangeSetResponse,
     AgentChangeSetRollbackRequest,
@@ -13,6 +14,7 @@ from open_node.domain.changes import (
 )
 from open_node.domain.inventory import AgentCommandRead
 from open_node.services.agent_ws import AgentConnectionManager
+from open_node.services.change_sets import ChangeSetConflict
 from open_node.services.inventory import (
     ChangeSetNotFoundError,
     InventoryStore,
@@ -48,6 +50,8 @@ async def create_change_set(
             change_set = store.get_change_set(change_set.id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ChangeSetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AgentChangeSetResponse(change_set=change_set, commands=commands)
 
 
@@ -73,7 +77,9 @@ async def create_routed_outbound_change_set(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=409
+            if isinstance(exc, ChangeSetConflict)
+            else status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
     return AgentChangeSetResponse(change_set=change_set, commands=commands)
@@ -105,6 +111,8 @@ async def dispatch_change_set(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ChangeSetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AgentChangeSetResponse(change_set=change_set, commands=commands)
 
 
@@ -126,11 +134,30 @@ async def rollback_change_set(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ChangeSetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AgentChangeSetResponse(
         change_set=change_set,
         commands=commands,
         warnings=warnings,
     )
+
+
+@router.post("/{change_set_id}/accept", response_model=AgentChangeSetResponse)
+async def accept_change_set(
+    change_set_id: UUID,
+    payload: AgentChangeSetAcceptRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentChangeSetResponse:
+    try:
+        change_set = store.accept_change_set(change_set_id, payload)
+    except ChangeSetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChangeSetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await connections.dispatch_ready_commands(store)
+    return AgentChangeSetResponse(change_set=change_set)
 
 
 async def _dispatch_commands(
@@ -141,4 +168,5 @@ async def _dispatch_commands(
     dispatched: list[AgentCommandRead] = []
     for command in commands:
         dispatched.append(await connections.dispatch_command(store, command))
+    await connections.dispatch_ready_commands(store)
     return dispatched

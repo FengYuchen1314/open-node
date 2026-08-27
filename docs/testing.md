@@ -298,7 +298,58 @@ The reference-agent smoke also creates a temporary administrator and signs in
 as the operator; the reference agent still authenticates only with its own
 bootstrap token. No test disables management authentication.
 
+## Multi-Node Change-Set Smoke
+
+On the designated VPS, build the frontend, install the backend's `browser`
+extra and Chromium, and install the Agent wheel into a separate environment.
+Then run:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-change-sets.py \
+  --agent-python "$AGENT_ENV/bin/python" \
+  --output /tmp/open-node-change-artifacts < /dev/null
+```
+
+This uses the same pinned official Xray archive as the independent-agent smoke
+and accepts `--xray-archive` for a checksum-verified local copy. It starts an
+authenticated disposable FastAPI controller with the production frontend,
+two installed Agents and real VLESS traffic for WebSocket/WebSocket, HTTP/HTTP
+and mixed transport pairs. Temporary gates verify forward ordering, reverse
+rollback ordering, cancellation while a forward command is executing, and
+automatic compensation after native Xray validation fails. Bootstrap and
+newly provisioned client traffic are checked before and after recovery.
+
+The mixed pair also exercises the real Vue rollback-failure/retry workflow,
+retained command history, incomplete compensation, and explicit acceptance
+with a required reason and checkbox on desktop and mobile. Layout failures
+retain screenshots and element-bound diagnostics. Temporary processes and
+private state are removed; only requested artifacts remain. Unit tests cover
+lease races, overlapping reservations, draining earlier sequences, late
+rollback rejection, restart persistence and missing-column SQLite migration.
+
 ## Latest Verification
+
+The coordinated change-set worktree passed on the designated VPS:
+
+- Backend: 189 tests; Agent: 86 tests; frontend: 82 tests and production build.
+- Ruff and Probe Worker TypeScript checks passed.
+- Real two-node WebSocket/WebSocket, HTTP/HTTP and mixed-transport changes
+  verified ordered execution, actual client forwarding, reverse compensation,
+  cancellation in flight and automatic recovery after native validation failure.
+- Desktop/mobile browser flows verified compensation retry, expanded command
+  results, retained history, required acceptance reason/acknowledgment and live
+  status. A deliberately delayed list response cannot overwrite a newer action.
+- Independent installed-Agent and pinned reference-Agent smokes passed again,
+  including snapshot refresh, validation-gated recovery and persistent journal
+  behavior. No reference source is needed by the independent Agent.
+- Missing-column SQLite upgrades preserve old command outcomes and pause legacy
+  execution for review, including concurrent ordinary dependency sequences.
+
+These results do not close the other runtime gates in
+[migration-map.md](migration-map.md). Existing Starlette/httpx deprecation and
+frontend bundle-size warnings remain.
+
+## Earlier Certificate Verification
 
 Certificate management was verified on the designated VPS:
 

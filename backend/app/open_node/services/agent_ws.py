@@ -49,6 +49,10 @@ class AgentConnectionManager:
                 break
             await self.dispatch_command(store, command)
 
+    async def dispatch_ready_commands(self, store: InventoryStore) -> None:
+        for server_id in list(self._connections):
+            await self.dispatch_pending_commands(store, server_id)
+
     async def dispatch_command(
         self,
         store: InventoryStore,

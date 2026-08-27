@@ -76,7 +76,7 @@ Xray/nginx config plus agent setting wrappers, high-level runtime/site
 operation wrappers, a subscription catalog with user-plan binding, optional
 agent `batch-apply` provisioning, public subscription links with generated
 per-user credentials, Clash/sing-box/URI subscription rendering, durable
-per-user traffic ledgering, rollback-friendly multi-server change sets plus a
+per-user traffic ledgering, [coordinated multi-server change sets](docs/change-sets.md) plus a
 routed-outbound change-set planner, and subscription template presets including
 Xray fork AnyTLS/Snell/Mieru coverage,
 catalog import/export workflows, quota status plus traffic reset automation,

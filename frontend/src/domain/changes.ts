@@ -1,6 +1,8 @@
 import type { AgentCommand, AgentCommandCreateRequest } from "./inventory";
 
-export type AgentChangeSetStatus = "planned" | "dispatched" | "rollback_queued";
+export type AgentChangeSetStatus = "planned" | "dispatched" | "rollback_queued" | "succeeded"
+  | "failed" | "rolled_back" | "rollback_failed" | "rollback_incomplete" | "cancelled"
+  | "accepted" | "needs_review";
 
 export interface AgentChangeSetStepCreateRequest {
   server_id: string;
@@ -51,6 +53,7 @@ export interface AgentChangeSetStep {
   rollback?: AgentCommandCreateRequest | null;
   forward_command?: AgentCommand | null;
   rollback_command?: AgentCommand | null;
+  rollback_history?: AgentCommand[];
   created_at: string;
   updated_at: string;
 }
@@ -62,6 +65,10 @@ export interface AgentChangeSet {
   status: AgentChangeSetStatus;
   rollback_on_failure: boolean;
   rollback_reason: string;
+  resolution_reason?: string;
+  held_server_ids?: string[];
+  blocking_command_ids?: string[];
+  warnings?: string[];
   steps: AgentChangeSetStep[];
   created_at: string;
   updated_at: string;
@@ -77,4 +84,15 @@ export interface AgentChangeSetResponse {
   commands: AgentCommand[];
   warnings: string[];
   license_required: false;
+}
+
+export function changeSetActions(change: AgentChangeSet | null) {
+  const status = change?.status;
+  return {
+    dispatch: status === "planned",
+    rollback: !!status && ["planned", "dispatched", "succeeded", "failed", "rollback_failed", "rollback_incomplete"].includes(status),
+    accept: !!status && ["failed", "rollback_failed", "rollback_incomplete", "needs_review"].includes(status)
+      && !change?.blocking_command_ids?.length,
+    retry: status === "rollback_failed",
+  };
 }

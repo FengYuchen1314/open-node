@@ -6,6 +6,7 @@ import hmac
 import json
 from calendar import monthrange
 from collections.abc import Iterable
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -38,6 +39,7 @@ from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from open_node.domain.changes import (
+    AgentChangeSetAcceptRequest,
     AgentChangeSetCreate,
     AgentChangeSetRead,
     AgentChangeSetRollbackRequest,
@@ -921,8 +923,21 @@ class AgentChangeSetModel(Base):
     status: Mapped[str] = mapped_column(String(24), index=True)
     rollback_on_failure: Mapped[bool] = mapped_column(Boolean, default=True)
     rollback_reason: Mapped[str] = mapped_column(Text, default="")
+    resolution_reason: Mapped[str] = mapped_column(Text, default="")
+    coordination_version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ChangeSetServerLockModel(Base):
+    __tablename__ = "change_set_server_locks"
+
+    server_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True,
+    )
+    change_set_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("agent_change_sets.id", ondelete="CASCADE"), index=True,
+    )
 
 
 class AgentChangeSetStepModel(Base):
@@ -956,6 +971,7 @@ class AgentChangeSetStepModel(Base):
     rollback_body: Mapped[Any | None] = mapped_column(JSON, nullable=True)
     rollback_timeout_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rollback_stream: Mapped[bool] = mapped_column(Boolean, default=False)
+    rollback_history_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     forward_command_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("agent_commands.id", ondelete="SET NULL"),
@@ -1187,12 +1203,21 @@ class InventoryStore:
     def create_schema(self) -> None:
         Base.metadata.create_all(self._engine)
         self._migrate_schema()
+        self._change_sets().migrate_legacy()
 
     def _migrate_schema(self) -> None:
         if self._engine.dialect.name != "sqlite":
             return
         inspector = inspect(self._engine)
         table_names = set(inspector.get_table_names())
+        if "agent_change_sets" in table_names:
+            self._sqlite_add_missing_columns(inspector, "agent_change_sets", {
+                "resolution_reason": "TEXT NOT NULL DEFAULT ''",
+                "coordination_version": "INTEGER NOT NULL DEFAULT 0",
+            })
+            self._sqlite_add_missing_columns(inspector, "agent_change_set_steps", {
+                "rollback_history_ids": "JSON NOT NULL DEFAULT '[]'",
+            })
         if "agent_scan_results" in table_names:
             self._sqlite_add_missing_columns(inspector, "agent_scan_results", {"nginx": "JSON"})
         if "agent_commands" in table_names:
@@ -3587,72 +3612,19 @@ class InventoryStore:
         self,
         change_set_id: UUID,
     ) -> tuple[AgentChangeSetRead, list[AgentCommandRead]]:
-        now = datetime.now(tz=UTC)
-        with self._session() as session:
-            change_set = self._change_set_model(session, change_set_id)
-            commands: list[CommandModel] = []
-            for step in self._change_set_steps(session, change_set.id):
-                if step.forward_command_id:
-                    continue
-                server = session.get(ServerModel, step.server_id)
-                if not server:
-                    raise ServerNotFoundError(f"server not found: {step.server_id}")
-                command = self._create_command_model(
-                    session,
-                    server,
-                    self._step_forward_command(step),
-                    now,
-                )
-                step.forward_command_id = command.id
-                step.updated_at = now
-                commands.append(command)
-
-            change_set.status = AgentChangeSetStatus.DISPATCHED.value
-            change_set.updated_at = now
-            session.commit()
-            for command in commands:
-                session.refresh(command)
-            session.refresh(change_set)
-            return self._change_set_read(session, change_set), [
-                self._command_read(command) for command in commands
-            ]
+        return self._change_sets().dispatch(change_set_id)
 
     def rollback_change_set(
         self,
         change_set_id: UUID,
         payload: AgentChangeSetRollbackRequest,
     ) -> tuple[AgentChangeSetRead, list[AgentCommandRead], list[str]]:
-        now = datetime.now(tz=UTC)
-        warnings: list[str] = []
-        with self._session() as session:
-            change_set = self._change_set_model(session, change_set_id)
-            commands: list[CommandModel] = []
-            steps = list(reversed(self._change_set_steps(session, change_set.id)))
-            for step in steps:
-                if step.rollback_command_id:
-                    continue
-                rollback = self._step_rollback_command(step)
-                if not rollback:
-                    warnings.append(f"step {step.sequence} has no rollback command")
-                    continue
-                server = session.get(ServerModel, step.server_id)
-                if not server:
-                    raise ServerNotFoundError(f"server not found: {step.server_id}")
-                command = self._create_command_model(session, server, rollback, now)
-                step.rollback_command_id = command.id
-                step.updated_at = now
-                commands.append(command)
+        return self._change_sets().rollback(change_set_id, payload)
 
-            change_set.status = AgentChangeSetStatus.ROLLBACK_QUEUED.value
-            change_set.rollback_reason = payload.reason
-            change_set.updated_at = now
-            session.commit()
-            for command in commands:
-                session.refresh(command)
-            session.refresh(change_set)
-            return self._change_set_read(session, change_set), [
-                self._command_read(command) for command in commands
-            ], warnings
+    def accept_change_set(
+        self, change_set_id: UUID, payload: AgentChangeSetAcceptRequest,
+    ) -> AgentChangeSetRead:
+        return self._change_sets().accept(change_set_id, payload)
 
     def create_command(self, server_id: UUID, payload: AgentCommandCreate) -> AgentCommandRead:
         with self._session() as session:
@@ -3740,7 +3712,7 @@ class InventoryStore:
         token: str,
         max_commands: int,
     ) -> tuple[ServerRead, list[AgentCommandRead]]:
-        with self._session() as session:
+        with self._coordinated_session() as session:
             server = self._server_by_token(session, token)
             now = datetime.now(tz=UTC)
             candidates = session.scalars(
@@ -3775,7 +3747,7 @@ class InventoryStore:
         command_id: UUID,
         payload: AgentCommandResultRequest,
     ) -> AgentCommandRead:
-        with self._session() as session:
+        with self._coordinated_session() as session:
             server = self._server_by_token(session, payload.token)
             command = session.get(CommandModel, str(command_id))
             if not command or command.server_id != server.id:
@@ -3791,7 +3763,7 @@ class InventoryStore:
         request_id: str,
         payload: AgentCommandResultRequest,
     ) -> AgentCommandRead:
-        with self._session() as session:
+        with self._coordinated_session() as session:
             server = self._server_by_token(session, payload.token)
             command = session.scalar(
                 select(CommandModel).where(
@@ -3860,7 +3832,7 @@ class InventoryStore:
             return self._stream_frame_read(frame, command)
 
     def lease_command_for_push(self, command_id: UUID) -> AgentCommandRead | None:
-        with self._session() as session:
+        with self._coordinated_session() as session:
             command = session.get(CommandModel, str(command_id))
             if not command:
                 raise CommandNotFoundError(f"command not found: {command_id}")
@@ -3872,7 +3844,7 @@ class InventoryStore:
             return self._command_read(command)
 
     def release_command_lease(self, command_id: UUID, attempts: int) -> AgentCommandRead:
-        with self._session() as session:
+        with self._coordinated_session() as session:
             command = session.get(CommandModel, str(command_id))
             if not command:
                 raise CommandNotFoundError(f"command not found: {command_id}")
@@ -6175,6 +6147,21 @@ class InventoryStore:
     def _session(self) -> Session:
         return self._session_factory()
 
+    @contextmanager
+    def _coordinated_session(self):
+        with self._session() as session:
+            # Reservations and command leases must observe one serialized state transition.
+            if self._engine.dialect.name == "sqlite":
+                session.execute(text("BEGIN IMMEDIATE"))
+            else:
+                session.execute(select(ServerModel.id).order_by(ServerModel.id).with_for_update()).all()
+            yield session
+
+    def _change_sets(self):
+        from open_node.services.change_sets import ChangeSetCoordinator
+
+        return ChangeSetCoordinator(self)
+
     @staticmethod
     def _server_record(server: ServerModel) -> ServerRecord:
         return ServerRecord(
@@ -6288,9 +6275,11 @@ class InventoryStore:
             status=AgentChangeSetStatus(change_set.status),
             rollback_on_failure=change_set.rollback_on_failure,
             rollback_reason=change_set.rollback_reason,
+            resolution_reason=change_set.resolution_reason,
             steps=[self._change_set_step_read(session, step) for step in steps],
             created_at=change_set.created_at,
             updated_at=change_set.updated_at,
+            **self._change_sets().read_state(session, change_set, steps),
         )
 
     @staticmethod
@@ -6320,6 +6309,11 @@ class InventoryStore:
             rollback_command=InventoryStore._command_read(rollback_command)
             if rollback_command
             else None,
+            rollback_history=[
+                InventoryStore._command_read(previous)
+                for identifier in (step.rollback_history_ids or [])
+                if (previous := session.get(CommandModel, identifier)) is not None
+            ],
             created_at=step.created_at,
             updated_at=step.updated_at,
         )
@@ -8367,12 +8361,13 @@ class InventoryStore:
         elapsed_ms = (now - leased_at).total_seconds() * 1000
         return elapsed_ms >= command.timeout_ms
 
-    @staticmethod
-    def _claim_command_lease(session: Session, command: CommandModel, now: datetime) -> bool:
+    def _claim_command_lease(self, session: Session, command: CommandModel, now: datetime) -> bool:
         if command.status != AgentCommandStatus.PENDING.value and (
             command.status != AgentCommandStatus.LEASED.value
             or not InventoryStore._lease_expired(command, now)
         ):
+            return False
+        if not self._change_sets().can_lease(session, command):
             return False
         # Both transports must claim the same persisted version before dispatching.
         result = session.execute(
@@ -8407,6 +8402,7 @@ class InventoryStore:
             return
         if command.status == AgentCommandStatus.WAITING.value:
             raise CommandNotReadyError(f"command is waiting for prerequisite: {command.id}")
+        self._change_sets().validate_result(session, command)
         now = datetime.now(tz=UTC)
         result_error = payload.error
         body = payload.body if isinstance(payload.body, dict) else {}
@@ -8446,13 +8442,13 @@ class InventoryStore:
         server.last_heartbeat = now
         server.updated_at = now
         self._advance_command_dependents(session, command, now)
-        if command.status == AgentCommandStatus.FAILED.value:
-            return
-        self._upsert_return_route_results(session, server, command, payload, now)
-        self._record_domain_latency_result(session, server, command, payload, now)
-        self._record_scan_result_from_command(session, server, command, payload, now)
-        self._record_xray_config_snapshot_from_command(session, server, command, payload, now)
-        self._queue_xray_snapshot_refresh_after_mutation(session, server, command, payload, now)
+        if command.status != AgentCommandStatus.FAILED.value:
+            self._upsert_return_route_results(session, server, command, payload, now)
+            self._record_domain_latency_result(session, server, command, payload, now)
+            self._record_scan_result_from_command(session, server, command, payload, now)
+            self._record_xray_config_snapshot_from_command(session, server, command, payload, now)
+            self._queue_xray_snapshot_refresh_after_mutation(session, server, command, payload, now)
+        self._change_sets().advance_after_result(session, command, now)
 
     @staticmethod
     def _advance_command_dependents(session: Session, command: CommandModel, now: datetime) -> None:

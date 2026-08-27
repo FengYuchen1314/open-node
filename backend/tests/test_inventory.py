@@ -2965,14 +2965,14 @@ def test_concurrent_validation_results_have_one_terminal_outcome(
     created, applied = queue_recovery(client)
     store = client.app.state.inventory
     validation, write, restart = applied["commands"]
-    original_apply = store._apply_command_result
+    original_complete = store.complete_command
     barrier = Barrier(2)
 
-    def concurrent_apply(session, server, command, payload):
+    def concurrent_complete(identifier, payload):
         barrier.wait(timeout=5)
-        original_apply(session, server, command, payload)
+        return original_complete(identifier, payload)
 
-    monkeypatch.setattr(store, "_apply_command_result", concurrent_apply)
+    monkeypatch.setattr(store, "complete_command", concurrent_complete)
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = [pool.submit(
             store.complete_command,
@@ -4667,14 +4667,14 @@ def test_http_and_websocket_lease_race_has_one_owner(
     server_id = created["server"]["id"]
     command = client.post(f"/api/v1/servers/{server_id}/operations/system-info").json()["command"]
     store = client.app.state.inventory
-    original_claim = store._claim_command_lease
+    original_session = store._coordinated_session
     barrier = Barrier(2)
 
-    def concurrent_claim(session, candidate, now):
+    def concurrent_session():
         barrier.wait(timeout=5)
-        return original_claim(session, candidate, now)
+        return original_session()
 
-    monkeypatch.setattr(store, "_claim_command_lease", concurrent_claim)
+    monkeypatch.setattr(store, "_coordinated_session", concurrent_session)
     with ThreadPoolExecutor(max_workers=2) as pool:
         http = pool.submit(store.lease_commands, created["agent_token"], 1)
         push = pool.submit(store.lease_command_for_push, UUID(command["id"]))

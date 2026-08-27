@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentChangeSet } from "../domain/changes";
 import type { AgentCommand } from "../domain/inventory";
 import {
+  acceptChangeSet,
   createChangeSet,
   createRoutedOutboundChangeSet,
   dispatchChangeSet,
@@ -73,6 +74,20 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("change set API client", () => {
+  it("explicitly acknowledges partial state with an audit reason", async () => {
+    const fetcher: typeof fetch = async (input, init) => {
+      expect(input.toString()).toBe("/api/v1/change-sets/change_1/accept");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ acknowledge: true, reason: "Verified nodes" });
+      return jsonResponse({ change_set: { ...changeSet, status: "accepted" }, commands: [], warnings: [] });
+    };
+    expect((await acceptChangeSet("change_1", "Verified nodes", fetcher)).change_set.status).toBe("accepted");
+  });
+
+  it("surfaces reservation conflicts without hiding the backend reason", async () => {
+    const fetcher: typeof fetch = async () => jsonResponse({ detail: "A command is still in flight" }, 409);
+    await expect(acceptChangeSet("change_1", "Verified nodes", fetcher)).rejects.toThrow("still in flight");
+  });
   it("lists change sets without sending license headers", async () => {
     let requestUrl = "";
     let headers: HeadersInit | undefined;

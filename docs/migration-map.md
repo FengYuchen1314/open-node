@@ -74,8 +74,11 @@ This document records the starting source map for the Open Node refactor.
    - Done: public subscription token/short-code links, stable per-user
      per-node credentials, Clash YAML rendering, and subscription userinfo
      headers from latest telemetry.
-   - Done: rollback-friendly multi-server change sets with forward command
-     dispatch, reverse rollback command queuing, and a Vue change workspace.
+   - Done: coordinated multi-server change sets with atomic node reservations,
+     persisted cross-node dependencies, prior-work draining, automatic failure
+     compensation, in-flight rollback barriers, retry history and explicit
+     partial-state acceptance. The Vue workspace exposes these states and
+     actions. SQLite upgrades pause legacy executions for operator review.
    - Done: routed-outbound change-set planner and Vue form that recreate the
      active MMWX add-client, add-outbound, add-rule workflow without license
      checks.
@@ -228,9 +231,10 @@ These passing command and snapshot checks do not prove a complete replacement:
   without a running Xray. Neither proves full fork protocol compatibility.
 - Verify external `runtime_mode: systemd` and wider OS/architecture deployment
   coverage. The verified non-root systemd installation owns a managed Xray child.
-- Extend dependency coordination to multi-server change sets and rollback,
-  including interactions with already-running commands. The new dependencies
-  cover the server recovery/runtime workflows, not arbitrary concurrent jobs.
+- Multi-server change-set coordination now includes already-started dependency
+  sequences, new-work reservations and reverse compensation. It coordinates
+  the Open Node command queue, not external shell edits or other host managers.
+  See [change-sets.md](change-sets.md) for the explicit failure/review contract.
 - Single-image FastAPI/Vue packaging, non-root read-only Compose deployment,
   HTTPS reverse proxy, administrator initialization/recovery, persistent-volume
   backup/restore, and explicit image rollback are implemented. The actual

@@ -165,6 +165,14 @@ image, verify it, and then switch traffic. Do not run `down --volumes` during
 upgrades, and do not prune the previous images until recovery is verified.
 Ordinary `down` retains data but may recreate the bridge network later.
 
+The coordinated change-set upgrade adds execution states that older builds
+cannot read. For this upgrade, returning to the older three-state build
+requires its pre-upgrade database backup, not only an image change. Stop new
+dispatches and resolve outstanding Agent work before recovery; restoring a
+control-plane database does not undo commands already executed on nodes.
+Review [legacy change-set migration](change-sets.md#upgrade-from-earlier-open-node-builds)
+before upgrading a deployment with existing change runs.
+
 The Node/Python base manifests and lego release are pinned; frontend
 dependencies use `package-lock.json`. Python dependencies currently resolve
 within the constraints in `backend/pyproject.toml`. Builds are therefore not
