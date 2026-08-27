@@ -434,12 +434,23 @@ body {
   grid-template-columns: repeat(3, minmax(160px, 1fr));
 }
 
+.runtime-tunnel-listeners summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 10px 0;
+}
+
 .runtime-deploy-toggle-row {
   align-items: center;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  grid-column: 1 / -1;
   min-height: 48px;
+}
+
+.runtime-deploy-toggle-row > .v-input {
+  flex: 0 0 auto;
 }
 
 .runtime-tunnel-deploy-grid .runtime-node-action {

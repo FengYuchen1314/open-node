@@ -4,6 +4,8 @@ import asyncio
 import contextlib
 import copy
 import fnmatch
+import hashlib
+import json
 import logging
 import os
 import signal
@@ -15,10 +17,17 @@ from urllib.parse import urlsplit
 import crossplane
 import httpx
 import psutil
+from pydantic import BaseModel, ConfigDict, Field
 
 from open_node_agent.certificates import hostname, validate_pair
 from open_node_agent.host_files import FileTransaction, guarded_path, read_private
-from open_node_agent.runtime import MAX_CONFIG_BYTES, RuntimeFailure, atomic_write, run_command
+from open_node_agent.runtime import (
+    MAX_CONFIG_BYTES,
+    RuntimeFailure,
+    atomic_write,
+    decode_config,
+    run_command,
+)
 
 
 def directive(name: str, *args: str, block: list | None = None) -> dict:
@@ -38,6 +47,20 @@ def render(nodes: list) -> bytes:
     return (crossplane.build(nodes) + "\n").encode()
 
 
+class TunnelDeployment(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    domain: str = Field(min_length=1, max_length=255)
+    cert_name: str = Field(min_length=1, max_length=255, pattern=r"^[a-zA-Z0-9_.-]+$")
+    nginx_http: list[dict] = Field(min_length=1, max_length=8)
+    domain_config: str = Field(min_length=1, max_length=MAX_CONFIG_BYTES)
+    xray_config: dict
+    expected_xray_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    clear_stream_port: bool = True
+    listen_port: int = Field(default=443, ge=1, le=65535)
+    restart_xray: bool = True
+
+
 class NginxRuntime:
     def __init__(self, xray, journal):
         self.xray, self.journal, self.config = xray, journal, xray.config
@@ -53,9 +76,15 @@ class NginxRuntime:
         self.log_handler = None
         self.log = logging.Logger("open-node-nginx")
         self.transaction = FileTransaction(
-            self.config.state_dir / "host-transaction.json", self.transaction_path
+            self.config.state_dir / "host-transaction.json",
+            self.transaction_path,
+            self.restore_intents,
         )
         self.transaction.recover()
+
+    def restore_intents(self, intents):
+        for service, desired in intents.items():
+            self.journal.set_desired_running(desired, service)
 
     def config_path(self, value: str | Path) -> Path:
         path = guarded_path(self.root, value)
@@ -64,12 +93,16 @@ class NginxRuntime:
         return path
 
     def cert_path(self, value: str | Path) -> Path:
+        if "$" in str(value):
+            raise RuntimeFailure("Dynamic certificate paths are not allowed")
         path = guarded_path(self.certs, value)
         if path.suffix not in {".pem", ".key", ".crt", ".cer"}:
             raise RuntimeFailure("Certificate paths must end in .pem, .key, .crt or .cer")
         return path
 
     def transaction_path(self, path: Path) -> Path:
+        if path == self.config.xray_config:
+            return guarded_path(path.parent, path)
         if path.is_relative_to(self.root):
             return self.config_path(path)
         if path.is_relative_to(self.certs):
@@ -118,6 +151,8 @@ class NginxRuntime:
         return parsed["config"][0]["parsed"]
 
     def site_path(self, value: str) -> Path:
+        if "$" in value:
+            raise RuntimeFailure("Dynamic static content paths are not allowed")
         path = Path(value)
         for root in (self.html, *self.config.nginx_site_roots):
             if path == root or path.is_relative_to(root):
@@ -320,35 +355,60 @@ class NginxRuntime:
                 "Nginx did not activate new workers; configuration rolled back"
             ) from None
 
-    async def apply(self, changes, *, activate=False, reload_xray=False):
+    async def apply(self, changes, *, activate=False, reload_xray=False, start_services=False):
         nginx_running, xray_running = await self.running(), await self.xray.running()
         changes = dict(changes)
+        coupled = self.config.xray_config in changes
+        intents = (
+            {
+                "xray": self.journal.desired_running(self.config.auto_start),
+                "nginx": self.journal.desired_running(False, "nginx"),
+            }
+            if coupled
+            else None
+        )
         if self.main.exists() or self.main in changes:
             self.prepare()
             changes[self.effective] = (
                 read_private(self.effective) if self.effective.exists() else None
             )
-        self.transaction.begin(changes)
+        self.transaction.begin(changes, intents=intents)
         touched_nginx = touched_xray = False
         try:
             if self.main.exists():
                 atomic_write(self.effective, self.compile())
                 await self.validate()
-            if reload_xray:
+            if reload_xray or coupled:
                 valid, _ = await self.xray.validate(self.xray.read())
                 if not valid:
-                    raise RuntimeFailure("Xray rejected the deployed certificate")
-            if activate and nginx_running:
+                    raise RuntimeFailure("Xray rejected the candidate host configuration")
+            if activate and (nginx_running or start_services):
                 touched_nginx = True
-                await self.reload()
-            if reload_xray and xray_running:
+                await (self.reload() if nginx_running else self.start())
+            if reload_xray and (xray_running or start_services):
                 touched_xray = True
                 await self.xray.restart()
+            if coupled:
+                if touched_nginx:
+                    self.journal.set_desired_running(True, "nginx")
+                if touched_xray:
+                    self.journal.set_desired_running(True)
             self.transaction.commit()
         except BaseException:
             self.transaction.recover()
 
             async def restore_services():
+                if coupled:
+                    # Release new listeners before restoring the previous port ownership.
+                    if touched_xray:
+                        await self.xray.stop()
+                    if touched_nginx:
+                        await self.stop()
+                    if touched_nginx and nginx_running:
+                        await self.start()
+                    if touched_xray and xray_running:
+                        await self.xray.start()
+                    return
                 if touched_nginx:
                     await self.reload()
                 if touched_xray:
@@ -361,7 +421,129 @@ class NginxRuntime:
             except asyncio.CancelledError:
                 await restore
             raise
-        return {"success": True, "restart_required": nginx_running and not activate}
+        return {
+            "success": True,
+            "restart_required": (nginx_running and not activate) or (coupled and not reload_xray),
+        }
+
+    async def deploy_tunnel(self, body):
+        self.require_binary()
+        if self.config.runtime_mode != "managed":
+            raise RuntimeFailure("Atomic tunnel deployment requires the managed Xray runtime")
+        body = TunnelDeployment.model_validate(body).model_dump()
+        domain = hostname(body.get("domain"))
+        current = self.xray.read()
+        expected = body.get("expected_xray_sha256")
+        actual = hashlib.sha256(
+            json.dumps(current, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if not isinstance(expected, str) or expected != actual:
+            raise RuntimeFailure(
+                "Xray configuration changed; refresh its snapshot before deployment"
+            )
+        cert_name = body.get("cert_name", domain)
+        cert, key = self.cert_path(cert_name + ".pem"), self.cert_path(cert_name + ".key")
+        validate_pair(domain, read_private(cert).decode(), read_private(key).decode())
+        candidate = decode_config(body.get("xray_config"))
+        if (
+            self.config.stats_address
+            and candidate.get("api", {}).get("listen") != self.config.stats_address
+        ):
+            raise RuntimeFailure("Tunnel API listener must match the operator's stats_address")
+        main = (
+            self.parse(self.main)
+            if self.main.exists()
+            else [
+                directive("events", block=[directive("worker_connections", "1024")]),
+                directive("http", block=[directive("access_log", "/dev/stdout")]),
+            ]
+        )
+        http = [item for item in main if item["directive"] == "http" and "block" in item]
+        if len(http) != 1:
+            raise RuntimeFailure("Tunnel deployment requires exactly one main http block")
+        additions = body.get("nginx_http")
+        if not isinstance(additions, list) or len(additions) > 8:
+            raise RuntimeFailure("Invalid tunnel HTTP configuration")
+        for item in additions:
+            if not isinstance(item, dict) or item.get("directive") not in {"map", "include"}:
+                raise RuntimeFailure("Tunnel HTTP additions must be maps or includes")
+            if item["directive"] == "include":
+                existing = any(
+                    n["directive"] == "include"
+                    and n["args"]
+                    in [
+                        ["servers/*.conf"],
+                        [str(self.root / "servers/*.conf")],
+                    ]
+                    for n in http[0]["block"]
+                )
+                if existing:
+                    continue
+            else:
+                names = [
+                    n
+                    for n in http[0]["block"]
+                    if n["directive"] == "map" and n["args"][-1:] == item.get("args", [])[-1:]
+                ]
+                if names:
+
+                    def shape(node):
+                        return {
+                            k: [shape(n) for n in v] if k == "block" else v
+                            for k, v in node.items()
+                            if k in {"directive", "args", "block"}
+                        }
+
+                    if len(names) != 1 or shape(names[0]) != shape(item):
+                        raise RuntimeFailure(
+                            "An existing Nginx map conflicts with tunnel deployment"
+                        )
+                    continue
+            http[0]["block"].append(item)
+        changes = {
+            self.main: render(main),
+            self.config_path("servers/" + domain + ".conf"): body["domain_config"].encode(),
+            self.config.xray_config: json.dumps(candidate, indent=2).encode() + b"\n",
+        }
+        index = self.html / "index.html"
+        if not index.exists():
+            changes[index] = b"Open Node\n"
+        if body.get("clear_stream_port", True):
+            stream_changes, _ = self.stream_changes(body.get("listen_port", 443))
+            changes.update(stream_changes)
+        result = await self.apply(
+            changes, activate=True, reload_xray=body.get("restart_xray", True), start_services=True
+        )
+        return {
+            **result,
+            "domain": domain,
+            "nginx": await self.status(),
+            "xray_running": await self.xray.running(),
+        }
+
+    def stream_changes(self, port):
+        if type(port) is not int or not 1 <= port <= 65535:
+            raise RuntimeFailure("Invalid stream port")
+        changes, removed = {}, 0
+        for file in self.files():
+            if file.parent != self.root / "stream_servers":
+                continue
+            kept, file_removed = [], 0
+            for item in self.parse(file):
+                matches = item["directive"] == "server" and any(
+                    n["directive"] == "listen"
+                    and n["args"]
+                    and n["args"][0].rsplit(":", 1)[-1] == str(port)
+                    for n in item.get("block", [])
+                )
+                if matches:
+                    removed += 1
+                    file_removed += 1
+                else:
+                    kept.append(item)
+            if file_removed:
+                changes[file] = render(kept)
+        return changes, removed
 
     def default_main(self):
         return render(
@@ -412,6 +594,7 @@ class NginxRuntime:
             "running": await self.running(),
             "installed": self.main.exists(),
             "available": self.config.nginx_binary is not None,
+            "tunnel_deploy": int(self.config.runtime_mode == "managed"),
             "mode": "managed",
             "config_path": str(self.main),
             "certificate_dir": str(self.certs),
@@ -561,29 +744,7 @@ class NginxRuntime:
                 raise RuntimeFailure("Website not found")
             return await self.apply({file: None}, activate=True)
         if operation == "clear-stream-port" and method == "POST":
-            port = body.get("port")
-            if type(port) is not int or not 1 <= port <= 65535:
-                raise RuntimeFailure("Invalid stream port")
-            changes, removed = {}, 0
-            for file in self.files():
-                if file.parent != self.root / "stream_servers":
-                    continue
-                kept = []
-                file_removed = 0
-                for item in self.parse(file):
-                    matches = item["directive"] == "server" and any(
-                        n["directive"] == "listen"
-                        and n["args"]
-                        and n["args"][0].rsplit(":", 1)[-1] == str(port)
-                        for n in item.get("block", [])
-                    )
-                    if matches:
-                        removed += 1
-                        file_removed += 1
-                    else:
-                        kept.append(item)
-                if file_removed:
-                    changes[file] = render(kept)
+            changes, removed = self.stream_changes(body.get("port"))
             await self.apply(changes, activate=True)
             return {"success": True, "removed": removed}
         raise NotImplementedError(f"Operation not implemented: {method} {path}")

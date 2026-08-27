@@ -124,11 +124,29 @@ const runtimeTunnelDeployForm = reactive({
   domain: "",
   proxyDomain: "",
   siteType: "static" as "static" | "proxy",
-  siteValue: "/usr/local/nginx/html",
+  siteValue: "",
+  listenAddress: "0.0.0.0",
+  listenPort: 443,
+  nginxPort: 8001,
+  forwardPort: 46174,
+  apiPort: 46736,
+  metricsPort: 38889,
   certName: "",
   clearStreamPort: true,
   restartXray: true,
   force: false,
+});
+const tunnelPortFields = [
+  { key: "listenPort", label: "Public port" },
+  { key: "nginxPort", label: "Nginx port" },
+  { key: "forwardPort", label: "Fallback port" },
+  { key: "apiPort", label: "Xray API port" },
+  { key: "metricsPort", label: "Metrics port" },
+] as const;
+const runtimeTunnelPortsInvalid = computed(() => {
+  const ports = tunnelPortFields.map(({ key }) => Number(runtimeTunnelDeployForm[key]));
+  return ports.some((port) => !Number.isInteger(port) || port < 1 || port > 65535) ||
+    new Set(ports).size !== ports.length;
 });
 const runtimeOperationOptions: Array<{ title: string; value: AgentOperationKind }> = [
   { title: "Manage inbounds", value: "inbounds_manage" },
@@ -201,7 +219,9 @@ const runtimeTunnelDeployDisabled = computed(
     Boolean(runtimeTunnelDeletingKey.value) ||
     !selectedServerId.value ||
     !runtimeTunnelDeployForm.domain.trim() ||
-    !runtimeTunnelDeployForm.siteValue.trim(),
+    !runtimeTunnelDeployForm.listenAddress.trim() ||
+    runtimeTunnelPortsInvalid.value ||
+    (runtimeTunnelDeployForm.siteType === "proxy" && !runtimeTunnelDeployForm.siteValue.trim()),
 );
 const runtimeNodeDraftsByIndex = computed(
   () => new Map(runtimeNodeDrafts.value.map((draft) => [draft.source_index, draft])),
@@ -911,8 +931,11 @@ function runtimeTunnelDeployTooltip() {
   if (!runtimeTunnelDeployForm.domain.trim()) {
     return "Tunnel domain is required";
   }
-  if (!runtimeTunnelDeployForm.siteValue.trim()) {
-    return "Camouflage site value is required";
+  if (runtimeTunnelDeployForm.siteType === "proxy" && !runtimeTunnelDeployForm.siteValue.trim()) {
+    return "Proxy URL is required";
+  }
+  if (!runtimeTunnelDeployForm.listenAddress.trim() || runtimeTunnelPortsInvalid.value) {
+    return "A listener address and distinct ports from 1 to 65535 are required";
   }
   if (
     runtimeNodeImporting.value ||
@@ -1323,7 +1346,13 @@ async function deployRuntimeTunnel() {
       domain: runtimeTunnelDeployForm.domain.trim(),
       proxy_domain: runtimeTunnelDeployForm.proxyDomain.trim() || null,
       site_type: runtimeTunnelDeployForm.siteType,
-      site_value: runtimeTunnelDeployForm.siteValue.trim(),
+      site_value: runtimeTunnelDeployForm.siteValue.trim() || null,
+      listen_address: runtimeTunnelDeployForm.listenAddress.trim(),
+      listen_port: Number(runtimeTunnelDeployForm.listenPort),
+      nginx_port: Number(runtimeTunnelDeployForm.nginxPort),
+      forward_port: Number(runtimeTunnelDeployForm.forwardPort),
+      api_port: Number(runtimeTunnelDeployForm.apiPort),
+      metrics_port: Number(runtimeTunnelDeployForm.metricsPort),
       cert_name: runtimeTunnelDeployForm.certName.trim() || null,
       clear_stream_port: runtimeTunnelDeployForm.clearStreamPort,
       restart_xray: runtimeTunnelDeployForm.restartXray,
@@ -1981,7 +2010,7 @@ function formatDateTime(value: string) {
                     v-model="runtimeTunnelDeployForm.siteValue"
                     density="comfortable"
                     hide-details
-                    label="Site value"
+                    :label="runtimeTunnelDeployForm.siteType === 'proxy' ? 'Proxy URL' : 'Static root'"
                     prepend-inner-icon="mdi-folder-web-outline"
                     variant="outlined"
                   />
@@ -1999,7 +2028,7 @@ function formatDateTime(value: string) {
                       color="primary"
                       density="compact"
                       hide-details
-                      label="Clear 443"
+                      label="Clear stream"
                     />
                     <v-switch
                       v-model="runtimeTunnelDeployForm.restartXray"
@@ -2034,6 +2063,31 @@ function formatDateTime(value: string) {
                     </template>
                   </v-tooltip>
                 </div>
+                <details class="runtime-tunnel-listeners">
+                  <summary>Listeners</summary>
+                  <div class="runtime-tunnel-deploy-grid">
+                    <v-text-field
+                      v-model="runtimeTunnelDeployForm.listenAddress"
+                      density="comfortable"
+                      hide-details
+                      label="Listen address"
+                      variant="outlined"
+                    />
+                    <v-text-field
+                      v-for="field in tunnelPortFields"
+                      :key="field.key"
+                      v-model.number="runtimeTunnelDeployForm[field.key]"
+                      :label="field.label"
+                      density="comfortable"
+                      hide-details
+                      type="number"
+                      min="1"
+                      max="65535"
+                      step="1"
+                      variant="outlined"
+                    />
+                  </div>
+                </details>
               </v-form>
 
               <v-form class="runtime-chain-form" @submit.prevent="createRuntimeTunnelChain">

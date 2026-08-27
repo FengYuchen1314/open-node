@@ -115,6 +115,44 @@ def exercise(url: str, password: str, output: Path, database_url: str) -> None:
         page.set_viewport_size({"width": 1440, "height": 900})
         print("PASS owned Nginx paths and SSL form on desktop/mobile", flush=True)
 
+        page.get_by_role("tab", name="Runtime", exact=True).click()
+        tunnel = page.locator("form.runtime-tunnel-deploy-form")
+        tunnel.get_by_label("Domain", exact=True).fill("localhost")
+        expect(tunnel.get_by_label("Static root", exact=True)).to_have_value("")
+        tunnel.locator("summary").click()
+        submit = tunnel.get_by_role("button", name="Deploy tunnel", exact=True)
+        expect(submit).to_be_enabled()
+        public = tunnel.get_by_label("Public port", exact=True)
+        public.fill("8001")
+        expect(submit).to_be_disabled()
+        public.fill("70000")
+        expect(submit).to_be_disabled()
+        public.fill("443")
+        expect(submit).to_be_enabled()
+        for width, height, name in ((1440, 900, "desktop"), (390, 844, "mobile")):
+            page.set_viewport_size({"width": width, "height": height})
+            tunnel.scroll_into_view_if_needed()
+            check_layout(page)
+            for label in tunnel.locator(".runtime-deploy-toggle-row .v-label").all():
+                text_height = label.evaluate("""el => {
+                    const range = document.createRange();
+                    range.selectNodeContents(el);
+                    return range.getBoundingClientRect().height;
+                }""")
+                assert text_height <= 28, {"label": label.inner_text(), "height": text_height}
+            page.evaluate("window.scrollTo(0, 0)")
+            page.wait_for_function("scrollY === 0")
+            page.screenshot(path=output / f"tunnel-{name}.png", full_page=True, animations="disabled")
+        with page.expect_request("**/xray/runtime/tunnel-deploy") as sent:
+            submit.click()
+        body = sent.value.post_data_json
+        assert body["site_value"] is None and body["listen_address"] == "0.0.0.0"
+        assert body["listen_port"] == 443 and body["nginx_port"] == 8001
+        assert body["forward_port"] == 46174 and body["api_port"] == 46736
+        assert body["metrics_port"] == 38889
+        page.set_viewport_size({"width": 1440, "height": 900})
+        print("PASS tunnel defaults, listener validation and request payload on desktop/mobile", flush=True)
+
         page.get_by_role("link", name="Access", exact=True).click()
         expect(page.get_by_role("heading", name="Change Password", exact=True)).to_be_visible()
         check_layout(page)

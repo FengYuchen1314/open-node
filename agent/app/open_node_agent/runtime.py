@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import tempfile
+from ipaddress import ip_address
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -204,14 +205,32 @@ class XrayRuntime:
             "inbounds": config.get("inbounds", []),
         }
 
+    def stats_endpoint(self) -> str | None:
+        if self.config.stats_address:
+            return self.config.stats_address
+        try:
+            api = self.read().get("api", {})
+            endpoint = api.get("listen", "")
+            host, _, port = endpoint.rpartition(":")
+            if (
+                "StatsService" in api.get("services", [])
+                and ip_address(host.strip("[]")).is_loopback
+                and 1 <= int(port) <= 65535
+            ):
+                return endpoint
+        except (OSError, ValueError, AttributeError, TypeError):
+            pass
+        return None
+
     async def stats(self) -> dict | None:
-        if not self.config.stats_address or not await self.running():
+        endpoint = self.stats_endpoint()
+        if not endpoint or not await self.running():
             return None
         code, output = await run_command(
             str(self.config.xray_binary),
             "api",
             "statsquery",
-            "--server=" + self.config.stats_address,
+            "--server=" + endpoint,
             "-reset=false",
             timeout=5,
         )

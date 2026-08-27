@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +15,7 @@ from cryptography.x509.oid import NameOID
 from open_node_agent.certificates import hostname, validate_pair
 from open_node_agent.client import Agent
 from open_node_agent.host_files import guarded_path
+from open_node_agent.nginx import directive
 from open_node_agent.runtime import RuntimeFailure, atomic_write
 
 
@@ -281,3 +284,193 @@ async def test_dead_master_cleanup_and_pid_reuse_guard(agent, monkeypatch):
     await nginx.stop()
     kill.assert_called_once()
     assert nginx.process is None
+
+
+def tunnel_body(agent):
+    nginx = agent.operations.nginx
+    cert, key = certificate()
+    atomic_write(nginx.cert_path("localhost.pem"), cert.encode())
+    atomic_write(nginx.cert_path("localhost.key"), key.encode())
+    current = json.dumps(agent.runtime.read(), sort_keys=True, separators=(",", ":"))
+    return {
+        "domain": "localhost",
+        "cert_name": "localhost",
+        "expected_xray_sha256": hashlib.sha256(current.encode()).hexdigest(),
+        "nginx_http": [
+            directive(
+                "map",
+                "$http_upgrade",
+                "$open_node_connection_upgrade",
+                block=[
+                    directive("default", "upgrade"),
+                    directive("", "close"),
+                ],
+            ),
+            directive("include", "servers/*.conf"),
+        ],
+        "domain_config": f"server {{ listen 18081; root {nginx.html}; }}",
+        "xray_config": {"inbounds": [], "outbounds": [{"protocol": "blackhole"}]},
+    }
+
+
+async def test_native_tunnel_initializes_owned_files_and_persists_start_intent(agent):
+    nginx = agent.operations.nginx
+    body = tunnel_body(agent)
+    nginx.start = AsyncMock()
+    agent.runtime.restart = AsyncMock()
+    agent.runtime.validate = AsyncMock(return_value=(True, ""))
+    result = await nginx.deploy_tunnel(body)
+    assert result["success"] and not result["restart_required"]
+    assert agent.runtime.read() == body["xray_config"]
+    assert (nginx.html / "index.html").read_bytes() == b"Open Node\n"
+    assert agent.journal.desired_running(False)
+    assert agent.journal.desired_running(False, "nginx")
+    nginx.start.assert_awaited_once()
+    agent.runtime.restart.assert_awaited_once()
+
+
+async def test_native_tunnel_preserves_main_and_merges_maps_idempotently(agent):
+    nginx = agent.operations.nginx
+    await seed(nginx)
+    body = tunnel_body(agent)
+    nginx.start = AsyncMock()
+    agent.runtime.validate = AsyncMock(return_value=(True, ""))
+    body["restart_xray"] = False
+    first = await nginx.deploy_tunnel(body)
+    main = nginx.main.read_bytes()
+    assert first["restart_required"]
+    body["expected_xray_sha256"] = tunnel_body(agent)["expected_xray_sha256"]
+    await nginx.deploy_tunnel(body)
+    assert main == nginx.main.read_bytes()
+    assert b"listen 18080" in nginx.effective.read_bytes()
+    assert main.count(b"include servers/*.conf") == 1
+    assert main.count(b"map $http_upgrade") == 1
+    assert not agent.journal.desired_running(agent.config.auto_start)
+    body["nginx_http"][0]["block"][0]["args"] = ["conflict"]
+    with pytest.raises(RuntimeFailure, match="map conflicts"):
+        await nginx.deploy_tunnel(body)
+    assert main == nginx.main.read_bytes()
+
+
+@pytest.mark.parametrize("running", [False, True])
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_native_tunnel_failed_activation_restores_files_and_service_intents(
+    agent, running, cancel
+):
+    nginx = agent.operations.nginx
+    await seed(nginx)
+    body = tunnel_body(agent)
+    old_xray, old_main = agent.config.xray_config.read_bytes(), nginx.main.read_bytes()
+    agent.journal.set_desired_running(running)
+    agent.journal.set_desired_running(running, "nginx")
+    nginx.running = AsyncMock(return_value=running)
+    agent.runtime.running = AsyncMock(return_value=running)
+    nginx.reload = AsyncMock()
+    nginx.start = AsyncMock()
+    nginx.stop = AsyncMock()
+    agent.runtime.validate = AsyncMock(return_value=(True, ""))
+    agent.runtime.restart = AsyncMock(
+        side_effect=asyncio.CancelledError() if cancel else RuntimeFailure("failed start")
+    )
+    agent.runtime.start = AsyncMock()
+    agent.runtime.stop = AsyncMock()
+    with pytest.raises(asyncio.CancelledError if cancel else RuntimeFailure):
+        await nginx.deploy_tunnel(body)
+    assert agent.config.xray_config.read_bytes() == old_xray
+    assert nginx.main.read_bytes() == old_main
+    assert not nginx.config_path("servers/localhost.conf").exists()
+    assert agent.journal.desired_running(not running) == running
+    assert agent.journal.desired_running(not running, "nginx") == running
+    assert agent.runtime.start.await_count == int(running)
+    assert nginx.start.await_count == 1
+    nginx.stop.assert_awaited_once()
+    agent.runtime.stop.assert_awaited_once()
+    assert not nginx.transaction.record.exists()
+
+
+async def test_native_tunnel_rejects_stale_snapshot_and_invalid_flags_without_writes(agent):
+    nginx = agent.operations.nginx
+    body = tunnel_body(agent)
+    original = agent.config.xray_config.read_bytes()
+    with pytest.raises(RuntimeFailure, match="refresh its snapshot"):
+        await nginx.deploy_tunnel({**body, "expected_xray_sha256": "0" * 64})
+    with pytest.raises(ValueError, match="bool_type"):
+        await nginx.deploy_tunnel({**body, "restart_xray": "false"})
+    agent.config.stats_address = "127.0.0.1:12345"
+    with pytest.raises(RuntimeFailure, match="stats_address"):
+        await nginx.deploy_tunnel(body)
+    assert agent.config.xray_config.read_bytes() == original
+    assert not nginx.main.exists()
+
+
+@pytest.mark.parametrize("running", [True, False])
+async def test_crashed_coupled_transaction_recovers_files_and_intent_before_start(config, running):
+    instance = Agent(config)
+    nginx = instance.operations.nginx
+    original = config.xray_config.read_bytes()
+    nginx.transaction.begin(
+        {config.xray_config: b"interrupted", nginx.main: b"invalid"},
+        intents={"xray": running, "nginx": running},
+    )
+    instance.journal.set_desired_running(not running)
+    instance.journal.set_desired_running(not running, "nginx")
+    await instance.close()
+    recovered = Agent(config)
+    try:
+        assert config.xray_config.read_bytes() == original and not nginx.main.exists()
+        assert recovered.journal.desired_running(not running) == running
+        assert recovered.journal.desired_running(not running, "nginx") == running
+    finally:
+        await recovered.close()
+
+
+async def test_corrupt_intent_metadata_is_rejected_before_file_recovery(agent):
+    nginx = agent.operations.nginx
+    original = agent.config.xray_config.read_bytes()
+    record = nginx.transaction.record
+    for intents in (None, {"xray": False}, {"xray": True, "nginx": "false"}):
+        atomic_write(
+            record,
+            json.dumps(
+                {
+                    "schema": 1,
+                    "files": {str(agent.config.xray_config): None},
+                    "intents": intents,
+                }
+            ).encode(),
+        )
+        with pytest.raises(RuntimeFailure, match="intent undo"):
+            nginx.transaction.recover()
+        assert agent.config.xray_config.read_bytes() == original
+    record.unlink()
+
+
+async def test_stats_auto_discovers_only_explicit_loopback_api(agent):
+    for endpoint in (
+        "127.0.0.1:12345",
+        "[::1]:12345",
+        "0.0.0.0:12345",
+        "example.com:12345",
+        "127.0.0.1:0",
+    ):
+        atomic_write(
+            agent.config.xray_config,
+            json.dumps(
+                {
+                    "api": {"listen": endpoint, "services": ["StatsService"]},
+                }
+            ).encode(),
+        )
+        assert agent.runtime.stats_endpoint() == (
+            endpoint if endpoint in {"127.0.0.1:12345", "[::1]:12345"} else None
+        )
+    agent.config.stats_address = "operator-address:1234"
+    assert agent.runtime.stats_endpoint() == "operator-address:1234"
+
+
+async def test_dynamic_content_and_certificate_paths_cannot_escape_owned_roots(agent):
+    nginx = agent.operations.nginx
+    with pytest.raises(RuntimeFailure, match="Dynamic"):
+        nginx.site_path(str(nginx.html / "$uri"))
+    with pytest.raises(RuntimeFailure, match="Dynamic"):
+        nginx.cert_path("$ssl_server_name.pem")

@@ -223,6 +223,7 @@ export interface ServerTelemetryResponse {
 
 export interface AgentScanResult {
   nginx?: {
+    tunnel_deploy?: number;
     running: boolean;
     installed: boolean;
     available: boolean;
@@ -411,7 +412,13 @@ export interface XrayRuntimeTunnelDeployRequest {
   domain?: string | null;
   proxy_domain?: string | null;
   site_type?: "static" | "proxy";
-  site_value: string;
+  site_value?: string | null;
+  listen_address?: string;
+  listen_port?: number;
+  nginx_port?: number;
+  forward_port?: number;
+  api_port?: number;
+  metrics_port?: number;
   cert_name?: string | null;
   clear_stream_port?: boolean;
   restart_xray?: boolean;
@@ -429,6 +436,7 @@ export interface XrayRuntimeTunnelDeployCommand {
 }
 
 export interface XrayRuntimeTunnelDeployResponse {
+  runtime_profile?: "legacy" | "open-node";
   server_id: string;
   server_name: string;
   domain: string;

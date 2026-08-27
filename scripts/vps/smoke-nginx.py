@@ -33,9 +33,9 @@ SPEC.loader.exec_module(service)
 runtime = service.runtime
 
 
-def certificate():
+def certificate(domain="localhost"):
     key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, domain)])
     now = datetime.now(UTC)
     cert = (
         x509.CertificateBuilder()
@@ -46,7 +46,7 @@ def certificate():
         .not_valid_before(now - timedelta(minutes=1))
         .not_valid_after(now + timedelta(days=1))
         .add_extension(
-            x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False
+            x509.SubjectAlternativeName([x509.DNSName(domain)]), critical=False
         )
         .sign(key, hashes.SHA256())
     )
@@ -348,7 +348,7 @@ def exercise(work, fixture, wheel, nginx, module, xray, client, url, echo_port, 
     )
 
 
-def run(wheel, nginx, module, archive):
+def run(wheel, nginx, module, archive, *, exercise_fn=exercise):
     if os.geteuid() != 0:
         raise RuntimeError("Run this smoke on the root-accessible systemd VPS")
     with tempfile.TemporaryDirectory(prefix="open-node-nginx-smoke-") as temporary:
@@ -415,7 +415,7 @@ def run(wheel, nginx, module, archive):
             for mode in ("websocket", "http"):
                 fixture = service.Fixture(work)
                 try:
-                    exercise(
+                    exercise_fn(
                         work,
                         fixture,
                         wheel,

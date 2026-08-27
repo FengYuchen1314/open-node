@@ -46,15 +46,32 @@ def remove_file(path: Path) -> None:
 
 
 class FileTransaction:
-    def __init__(self, record: Path, check_path):
+    def __init__(self, record: Path, check_path, restore_intents=None):
         self.record = record
         self.check_path = check_path
+        self.restore_intents = restore_intents
+
+    def check_intents(self, intents):
+        if intents is not None and (
+            not isinstance(intents, dict)
+            or set(intents) != {"xray", "nginx"}
+            or any(type(value) is not bool for value in intents.values())
+            or self.restore_intents is None
+        ):
+            raise RuntimeFailure("Invalid runtime intent undo record")
 
     def recover(self) -> None:
         guarded_path(self.record.parent, self.record)
         if not self.record.exists():
             return
         data = json.loads(read_private(self.record))
+        intents = None
+        if isinstance(data, dict) and data.get("schema") == 1:
+            intents = data.get("intents")
+            if set(data) != {"schema", "files", "intents"} or intents is None:
+                raise RuntimeFailure("Invalid runtime intent undo record")
+            self.check_intents(intents)
+            data = data.get("files")
         if not isinstance(data, dict) or len(data) > 128:
             raise RuntimeFailure("Invalid host transaction record")
         # Validate the complete undo record before restoring any file.
@@ -70,9 +87,12 @@ class FileTransaction:
             else:
                 atomic_write(path, value)
                 path.chmod(0o600)
+        if intents is not None:
+            self.restore_intents(intents)
         self.commit()
 
-    def begin(self, changes: dict[Path, bytes | None]) -> None:
+    def begin(self, changes: dict[Path, bytes | None], *, intents=None) -> None:
+        self.check_intents(intents)
         guarded_path(self.record.parent, self.record)
         if self.record.exists():
             raise RuntimeFailure("Unresolved host transaction; recovery is required")
@@ -86,7 +106,11 @@ class FileTransaction:
             originals[str(path)] = (
                 base64.b64encode(read_private(path)).decode() if path.exists() else None
             )
-        record = json.dumps(originals).encode()
+        record = json.dumps(
+            {"schema": 1, "files": originals, "intents": intents}
+            if intents is not None
+            else originals
+        ).encode()
         if len(record) > MAX_CONFIG_BYTES:
             raise RuntimeFailure("Host transaction undo record exceeds 2 MiB")
         atomic_write(self.record, record)

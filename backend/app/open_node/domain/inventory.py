@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime
 from enum import StrEnum
+from ipaddress import ip_address
 from typing import Any, Literal, Self
 from urllib.parse import urlparse
 from uuid import UUID
@@ -461,6 +462,7 @@ class AgentNginxScan(BaseModel):
     running: bool = False
     installed: bool = False
     available: bool = False
+    tunnel_deploy: int = Field(default=0, ge=0, le=1)
     mode: Literal["managed"] = "managed"
     config_path: str = Field(max_length=512)
     certificate_dir: str = Field(max_length=512)
@@ -882,7 +884,13 @@ class XrayRuntimeTunnelDeployRequest(BaseModel):
     domain: str | None = Field(default=None, max_length=255)
     proxy_domain: str | None = Field(default=None, max_length=255)
     site_type: Literal["static", "proxy"] = "static"
-    site_value: str = Field(default="/usr/local/nginx/html", max_length=512)
+    site_value: str | None = Field(default=None, max_length=512)
+    listen_address: str = "0.0.0.0"
+    listen_port: int = Field(default=443, ge=1, le=65535)
+    nginx_port: int = Field(default=8001, ge=1, le=65535)
+    forward_port: int = Field(default=46174, ge=1, le=65535)
+    api_port: int = Field(default=46736, ge=1, le=65535)
+    metrics_port: int = Field(default=38889, ge=1, le=65535)
     cert_name: str | None = Field(default=None, max_length=255)
     clear_stream_port: bool = True
     restart_xray: bool = True
@@ -906,8 +914,28 @@ class XrayRuntimeTunnelDeployRequest(BaseModel):
 
     @field_validator("site_value")
     @classmethod
-    def validate_site_value(cls, value: str) -> str:
-        return _strip_required_text(value, "site_value")
+    def validate_site_value(cls, value: str | None) -> str | None:
+        return _strip_optional_text(value, "site_value")
+
+    @field_validator("listen_address")
+    @classmethod
+    def validate_listen_address(cls, value: str) -> str:
+        return str(ip_address(value))
+
+    @model_validator(mode="after")
+    def validate_runtime_ports(self):
+        ports = [
+            self.listen_port,
+            self.nginx_port,
+            self.forward_port,
+            self.api_port,
+            self.metrics_port,
+        ]
+        if len(set(ports)) != len(ports):
+            raise ValueError("Tunnel listener and forwarding ports must be distinct")
+        if self.site_type == "proxy" and not self.site_value:
+            raise ValueError("A proxy site requires site_value")
+        return self
 
 
 class XrayRuntimeTunnelDeployCommand(BaseModel):
@@ -918,6 +946,7 @@ class XrayRuntimeTunnelDeployCommand(BaseModel):
 
 
 class XrayRuntimeTunnelDeployResponse(BaseModel):
+    runtime_profile: Literal["legacy", "open-node"] = "legacy"
     server_id: UUID
     server_name: str
     domain: str

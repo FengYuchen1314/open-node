@@ -174,6 +174,7 @@ from open_node.domain.subscriptions import (
     XrayRuntimeNodeSyncRequest,
     XrayRuntimeNodeSyncResponse,
 )
+from open_node.services.tunnel_config import managed_tunnel_bundle
 
 
 class InvalidAgentTokenError(ValueError):
@@ -429,6 +430,7 @@ _XRAY_SNAPSHOT_REFRESH_QUERY = "snapshot_source=master_write"
 _XRAY_SNAPSHOT_REFRESH_TIMEOUT_MS = 60_000
 _XRAY_RECONNECT_SYNC_TIMEOUT_MS = 60_000
 _XRAY_MUTATING_PATH_PREFIXES = (
+    "/api/child/tunnel/deploy",
     "/api/child/inbounds",
     "/api/child/outbounds",
     "/api/child/routing",
@@ -1669,10 +1671,36 @@ class InventoryStore:
                 proxy_domain = None
             cert_name = self._cert_deploy_filename(payload.cert_name or domain)
             warnings: list[str] = []
+            scan = session.get(AgentScanResultModel, server.id)
+            nginx = scan.nginx if scan else None
+            managed = bool(nginx and nginx.get("mode") == "managed")
+            if managed and (nginx.get("tunnel_deploy") != 1 or not nginx.get("available")):
+                if payload.queue_agent_commands:
+                    raise XrayRuntimeTunnelDeployUnavailableError(
+                        "upgrade/configure the Open Node Agent for atomic tunnel deployment"
+                    )
+                warnings.append("agent_tunnel_deploy_unavailable")
+            ports = (
+                payload.listen_port,
+                payload.nginx_port,
+                payload.forward_port,
+                payload.api_port,
+                payload.metrics_port,
+            )
+            if not managed and (
+                ports != (443, 8001, 46174, 46736, 38889) or payload.listen_address != "0.0.0.0"
+            ):
+                raise XrayRuntimeTunnelDeployUnavailableError(
+                    "custom tunnel listeners require an Open Node Agent scan"
+                )
 
             snapshot = self._current_xray_config_snapshot(session, server.id)
             if snapshot is None:
                 warnings.append("current_config_snapshot_not_found")
+                if managed and payload.queue_agent_commands:
+                    raise XrayRuntimeTunnelDeployUnavailableError(
+                        "read the current Xray configuration before tunnel deployment"
+                    )
             elif self._xray_config_snapshot_has_user_content(snapshot):
                 warnings.append("current_config_has_user_content")
                 if payload.queue_agent_commands and not payload.force:
@@ -1684,11 +1712,20 @@ class InventoryStore:
             nginx_config = _TUNNEL_NGINX_CONFIG
             domain_config = self._render_tunnel_domain_config(
                 payload.site_type,
-                payload.site_value,
+                payload.site_value or "/usr/local/nginx/html",
                 domain,
                 cert_name,
             )
             xray_config = self._render_tunnel_xray_config(domain)
+            http_nodes = []
+            if managed:
+                nginx_config, domain_config, http_nodes, xray_config = managed_tunnel_bundle(
+                    payload,
+                    domain,
+                    cert_name,
+                    nginx,
+                    xray_config,
+                )
             xray_config_text = json.dumps(xray_config, indent=4, ensure_ascii=False)
 
             previews: list[XrayRuntimeTunnelDeployCommand] = []
@@ -1727,6 +1764,34 @@ class InventoryStore:
                     )
                 )
 
+            if managed:
+                expected = None
+                if snapshot:
+                    expected = hashlib.sha256(
+                        json.dumps(
+                            json.loads(snapshot.config),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode()
+                    ).hexdigest()
+                previews = [
+                    XrayRuntimeTunnelDeployCommand(
+                        step="deploy_owned_tunnel",
+                        path="/api/child/tunnel/deploy",
+                        body={
+                            "domain": domain,
+                            "cert_name": cert_name,
+                            "nginx_http": http_nodes,
+                            "domain_config": domain_config,
+                            "xray_config": xray_config,
+                            "expected_xray_sha256": expected,
+                            "clear_stream_port": payload.clear_stream_port,
+                            "listen_port": payload.listen_port,
+                            "restart_xray": payload.restart_xray,
+                        },
+                    )
+                ]
+
             scan_preview = (
                 XrayRuntimeTunnelDeployCommand(
                     step="scan_runtime",
@@ -1737,6 +1802,7 @@ class InventoryStore:
             )
 
             return XrayRuntimeTunnelDeployResponse(
+                runtime_profile="open-node" if managed else "legacy",
                 server_id=UUID(server.id),
                 server_name=server.name,
                 domain=domain,

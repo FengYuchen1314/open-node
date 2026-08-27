@@ -45,7 +45,8 @@ command deduplication. The [host deployment CLI](docs/agent-deployment.md) adds
 a dedicated systemd account, per-release environments, upgrade rollback,
 interrupted-switch recovery, and data-preserving uninstall/reinstall.
 Optional [Nginx and certificate management](docs/nginx-management.md) supports
-owned HTTP/TLS sites and supplied certificate rotation. Remote lifecycle
+owned HTTP/TLS sites, supplied certificate rotation, and atomic Nginx/Xray
+tunnel deployment with configurable listeners and failure recovery. Remote lifecycle
 handlers, WARP, ACME renewal, and fork-specific runtime workflows are
 still incomplete; control-plane wrappers
 for those operations do not imply the independent agent implements them.

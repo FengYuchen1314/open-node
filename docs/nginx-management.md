@@ -31,11 +31,11 @@ paths are copied during initial host installation; uninstall/reinstall preserves
 the copies. Existing installations can add the optional settings and runtime
 files as the host administrator, retaining the documented account ownership.
 
-Nginx starts only after an explicit install/start command and retains its own
+Nginx starts only after an explicit install/start or tunnel-deploy command and retains its own
 start/stop intent independently of Xray. Use the provided systemd installation;
 Nginx execution through a root-running manual Agent is rejected. Static content
 must be readable by the dedicated account, and the hardened service cannot
-read home directories. Existing listener ports are never taken over.
+read home directories. Unrelated host listener ports are never taken over.
 
 For the default installation, the owned paths are:
 
@@ -105,18 +105,77 @@ absolute paths. Reloading preserves intentionally stopped services. Public-CA
 issuance, ACME challenges, automatic renewal, and trust-chain issuance policy
 are not implemented by this endpoint. It deploys supplied certificates.
 
+## Atomic Tunnel Deployment
+
+The Config workspace's Runtime tab uses
+`POST /api/v1/servers/{id}/xray/runtime/tunnel-deploy`. A current Agent scan
+with `nginx.tunnel_deploy: 1` selects the `open-node` runtime profile. The
+Agent must have an operator-supplied Nginx binary and managed Xray runtime.
+Older managed Agents must be upgraded; an absent native scan retains the
+separate legacy MMWX template path. Preview responses expose `runtime_profile`.
+
+Deploy the certificate/key into the owned certificate directory first, then
+read the current Xray configuration. A minimal queued request is:
+
+```json
+{
+  "domain": "example.com",
+  "queue_agent_commands": true,
+  "queue_scan_after_apply": true
+}
+```
+
+Existing non-template Xray entries require explicit `force: true`. This is a
+replacement Xray template, not a merge of arbitrary proxy protocols. Force
+does not bypass certificate/config validation or the canonical snapshot hash:
+if the node config changes before execution, refresh its snapshot and plan again.
+
+The template uses the official Xray v26.3.27 `tunnel` schema (`address`, `port`,
+`network`), TLS sniffing with `routeOnly`, exact-domain SNI routing, and a
+PROXY-protocol connection to Nginx. Defaults are:
+
+- Public Xray listener: `listen_address: 0.0.0.0`, `listen_port: 443`.
+- Internal Nginx TLS/PROXY listener: loopback `nginx_port: 8001`.
+- Unmatched traffic: fixed loopback `forward_port: 46174`.
+- Xray API and metrics: loopback `api_port: 46736`, `metrics_port: 38889`.
+
+All five ports are configurable, distinct, and within 1-65535. The operator
+must provide a service on the fallback port; deployment does not invent one.
+The Agent discovers a loopback `api.listen` for statistics when `stats_address`
+is unset. An explicit `stats_address` must match the generated API listener.
+The legacy profile rejects customized listener settings.
+
+`site_type: static` uses the scanned owned HTML directory when `site_value`
+is omitted, initializing `index.html` only when absent. Additional static roots
+must be allowed in the Agent settings. `site_type: proxy` requires a URL in
+`site_value`; upstream HTTPS verification uses Debian's system CA bundle.
+`cert_name` defaults to the domain and names the existing `.pem`/`.key` pair.
+`proxy_domain` remains legacy response metadata, not another native SNI route.
+
+One `/api/child/tunnel/deploy` command merges the required HTTP map/include
+into the owned Nginx main config, preserving unrelated sites and stream blocks.
+`clear_stream_port: true` removes only the matching owned stream listener.
+Nginx and Xray configs are validated before runtime activation. Default
+`restart_xray: true` starts both services even if previously stopped. With
+`restart_xray: false`, Nginx is activated but Xray is not restarted and the
+result reports `restart_required`; the new Xray file takes effect on a later start.
+
+Files and previous service-start intentions share a durable undo record. An
+activation failure restores both configs and their prior running/stopped state;
+interrupted transactions recover before either service is started again.
+Successful deployment refreshes the control-plane Xray snapshot. This is a
+recoverable configuration transaction, not zero-downtime deployment or atomic
+network traffic switching. Existing sessions can be interrupted during restart.
+
 ## Failure Behavior
 
 Configuration parsing uses [NGINX crossplane](https://github.com/nginxinc/crossplane).
 Includes are expanded only from the owned directory, with cycle/count/size
 limits and symlink/hardlink rejection. The Agent owns daemon/master settings,
 PID, modules, logs, and temporary paths. Static `root`/`alias` and certificate
-paths have their own boundaries. Do not paste a legacy global configuration
+paths have their own boundaries; dynamic variables in those paths are rejected.
+Do not paste a legacy global configuration
 without adapting its paths and removing Agent-controlled directives.
-The existing high-level tunnel-deployment templates still target the MMWX
-fork and its global Nginx layout; they are not an independently verified
-Open Node tunnel migration path. Use the owned site/config commands above
-for the Nginx functionality described here.
 
 Changes have a private, fsynced undo record before any file is replaced. The
 Agent runs `nginx -t` against the effective config and observes new workers

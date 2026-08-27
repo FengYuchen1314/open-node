@@ -125,6 +125,32 @@ and data-preserving uninstall/reinstall. Test certificates are local fixtures;
 no public CA or real domain validation is used. Fixture units/accounts and
 directories are purged after the run, with existing services untouched.
 
+## Atomic Tunnel Smoke
+
+Use the same binary/module fixtures and built Agent wheel as the Nginx smoke:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-tunnel.py \
+  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --nginx /path/to/extracted/usr/sbin/nginx \
+  --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so
+```
+
+For each transport, this installs a fresh non-root systemd Agent and exercises
+the real FastAPI tunnel planner and queue. It verifies fresh deployment without
+prior Nginx installation, hostname-verified TLS SNI routing to static and proxy
+sites, unmatched SNI reaching a fixed loopback TLS fallback, actual traffic
+statistics, post-deployment snapshot refresh, stale-template rejection,
+Nginx/Xray occupied-listener rollback, and owned stream-to-Xray listener
+handover while preserving a neighboring stream server. It injects a durable
+multi-file undo record with conflicting stored start intentions, restarts the
+Agent, and verifies both running and intentionally stopped recovery. A failed
+cold deployment must leave both services stopped. Unit tests also cover
+command cancellation, corrupt intent records, and idempotent map merging.
+
+This verifies official Xray v26.3.27 on Debian 12 x86-64, not an arbitrary
+future Xray schema, zero-downtime switching, or fork-specific protocol support.
+
 ## Reference-Agent Smoke
 
 After installing the backend development dependencies, run this on the VPS
@@ -179,14 +205,16 @@ bootstrap token. No test disables management authentication.
 
 ## Latest Verification
 
-On 2026-08-27 (UTC), the Nginx/certificate worktree passed on the VPS:
+On 2026-08-27 (UTC), the atomic-tunnel worktree passed on the VPS:
 
-- Backend: 143 tests, including HTTP/WebSocket Nginx scan reporting, legacy SQLite
+- Backend: 153 tests, including HTTP/WebSocket Nginx scan reporting, legacy SQLite
   scan-schema migration, anonymous management-route rejection, session
   persistence/expiry/revocation, CSRF/Origin rejection, concurrent login limiting,
   a password-reset/login race, administrator CLI recovery, and the existing
-  inventory, dependency, migration, subscription, and change-set suites.
-- Independent agent: 74 tests, including private state/lock protection, TLS
+  inventory, dependency, migration, subscription, and change-set suites. Native
+  tunnel coverage checks profile/capability selection, snapshot prerequisites,
+  listener validation, generated paths/config, and post-deploy refresh.
+- Independent agent: 86 tests, including private state/lock protection, TLS
   configuration, persistent deduplication, transport reconnects, heartbeats
   during commands, interrupted execution, bounded errors/subprocesses, atomic
   rollback, client edits, stop intent, network rate calculation, deployment
@@ -194,6 +222,9 @@ On 2026-08-27 (UTC), the Nginx/certificate worktree passed on the VPS:
   New coverage includes certificate matching/SAN/dates, file-boundary enforcement,
   include parsing/cycles, multi-file rollback, command cancellation, interrupted-file
   recovery, exact stream cleanup, separate stop intent, and master PID reuse guards.
+  Coupled tunnel tests cover fresh files, map merging, stale snapshot rejection,
+  start/cancellation rollback, durable file/intent recovery, invalid metadata,
+  loopback stats discovery, and dynamic path rejection.
 - Agent wheel: isolated build and installation into a separate environment;
   real Xray smoke passed over WebSocket and HTTP, including provisioning,
   revocation, actual forwarding/statistics, failed-start rollback, recovery,
@@ -206,15 +237,23 @@ On 2026-08-27 (UTC), the Nginx/certificate worktree passed on the VPS:
   leaf serial rotation, key rejection, proxy/stream response bytes, occupied-listener
   rollback, exact stream cleanup, Agent and Nginx master crash recovery, interrupted
   file recovery, site deletion, and data-preserving service removal/reinstallation.
+- Native tunnel: both transports with the real planner, queue, and installed
+  wheel; verified TLS static/proxy/fallback bytes, traffic reporting, stale hash
+  rejection, both runtime port conflicts, owned listener handover, and recovery
+  of files plus running/stopped intentions. Failed cold deployment leaves no
+  unwanted running service.
 - Frontend: 74 tests, including session/CSRF request handling, expired-session
   transitions, waiting/skipped Vuetify component rendering, and the production build.
 - Probe Worker: TypeScript checks.
-- Ruff: backend, independent agent, and all five smoke scripts.
+- Ruff: backend, independent agent, and all six smoke scripts.
 - Reference-agent smoke: all ten stages, with the pinned image.
 - Chromium operator smoke: desktop 1440x900 and mobile 390x844 sign-in/access,
   server creation, reload persistence, password change, logout, and expiry. Nginx
   form defaults, page/control bounds, and full visibility of the active tab are
-  also checked on both viewports, with configuration screenshots.
+  also checked on both viewports, with configuration screenshots. Tunnel form
+  checks cover default node-owned paths, duplicate/out-of-range port rejection,
+  real request payloads, and single-line toggle text. Desktop and mobile
+  screenshots were inspected after fixing the narrow desktop toggle layout.
 
 The backend test run still reports a Starlette/httpx deprecation warning, and
 the frontend build reports a large bundle warning. Neither is a failed check.

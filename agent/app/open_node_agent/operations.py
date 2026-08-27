@@ -198,6 +198,8 @@ class Operations:
             raise RuntimeFailure("Command body must be an object")
         query = parse_qs(command.get("query") or "")
         async with self.runtime.lock:
+            if path == "/api/child/tunnel/deploy" and method == "POST":
+                return await self.nginx.deploy_tunnel(body)
             if path.startswith("/api/child/nginx/") or path in {
                 "/api/child/cert/deploy",
                 "/api/child/validate-site",

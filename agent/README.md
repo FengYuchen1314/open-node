@@ -87,6 +87,10 @@ negative rates.
 Optional [owned Nginx management](../docs/nginx-management.md) includes service
 control, configuration/site files, HTTP/TLS sites, reverse proxies, stream-port
 cleanup, logs, and supplied certificate deployment/rotation with rollback.
+Native tunnel deployment combines owned Nginx and official Xray configuration,
+validates the current snapshot hash, and restores files and service intentions
+after failures or interruption. The Agent can discover statistics from a
+loopback Xray `api.listen`; explicit `stats_address` takes precedence.
 Unsupported operations return 501 rather than reporting success. WARP, ACME
 issuance/renewal, remote upgrade/removal handlers, fork-only protocols, and
 further migration workflows remain release gates.

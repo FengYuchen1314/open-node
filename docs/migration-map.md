@@ -211,9 +211,11 @@ These passing command and snapshot checks do not prove a complete replacement:
   supplied certificate deployment/rotation, and crash/transaction recovery are
   implemented in the independent agent. Complete WARP, ACME issuance/renewal,
   diagnostics, and remaining host operations. Unimplemented operations return 501.
-- Adapt the high-level legacy tunnel-deploy templates to the independent
-  Nginx directory/ownership contract and supported runtime protocols; existing
-  MMWX/fork templates are not evidence for this migration path.
+- Native high-level tunnel deployment now uses the independent Nginx ownership
+  contract and official Xray TLS-SNI forwarding, with one conditional command,
+  configurable listeners, actual static/proxy/fallback traffic, two-service
+  rollback, and restart recovery verified over WebSocket and HTTP. This does
+  not prove every fork-only protocol or arbitrary existing-config migration.
 - Verify the fork-specific runtime protocols and migration from fork-only
   configurations. Actual VLESS traffic is verified using official Xray with
   the independent agent; the reference-agent smoke still uses external mode
