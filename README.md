@@ -76,6 +76,8 @@ Plan [editing, unassignment and removal](docs/plan-management.md) now preserve
 credentials and charged usage while coordinating node membership and limits.
 Revision guards protect concurrent edits, and the dialog tracks remote access
 confirmation, including pending withdrawal from an offline Agent.
+Per-plan node aliases apply across all five subscription formats, with saved
+enable switches, catalog import/export and no runtime changes for alias-only edits.
 
 Server [editing and removal](docs/server-management.md) now include guarded
 profile updates, selective node-address synchronization and an impact preview.

@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import SubscriptionAccessPanel from "../components/SubscriptionAccessPanel.vue";
 import PlanManagementDialog from "../components/PlanManagementDialog.vue";
+import PlanNodeAliases from "../components/PlanNodeAliases.vue";
 import UserManagementDialog from "../components/UserManagementDialog.vue";
 import UserLoginDialog from "../components/UserLoginDialog.vue";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog.vue";
@@ -146,7 +147,11 @@ const planForm = reactive({
   device_limit: 0,
   traffic_mode: "twoway" as SubscriptionTrafficMode,
   node_ids: [] as string[],
+  node_name_overrides: {} as Record<string, string>,
+  node_name_override_enabled: false,
 });
+const planAliasesValid = ref(true);
+const planAliasNodes = computed(() => planForm.node_ids.map(id => ({ id, name: nodes.value.find(node => node.id === id)?.name ?? id })));
 const assignForm = reactive({
   username: "",
   plan_id: "",
@@ -403,6 +408,7 @@ async function createPresetNode() {
 }
 
 async function submitPlan() {
+  if (!planAliasesValid.value) return;
   const name = planForm.name.trim();
   if (!name) {
     errorMessage.value = "Plan name is required.";
@@ -421,6 +427,8 @@ async function submitPlan() {
       is_reset: planForm.is_reset,
       reset_day: planForm.is_reset ? planForm.reset_day : 0,
       node_ids: [...planForm.node_ids],
+      node_name_overrides: { ...planForm.node_name_overrides },
+      node_name_override_enabled: planForm.node_name_override_enabled,
       node_multipliers: Object.fromEntries(planForm.node_ids.map((nodeId) => [nodeId, 1])),
       speed_limit_mbps: planForm.speed_limit_mbps,
       device_limit: planForm.device_limit,
@@ -722,6 +730,8 @@ function resetPlanForm() {
     device_limit: 0,
     traffic_mode: "twoway" as SubscriptionTrafficMode,
     node_ids: [],
+    node_name_overrides: {},
+    node_name_override_enabled: false,
   });
 }
 
@@ -1222,8 +1232,10 @@ function formatBytes(value: number) {
                 multiple
                 variant="outlined"
               />
+              <PlanNodeAliases v-model:names="planForm.node_name_overrides" v-model:enabled="planForm.node_name_override_enabled" :nodes="planAliasNodes" :disabled="savingAction === 'plan'" @valid="planAliasesValid = $event" />
               <v-btn
                 :loading="savingAction === 'plan'"
+                :disabled="!planAliasesValid"
                 color="primary"
                 prepend-icon="mdi-plus"
                 type="submit"

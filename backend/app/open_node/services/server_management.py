@@ -293,7 +293,12 @@ class ServerManagement:
                 plan.node_ids = [
                     identifier for identifier in plan.node_ids if identifier not in node_ids
                 ]
-                for field in ("node_multipliers", "node_speed_limits", "node_device_limits"):
+                for field in (
+                    "node_multipliers",
+                    "node_speed_limits",
+                    "node_device_limits",
+                    "node_name_overrides",
+                ):
                     setattr(
                         plan,
                         field,

@@ -108,6 +108,8 @@ export interface SubscriptionPlanCreateRequest {
   reset_day?: number;
   node_ids?: string[];
   node_multipliers?: Record<string, number>;
+  node_name_overrides?: Record<string, string>;
+  node_name_override_enabled?: boolean;
   node_speed_limits?: Record<string, number>;
   node_device_limits?: Record<string, number>;
   speed_limit_mbps?: number;
@@ -123,6 +125,8 @@ export interface SubscriptionPlan extends SubscriptionPlanCreateRequest {
   reset_day: number;
   node_ids: string[];
   node_multipliers: Record<string, number>;
+  node_name_overrides: Record<string, string>;
+  node_name_override_enabled: boolean;
   node_speed_limits: Record<string, number>;
   node_device_limits: Record<string, number>;
   speed_limit_mbps: number;
@@ -328,6 +332,8 @@ export interface SubscriptionCatalogPlanEntry {
   reset_day: number;
   node_names: string[];
   node_multipliers: Record<string, number>;
+  node_name_overrides?: Record<string, string>;
+  node_name_override_enabled?: boolean;
   node_speed_limits: Record<string, number>;
   node_device_limits: Record<string, number>;
   speed_limit_mbps: number;

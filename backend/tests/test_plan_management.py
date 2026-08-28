@@ -24,6 +24,8 @@ FIELDS = (
     "reset_day",
     "node_ids",
     "node_multipliers",
+    "node_name_overrides",
+    "node_name_override_enabled",
     "node_speed_limits",
     "node_device_limits",
     "speed_limit_mbps",

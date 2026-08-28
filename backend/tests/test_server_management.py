@@ -105,6 +105,8 @@ def subscriber(env, nodes):
                 "node_ids": [item["id"] for item in nodes],
                 "traffic_limit_gb": 1,
                 "node_multipliers": {item["id"]: 2 for item in nodes},
+                "node_name_overrides": {item["id"]: "Alias " + item["name"] for item in nodes},
+                "node_name_override_enabled": True,
                 "node_speed_limits": {item["id"]: 3 for item in nodes},
                 "node_device_limits": {item["id"]: 4 for item in nodes},
             },
@@ -192,6 +194,8 @@ def test_removal_prunes_plans_preserves_user_usage_and_revokes_agent(env, tmp_pa
     assert entries[0]["server_name"] == "alpha"
     updated = env[0].get("/api/v1/plans").json()["plans"][0]
     assert updated["id"] == plan["id"] and updated["node_ids"] == [remaining["id"]]
+    assert updated["node_name_overrides"] == {remaining["id"]: "Alias " + remaining["name"]}
+    assert updated["node_name_override_enabled"] is True
     for field in ("node_multipliers", "node_speed_limits", "node_device_limits"):
         assert first["id"] not in updated[field]
     assert (

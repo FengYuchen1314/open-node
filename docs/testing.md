@@ -99,6 +99,26 @@ and complete link reset are checked against real forwarding and an unchanged
 runtime PID. The temporary Agent installation is removed after the run.
 See [subscription-links.md](subscription-links.md) for identity and security rules.
 
+## Plan Alias Smoke
+
+With the same VPS prerequisites and built frontend:
+
+```bash
+python scripts/vps/smoke-plan-node-aliases.py \
+  --xray /absolute/path/to/xray \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /absolute/path/to/nginx \
+  --output /tmp/open-node-plan-alias-screenshots \
+  --transport websocket
+```
+
+Repeat with `--transport http`. The isolated fixture checks browser creation,
+alias editing, stale revisions, saved enable/disable state, clearing, all five
+export formats and a subscriber's downloaded Xray configuration forwarding
+real traffic. Credentials, subscription keys, the unrelated plan and runtime
+PID remain unchanged. It captures 1440/390/320px views and removes its temporary
+Agent installation. See [plan-management.md](plan-management.md) for semantics.
+
 ## Subscription Client Smoke
 
 Build the frontend and [patched runtime](fork-runtime.md) on the VPS. Use the
@@ -1002,6 +1022,27 @@ lease races, overlapping reservations, draining earlier sequences, late
 rollback rejection, restart persistence and missing-column SQLite migration.
 
 ## Latest Verification
+
+Plan node aliases passed on the designated VPS:
+
+- Full regression: backend 791 tests, Agent 522 tests, frontend 187 tests and
+  production build passed. The earlier focused backend run passed 159 tests.
+- All five subscription formats and previews use aliases before multipliers;
+  reserved/original-name collisions, Unicode validation, isolated plans,
+  preserved runtime records, legacy field omission, catalog remapping/rollback,
+  node/server removal and repeated SQLite upgrades passed.
+- Final HTTP and WebSocket browser runs passed creation, alias edits, stale
+  revision rejection, disable/clear, and subscriber downloads. The downloaded
+  Xray configuration forwarded real traffic while the runtime PID, credentials,
+  subscription keys and unrelated plan remained unchanged.
+- Desktop 1440px, mobile 390px and narrow 320px screenshots were inspected.
+  Ruff passed for all changed Python sources and the smoke script. Temporary
+  Agent installations were removed by the fixture.
+
+The existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+These results do not close the remaining [migration gates](migration-map.md).
+
+## Earlier Short-Code Verification
 
 Custom subscription short-code verification on the designated VPS:
 

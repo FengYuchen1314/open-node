@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import PlanNodeAliases from "./PlanNodeAliases.vue";
 import type { ManagedNode, SubscriptionAccessResponse } from "../domain/subscriptions";
 import { getSubscriptionAccess, syncSubscriptionAccess } from "../services/subscriptions";
 import { getPlanManagement, planSettings, removePlan, savePlan, type PlanManagementRead, type PlanManagementResult, type PlanOperation, type PlanSettings } from "../services/plan-management";
@@ -13,6 +14,7 @@ const busy = ref(false);
 const error = ref("");
 const acknowledgment = ref(false);
 const confirmName = ref("");
+const aliasesValid = ref(true);
 const states = reactive<Record<string, SubscriptionAccessResponse>>({});
 const stateErrors = reactive<Record<string, string>>({});
 let version = 0;
@@ -22,7 +24,7 @@ const removed = computed(() => !!result.value && props.mode !== "edit");
 const expectedName = computed(() => props.mode === "unassign" ? props.id : detail.value?.plan.name ?? "");
 const options = computed(() => props.nodes.filter(node => !node.removal_id).map(node => ({ title: node.name, value: node.id })));
 const selectedNodes = computed(() => form.value?.node_ids.map(id => ({ id, name: props.nodes.find(node => node.id === id)?.name ?? id })) ?? []);
-const canSubmit = computed(() => !busy.value && !!detail.value && acknowledgment.value && !removed.value && (props.mode === "edit" ? !!form.value?.name.trim() : confirmName.value === expectedName.value));
+const canSubmit = computed(() => !busy.value && !!detail.value && acknowledgment.value && !removed.value && (props.mode === "edit" ? !!form.value?.name.trim() && aliasesValid.value : confirmName.value === expectedName.value));
 
 function resetStatus() {
   clearTimeout(timer);
@@ -122,14 +124,15 @@ onBeforeUnmount(() => { ++version; resetStatus(); });
             </div>
             <v-switch v-model="form.is_reset" label="Monthly reset for new assignments" color="primary" density="compact" hide-details :disabled="busy" />
             <v-autocomplete v-model="form.node_ids" :items="options" label="Plan nodes" multiple chips closable-chips variant="outlined" density="compact" hide-details :disabled="busy" />
-            <section v-for="node in selectedNodes" :key="node.id" class="plan-node" :aria-label="node.name">
-              <strong>{{ node.name }}</strong>
+            <PlanNodeAliases v-model:names="form.node_name_overrides" v-model:enabled="form.node_name_override_enabled" :nodes="selectedNodes" :disabled="busy" @valid="aliasesValid = $event">
+              <template #default="{ node }">
               <div class="plan-overrides">
                 <v-text-field :model-value="form.node_multipliers[node.id] ?? ''" :aria-label="`${node.name}: multiplier`" label="Display multiplier" placeholder="1" type="number" min="0.000001" step="any" variant="outlined" density="compact" hide-details :disabled="busy" @update:model-value="setOverride('node_multipliers', node.id, $event)" />
                 <v-text-field :model-value="form.node_speed_limits[node.id] ?? ''" :aria-label="`${node.name}: speed`" label="Speed (Mbps)" placeholder="Inherit" type="number" min="0" step="any" variant="outlined" density="compact" hide-details :disabled="busy" @update:model-value="setOverride('node_speed_limits', node.id, $event)" />
                 <v-text-field :model-value="form.node_device_limits[node.id] ?? ''" :aria-label="`${node.name}: connections`" label="Connections" placeholder="Inherit" type="number" min="0" step="1" variant="outlined" density="compact" hide-details :disabled="busy" @update:model-value="setOverride('node_device_limits', node.id, $event)" />
               </div>
-            </section>
+              </template>
+            </PlanNodeAliases>
           </v-form>
           <h3 v-else>{{ detail.plan.name }}</h3>
           <section class="plan-subscribers" aria-label="Affected subscribers">

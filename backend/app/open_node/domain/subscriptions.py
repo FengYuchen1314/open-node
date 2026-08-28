@@ -25,6 +25,28 @@ def _strip_optional_text(value: str | None, field_name: str) -> str | None:
     return _strip_required_text(value, field_name)
 
 
+def _normalize_node_names(names: dict[Any, str], selected: list[Any]) -> dict[Any, str]:
+    allowed, seen, result = set(selected), set(), {}
+    for identifier, value in names.items():
+        if identifier not in allowed:
+            continue
+        value = value.strip()
+        if not value:
+            continue
+        if len(value) > 128 or any(
+            ord(char) < 32 or 127 <= ord(char) <= 159 or 0xD800 <= ord(char) <= 0xDFFF
+            for char in value
+        ):
+            raise ValueError(
+                "Node aliases must be at most 128 characters without control characters"
+            )
+        if value in seen:
+            raise ValueError("Node aliases within a plan must be distinct")
+        seen.add(value)
+        result[identifier] = value
+    return result
+
+
 def _ensure_json_object(value: dict[str, Any], field_name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{field_name} must be a JSON object")
@@ -663,11 +685,22 @@ class SubscriptionCatalogPlanEntry(BaseModel):
     reset_day: int = Field(default=0, ge=0, le=31)
     node_names: list[str] = Field(default_factory=list)
     node_multipliers: dict[str, float] = Field(default_factory=dict)
+    node_name_overrides: dict[str, str] = Field(default_factory=dict, max_length=1000)
+    node_name_override_enabled: bool = False
     node_speed_limits: dict[str, float] = Field(default_factory=dict)
     node_device_limits: dict[str, int] = Field(default_factory=dict)
     speed_limit_mbps: float = Field(default=0, ge=0, le=(1 << 50) / 125000, allow_inf_nan=False)
     device_limit: int = Field(default=0, ge=0, le=1_000_000)
     traffic_mode: SubscriptionTrafficMode = SubscriptionTrafficMode.ONEWAY
+
+    @model_validator(mode="after")
+    def normalize_node_names(self):
+        object.__setattr__(
+            self,
+            "node_name_overrides",
+            _normalize_node_names(self.node_name_overrides, self.node_names),
+        )
+        return self
 
     @field_validator("name")
     @classmethod
@@ -754,11 +787,22 @@ class SubscriptionPlanCreate(BaseModel):
     reset_day: int = Field(default=0, ge=0, le=31)
     node_ids: list[UUID] = Field(default_factory=list, max_length=1000)
     node_multipliers: dict[UUID, float] = Field(default_factory=dict)
+    node_name_overrides: dict[UUID, str] = Field(default_factory=dict, max_length=1000)
+    node_name_override_enabled: bool = False
     node_speed_limits: dict[UUID, float] = Field(default_factory=dict)
     node_device_limits: dict[UUID, int] = Field(default_factory=dict)
     speed_limit_mbps: float = Field(default=0, ge=0, le=(1 << 50) / 125000, allow_inf_nan=False)
     device_limit: int = Field(default=0, ge=0, le=1_000_000)
     traffic_mode: SubscriptionTrafficMode = SubscriptionTrafficMode.ONEWAY
+
+    @model_validator(mode="after")
+    def normalize_node_names(self):
+        object.__setattr__(
+            self,
+            "node_name_overrides",
+            _normalize_node_names(self.node_name_overrides, self.node_ids),
+        )
+        return self
 
     @field_validator("name")
     @classmethod

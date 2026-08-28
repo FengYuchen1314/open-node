@@ -1160,6 +1160,8 @@ class SubscriptionPlanModel(Base):
     reset_day: Mapped[int] = mapped_column(Integer, default=0)
     node_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     node_multipliers: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
+    node_name_overrides: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    node_name_override_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     node_speed_limits: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
     node_device_limits: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
     speed_limit_mbps: Mapped[float] = mapped_column(Float, default=0)
@@ -1357,6 +1359,15 @@ class InventoryStore:
             return
         inspector = inspect(self._engine)
         table_names = set(inspector.get_table_names())
+        if "subscription_plans" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector,
+                "subscription_plans",
+                {
+                    "node_name_overrides": "JSON NOT NULL DEFAULT '{}'",
+                    "node_name_override_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+                },
+            )
         if "product_user_subscription_tokens" in table_names:
             self._sqlite_add_missing_columns(
                 inspector, "product_user_subscription_tokens", {"custom_short_code": "VARCHAR(16)"}
@@ -3245,6 +3256,14 @@ class InventoryStore:
                         setattr(node, field, node_ids_by_name.get(name))
                 self._node_management().validate_node(session, node)
             for plan_entry in payload.catalog.plans:
+                alias_names = set(plan_entry.node_name_overrides)
+                if any(
+                    count > 1 and name in alias_names
+                    for name, count in Counter(
+                        entry.name for entry in payload.catalog.nodes
+                    ).items()
+                ):
+                    raise ManagedNodeConflict("Plan aliases require unambiguous catalog node names")
                 plan = session.scalar(
                     select(SubscriptionPlanModel).where(
                         SubscriptionPlanModel.name == plan_entry.name
@@ -3355,6 +3374,10 @@ class InventoryStore:
                 reset_day=payload.reset_day,
                 node_ids=[str(node_id) for node_id in payload.node_ids],
                 node_multipliers=self._uuid_keyed_float_map(payload.node_multipliers),
+                node_name_overrides={
+                    str(key): value for key, value in payload.node_name_overrides.items()
+                },
+                node_name_override_enabled=payload.node_name_override_enabled,
                 node_speed_limits=self._uuid_keyed_float_map(payload.node_speed_limits),
                 node_device_limits=self._uuid_keyed_int_map(payload.node_device_limits),
                 speed_limit_mbps=payload.speed_limit_mbps,
@@ -5053,6 +5076,10 @@ class InventoryStore:
                 UUID(node_id): multiplier
                 for node_id, multiplier in (plan.node_multipliers or {}).items()
             },
+            node_name_overrides={
+                UUID(node_id): name for node_id, name in (plan.node_name_overrides or {}).items()
+            },
+            node_name_override_enabled=plan.node_name_override_enabled,
             node_speed_limits={
                 UUID(node_id): limit for node_id, limit in (plan.node_speed_limits or {}).items()
             },
@@ -5071,6 +5098,16 @@ class InventoryStore:
         plan: SubscriptionPlanModel,
         node_names: dict[str, str],
     ) -> SubscriptionCatalogPlanEntry:
+        from collections import Counter
+
+        counts = Counter(node_names.values())
+        if any(
+            identifier not in node_names or counts[node_names[identifier]] != 1
+            for identifier in (plan.node_name_overrides or {})
+        ):
+            raise ManagedNodeConflict(
+                "Plan aliases require unique, existing node names for catalog export"
+            )
         return SubscriptionCatalogPlanEntry(
             name=plan.name,
             description=plan.description,
@@ -5083,6 +5120,11 @@ class InventoryStore:
                 plan.node_multipliers or {},
                 node_names,
             ),
+            node_name_overrides=InventoryStore._catalog_map_keys_to_names(
+                plan.node_name_overrides or {},
+                node_names,
+            ),
+            node_name_override_enabled=plan.node_name_override_enabled,
             node_speed_limits=InventoryStore._catalog_map_keys_to_names(
                 plan.node_speed_limits or {},
                 node_names,
@@ -5194,6 +5236,10 @@ class InventoryStore:
                 entry.node_multipliers,
                 node_ids_by_name,
             ),
+            node_name_overrides=cls._catalog_map_keys_to_ids(
+                entry.node_name_overrides, node_ids_by_name
+            ),
+            node_name_override_enabled=entry.node_name_override_enabled,
             node_speed_limits=cls._catalog_map_keys_to_ids(
                 entry.node_speed_limits,
                 node_ids_by_name,
@@ -5224,6 +5270,18 @@ class InventoryStore:
         plan.is_reset = entry.is_reset
         plan.reset_day = entry.reset_day
         plan.node_ids = node_ids
+        if "node_name_overrides" in entry.model_fields_set:
+            plan.node_name_overrides = cls._catalog_map_keys_to_ids(
+                entry.node_name_overrides, node_ids_by_name
+            )
+        else:
+            plan.node_name_overrides = {
+                key: value
+                for key, value in (plan.node_name_overrides or {}).items()
+                if key in node_ids
+            }
+        if "node_name_override_enabled" in entry.model_fields_set:
+            plan.node_name_override_enabled = entry.node_name_override_enabled
         plan.node_multipliers = cls._catalog_map_keys_to_ids(
             entry.node_multipliers,
             node_ids_by_name,
@@ -6577,6 +6635,8 @@ class InventoryStore:
         node: ManagedNodeModel,
         name: str,
     ) -> str:
+        if plan.node_name_override_enabled:
+            name = (plan.node_name_overrides or {}).get(node.id) or name
         multiplier = float((plan.node_multipliers or {}).get(node.id, 1))
         if multiplier == 1:
             return name

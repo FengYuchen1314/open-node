@@ -7,6 +7,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from open_node.domain.plan_management import PlanManagementRead, PlanManagementResult
+from open_node.domain.subscriptions import SubscriptionPlanCreate
 from open_node.services.inventory import (
     DuplicateSubscriptionPlanNameError,
     ManagedNodeModel,
@@ -145,6 +146,29 @@ class PlanManagement:
             ):
                 raise DuplicateSubscriptionPlanNameError("A plan with this name already exists")
             self.store._ensure_managed_nodes_exist(session, payload.node_ids)
+            aliases = (
+                {str(key): value for key, value in payload.node_name_overrides.items()}
+                if "node_name_overrides" in payload.model_fields_set
+                else {
+                    key: value
+                    for key, value in (plan.node_name_overrides or {}).items()
+                    if key in {str(identifier) for identifier in payload.node_ids}
+                }
+            )
+            aliases_enabled = (
+                payload.node_name_override_enabled
+                if "node_name_override_enabled" in payload.model_fields_set
+                else plan.node_name_override_enabled
+            )
+            alias_only = (
+                aliases != plan.node_name_overrides
+                or aliases_enabled != plan.node_name_override_enabled
+            ) and all(
+                getattr(payload, key) == getattr(before.plan, key)
+                for key in SubscriptionPlanCreate.model_fields
+                if key not in {"node_name_overrides", "node_name_override_enabled"}
+            )
+            plan.node_name_overrides, plan.node_name_override_enabled = aliases, aliases_enabled
             for key in (
                 "name",
                 "description",
@@ -169,6 +193,8 @@ class PlanManagement:
             warnings, commands = list(before.warnings), []
             access = self.store._subscription_access()
             for user in users:
+                if alias_only:
+                    continue
                 batches, notices = self.store._subscription_provision_batches(
                     session, user, plan, no_restart=False
                 )

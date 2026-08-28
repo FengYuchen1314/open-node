@@ -26,6 +26,7 @@ export function planSettings(plan: SubscriptionPlan): PlanSettings {
     speed_limit_mbps: plan.speed_limit_mbps, device_limit: plan.device_limit,
     traffic_mode: plan.traffic_mode, node_ids: [...plan.node_ids],
     node_multipliers: { ...plan.node_multipliers }, node_speed_limits: { ...plan.node_speed_limits },
+    node_name_overrides: { ...plan.node_name_overrides }, node_name_override_enabled: plan.node_name_override_enabled ?? false,
     node_device_limits: { ...plan.node_device_limits },
   };
 }

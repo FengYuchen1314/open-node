@@ -7,7 +7,7 @@ There is no activation service, license key, paid tier or third-party account.
 ## Edit
 
 Editing changes the plan name, description, quota, counted traffic directions,
-default duration/reset preferences, node membership, display multipliers and
+default duration/reset preferences, node membership, node aliases, display multipliers and
 native speed/concurrent-connection limits. Per-node limits override plan
 defaults; a blank override inherits, and an explicit zero means unlimited.
 Direct-parent inheritance and [user overrides](user-limits.md) participate in
@@ -33,6 +33,36 @@ users and credential bindings. Stale edits return 409. Live telemetry and Agent
 confirmation do not invalidate a form, but changed membership does. Settings,
 credentials and queued intents commit together; a provisioning conflict rolls
 back the edit. Saving requires explicit acceptance of runtime restarts.
+
+## Node Aliases
+
+Create and edit forms provide a `Custom subscription names` switch and an
+optional name for each selected node. `node_name_overrides` maps stable node
+UUIDs to names; `node_name_override_enabled` defaults to false. Switching off
+keeps the saved names, while clearing a name restores the original label.
+Aliases do not inherit from a parent node or affect other plans.
+
+Names are trimmed, blank entries are removed, and only selected nodes retain
+aliases. Names must be distinct within the alias map, case-sensitive, and at
+most 128 Unicode code points without control characters. Collisions with
+original node names or reserved client tags receive deterministic numeric
+suffixes in the exported subscription.
+
+The alias is applied before the display multiplier in the shared renderer.
+Clash, sing-box, Xray, URI-list, base64 and format previews use the same name;
+generated group references point to those final names. Operational inventory,
+inbound/outbound resource identities, user credentials, subscription keys and
+traffic accounting do not change. An edit that changes only aliases or their
+switch does not provision credentials or enqueue Agent commands. Concurrent
+node/limit changes retain the ordinary deployment and acknowledgment contract.
+
+Catalog exports use original inventory node names as map keys, remapped to
+destination UUIDs during import. Ambiguous alias keys fail with 409 instead of
+silently targeting another node; skipped missing nodes produce catalog
+warnings. Legacy edits/imports that omit the new fields preserve saved aliases
+on retained nodes. Explicit empty maps clear them. Removing a node or server
+prunes only the associated entries. SQLite upgrades add the two columns with
+empty/disabled defaults and preserve existing plans and credentials.
 
 ## Unassign Or Remove
 
@@ -94,11 +124,18 @@ of the unrelated subscriber and bounded connection-slot release. It captures
 `--transport http`; both connect through trusted TLS. All tests, builds,
 formatting and browser execution run on the configured VPS.
 
+`backend/tests/test_plan_node_aliases.py` covers all five formats, naming
+collisions, Unicode validation, unchanged runtime records, plan isolation,
+catalog remapping/rollback, legacy-field omission, removal and repeatable
+schema upgrades. `scripts/vps/smoke-plan-node-aliases.py` exercises browser
+creation/editing, stale edits, toggle/clear, subscriber downloads, actual Xray
+forwarding and unchanged runtime PID with both transports at 1440/390/320px.
+
 ## Migration Boundaries
 
 This implements the lifecycle of existing Open Node plan fields, not every
-original package feature. Per-plan node name aliases, automatic speed-rule
+original package feature. Per-plan automatic speed-rule
 binding and custom Clash/Surge template selection still need migration and
 real-client verification. [User profile editing and removal](user-management.md)
-are implemented separately; ordinary node editing/removal remains product work.
+and [node editing/removal](node-management.md) are implemented separately.
 These are not license-gated features.

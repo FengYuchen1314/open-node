@@ -469,7 +469,12 @@ class NodeManagement:
                 if not ids.intersection(plan.node_ids):
                     continue
                 plan.node_ids = [value for value in plan.node_ids if value not in ids]
-                for field in ("node_multipliers", "node_speed_limits", "node_device_limits"):
+                for field in (
+                    "node_multipliers",
+                    "node_speed_limits",
+                    "node_device_limits",
+                    "node_name_overrides",
+                ):
                     setattr(
                         plan,
                         field,

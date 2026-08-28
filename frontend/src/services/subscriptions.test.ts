@@ -98,6 +98,8 @@ const subscriptionPlan: SubscriptionPlan = {
   reset_day: 1,
   node_ids: ["node_1"],
   node_multipliers: { node_1: 1 },
+  node_name_overrides: {},
+  node_name_override_enabled: false,
   node_speed_limits: {},
   node_device_limits: {},
   speed_limit_mbps: 200,
