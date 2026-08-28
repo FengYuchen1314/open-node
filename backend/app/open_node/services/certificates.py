@@ -58,6 +58,7 @@ class ManagedCertificate(CertificateBase):
     email: Mapped[str | None] = mapped_column(String(320))
     account_email: Mapped[str | None] = mapped_column(String(320))
     provider_id: Mapped[str | None] = mapped_column(String(36))
+    validation_server_id: Mapped[str | None] = mapped_column(String(36))
     challenge_type: Mapped[str] = mapped_column(String(16), default="dns", server_default="dns")
     webroot_id: Mapped[str | None] = mapped_column(String(64))
     directory_url: Mapped[str | None] = mapped_column(String(1024))
@@ -84,6 +85,20 @@ class CertificateJob(CertificateBase):
     finished_at: Mapped[float | None] = mapped_column(Float)
     message: Mapped[str | None] = mapped_column(String(512))
     parameters: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+
+
+class CertificateHTTPLease(CertificateBase):
+    __tablename__ = "certificate_http_leases"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    certificate_id: Mapped[str] = mapped_column(String(36), index=True)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    server_id: Mapped[str] = mapped_column(String(36))
+    presentation: Mapped[dict] = mapped_column(JSON)
+    present_command_id: Mapped[str] = mapped_column(String(36))
+    cleanup_command_id: Mapped[str | None] = mapped_column(String(36))
+    cleanup_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    released_at: Mapped[float | None] = mapped_column(Float)
+    next_attempt: Mapped[float] = mapped_column(Float, default=0)
 
 
 class CertificateVersion(CertificateBase):
@@ -168,6 +183,7 @@ class CertificateStore:
                     "challenge_type": "VARCHAR(16) NOT NULL DEFAULT 'dns'",
                     "webroot_id": "VARCHAR(64)",
                     "account_email": "VARCHAR(320)",
+                    "validation_server_id": "VARCHAR(36)",
                 },
                 "certificate_jobs": {"parameters": "JSON NOT NULL DEFAULT '{}'"},
                 "certificate_versions": {"fingerprint": "VARCHAR(64)"},
@@ -194,11 +210,26 @@ class CertificateStore:
 
     def capabilities(self):
         binary = self.settings.certificate_lego_binary
+        with self.session() as db:
+            nodes = [
+                {"id": scan.server_id, "name": server.name, **scan.http01}
+                for scan, server in db.execute(
+                    select(AgentScanResultModel, ServerModel)
+                    .join(
+                        ServerModel,
+                        AgentScanResultModel.server_id == ServerModel.id,
+                    )
+                    .where(AgentScanResultModel.http01.is_not(None))
+                )
+                if scan.http01 and scan.http01.get("version") == 1
+            ]
         return {
             "available": bool(binary and binary.is_file() and os.access(binary, os.X_OK)),
             "license_required": False,
             "account_management": os.name == "posix",
             "revocation": os.name == "posix",
+            "remote_http_available": os.name == "posix",
+            "validation_nodes": nodes,
             "directories": self.settings.certificate_acme_directories,
             "challenge_types": [
                 "dns",
@@ -306,6 +337,9 @@ class CertificateStore:
                 domains=payload.domains,
                 email=str(payload.email),
                 provider_id=str(payload.provider_id) if payload.provider_id else None,
+                validation_server_id=str(payload.validation_server_id)
+                if payload.validation_server_id
+                else None,
                 challenge_type=payload.challenge_type,
                 webroot_id=payload.webroot_id,
                 directory_url=payload.directory_url,
@@ -319,6 +353,24 @@ class CertificateStore:
     def check_challenge(self, row):
         if not row.email or "/" in row.email or "\\" in row.email:
             raise CertificateError("ACME account email is missing or unsafe")
+        if row.validation_server_id:
+            with self.session() as db:
+                self.get(db, ServerModel, row.validation_server_id)
+                scan = db.get(AgentScanResultModel, str(row.validation_server_id))
+                capability = scan.http01 if scan else None
+            if (
+                row.challenge_type not in {"standalone", "webroot"}
+                or not capability
+                or capability.get("version") != 1
+                or capability.get("cleanup_error")
+                or (row.challenge_type == "standalone" and not capability.get("standalone"))
+                or (
+                    row.challenge_type == "webroot"
+                    and row.webroot_id not in capability.get("webroots", [])
+                )
+            ):
+                raise CertificateError("HTTP validation is not enabled or healthy on this node")
+            return
         if row.challenge_type not in self.capabilities()["challenge_types"]:
             raise CertificateError(
                 "Certificate challenge type is not enabled by the host administrator"
@@ -353,7 +405,18 @@ class CertificateStore:
                 )
             ]
             jobs = [
-                public_row(j)
+                {
+                    **public_row(j),
+                    "cleanup_pending": db.scalar(
+                        select(CertificateHTTPLease.id)
+                        .where(
+                            CertificateHTTPLease.job_id == j.id,
+                            CertificateHTTPLease.released_at.is_(None),
+                        )
+                        .limit(1)
+                    )
+                    is not None,
+                }
                 for j in db.scalars(
                     select(CertificateJob)
                     .where(CertificateJob.certificate_id == row.id)
@@ -457,7 +520,21 @@ class CertificateStore:
             row = self.get(db, ManagedCertificate, identifier)
             if row.active_job_id:
                 raise CertificateError("Wait for the active certificate job before deletion")
-            for model in (CertificateJob, CertificateVersion, CertificateTarget):
+            if db.scalar(
+                select(CertificateHTTPLease.id)
+                .where(
+                    CertificateHTTPLease.certificate_id == row.id,
+                    CertificateHTTPLease.released_at.is_(None),
+                )
+                .limit(1)
+            ):
+                raise CertificateError("Wait for remote HTTP challenge cleanup before deletion")
+            for model in (
+                CertificateHTTPLease,
+                CertificateJob,
+                CertificateVersion,
+                CertificateTarget,
+            ):
                 for item in db.scalars(select(model).where(model.certificate_id == row.id)):
                     db.delete(item)
             db.delete(row)
@@ -534,10 +611,9 @@ class CertificateStore:
         return row.expires_at - now <= window
 
     def queue(self, identifier, kind, force=False):
-        if not self.capabilities()["available"]:
-            raise CertificateError("Configure certificate_lego_binary on the control-plane host")
         with self.write() as db:
             row = self.get(db, ManagedCertificate, identifier)
+            self.require_issuer(row)
             if not row.directory_url:
                 raise CertificateError("Imported certificates do not have ACME configuration")
             self.check_challenge(row)
@@ -550,6 +626,11 @@ class CertificateStore:
             ):
                 force = True
             return public_row(self.claim(db, row, kind, force=force))
+
+    def require_issuer(self, row):
+        capability = "remote_http_available" if row.validation_server_id else "available"
+        if not self.capabilities()[capability]:
+            raise CertificateError("ACME issuance client is unavailable on the control-plane host")
 
     @staticmethod
     def claim(db, row, kind, *, force=False, parameters=None):

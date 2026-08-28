@@ -1,4 +1,5 @@
 import os
+import re
 import ssl
 from ipaddress import ip_address
 from pathlib import Path
@@ -35,10 +36,40 @@ class AgentConfig(BaseModel):
     nginx_listen_address: str = "0.0.0.0"
     nexttrace_binary: Path | None = None
     nexttrace_geoip: bool = True
+    certificate_http_address: str | None = None
+    certificate_webroots: list[str] = Field(default_factory=list, max_length=16)
     stats_address: str | None = None
     heartbeat_seconds: float = Field(default=15, ge=1, le=300)
     telemetry_seconds: float = Field(default=30, ge=1, le=300)
     poll_seconds: float = Field(default=3, ge=0.2, le=60)
+
+    @field_validator("certificate_http_address")
+    @classmethod
+    def challenge_listener(cls, value):
+        if value is None:
+            return value
+        address = urlsplit("http://" + value)
+        if (
+            not address.hostname
+            or not address.port
+            or address.username
+            or address.password
+            or address.path
+            or address.query
+            or address.fragment
+        ):
+            raise ValueError("HTTP challenge listener requires a literal IP address and port")
+        ip_address(address.hostname)
+        return value
+
+    @field_validator("certificate_webroots")
+    @classmethod
+    def challenge_sites(cls, values):
+        if len(set(values)) != len(values) or any(
+            not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", value) for value in values
+        ):
+            raise ValueError("HTTP challenge webroot IDs must be distinct safe directory names")
+        return values
 
     @field_validator("nginx_listen_address")
     @classmethod

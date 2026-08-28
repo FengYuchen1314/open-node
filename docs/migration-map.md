@@ -241,7 +241,11 @@ These passing command and snapshot checks do not prove a complete replacement:
   or owned public challenge directories, with interruption cleanup and the
   same renewal/deployment flow. Account contact/EAB editing and exact-version
   revocation now include durable receipts, retry and persistent duplicate protection.
-  Remote-node issuance and public CA/provider staging remain unverified;
+  Remote-node HTTP-01 now keeps ACME accounts and keys centrally while an
+  opted-in Agent serves expiring challenges. Durable order and cleanup records
+  support controller restart and node reconnect, verified with real EAB/Pebble,
+  non-root Nginx, HTTPS/WSS, automatic renewal and trusted TLS.
+  Public CA/provider staging remains unverified;
   validate supported DNS adapters with operator-owned staging accounts before
   claiming public-provider production coverage. See [certificates.md](certificates.md).
 - Native high-level tunnel deployment now uses the independent Nginx ownership

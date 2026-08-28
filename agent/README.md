@@ -111,9 +111,13 @@ Native tunnel deployment combines owned Nginx and official Xray configuration,
 validates the current snapshot hash, and restores files and service intentions
 after failures or interruption. The Agent can discover statistics from a
 loopback Xray `api.listen`; explicit `stats_address` takes precedence.
-ACME DNS-01 issuance and renewal are handled by the
+ACME issuance and renewal are handled by the
 [control plane](../docs/certificates.md), which sends certificate deployment
-commands to this Agent. No Agent-local ACME runtime is required.
+commands to this Agent. Host-opted-in HTTP-01 validation serves short-lived
+public challenges through a standalone listener or owned Nginx webroot, with
+durable cleanup and expiry. Account and issuance keys remain on the control
+plane. See [remote validation setup](../docs/certificates.md#remote-validation-node).
+No Agent-local ACME runtime is required.
 Unsupported operations return 501 rather than reporting success. Public WARP
 provider verification, fork-only protocols and
 further migration workflows remain release gates.

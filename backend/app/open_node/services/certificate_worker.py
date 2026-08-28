@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from open_node.services.certificate_acme import ADMIN_ERRORS, fingerprint
 from open_node.services.certificate_http import WebrootChallenges, harden_work
+from open_node.services.certificate_remote import RemoteHTTP01
 from open_node.services.certificate_vault import material, private_path
 from open_node.services.certificates import (
     CertificateError,
@@ -34,13 +35,19 @@ class CertificateWorker:
         self.store, self.connections = store, connections
         self.settings = store.settings
         self.webroots = WebrootChallenges(store.vault)
+        self.remote = RemoteHTTP01(store, connections)
 
     def recover(self):
         self.webroots.recover()
+        self.remote.request_cleanup()
         with self.store.write() as db:
             for job in db.scalars(select(CertificateJob).where(CertificateJob.status == "running")):
                 row = db.get(ManagedCertificate, job.certificate_id)
-                if job.kind in {"account", "revoke"} and row and row.active_job_id == job.id:
+                if (
+                    row
+                    and row.active_job_id == job.id
+                    and (job.kind in {"account", "revoke"} or row.validation_server_id)
+                ):
                     job.status, job.finished_at = "queued", None
                     job.message = "Resuming reconciliation with the CA"
                     row.status = "queued"
@@ -102,8 +109,8 @@ class CertificateWorker:
                     self.recover()
                     while True:
                         await self.deploy_pending()
-                        if self.settings.certificate_lego_binary:
-                            self.schedule()
+                        await self.remote.drain()
+                        self.schedule()
                         if await self.run_one(lock_fd):
                             continue
                         await asyncio.sleep(self.settings.certificate_poll_seconds)
@@ -136,8 +143,7 @@ class CertificateWorker:
             if administration:
                 data = await self.administer(row, job, lock_fd)
             else:
-                if not self.store.capabilities()["available"]:
-                    raise CertificateError("ACME issuance client is unavailable")
+                self.store.require_issuer(row)
                 self.store.check_challenge(row)
                 with self.store.session() as db:
                     provider = (
@@ -145,7 +151,11 @@ class CertificateWorker:
                         if row.provider_id
                         else None
                     )
-                data = await self.obtain(row, provider, job, lock_fd)
+                data = (
+                    await self.remote.obtain(row, job, lock_fd)
+                    if row.validation_server_id
+                    else await self.obtain(row, provider, job, lock_fd)
+                )
             with self.store.write() as db:
                 current = self.store.get(db, ManagedCertificate, row.id)
                 active_job = self.store.get(db, CertificateJob, job.id)
@@ -187,7 +197,9 @@ class CertificateWorker:
             with self.store.write() as db:
                 current = self.store.get(db, ManagedCertificate, row.id)
                 active_job = self.store.get(db, CertificateJob, job.id)
-                if administration and isinstance(exc, asyncio.CancelledError):
+                if (administration or row.validation_server_id) and isinstance(
+                    exc, asyncio.CancelledError
+                ):
                     active_job.status, active_job.finished_at = "queued", None
                     active_job.message = "Operation paused; reconciliation resumes after restart"
                     current.status = "queued"

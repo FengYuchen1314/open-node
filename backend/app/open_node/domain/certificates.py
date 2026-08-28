@@ -66,6 +66,7 @@ class CertificateCreate(CertificateInput):
     email: EmailStr
     challenge_type: Literal["dns", "standalone", "webroot"] = "dns"
     provider_id: UUID | None = None
+    validation_server_id: UUID | None = None
     webroot_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     directory_url: str = "https://acme-v02.api.letsencrypt.org/directory"
     accept_terms: Literal[True]
@@ -90,7 +91,7 @@ class CertificateCreate(CertificateInput):
     @model_validator(mode="after")
     def challenge(self):
         if self.challenge_type == "dns":
-            if not self.provider_id or self.webroot_id:
+            if not self.provider_id or self.webroot_id or self.validation_server_id:
                 raise ValueError("DNS validation requires only a DNS provider")
         else:
             if self.provider_id or any(name.startswith("*.") for name in self.domains):

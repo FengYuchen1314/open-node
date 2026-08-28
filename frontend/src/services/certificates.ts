@@ -15,6 +15,7 @@ export interface ManagedCertificate {
   domains: string[];
   email: string | null;
   provider_id: string | null;
+  validation_server_id?: string | null;
   directory_url: string | null;
   challenge_type: CertificateChallenge;
   webroot_id: string | null;
@@ -30,6 +31,8 @@ export interface CertificateCapabilities {
   available: boolean;
   account_management: boolean;
   revocation: boolean;
+  remote_http_available?: boolean;
+  validation_nodes?: Array<{ id: string; name: string; version: 1; standalone: boolean; webroots: string[]; cleanup_error: string | null }>;
   directories: string[];
   challenge_types: CertificateChallenge[];
   webroots: string[];
@@ -47,7 +50,7 @@ export interface CertificateDetail {
   certificate: ManagedCertificate;
   account: { email: string; state: string; uri: string | null; eab_configured: boolean; pending_email: string | null; retry_job_id: string | null } | null;
   versions: CertificateVersion[];
-  jobs: Array<{ id: string; kind: string; status: string; message: string | null; created_at: number }>;
+  jobs: Array<{ id: string; kind: string; status: string; message: string | null; created_at: number; cleanup_pending?: boolean }>;
   targets: Array<{ id: string; server_id: string; domain: string; cert_name: string; status: string; error: string | null; auto_deploy: boolean }>;
 }
 

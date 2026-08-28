@@ -15,6 +15,7 @@ from websockets.exceptions import WebSocketException
 
 from open_node_agent import __version__
 from open_node_agent.config import AgentConfig
+from open_node_agent.http01 import ENDPOINT as HTTP01_ENDPOINT
 from open_node_agent.journal import CommandJournal
 from open_node_agent.lifecycle import DeferredCommand
 from open_node_agent.lifecycle_protocol import is_lifecycle_command
@@ -70,7 +71,8 @@ class Agent:
                 and time.monotonic() - self.last_contact
                 <= max(45, self.config.heartbeat_seconds * 3)
             ),
-            "runtime_ready": (not desired or await self.runtime.running()) and (
+            "runtime_ready": (not desired or await self.runtime.running())
+            and (
                 not self.journal.desired_running(False, "nginx")
                 or await self.operations.nginx.running()
             ),
@@ -105,7 +107,9 @@ class Agent:
         async with self.execution_lock:
             lifecycle = is_lifecycle_command(command)
             if cached := self.journal.begin(
-                command, resume=lifecycle and self.config.lifecycle_socket is not None
+                command,
+                resume=(lifecycle and self.config.lifecycle_socket is not None)
+                or command["path"] == HTTP01_ENDPOINT,
             ):
                 return cached
             result = {"request_id": command["request_id"], "status": 200}
@@ -279,9 +283,7 @@ class Agent:
                                 + "/result"
                             )
                         )
-                        response = await client.post(
-                            base + target, json={"token": token, **result}
-                        )
+                        response = await client.post(base + target, json={"token": token, **result})
                         if response.status_code != 404 or not result.get("command_id"):
                             response.raise_for_status()
                         self.journal.acknowledge(result["request_id"])
@@ -363,6 +365,7 @@ class Agent:
                 group.create_task(self.monitor_runtime()),
                 group.create_task(self.connection_loop()),
                 group.create_task(self.health_loop()),
+                group.create_task(self.operations.http01.run()),
             ]
 
     async def connection_loop(self) -> None:
@@ -391,6 +394,7 @@ class Agent:
         for task in self.tasks:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
+        await self.operations.http01.close()
         await self.operations.nginx.close()
         await self.runtime.close()
         self.journal.close()

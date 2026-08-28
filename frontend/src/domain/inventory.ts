@@ -226,6 +226,12 @@ export interface ServerTelemetryResponse {
 }
 
 export interface AgentScanResult {
+  http01?: {
+    version: 1;
+    standalone: boolean;
+    webroots: string[];
+    cleanup_error: string | null;
+  } | null;
   nginx?: {
     tunnel_deploy?: number;
     running: boolean;

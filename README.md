@@ -72,13 +72,15 @@ for those operations do not imply the independent agent implements them.
 
 [Central certificate management](docs/certificates.md) now provides DNS
 credentials, PEM import/export, DNS-01 and HTTP-01 issuance and renewal through pinned
-lego v4, EAB, encrypted version history, and automatic Agent deployment.
+lego v4 and Certbot ACME, EAB, encrypted version history, and automatic Agent deployment.
 The VPS smoke uses a real Pebble test CA and authoritative DNS, including
 short-lived automatic renewal and trusted TLS/version rollback on both
 Agent transports. HTTP-01 supports a standalone listener or an allowlisted
-webroot on the control-plane host. Account contact editing and exact-version
+webroot on the control plane or a host-enabled validation node. Remote validation
+retains central accounts/keys, durable orders and acknowledged challenge cleanup.
+Account contact editing and exact-version
 revocation include crash reconciliation and persistent duplicate protection.
-Public-CA/provider-account staging and remote-node issuance remain separate gates.
+Public-CA/provider-account staging remains a separate gate.
 
 The first milestone establishes the project skeleton, the no-license contract,
 persisted server/agent inventory, agent telemetry and command slices, initial

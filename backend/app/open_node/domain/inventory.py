@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from ipaddress import ip_address
@@ -480,7 +481,24 @@ class AgentNginxScan(BaseModel):
     html_path: str = Field(max_length=512)
 
 
+class AgentHTTP01Scan(BaseModel):
+    version: Literal[1] = 1
+    standalone: bool = False
+    webroots: list[str] = Field(default_factory=list, max_length=16)
+    cleanup_error: str | None = Field(default=None, max_length=512)
+
+    @field_validator("webroots")
+    @classmethod
+    def webroot_ids(cls, values):
+        if len(set(values)) != len(values) or any(
+            not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", value) for value in values
+        ):
+            raise ValueError("Invalid HTTP-01 webroot IDs")
+        return values
+
+
 class AgentScanResultPayload(BaseModel):
+    http01: AgentHTTP01Scan | None = None
     nginx: AgentNginxScan | None = None
     xray_running: bool = False
     xray_version: str | None = Field(default=None, max_length=120)

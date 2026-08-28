@@ -17,7 +17,7 @@ const loading = ref(false);
 const dialog = ref<"" | "provider" | "certificate" | "import" | "account" | "revoke">("");
 const editingProvider = ref("");
 const providerForm = reactive({ name: "", provider: "cloudflare", credentials: {} as Record<string, string> });
-const form = reactive({ name: "", domains: "", email: "", challenge_type: "dns" as CertificateChallenge, provider_id: "", webroot_id: "", directory_url: "", accept_terms: false, auto_renew: true, eab_kid: "", eab_hmac_key: "" });
+const form = reactive({ name: "", domains: "", email: "", challenge_type: "dns" as CertificateChallenge, validation_server_id: "", provider_id: "", webroot_id: "", directory_url: "", accept_terms: false, auto_renew: true, eab_kid: "", eab_hmac_key: "" });
 const importForm = reactive({ name: "", cert_pem: "", key_pem: "" });
 const accountForm = reactive({ email: "", eab_action: "keep", eab_kid: "", eab_hmac_key: "" });
 const revokeForm = reactive({ version_id: "", serial: "", directory_url: "", reason: 0, confirm: false });
@@ -32,10 +32,21 @@ const providerFields = computed(() => capabilities.value.providers.find((item) =
 const serverOptions = computed(() => servers.value.map((server) => ({ title: server.name, value: server.id })));
 const providerOptions = computed(() => providers.value.map((provider) => ({ title: provider.name, value: provider.id })));
 const challengeLabels: Record<CertificateChallenge, string> = { dns: "DNS-01", standalone: "HTTP-01 / Standalone", webroot: "HTTP-01 / Webroot" };
-const challengeOptions = computed(() => capabilities.value.challenge_types.map((value) => ({ value, title: challengeLabels[value] })));
+const validationNodes = computed(() => capabilities.value.remote_http_available ? (capabilities.value.validation_nodes ?? []).filter((node) => !node.cleanup_error) : []);
+const challengeTypes = computed(() => [...new Set<CertificateChallenge>([
+  ...capabilities.value.challenge_types,
+  ...(validationNodes.value.some((node) => node.standalone) ? ["standalone" as const] : []),
+  ...(validationNodes.value.some((node) => node.webroots.length) ? ["webroot" as const] : []),
+])]);
+const challengeOptions = computed(() => challengeTypes.value.map((value) => ({ value, title: challengeLabels[value] })));
+const validationOptions = computed(() => [
+  { title: "Control plane", value: "", props: { disabled: !capabilities.value.challenge_types.includes(form.challenge_type) } },
+  ...validationNodes.value.filter((node) => form.challenge_type === "standalone" ? node.standalone : form.challenge_type === "webroot" && node.webroots.length > 0).map((node) => ({ title: node.name, value: node.id, props: { disabled: false } })),
+]);
+const webrootOptions = computed(() => form.validation_server_id ? validationNodes.value.find((node) => node.id === form.validation_server_id)?.webroots ?? [] : capabilities.value.webroots);
 const wildcardError = computed(() => form.challenge_type !== "dns" && form.domains.trim().split(/[\s,]+/).some((name) => name.startsWith("*.")));
-const canCreate = computed(() => Boolean(form.name && form.domains.trim() && form.email && form.directory_url && form.accept_terms && !wildcardError.value && capabilities.value.challenge_types.includes(form.challenge_type) && (form.challenge_type !== "dns" || form.provider_id) && (form.challenge_type !== "webroot" || form.webroot_id)));
-const hasChallenge = computed(() => providers.value.length > 0 || capabilities.value.challenge_types.some((type) => type !== "dns"));
+const canCreate = computed(() => Boolean(form.name && form.domains.trim() && form.email && form.directory_url && form.accept_terms && !wildcardError.value && challengeTypes.value.includes(form.challenge_type) && (form.challenge_type === "dns" ? form.provider_id : validationOptions.value.some((option) => option.value === form.validation_server_id && !option.props.disabled)) && (form.challenge_type !== "webroot" || webrootOptions.value.includes(form.webroot_id))));
+const hasChallenge = computed(() => providers.value.length > 0 || challengeTypes.value.some((type) => type !== "dns"));
 const currentRevocation = computed(() => detail.value?.versions.find((version) => version.id === detail.value?.certificate.version_id)?.revocation);
 const canSaveAccount = computed(() => Boolean(accountForm.email.trim() && (accountForm.eab_action !== "replace" || (accountForm.eab_kid && accountForm.eab_hmac_key))));
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -45,7 +56,14 @@ function color(status: string) { return ["issued", "succeeded"].includes(status)
 function statusLabel(status: string) { return ({ revocation_pending: "Revoking", revocation_unknown: "Unconfirmed", updating_account: "Account update", not_registered: "Not registered", unconfirmed: "Unconfirmed", unavailable: "Unavailable", registered: "Registered" } as Record<string, string>)[status] ?? status; }
 function needsReissue(row: ManagedCertificate) { return ["revoked", "revocation_unknown", "revocation_pending", "revoking"].includes(row.status); }
 function serverName(id: string) { return servers.value.find((server) => server.id === id)?.name ?? id; }
-function challengeName(row: ManagedCertificate) { return row.directory_url ? challengeLabels[row.challenge_type] + (row.webroot_id ? " / " + row.webroot_id : "") : "Imported"; }
+function challengeName(row: ManagedCertificate) { return row.directory_url ? challengeLabels[row.challenge_type] + (row.validation_server_id ? " / " + serverName(row.validation_server_id) : "") + (row.webroot_id ? " / " + row.webroot_id : "") : "Imported"; }
+function issuerAvailable(row: ManagedCertificate) { return row.validation_server_id ? Boolean(capabilities.value.remote_http_available) : capabilities.value.available; }
+function selectValidationHost() {
+  if (form.challenge_type === "dns") form.validation_server_id = "";
+  else if (!validationOptions.value.some((option) => option.value === form.validation_server_id && !option.props.disabled)) {
+    form.validation_server_id = validationOptions.value.find((option) => !option.props.disabled)?.value ?? "";
+  }
+}
 
 async function refresh() {
   if (loading.value) return;
@@ -100,7 +118,8 @@ function openProvider(provider?: DNSProvider) {
 }
 
 function openCertificate() {
-  Object.assign(form, { name: "", domains: "", email: "", challenge_type: providers.value.length ? "dns" : capabilities.value.challenge_types.find((type) => type !== "dns") ?? "dns", provider_id: providers.value[0]?.id ?? "", webroot_id: capabilities.value.webroots[0] ?? "", directory_url: capabilities.value.directories[0] ?? "", accept_terms: false, auto_renew: true, eab_kid: "", eab_hmac_key: "" });
+  Object.assign(form, { name: "", domains: "", email: "", challenge_type: providers.value.length ? "dns" : challengeTypes.value.find((type) => type !== "dns") ?? "dns", validation_server_id: "", provider_id: providers.value[0]?.id ?? "", webroot_id: capabilities.value.webroots[0] ?? "", directory_url: capabilities.value.directories[0] ?? "", accept_terms: false, auto_renew: true, eab_kid: "", eab_hmac_key: "" });
+  selectValidationHost();
   dialog.value = "certificate";
 }
 
@@ -139,7 +158,7 @@ function saveProvider() { void action(async () => {
 
 function createCertificate() { void action(async () => {
   if (!canCreate.value) return;
-  await certificateRequest("", "POST", { ...form, provider_id: form.challenge_type === "dns" ? form.provider_id : null, webroot_id: form.challenge_type === "webroot" ? form.webroot_id : null, domains: form.domains.trim().split(/[\s,]+/), eab_kid: form.eab_kid || null, eab_hmac_key: form.eab_hmac_key || null });
+  await certificateRequest("", "POST", { ...form, validation_server_id: form.challenge_type === "dns" ? null : form.validation_server_id || null, provider_id: form.challenge_type === "dns" ? form.provider_id : null, webroot_id: form.challenge_type === "webroot" ? form.webroot_id : null, domains: form.domains.trim().split(/[\s,]+/), eab_kid: form.eab_kid || null, eab_hmac_key: form.eab_hmac_key || null });
   dialog.value = "";
 }); }
 
@@ -178,6 +197,8 @@ function download(privateKey = false) {
 }
 
 watch(() => providerForm.provider, () => { providerForm.credentials = {}; });
+watch(() => form.challenge_type, selectValidationHost);
+watch(webrootOptions, (values) => { if (!values.includes(form.webroot_id)) form.webroot_id = values[0] ?? ""; });
 watch(dialog, (value) => { if (!value) { providerForm.credentials = {}; importForm.cert_pem = ""; importForm.key_pem = ""; form.eab_kid = ""; form.eab_hmac_key = ""; accountForm.eab_kid = ""; accountForm.eab_hmac_key = ""; revokeForm.confirm = false; } });
 watch(() => accountForm.eab_action, () => { accountForm.eab_kid = ""; accountForm.eab_hmac_key = ""; });
 onMounted(() => { void refresh(); timer = setInterval(() => { if (!busy.value && !dialog.value && !document.hidden) void refresh(); }, 5000); });
@@ -196,7 +217,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
       <div class="certificate-toolbar">
         <v-btn prepend-icon="mdi-plus" color="primary" :disabled="busy || !hasChallenge" @click="openCertificate">New certificate</v-btn>
         <v-btn prepend-icon="mdi-import" variant="outlined" :disabled="busy" @click="dialog = 'import'">Import PEM</v-btn>
-        <v-chip v-if="!capabilities.available" color="warning" size="small">ACME unavailable</v-chip>
+        <v-chip v-if="!capabilities.available && !validationNodes.length" color="warning" size="small">ACME unavailable</v-chip>
       </div>
       <p v-if="!certificates.length" class="certificate-empty">No certificates</p>
       <article v-for="row in certificates" :key="row.id" class="certificate-row">
@@ -205,7 +226,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
         <div class="certificate-expiry"><span>Expires</span><time>{{ date(row.expires_at) }}</time></div>
         <div class="certificate-actions">
           <v-btn icon="mdi-folder-open-outline" variant="text" size="small" title="Certificate details" aria-label="Certificate details" :disabled="busy" @click="inspect(row)" />
-          <v-btn :icon="row.version_id ? 'mdi-autorenew' : 'mdi-certificate-outline'" variant="text" size="small" :title="needsReissue(row) ? 'Reissue certificate' : row.version_id ? 'Renew certificate' : 'Issue certificate'" :aria-label="needsReissue(row) ? 'Reissue certificate' : row.version_id ? 'Renew certificate' : 'Issue certificate'" :disabled="busy || Boolean(row.active_job_id) || !row.directory_url || !capabilities.available" @click="queue(row)" />
+          <v-btn :icon="row.version_id ? 'mdi-autorenew' : 'mdi-certificate-outline'" variant="text" size="small" :title="needsReissue(row) ? 'Reissue certificate' : row.version_id ? 'Renew certificate' : 'Issue certificate'" :aria-label="needsReissue(row) ? 'Reissue certificate' : row.version_id ? 'Renew certificate' : 'Issue certificate'" :disabled="busy || Boolean(row.active_job_id) || !row.directory_url || !issuerAvailable(row)" @click="queue(row)" />
           <v-btn icon="mdi-trash-can-outline" variant="text" size="small" title="Delete certificate" aria-label="Delete certificate" :disabled="busy || Boolean(row.active_job_id)" @click="remove(row)" />
         </div>
       </article>
@@ -227,7 +248,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
       <div class="certificate-toolbar">
         <v-switch :model-value="detail.certificate.auto_renew" label="Auto-renew" color="primary" hide-details density="compact" :disabled="busy || Boolean(currentRevocation) || !detail.certificate.directory_url" @update:model-value="toggleRenew(detail.certificate, $event)" />
         <v-checkbox :model-value="force || Boolean(currentRevocation)" label="Force renewal" hide-details density="compact" :disabled="busy || Boolean(currentRevocation) || !detail.certificate.directory_url" @update:model-value="force = Boolean($event)" />
-        <v-btn icon="mdi-autorenew" :title="currentRevocation ? 'Reissue certificate' : 'Renew now'" :aria-label="currentRevocation ? 'Reissue certificate' : 'Renew now'" variant="text" :disabled="busy || !detail.certificate.version_id || !detail.certificate.directory_url || Boolean(detail.certificate.active_job_id) || !capabilities.available" @click="queue(detail.certificate, force)" />
+        <v-btn icon="mdi-autorenew" :title="currentRevocation ? 'Reissue certificate' : 'Renew now'" :aria-label="currentRevocation ? 'Reissue certificate' : 'Renew now'" variant="text" :disabled="busy || !detail.certificate.version_id || !detail.certificate.directory_url || Boolean(detail.certificate.active_job_id) || !issuerAvailable(detail.certificate)" @click="queue(detail.certificate, force)" />
         <v-btn icon="mdi-certificate-outline" title="Download certificate" aria-label="Download certificate" variant="text" :disabled="busy || !detail.certificate.version_id" @click="download()" />
         <v-btn icon="mdi-key-arrow-right" title="Download private key" aria-label="Download private key" variant="text" :disabled="busy || !detail.certificate.version_id" @click="download(true)" />
       </div>
@@ -268,7 +289,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
         </div>
       </div>
       <h3>Jobs</h3>
-      <div v-for="job in detail.jobs" :key="job.id" class="version-row"><div><strong>{{ job.kind }}</strong><div>{{ job.message }}</div></div><time>{{ date(job.created_at) }}</time><v-chip :color="color(job.status)" size="small">{{ job.status }}</v-chip></div>
+      <div v-for="job in detail.jobs" :key="job.id" class="version-row"><div class="certificate-identity"><strong>{{ job.kind }}</strong><div>{{ job.message }}</div><div v-if="job.cleanup_pending" class="cleanup-pending">Node challenge cleanup pending</div></div><time>{{ date(job.created_at) }}</time><v-chip :color="color(job.status)" size="small">{{ job.status }}</v-chip></div>
     </section>
 
     <v-dialog :model-value="Boolean(dialog)" max-width="620" scrollable :persistent="busy" @update:model-value="(value) => { if (!value) dialog = ''; }">
@@ -286,8 +307,9 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
             <v-textarea v-model="form.domains" label="DNS names" rows="2" variant="outlined" hide-details="auto" :error-messages="wildcardError ? ['Wildcard names require DNS-01'] : []" />
             <v-text-field v-model="form.email" label="Account email" type="email" variant="outlined" hide-details />
             <v-select v-model="form.challenge_type" label="Validation method" :items="challengeOptions" variant="outlined" hide-details />
+            <v-select v-if="form.challenge_type !== 'dns'" v-model="form.validation_server_id" label="Validation host" :items="validationOptions" variant="outlined" hide-details />
             <v-select v-if="form.challenge_type === 'dns'" v-model="form.provider_id" label="DNS provider" :items="providerOptions" variant="outlined" hide-details />
-            <v-select v-if="form.challenge_type === 'webroot'" v-model="form.webroot_id" label="Webroot" :items="capabilities.webroots" variant="outlined" hide-details />
+            <v-select v-if="form.challenge_type === 'webroot'" v-model="form.webroot_id" label="Webroot" :items="webrootOptions" variant="outlined" hide-details />
             <v-select v-model="form.directory_url" label="ACME directory" :items="capabilities.directories" variant="outlined" hide-details />
             <details><summary>External account binding</summary><div class="certificate-form mt-3"><v-text-field v-model="form.eab_kid" label="EAB key ID" type="password" variant="outlined" hide-details /><v-text-field v-model="form.eab_hmac_key" label="EAB HMAC key" type="password" variant="outlined" hide-details /></div></details>
             <v-switch v-model="form.auto_renew" label="Auto-renew" color="primary" hide-details density="compact" />
@@ -340,6 +362,7 @@ h1 { font-size: 28px; } h2 { font-size: 22px; } h3 { font-size: 16px; margin: 24
 .certificate-form { display: grid; gap: 14px; min-width: 0; }
 .target-form { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: center; }
 .certificate-error { color: #a33232 !important; }
+.cleanup-pending { color: #8b590e !important; }
 .certificate-dialog { border-radius: 8px; }
 .certificate-dialog :deep(.v-card-title) { white-space: normal; font-size: 20px; }
 .certificate-dialog :deep(.v-label) { white-space: normal; }

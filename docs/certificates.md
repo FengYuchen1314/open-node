@@ -9,10 +9,10 @@ payment or commercial entitlement is required.
 
 ## Host Setup
 
-ACME execution currently requires Linux and the
+ACME execution requires Linux. DNS-01 and control-plane HTTP-01 use the
 [lego v4.35.2 executable](https://github.com/go-acme/lego/releases/tag/v4.35.2).
 Open Node delegates issuance and provider protocols to this MIT-licensed client.
-Account contact and revocation operations use the Apache-2.0-licensed
+Remote-node HTTP-01, account contact and revocation operations use the Apache-2.0-licensed
 [Certbot ACME client 5.7.0](https://github.com/certbot/certbot/releases/tag/v5.7.0),
 installed with the backend dependencies. It does not copy the reference product's
 implementation. Install a trusted,
@@ -42,9 +42,9 @@ election and network-filesystem locks are not supported. A file lock elects
 one worker and is inherited by the ACME child, preventing another worker
 from issuing while a surviving child still owns the lock.
 
-Without a configured executable, PEM import/export, account editing, revocation
-and automatic/manual node deployment remain available on Linux;
-ACME issuance/renewal is unavailable. Deployments
+Without a configured lego executable, remote-node HTTP-01 issuance/renewal,
+PEM import/export, account editing, revocation and automatic/manual node deployment
+remain available on Linux. Central DNS-01 and HTTP-01 issuance are unavailable. Deployments
 require an installed, scanned Open Node Agent with an owned certificate
 directory. Agent credentials and management authentication remain separate.
 
@@ -105,14 +105,14 @@ and does not resend a contact change already accepted there.
 
 ## HTTP-01 Validation
 
-Both HTTP modes run on the **control-plane host**, before certificate deployment
-to nodes. Every requested hostname must route its public HTTP port **80**
-challenge requests to that host. Check all published A/AAAA addresses and any
+The validation host is either the **control plane** or an explicitly enabled
+**Open Node Agent**. Every requested hostname must route its public HTTP port **80**
+challenge requests to the selected host. Check all published A/AAAA addresses and any
 CDN, firewall or reverse proxy. HTTP-01 cannot issue wildcard certificates;
 use DNS-01 for those. The panel neither changes DNS nor stops existing listeners.
 HTTP modes are disabled until explicitly configured by the host administrator.
 
-### Standalone Listener
+### Control-Plane Standalone Listener
 
 For a non-root backend behind an existing web server:
 
@@ -137,7 +137,7 @@ whole backend as root merely to bind port 80. In containers, configure the
 actual reachable interface and proxy network rather than assuming host
 loopback reaches the container. The API cannot choose addresses or ports.
 
-### Existing Webroot
+### Control-Plane Webroot
 
 Configure a host-side allowlist; the browser selects an ID, never a disk path:
 
@@ -182,21 +182,99 @@ or moved, finish outstanding jobs first; retained ownership records may need
 host-side review. A cleanup warning for an unavailable old site does not block
 unrelated certificates or node deployments.
 
+### Remote Validation Node
+
+On the node, enable one or both modes in its host-managed Agent configuration
+and restart the owned Agent service:
+
+```json
+{
+  "certificate_http_address": "127.0.0.1:8082",
+  "certificate_webroots": ["site"]
+}
+```
+
+These are optional fields in the existing configuration, not a replacement for
+its master URL, token or runtime settings. Standalone requires a literal IP and
+port, including bracketed IPv6 where appropriate. Route public port 80 to the
+listener using the proxy location above. An occupied port causes failure; the
+Agent does not stop its owner. Direct low-port binding requires host permission.
+
+Node webroot IDs map only to `<agent-state-dir>/nginx/html/<id>`. With the normal
+service installation, configure the relevant public port-80 Nginx server with:
+
+```nginx
+location ^~ /.well-known/acme-challenge/ {
+    root /opt/open-node-agent/state/nginx/html/site;
+    try_files $uri =404;
+}
+```
+
+Use the actual owned state directory if installation paths differ. Validate and
+reload Nginx after changing its configuration, and retain this HTTP location
+when enabling TLS or redirects. The managed Nginx process runs as the Agent user
+and can traverse its private state. Arbitrary external document roots are not
+accepted by node commands; standalone proxying works with an independent web
+server without granting that server access to private Agent state.
+
+The challenge directory must initially be absent or empty and cannot be shared
+with another ACME writer. The Agent records directory identity, checks ownership,
+links and exact file contents, and leaves other site files unchanged. Responses
+are public `0644` files, never account keys or certificate private keys.
+
+After the next Agent scan, choose **Validation host** in the certificate form.
+The API stores `validation_server_id`; null retains control-plane behavior.
+Legacy Agents without an HTTP-01 capability report are not selectable. Creating
+and starting a job both check the node's allowed mode and webroot IDs. A stale
+scan cannot override the live Agent's host policy.
+
+The central Certbot client creates the account, CSR and CA order. Only public
+challenge tokens and key authorizations are sent over the authenticated Agent
+command channel. EAB credentials and account/certificate keys stay in the
+central private vault. Subsequent certificate deployment is a separate action.
+No ACME client, CA account or DNS-provider secret is installed on the node.
+
+Every presentation has an immutable, expiring lease. Keep controller and node
+clocks synchronized. Cleanup is independent of
+presentation success, survives controller restart and records a node acknowledgment.
+A release received before an old presentation prevents that presentation from
+resurrecting the challenge. Standalone responses stop at expiry; running Agents
+also clean owned webroot files on expiry. An offline Agent cannot remove files
+until restart. The supported managed Nginx service stops with its Agent.
+Unexpected file replacements are preserved and reported for host attention.
+
+The job displays **Node challenge cleanup pending** until the node confirms
+cleanup, even when issuance succeeded. Retry runs automatically after reconnect;
+profile deletion is blocked while cleanup is unresolved. Do not discard the
+Agent journal or its owned challenge directory to bypass this check. Resolve
+host-side ownership/content errors first. One damaged challenge directory does
+not prevent expiration cleanup of other leases.
+
+On controller interruption, remote jobs retain their job ID, certificate key,
+CSR and CA order URL. Recovery first cleans older leases, then reconciles that
+order with a fresh presentation lease when necessary. Already-finalized orders
+are fetched without another finalization. A new-order request whose response was
+lost before its URL was saved is explicitly unconfirmed and is not silently
+resubmitted on resume. Inspect CA state before initiating a new job.
+
 ## Renewal And Deployment
 
 The worker checks for due certificates every 30 seconds by default. Renewal
 starts during the last third of validity, capped at 30 days, or the last half
 for certificates valid for ten days or less. Successful/not-due checks are
 scheduled at most an hour apart, shortened for short-lived certificates.
-lego also applies its renewal and ARI decisions. A forced manual renewal
+For central validation, lego also applies its renewal and ARI decisions.
+Remote validation uses the same controller age policy without lego's ARI override.
+A forced manual renewal
 bypasses the normal age/ARI decision; use it sparingly because CA limits still
 apply. Only one queued/running job per certificate is allowed.
 
 Failed or interrupted issuance/renewal jobs retain the last active version and record a safe
 error. Automatic retry is delayed an hour after failure; operators can retry
-manually sooner. A restarted worker marks unfinished running issuance jobs interrupted
+manually sooner. A restarted worker marks unfinished running central-validation jobs interrupted
 and resumes queued jobs. A valid newly written certificate left by an
 interrupted job can be recovered on a normal retry, avoiding an extra CA order.
+Remote-node jobs instead reconcile their durable order as described above.
 The worker bounds execution time and output and terminates its process group
 on cancellation. Private `last-job.log` files aid diagnosis and may contain
 provider responses: do not publish these logs.
@@ -259,8 +337,9 @@ again. Retained private-key exports remain available for operator recovery.
 DNS credentials, EAB credentials and stored certificate material are encrypted
 with a randomly generated Fernet key outside the database. Back up both the
 database and the entire private state directory, including `vault.key`,
-`vault.initialized`, HTTP webroot ownership records, administration receipts and
-lego account files. Stop the backend while taking a
+`vault.initialized`, HTTP webroot ownership records, administration/issuance receipts,
+saved orders and account files. Back up each validation Agent's state and command
+journal with its owned runtime configuration. Stop the backend while taking a
 consistent filesystem backup, or use an equivalent coordinated snapshot.
 Losing the vault key makes encrypted data unreadable. A missing key beside an
 existing initialization marker or encrypted database rows fails closed instead
@@ -299,5 +378,5 @@ non-root web server, forced interruption and actual automatic renewal.
 The [administration smoke](testing.md#certificate-administration-smoke) additionally
 checks actual CA account contacts, exact-version revocation, orphaned account keys,
 EAB edits, lost responses, hard restart and duplicate/import protection.
-Public CA/provider staging, remote-node issuance and multi-host scheduling remain
-migration gates.
+Remote HTTP-01 has a separate [node-validation smoke](testing.md#remote-http-01-smoke).
+Public CA/provider staging and multi-host scheduling remain migration gates.

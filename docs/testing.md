@@ -496,6 +496,57 @@ Verified on the designated Debian 12 x86-64 VPS:
 - Ruff passed for changed backend modules and the HTTP smoke. Existing
   Starlette/httpx deprecation and frontend bundle-size warnings remain.
 
+## Remote HTTP-01 Smoke
+
+Build the frontend and current Agent wheel on the VPS. Use the backend
+development/browser/ACME-test extras and the same pinned Pebble, Nginx and
+official Xray artifacts as the existing ACME and Agent smokes:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-certificate-remote.py \
+  --pebble /path/to/pebble-linux-amd64/linux/amd64/pebble \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /path/to/nginx \
+  --nginx-stream-module /path/to/ngx_stream_module.so \
+  --screenshots /tmp/open-node-remote-http01-screenshots
+```
+
+The fixture starts a TLS-verified controller without lego or central HTTP-01
+listeners. Real non-root systemd Agents connect over HTTPS polling and WSS.
+An EAB-required Pebble CA reads standalone responses and owned Nginx webroots
+on those nodes, through an observable fault-injection proxy. It never supplies
+synthetic successful challenge data.
+
+The workflow covers issue, not-due skip, failed validation retaining the old
+version, forced renewal, node-disconnected cleanup and reconnect, actual TLS
+deployment, account contact changes and elapsed-time automatic renewal. A
+controller hard kill leaves the ACME child holding the inherited lock; after
+the child is killed, recovery must reuse the same job/order and create a new
+challenge lease after cleaning the old one.
+
+Playwright creates remote profiles, selects validation nodes, checks wildcard
+rejection and explicit terms/EAB fields, and reads issued versions. Layout
+checks and screenshots cover 1440px, 390px and 320px. The test leaves existing
+services untouched and removes its temporary systemd users/services/directories.
+It does not use public CA orders or provider accounts.
+
+Focused backend tests cover additive scan/profile migration, live capability
+checks, command/lease receipts, cleanup retries, deletion protection, cancellation,
+order-response loss, persisted CSR/key binding and public-only EAB payloads.
+Agent tests cover host opt-in, exact HTTP host/path/token matching, expiry,
+idempotent release-before-present ordering, restart, occupied ports, immutable
+leases and filesystem replacement/link protection.
+
+Verified on the designated Debian 12 x86-64 VPS:
+
+- Backend: 387 tests; Agent: 304 tests; frontend: 98 tests and production build.
+- Remote standalone/webroot issuance, EAB, HTTPS/WSS, cleanup after reconnect,
+  inherited-lock/order recovery and elapsed-time renewal with live TLS passed.
+- Existing DNS-01/EAB, control-plane HTTP-01 and account/revocation lifecycle
+  smokes passed, including forced interruption and automatic renewal.
+- Desktop/mobile/narrow screenshots were inspected; the changed Python code
+  passed Ruff. Existing Starlette/httpx and frontend bundle-size warnings remain.
+
 ## Certificate Administration Smoke
 
 Use the same pinned lego/Pebble binaries, backend development/browser/ACME-test

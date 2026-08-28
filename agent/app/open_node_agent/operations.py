@@ -9,6 +9,8 @@ import psutil
 
 from open_node_agent import __version__
 from open_node_agent.diagnostics import Diagnostics
+from open_node_agent.http01 import ENDPOINT as HTTP01_ENDPOINT
+from open_node_agent.http01 import HttpChallenges
 from open_node_agent.journal import CommandJournal
 from open_node_agent.lifecycle import HostLifecycle
 from open_node_agent.logs import OwnedLogs
@@ -178,6 +180,7 @@ class Operations:
         self.diagnostics = Diagnostics(runtime.config)
         self.logs = OwnedLogs(runtime.config)
         self.warp = Warp(runtime)
+        self.http01 = HttpChallenges(runtime.config, journal)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
 
@@ -187,6 +190,7 @@ class Operations:
             "nginx": await self.nginx.status(),
             "runtime_release": self.releases.status(),
             "warp": self.warp.snapshot(),
+            "http01": self.http01.snapshot(),
         }
 
     def network_speed(self) -> dict:
@@ -212,6 +216,13 @@ class Operations:
         if not isinstance(body, dict):
             raise RuntimeFailure("Command body must be an object")
         query = parse_qs(command.get("query") or "")
+        if path == HTTP01_ENDPOINT:
+            if method == "PUT":
+                return await self.http01.present(body)
+            if method == "DELETE":
+                return await self.http01.release(body)
+            if method == "GET":
+                return self.http01.snapshot()
         if path == "/api/child/domains/latency" and method == "POST":
             return await self.diagnostics.latency(body)
         if path == "/api/child/network/return-route-test" and method == "POST":

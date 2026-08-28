@@ -119,6 +119,23 @@ def connect(request, pem):
         raise
 
 
+def save_registration(vault, account_file, email, registration):
+    https_url(registration.uri)
+    # EAB is decoded as an immutable mapping; retain it without resending it.
+    body = json.loads(registration.body.update(external_account_binding=None).json_dumps())
+    if registration.body.external_account_binding:
+        body["externalAccountBinding"] = dict(registration.body.external_account_binding)
+    vault.write(
+        account_file,
+        json.dumps(
+            {
+                "email": email,
+                "registration": {"uri": registration.uri, "body": body},
+            }
+        ).encode(),
+    )
+
+
 def update_account(vault, request):
     work = private_path(vault.root, Path(request["profile_work"]))
     email, storage_email = request["email"], request["storage_email"]
@@ -157,21 +174,7 @@ def update_account(vault, request):
             )
         if tuple(registration.body.contact) != contact:
             raise AdministrationError("contact_unconfirmed")
-        https_url(registration.uri)
-        # The client decodes EAB as an immutable mapping which its JSON encoder
-        # cannot round-trip. Keep the CA proof locally; never resend it on update.
-        body = json.loads(registration.body.update(external_account_binding=None).json_dumps())
-        if registration.body.external_account_binding:
-            body["externalAccountBinding"] = dict(registration.body.external_account_binding)
-        vault.write(
-            account_file,
-            json.dumps(
-                {
-                    "email": email,
-                    "registration": {"uri": registration.uri, "body": body},
-                }
-            ).encode(),
-        )
+        save_registration(vault, account_file, email, registration)
         return {"email": email, "storage_email": storage_email, "registered": True}
     finally:
         acme.net.session.close()
