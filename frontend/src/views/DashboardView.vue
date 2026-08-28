@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import CommandInspector from "../components/CommandInspector.vue";
 import AgentLifecycleDialog from "../components/AgentLifecycleDialog.vue";
 import ServerTrafficPanel from "../components/ServerTrafficPanel.vue";
+import ServerManagementDialog from "../components/ServerManagementDialog.vue";
 import RouteProbeFields from "../components/RouteProbeFields.vue";
 import { diagnosticPaths, latencyCommandTimeout, routeTargets, selectedRouteTargets } from "../domain/diagnostics";
 import {
@@ -37,6 +38,10 @@ import {
 } from "../services/inventory";
 
 const servers = ref<ServerSummary[]>([]);
+const management = reactive({ open: false, serverId: "", mode: "edit" as "edit" | "remove" });
+function manageServer(serverId: string, mode: "edit" | "remove") {
+  Object.assign(management, { serverId, mode, open: true });
+}
 const telemetryByServer = ref<Record<string, AgentTelemetry | null>>({});
 const scanResultsByServer = ref<Record<string, AgentScanResult | null>>({});
 const commandsByServer = ref<Record<string, AgentCommand[]>>({});
@@ -1065,6 +1070,7 @@ function truncateText(value: string, maxLength: number) {
           <thead>
             <tr>
               <th>Name</th>
+              <th aria-label="Server actions"></th>
               <th>Status</th>
               <th>Endpoint</th>
               <th>Probe</th>
@@ -1081,6 +1087,16 @@ function truncateText(value: string, maxLength: number) {
               <td>
                 <div class="server-name">{{ server.name }}</div>
                 <div class="server-subline">{{ server.xray_mode }} xray</div>
+              </td>
+              <td>
+                <div class="d-flex">
+                  <v-tooltip text="Edit server"><template #activator="{ props: tip }">
+                    <v-btn v-bind="tip" icon="mdi-pencil-outline" :aria-label="`Edit ${server.name}`" variant="text" size="small" @click="manageServer(server.id, 'edit')" />
+                  </template></v-tooltip>
+                  <v-tooltip text="Remove server"><template #activator="{ props: tip }">
+                    <v-btn v-bind="tip" icon="mdi-delete-outline" :aria-label="`Remove ${server.name}`" variant="text" size="small" @click="manageServer(server.id, 'remove')" />
+                  </template></v-tooltip>
+                </div>
               </td>
               <td>
                 <v-chip
@@ -1133,6 +1149,7 @@ function truncateText(value: string, maxLength: number) {
           <div>No servers yet.</div>
         </div>
         <ServerTrafficPanel v-if="servers.length" :servers="servers" />
+        <ServerManagementDialog v-model:open="management.open" :server-id="management.serverId" :mode="management.mode" @changed="refreshServers" />
       </v-sheet>
 
       <v-sheet class="section-surface create-panel" border>

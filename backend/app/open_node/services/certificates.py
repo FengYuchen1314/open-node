@@ -331,6 +331,8 @@ class CertificateStore:
         with self.write() as db:
             if payload.provider_id:
                 self.get(db, DNSProvider, payload.provider_id)
+            if payload.validation_server_id:
+                self.get(db, ServerModel, payload.validation_server_id)
             row = ManagedCertificate(
                 id=str(uuid4()),
                 name=payload.name,

@@ -470,6 +470,8 @@ class ProductUserCredentialsResponse(BaseModel):
 
 
 class SubscriptionTrafficEntryRead(BaseModel):
+    server_name: str | None = None
+    archived: bool = False
     username: str
     server_id: UUID
     email: str

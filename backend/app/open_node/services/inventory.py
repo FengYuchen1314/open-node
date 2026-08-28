@@ -964,6 +964,7 @@ class AgentChangeSetModel(Base):
     rollback_reason: Mapped[str] = mapped_column(Text, default="")
     resolution_reason: Mapped[str] = mapped_column(Text, default="")
     coordination_version: Mapped[int] = mapped_column(Integer, default=1)
+    archived_steps: Mapped[list[dict]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -1205,6 +1206,19 @@ class SubscriptionTrafficLedgerModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class SubscriptionArchivedTrafficModel(Base):
+    __tablename__ = "subscription_archived_traffic"
+
+    username: Mapped[str] = mapped_column(
+        ForeignKey("product_users.username", ondelete="CASCADE"), primary_key=True
+    )
+    server_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    server_name: Mapped[str] = mapped_column(String(120))
+    upload: Mapped[int] = mapped_column(BigInteger, default=0)
+    download: Mapped[int] = mapped_column(BigInteger, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ProbeSettingsModel(Base):
     __tablename__ = "probe_settings"
 
@@ -1293,6 +1307,7 @@ class InventoryStore:
                 {
                     "resolution_reason": "TEXT NOT NULL DEFAULT ''",
                     "coordination_version": "INTEGER NOT NULL DEFAULT 0",
+                    "archived_steps": "JSON NOT NULL DEFAULT '[]'",
                 },
             )
             self._sqlite_add_missing_columns(
@@ -1972,7 +1987,7 @@ class InventoryStore:
         payload: XrayRuntimeNodeCreateRequest,
     ) -> ManagedNodeRead:
         now = datetime.now(tz=UTC)
-        with self._session() as session:
+        with self._coordinated_session() as session:
             server = session.get(ServerModel, str(server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {server_id}")
@@ -2014,7 +2029,7 @@ class InventoryStore:
         existing_nodes: list[ManagedNodeRead] = []
         skipped: list[XrayRuntimeNodeImportSkipped] = []
 
-        with self._session() as session:
+        with self._coordinated_session() as session:
             server = session.get(ServerModel, str(server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {server_id}")
@@ -2656,7 +2671,7 @@ class InventoryStore:
 
     def create_probe_task(self, payload: ProbeTaskCreate) -> ProbeTaskRead:
         now = datetime.now(tz=UTC)
-        with self._session() as session:
+        with self._coordinated_session() as session:
             server = session.get(ServerModel, str(payload.server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {payload.server_id}")
@@ -2889,7 +2904,7 @@ class InventoryStore:
 
     def create_managed_node(self, payload: ManagedNodeCreate) -> ManagedNodeRead:
         now = datetime.now(tz=UTC)
-        with self._session() as session:
+        with self._coordinated_session() as session:
             server = session.get(ServerModel, str(payload.server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {payload.server_id}")
@@ -3027,7 +3042,7 @@ class InventoryStore:
     ) -> SubscriptionCatalogImportResponse:
         now = datetime.now(tz=UTC)
         summary = SubscriptionCatalogImportSummary()
-        with self._session() as session:
+        with self._coordinated_session() as session:
             for user_entry in payload.catalog.users:
                 existing = session.get(ProductUserModel, user_entry.username)
                 if existing:
@@ -3145,7 +3160,7 @@ class InventoryStore:
 
     def create_subscription_plan(self, payload: SubscriptionPlanCreate) -> SubscriptionPlanRead:
         now = datetime.now(tz=UTC)
-        with self._session() as session:
+        with self._coordinated_session() as session:
             existing = session.scalar(
                 select(SubscriptionPlanModel).where(SubscriptionPlanModel.name == payload.name)
             )
@@ -3448,14 +3463,31 @@ class InventoryStore:
                     SubscriptionTrafficLedgerModel.email,
                 )
             ).all()
+            archived = self._archived_user_traffic(session, username)
             upload = sum(entry.upload for entry in entries)
             download = sum(entry.download for entry in entries)
+            upload += sum(entry.upload for entry in archived)
+            download += sum(entry.download for entry in archived)
             return ProductUserTrafficResponse(
                 username=username,
                 upload=upload,
                 download=download,
                 total=upload + download,
-                entries=[self._subscription_traffic_entry_read(entry) for entry in entries],
+                entries=[self._subscription_traffic_entry_read(entry) for entry in entries]
+                + [
+                    SubscriptionTrafficEntryRead(
+                        username=entry.username,
+                        server_id=UUID(entry.server_id),
+                        server_name=entry.server_name,
+                        archived=True,
+                        email="",
+                        upload=entry.upload,
+                        download=entry.download,
+                        total=entry.upload + entry.download,
+                        updated_at=entry.updated_at,
+                    )
+                    for entry in archived
+                ],
             )
 
     def subscription_user_quota(
@@ -3741,7 +3773,7 @@ class InventoryStore:
             if step.rollback:
                 step.rollback.validate_wire_payload()
         now = datetime.now(tz=UTC)
-        with self._session() as session:
+        with self._coordinated_session() as session:
             self._ensure_step_servers_exist(session, payload.steps)
             change_set = AgentChangeSetModel(
                 id=str(uuid4()),
@@ -5990,6 +6022,10 @@ class InventoryStore:
             touched += 1
 
         user.last_traffic_reset_at = now
+        for entry in self._archived_user_traffic(session, user.username):
+            entry.upload = entry.download = 0
+            entry.updated_at = now
+            touched += 1
         user.updated_at = now
         return touched
 
@@ -6075,12 +6111,26 @@ class InventoryStore:
                 SubscriptionTrafficLedgerModel.username == username
             )
         ).all()
+        archived = self._archived_user_traffic(session, username)
         if ledgers:
-            return (
+            upload, download = (
                 sum(ledger.upload for ledger in ledgers),
                 sum(ledger.download for ledger in ledgers),
             )
-        return self._subscription_latest_user_traffic(session, username)
+        else:
+            upload, download = self._subscription_latest_user_traffic(session, username)
+        return (
+            upload + sum(row.upload for row in archived),
+            download + sum(row.download for row in archived),
+        )
+
+    @staticmethod
+    def _archived_user_traffic(session, username):
+        return session.scalars(
+            select(SubscriptionArchivedTrafficModel)
+            .where(SubscriptionArchivedTrafficModel.username == username)
+            .order_by(SubscriptionArchivedTrafficModel.server_id)
+        ).all()
 
     def _subscription_latest_user_traffic(
         self,
@@ -6311,6 +6361,11 @@ class InventoryStore:
 
         return ServerTrafficCoordinator(self)
 
+    def _server_management(self):
+        from open_node.services.server_management import ServerManagement
+
+        return ServerManagement(self)
+
     @staticmethod
     def _server_record(server: ServerModel) -> ServerRecord:
         return ServerRecord(
@@ -6429,7 +6484,14 @@ class InventoryStore:
             rollback_on_failure=change_set.rollback_on_failure,
             rollback_reason=change_set.rollback_reason,
             resolution_reason=change_set.resolution_reason,
-            steps=[self._change_set_step_read(session, step) for step in steps],
+            steps=sorted(
+                [self._change_set_step_read(session, step) for step in steps]
+                + [
+                    AgentChangeSetStepRead.model_validate(step)
+                    for step in (change_set.archived_steps or [])
+                ],
+                key=lambda step: step.sequence,
+            ),
             created_at=change_set.created_at,
             updated_at=change_set.updated_at,
             **self._change_sets().read_state(session, change_set, steps),

@@ -1512,9 +1512,9 @@ function formatBytes(value: number) {
               class="catalog-item"
             >
               <div>
-                <div class="server-name">{{ entry.email }}</div>
+                <div class="server-name">{{ entry.archived ? "Archived usage" : entry.email }}</div>
                 <div class="server-subline">
-                  {{ serverName(entry.server_id) }} - {{ formatDate(entry.last_reported_at) }}
+                  {{ entry.server_name || serverName(entry.server_id) }} - {{ formatDate(entry.last_reported_at || entry.updated_at) }}
                 </div>
               </div>
               <v-chip color="secondary" size="small" variant="tonal">

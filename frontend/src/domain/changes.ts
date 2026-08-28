@@ -44,6 +44,8 @@ export interface AgentChangeSetRollbackRequest {
 }
 
 export interface AgentChangeSetStep {
+  archived?: boolean;
+  server_name?: string | null;
   id: string;
   change_set_id: string;
   sequence: number;
@@ -87,7 +89,7 @@ export interface AgentChangeSetResponse {
 }
 
 export function changeSetActions(change: AgentChangeSet | null) {
-  const status = change?.status;
+  const status = change?.steps?.some(step => step.archived) ? undefined : change?.status;
   return {
     dispatch: status === "planned",
     rollback: !!status && ["planned", "dispatched", "succeeded", "failed", "rollback_failed", "rollback_incomplete"].includes(status),

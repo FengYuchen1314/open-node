@@ -955,7 +955,7 @@ function readableError(error: unknown) {
                 <div class="change-step-title-row">
                   <div>
                     <div class="compact-title">{{ step.sequence }}. {{ step.label }}</div>
-                    <div class="section-subtitle">{{ serverName(step.server_id) }}</div>
+                    <div class="section-subtitle">{{ step.server_name || serverName(step.server_id) }}{{ step.archived ? " (archived)" : "" }}</div>
                   </div>
                   <v-chip color="grey" density="comfortable" size="small" variant="tonal">
                     {{ step.server_id.slice(0, 8) }}

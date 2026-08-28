@@ -185,6 +185,8 @@ class ChangeSetCoordinator:
 
     def read_state(self, session, change, steps):
         warnings = []
+        if change.archived_steps:
+            warnings.append("Server removed; this change set is archived and cannot be replayed")
         if change.coordination_version == 0:
             warnings.append("Legacy execution needs operator review; unsent commands were stopped")
         for step in steps:
@@ -220,6 +222,8 @@ class ChangeSetCoordinator:
     def dispatch(self, identifier):
         with self.store._coordinated_session() as session:
             change = self.store._change_set_model(session, identifier)
+            if change.archived_steps:
+                raise ChangeSetConflict("An archived change set cannot be dispatched")
             commands = []
             if change.status == State.PLANNED:
                 steps = self.steps(session, change)
@@ -280,6 +284,8 @@ class ChangeSetCoordinator:
     def rollback(self, identifier, payload):
         with self.store._coordinated_session() as session:
             change = self.store._change_set_model(session, identifier)
+            if change.archived_steps:
+                raise ChangeSetConflict("A target server was removed; create a new recovery plan")
             steps = self.steps(session, change)
             before = self.command_ids(steps)
             now = datetime.now(UTC)

@@ -152,6 +152,8 @@ class AgentChangeSetAcceptRequest(BaseModel):
 
 
 class AgentChangeSetStepRead(BaseModel):
+    archived: bool = False
+    server_name: str | None = None
     id: UUID
     change_set_id: UUID
     sequence: int

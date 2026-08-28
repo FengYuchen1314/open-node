@@ -153,6 +153,8 @@ export interface SubscriptionCredential {
 }
 
 export interface SubscriptionTrafficEntry {
+  server_name?: string | null;
+  archived?: boolean;
   username: string;
   server_id: string;
   email: string;

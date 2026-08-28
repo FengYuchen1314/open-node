@@ -6,6 +6,10 @@ function change(status: AgentChangeSetStatus, blocked = false) {
 }
 
 describe("change set actions", () => {
+  it("retains archived history without offering dispatch or rollback", () => {
+    const archived = { ...change("succeeded"), steps: [{ archived: true }] } as AgentChangeSet;
+    expect(changeSetActions(archived)).toEqual({ dispatch: false, rollback: false, accept: false, retry: false });
+  });
   it("dispatches only fresh plans", () => {
     expect(changeSetActions(change("planned")).dispatch).toBe(true);
     for (const status of ["succeeded", "failed", "dispatched", "accepted"] as const) {

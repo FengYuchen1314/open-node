@@ -244,6 +244,12 @@ These passing command and snapshot checks do not prove a complete replacement:
   reset markers. Existing telemetry is replayed once during SQLite upgrade.
   The dashboard and public probe use the configured billing total. These
   server thresholds are informational and do not replace user access controls.
+- Server [editing/removal](server-management.md) now preserves identity during
+  profile edits, synchronizes matching advertised node addresses and uses a
+  revision-guarded impact confirmation. Removal preserves already charged
+  user usage and settled change history, cleans server-owned records and
+  rejects old Agent connections. It is not remote uninstall or credential
+  revocation; active changes and certificate challenges must be resolved first.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both

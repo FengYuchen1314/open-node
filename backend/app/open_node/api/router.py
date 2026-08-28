@@ -9,6 +9,7 @@ from open_node.api.routes import (
     license,
     probe,
     public,
+    server_management,
     servers,
     subscriptions,
     system,
@@ -17,6 +18,7 @@ from open_node.api.routes import (
 api_router = APIRouter()
 private_router = APIRouter(dependencies=[Depends(require_administrator)])
 private_router.include_router(servers.router)
+private_router.include_router(server_management.router)
 private_router.include_router(certificates.router)
 private_router.include_router(changes.router)
 private_router.include_router(probe.router)

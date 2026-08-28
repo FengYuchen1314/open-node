@@ -46,6 +46,11 @@ Remaining migration gates still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
 
+Server [editing and removal](docs/server-management.md) now include guarded
+profile updates, selective node-address synchronization and an impact preview.
+Removal retains user usage and change history while revoking controller access;
+stopping or uninstalling remote services remains a separate explicit operation.
+
 Server [traffic cycles](docs/server-traffic.md) now keep durable Xray/system
 usage, per-direction quotas, manual resets and UTC monthly reset schedules.
 The dashboard panel and public probe share the same billing totals.

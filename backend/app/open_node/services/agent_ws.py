@@ -45,6 +45,14 @@ class AgentConnectionManager:
         if current and current.websocket is websocket:
             self._connections.pop(server_id, None)
 
+    async def disconnect(self, server_id: UUID) -> None:
+        connection = self._connections.pop(server_id, None)
+        if connection and (close := getattr(connection.websocket, "close", None)):
+            try:
+                await close(code=1008)
+            except (OSError, RuntimeError, WebSocketDisconnect):
+                pass
+
     async def dispatch_pending_commands(self, store: InventoryStore, server_id: UUID) -> None:
         connection = self._connections.get(server_id)
         if not connection or not connection.capabilities.rpc:

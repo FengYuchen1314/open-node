@@ -38,6 +38,7 @@ from open_node.services.inventory import (
     CommandNotReadyError,
     InvalidAgentTokenError,
     InventoryStore,
+    ServerNotFoundError,
 )
 from open_node.services.secure_channel import AgentSocket, ChannelError
 
@@ -47,10 +48,17 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 @router.get("/identity", dependencies=[Depends(require_administrator)])
 def agent_identity(request: Request) -> dict:
     identity = request.app.state.agent_identity
-    return identity.public_metadata() if identity else {
-        "enabled": False, "protocol": "securechan-v1", "public_key": None,
-        "fingerprint": None, "license_required": False,
-    }
+    return (
+        identity.public_metadata()
+        if identity
+        else {
+            "enabled": False,
+            "protocol": "securechan-v1",
+            "public_key": None,
+            "fingerprint": None,
+            "license_required": False,
+        }
+    )
 
 
 @router.get("", response_model=list[AgentRead], dependencies=[Depends(require_administrator)])
@@ -204,6 +212,7 @@ async def agent_websocket(websocket: WebSocket) -> None:
 
         while True:
             message = await channel.receive_json()
+            store.authenticate_agent(token)
             await _handle_agent_ws_message(channel, store, token, message)
             if isinstance(message, dict) and message.get("type") == "rpc_reply":
                 await connections.dispatch_ready_commands(store)
@@ -211,7 +220,7 @@ async def agent_websocket(websocket: WebSocket) -> None:
                 await connections.dispatch_pending_commands(store, server.id)
     except WebSocketDisconnect:
         pass
-    except (ChannelError, TimeoutError, UnicodeError):
+    except (ChannelError, TimeoutError, UnicodeError, InvalidAgentTokenError, ServerNotFoundError):
         await channel.close(code=1008)
     finally:
         if server_id:
