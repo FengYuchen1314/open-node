@@ -53,7 +53,9 @@ single-file JSON configuration. The installer preserves the input files and
 owns its separate non-root runtime. Stop or relocate the original listener
 before using its public port; do not run two owners against the same config.
 Existing separately owned services use the [systemd binding](external-systemd.md)
-contract instead. Automatic `-confdir` consolidation is not implemented here.
+contract instead. Its separate [multifile takeover](xray-takeover.md) workflow
+can consolidate explicitly authorized JSON/JSONC inputs. This has real coverage
+with official Xray; the fork's multifile/runtime combinations still need verification.
 
 The Agent edits `settings.users` for AnyTLS, Snell and Mieru, and
 `settings.clients` for VLESS, VMess, Trojan, Shadowsocks and Hysteria. An email

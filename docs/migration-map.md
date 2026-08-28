@@ -266,8 +266,11 @@ These passing command and snapshot checks do not prove a complete replacement:
 - External [systemd runtime mode](external-systemd.md) now verifies a dedicated
   non-root service's binary/config binding and uses scoped host-installed
   polkit authorization. Both transports have real forwarding, provisioning,
-  stop-intent, independent ownership and failure recovery coverage. Multi-file
-  takeover and wider OS/architecture coverage remain unverified; the managed
+  stop-intent, independent ownership and failure recovery coverage. Opted-in
+  [multifile takeover](xray-takeover.md) now adds native merge previews, exact
+  backups and durable recovery, including real process kills and occupied-port
+  failures on both transports. Wider OS/runtime combinations, cross-account
+  migration and arbitrary process adoption remain unverified; the managed
   installer still owns a separate child.
 - Multi-server change-set coordination now includes already-started dependency
   sequences, new-work reservations and reverse compensation. It coordinates

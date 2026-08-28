@@ -412,6 +412,63 @@ any cleanup that needs attention. Stopped-Agent upgrades and path/ownership
 guards have additional focused unit tests. External `runtime_mode: systemd`
 and arbitrary future schema rollback are not covered by this smoke.
 
+## Xray Multifile Takeover Smoke
+
+Build the frontend and Agent wheel on the designated VPS. Run with the backend
+development environment, Playwright Chromium, systemd, polkit and trusted Nginx:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-xray-takeover.py \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /absolute/path/to/nginx \
+  --output /tmp/open-node-takeover-screenshots
+```
+
+The root-only fixture creates a disposable root-owned virtual environment and
+dedicated non-root services. It obtains official Xray 26.3.27 using the same
+pinned archive digest as the runtime smoke. An existing verified archive can
+be supplied with `--xray-archive`. It never operates on an existing MMWX service.
+
+Both HTTPS polling and WSS exercise repeated explicit JSON/JSONC inputs plus
+a directory. A separate polling case uses only `-confdir`, with an existing
+target inside it. Conflicting credentials, outbound order and routing distinguish
+the actual core's merge from generic JSON merging. Real VLESS traffic verifies
+the source and consolidated layouts, newly provisioned users and Agent restarts.
+Checks cover secret-free GET previews, stale checksums, exact original-byte
+backups, unchanged unit definitions, neutralized secondary files, repeated no-op
+requests, and consolidation of a stopped service without starting it.
+
+Fixture-only wheels inject real SIGKILLs after the prepared, stopping and
+activating records and after the first config replacement. Restarted Agents
+restore files and forwarding; interrupted commands are redelivered and return
+409, not a manufactured success. An independent file edit blocks recovery until
+the host repairs it. A real occupied listener makes Xray activation fail and
+verifies delayed rollback after the port is released. These modified wheels are
+never published. The unmodified wheel then reruns the existing external-systemd
+fixture over both transports, including ownership and authorization guards.
+
+Browser checks exercise preview, explicit acknowledgment, checksum-bound apply,
+command completion and actual forwarding at 1440x900, 390x844 and 320x740.
+The dialog scrolls internally, keeps actions visible and wraps long paths and
+checksums. Unit tests also cover read-only previews during pending recovery,
+backup-before-commit ordering, input/output size limits and file safety.
+
+Recorded verification on 2026-08-28 (UTC) on the designated VPS:
+
+- Backend: 451 tests; Agent: 434 tests; frontend: 99 tests, totaling 984.
+- Frontend production build, Ruff and probe Worker TypeScript checks passed.
+- The installed-wheel takeover fixture passed both control transports, the
+  directory-only case, all crash/failure cases and both original systemd regressions.
+- Desktop, mobile and narrow browser workflows passed; screenshots were inspected.
+- The final Agent wheel SHA-256 is
+  `b971c38c455a0a5adc5a7f74fb703a54f25301923da17a07a4ab74acc3731b77`.
+- Existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+
+The verified host scope remains Debian 12 x86-64 and official Xray 26.3.27.
+Other runtime/OS combinations, arbitrary host-process adoption and crash recovery
+for ordinary config mutations are not established by this workflow. See
+[takeover boundaries](xray-takeover.md) and the other [migration gates](migration-map.md).
+
 ## External Systemd Smoke
 
 Build the Agent wheel and install it into a separate, root-owned virtual

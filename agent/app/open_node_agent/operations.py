@@ -18,6 +18,8 @@ from open_node_agent.nginx import NginxRuntime
 from open_node_agent.runtime import RuntimeFailure, XrayRuntime
 from open_node_agent.warp import Warp
 from open_node_agent.xray_releases import XrayReleases
+from open_node_agent.xray_takeover import ENDPOINT as TAKEOVER_ENDPOINT
+from open_node_agent.xray_takeover import XrayTakeover
 
 
 def telemetry() -> dict:
@@ -248,6 +250,7 @@ class Operations:
         self.logs = OwnedLogs(runtime.config)
         self.warp = Warp(runtime)
         self.http01 = HttpChallenges(runtime.config, journal)
+        self.takeover = XrayTakeover(runtime, journal)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
 
@@ -302,6 +305,8 @@ class Operations:
             if method == "DELETE":
                 return self.logs.delete(query)
         async with self.runtime.lock:
+            if path == TAKEOVER_ENDPOINT and method in {"GET", "POST"}:
+                return await self.takeover.handle({"preview": True} if method == "GET" else body)
             if path.startswith("/api/child/warp/"):
                 return await self.warp.handle(method, path, body)
             if path == "/api/child/agent/lifecycle" and method == "GET":

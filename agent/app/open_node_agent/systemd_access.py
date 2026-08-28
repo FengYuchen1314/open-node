@@ -81,6 +81,7 @@ def main() -> None:
     parser.add_argument("--service", required=True)
     parser.add_argument("--xray-binary", type=Path)
     parser.add_argument("--xray-config", type=Path)
+    parser.add_argument("--allow-takeover", action="store_true")
     args = parser.parse_args()
     try:
         if os.geteuid() != 0:
@@ -101,8 +102,13 @@ def main() -> None:
                 xray_service=args.service,
                 xray_binary=args.xray_binary,
                 xray_config=args.xray_config,
+                allow_xray_takeover=args.allow_takeover,
             )
-            asyncio.run(SystemdRuntime(config, uid=user.pw_uid, gid=user.pw_gid).inspect())
+            asyncio.run(
+                SystemdRuntime(config, uid=user.pw_uid, gid=user.pw_gid).inspect(
+                    allow_multifile=args.allow_takeover
+                )
+            )
         path = change_rule(args.user, args.service, grant=args.action == "grant")
         print(
             json.dumps(

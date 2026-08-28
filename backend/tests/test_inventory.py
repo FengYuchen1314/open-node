@@ -3809,11 +3809,10 @@ def test_xray_takeover_external_operation_queues_agent_schema(tmp_path: Path) ->
     )
     response = client.post(
         f"/api/v1/servers/{created['server']['id']}/operations/xray/takeover-external",
-        json={"command_timeout_ms": 180_000},
+        json={"confirm": True, "command_timeout_ms": 180_000},
     )
 
-    assert default_response.status_code == 201
-    assert default_response.json()["command"]["timeout_ms"] == 120_000
+    assert default_response.status_code == 422
     assert response.status_code == 201
     payload = response.json()
     command = payload["command"]
@@ -3821,8 +3820,17 @@ def test_xray_takeover_external_operation_queues_agent_schema(tmp_path: Path) ->
     assert command["method"] == "POST"
     assert command["path"] == "/api/child/external-xray/takeover"
     assert command["stream"] is False
-    assert command["body"] is None
+    assert command["body"] == {"confirm": True}
     assert command["timeout_ms"] == 180_000
+
+    preview = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/xray/takeover-external",
+        json={"preview": True},
+    )
+    assert preview.status_code == 201
+    assert preview.json()["command"]["method"] == "GET"
+    assert preview.json()["command"]["body"] is None
+    assert preview.json()["command"]["timeout_ms"] == 120_000
 
 
 def test_nginx_config_write_operation_queues_text_config(tmp_path: Path) -> None:

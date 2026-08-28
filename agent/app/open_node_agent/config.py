@@ -24,6 +24,7 @@ class AgentConfig(BaseModel):
     xray_binary: Path = Path("/usr/local/bin/xray")
     xray_config: Path = Path("/etc/open-node-agent/xray.json")
     runtime_mode: Literal["managed", "systemd"] = "managed"
+    allow_xray_takeover: bool = False
     xray_service: str = Field(
         default="open-node-xray.service", pattern=r"^[a-zA-Z0-9_.@-]+\.service$"
     )

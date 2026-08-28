@@ -55,6 +55,10 @@ For an existing dedicated systemd service, select `runtime_mode: systemd` and
 follow the [external systemd setup](../docs/external-systemd.md). Both processes
 use a dedicated non-root account, verified unit/binary/config binding, and an
 explicit host-installed polkit grant for only that canonical service.
+The separate [multifile takeover](../docs/xray-takeover.md) workflow offers a
+read-only preview and requires `allow_xray_takeover: true` and explicit confirmation.
+It consolidates native JSON/JSONC inputs, retains private source backups and
+recovers interrupted writes without changing the unit or adopting arbitrary processes.
 In managed mode the agent stops its own child on graceful shutdown; use a
 systemd service with `KillMode=control-group` to contain abrupt agent termination.
 
@@ -125,7 +129,8 @@ provider verification and further migration workflows remain release gates.
 Native [fork protocol user management](../docs/fork-runtime.md) now edits
 AnyTLS/Snell/Mieru user containers. Its optional MPL-2.0 runtime patch retains
 empty listeners while rejecting traffic, so last-user revocation can persist.
-Mieru UDP targets and stock-client subscription filtering remain unfinished.
+Native subscription formats have pinned-client forwarding coverage; broader
+client combinations and Mieru UDP targets remain unfinished.
 
 ## Verification
 

@@ -60,6 +60,9 @@ interrupted-switch recovery, and data-preserving uninstall/reinstall.
 Separately owned Xray services use the [external systemd mode](docs/external-systemd.md),
 with non-root scoped authorization, verified config binding and independent
 process ownership. Both modes have real forwarding coverage over HTTPS/WSS.
+Opt-in [multifile takeover](docs/xray-takeover.md) uses the bound Xray's native
+merge rules, read-only previews, private source backups and durable recovery.
+It preserves the host-owned unit and binary.
 Managed [Xray release operations](docs/xray-releases.md) add checksum-pinned
 installation, version switching, explicit rollback and data-preserving removal.
 They preserve the root-owned bootstrap binary and recover the prior runtime

@@ -736,6 +736,9 @@ export interface AgentXrayConfigFileWriteOperationRequest {
 }
 
 export interface AgentXrayTakeoverExternalOperationRequest {
+  preview?: boolean;
+  confirm?: true;
+  expected_sha256?: string;
   command_timeout_ms?: number;
 }
 

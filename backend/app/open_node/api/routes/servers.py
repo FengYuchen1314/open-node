@@ -1517,17 +1517,21 @@ async def queue_xray_config_file_write_operation(
 )
 async def queue_xray_takeover_external_operation(
     server_id: UUID,
+    payload: AgentXrayTakeoverExternalOperationRequest,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
-    payload: AgentXrayTakeoverExternalOperationRequest | None = None,
 ) -> AgentCommandCreateResponse:
-    request = payload or AgentXrayTakeoverExternalOperationRequest()
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(
-            method="POST",
+            method="GET" if payload.preview else "POST",
             path="/api/child/external-xray/takeover",
-            timeout_ms=request.command_timeout_ms,
+            body=None
+            if payload.preview
+            else payload.model_dump(
+                exclude={"preview", "command_timeout_ms"}, exclude_none=True
+            ),
+            timeout_ms=payload.command_timeout_ms,
         ),
         store,
         connections,

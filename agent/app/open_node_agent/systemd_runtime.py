@@ -1,6 +1,7 @@
 """Bind an independently owned system service to one Xray executable and JSON file."""
 
 import grp
+import hashlib
 import json
 import os
 import pwd
@@ -22,6 +23,15 @@ class Binding:
     running: bool
     environment: dict[str, str]
     directory: str
+    layout: "ConfigLayout | None" = None
+    identity: str = ""
+
+
+@dataclass(frozen=True)
+class ConfigLayout:
+    argv: tuple[str, ...]
+    files: tuple[Path, ...]
+    directory: Path | None
 
 
 def root_owned(path: Path) -> Path:
@@ -61,10 +71,12 @@ def private_config(path: Path, uid: int) -> None:
         )
 
 
-def config_argument(argv: list[str], binary: Path, config: Path) -> None:
+def config_layout(
+    argv: list[str], binary: Path, config: Path, *, allow_multiple: bool = False
+) -> ConfigLayout:
     if len(argv) < 3 or argv[:2] != [str(binary), "run"]:
         raise RuntimeFailure("External Xray ExecStart must execute the configured binary with run")
-    options = {}
+    options, files = {}, []
     iterator = iter(argv[2:])
     for argument in iterator:
         flag, separator, value = argument.partition("=")
@@ -74,14 +86,46 @@ def config_argument(argv: list[str], binary: Path, config: Path) -> None:
             "--config": "config",
             "-format": "format",
             "--format": "format",
+            "-confdir": "confdir",
+            "--confdir": "confdir",
         }.get(flag)
-        if name is None or name in options:
+        if name is None or (name in options and not (allow_multiple and name == "config")):
             raise RuntimeFailure(
                 "External Xray requires one explicit JSON config, without extra flags"
             )
         options[name] = value if separator else next(iterator, "")
-    if options.get("config") != str(config) or options.get("format", "json") != "json":
+        if name == "config":
+            files.append(Path(options[name]))
+    directory = Path(options["confdir"]) if options.get("confdir") else None
+    if not allow_multiple and (directory or files != [config]):
         raise RuntimeFailure("External Xray ExecStart does not match the configured JSON file")
+    if options.get("format", "json") not in ({"json", "auto"} if allow_multiple else {"json"}):
+        raise RuntimeFailure("External Xray takeover supports JSON and JSONC inputs")
+    if directory:
+        if not directory.is_absolute() or ".." in directory.parts:
+            raise RuntimeFailure("External Xray config directories require an absolute path")
+        entries = sorted(directory.iterdir())
+        if len(entries) > 1024:
+            raise RuntimeFailure("External Xray config directory has too many entries")
+        for entry in entries:
+            if entry.suffix in {".yaml", ".yml", ".toml"} and options.get("format") != "json":
+                raise RuntimeFailure("Convert YAML/TOML inputs to JSON before takeover")
+            if entry.suffix in {".json", ".jsonc"}:
+                files.append(entry)
+    if not files or len(files) > 128 or len(set(files)) != len(files) or config not in files:
+        raise RuntimeFailure("Use distinct config inputs containing the configured target file")
+    if any(
+        not path.is_absolute()
+        or ".." in path.parts
+        or (allow_multiple and path.suffix not in {".json", ".jsonc"})
+        for path in files
+    ):
+        raise RuntimeFailure("External Xray inputs require absolute JSON/JSONC file paths")
+    return ConfigLayout(tuple(argv), tuple(files), directory)
+
+
+def config_argument(argv: list[str], binary: Path, config: Path) -> None:
+    config_layout(argv, binary, config)
 
 
 class SystemdRuntime:
@@ -89,9 +133,16 @@ class SystemdRuntime:
         self.config = config
         self.uid = os.geteuid() if uid is None else uid
         self.gid = os.getegid() if gid is None else gid
+        self.layout: ConfigLayout | None = None
+        self.pending_takeover = False
 
     def read_config(self) -> bytes:
+        if self.config.allow_xray_takeover:
+            self.require_consolidated()
         path = self.config.xray_config
+        return self.read_private(path)
+
+    def read_private(self, path: Path) -> bytes:
         private_config(path, self.uid)
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as source:
@@ -107,6 +158,29 @@ class SystemdRuntime:
         if len(raw) > MAX_CONFIG_BYTES:
             raise RuntimeFailure("Xray configuration exceeds 2 MiB")
         return raw
+
+    def require_consolidated(self) -> None:
+        if self.pending_takeover:
+            raise RuntimeFailure("External Xray takeover recovery is pending")
+        if self.layout is None:
+            raise RuntimeFailure("External Xray binding has not been verified")
+        try:
+            plain = isinstance(json.loads(self.read_private(self.config.xray_config)), dict)
+        except (UnicodeError, ValueError):
+            plain = False
+        if not plain:
+            raise RuntimeFailure("External Xray target needs native JSON consolidation")
+        for path in self.layout.files:
+            if path != self.config.xray_config:
+                try:
+                    empty = json.loads(self.read_private(path)) == {}
+                except (UnicodeError, ValueError):
+                    empty = False
+                if not empty:
+                    raise RuntimeFailure(
+                        "External Xray has active config fragments; "
+                        "preview and confirm takeover first"
+                    )
 
     async def bus(self, *args: str) -> dict:
         try:
@@ -138,15 +212,15 @@ class SystemdRuntime:
         except (KeyError, IndexError, TypeError, AttributeError, ValueError) as exc:
             raise RuntimeFailure("Invalid systemd properties response") from exc
 
-    async def inspect(self) -> Binding:
+    async def inspect(self, *, allow_multifile: bool = False) -> Binding:
         try:
-            return await self._inspect()
+            return await self._inspect(allow_multifile=allow_multifile)
         except (OSError, KeyError, IndexError, TypeError, AttributeError, RuntimeError) as exc:
             raise RuntimeFailure(
                 "Cannot verify the external Xray service binding or host files"
             ) from exc
 
-    async def _inspect(self) -> Binding:
+    async def _inspect(self, *, allow_multifile: bool = False) -> Binding:
         config = self.config
         if not re.fullmatch(SERVICE_PATTERN, config.xray_service):
             raise RuntimeFailure("Use an exact system service name, not an option or pattern")
@@ -164,8 +238,10 @@ class SystemdRuntime:
             raise RuntimeFailure(
                 "External Xray needs a persistent unit and a completed daemon-reload"
             )
+        unit_hashes = {}
         for filename in (unit["FragmentPath"], *unit["DropInPaths"]):
-            root_owned(Path(filename))
+            trusted = root_owned(Path(filename))
+            unit_hashes[filename] = hashlib.sha256(trusted.read_bytes()).hexdigest()
         if self.uid in {0, 65534}:
             raise RuntimeFailure("External Xray requires a dedicated non-root account, not nobody")
         user = pwd.getpwuid(self.uid)
@@ -218,8 +294,19 @@ class SystemdRuntime:
                 "External Xray requires one unprefixed ExecStart using the configured binary"
             )
         argv = commands[0][1]
-        config_argument(argv, config.xray_binary, config.xray_config)
-        private_config(config.xray_config, self.uid)
+        layout = config_layout(
+            argv, config.xray_binary, config.xray_config, allow_multiple=config.allow_xray_takeover
+        )
+        for filename in layout.files:
+            private_config(filename, self.uid)
+        if layout.directory:
+            if any(part.is_symlink() for part in (layout.directory, *layout.directory.parents)):
+                raise RuntimeFailure("External Xray config directory cannot be a symlink")
+            info = layout.directory.stat()
+            if info.st_uid != self.uid or info.st_mode & 0o022 or info.st_mode & 0o300 != 0o300:
+                raise RuntimeFailure(
+                    "External Xray config directory must belong to the service user"
+                )
         binary = root_owned(config.xray_binary)
         if not binary.stat().st_mode & 0o111:
             raise RuntimeFailure("External Xray binary must be executable")
@@ -238,6 +325,8 @@ class SystemdRuntime:
             if not separator or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", key):
                 raise RuntimeFailure("External Xray has an invalid environment assignment")
             environment[key] = value
+        if environment.get("XRAY_LOCATION_CONFDIR") or environment.get("xray.location.confdir"):
+            raise RuntimeFailure("External Xray config directories must be explicit in ExecStart")
         running = unit["ActiveState"] == "active" and unit["SubState"] == "running"
         if running:
             pid = service["MainPID"]
@@ -254,12 +343,36 @@ class SystemdRuntime:
                 raise RuntimeFailure(
                     "External Xray running arguments differ; restart the service on the host"
                 )
-        return Binding(running, environment, directory)
+        identity = hashlib.sha256(
+            json.dumps(
+                {
+                    "argv": argv,
+                    "environment": environment,
+                    "directory": directory,
+                    "unit": unit["FragmentPath"],
+                    "dropins": unit["DropInPaths"],
+                    "unit_hashes": unit_hashes,
+                    "binary": [
+                        binary.stat().st_dev,
+                        binary.stat().st_ino,
+                        binary.stat().st_mtime_ns,
+                    ],
+                },
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        self.layout = layout
+        if config.allow_xray_takeover and not allow_multifile:
+            self.require_consolidated()
+        return Binding(running, environment, directory, layout, identity)
 
-    async def control(self, action: str) -> None:
+    async def control(self, action: str, *, allow_multifile: bool = False) -> None:
         if action not in {"start", "stop", "restart"}:
             raise RuntimeFailure("Unsupported external Xray service action")
-        await self.inspect()
+        if allow_multifile:
+            await self.inspect(allow_multifile=True)
+        else:
+            await self.inspect()
         code, _ = await run_command(
             "systemctl", "--system", "--no-ask-password", action, self.config.xray_service
         )

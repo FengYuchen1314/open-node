@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
 import CommandInspector from "../components/CommandInspector.vue";
 import type {
@@ -79,6 +79,12 @@ const applyingSnapshotRecovery = ref(false);
 const errorMessage = ref("");
 const successMessage = ref("");
 const activeTab = ref("xray");
+const takeoverDialog = ref(false);
+const takeoverBusy = ref(false);
+const takeoverConfirmed = ref(false);
+const takeoverError = ref("");
+const takeoverPreview = ref<{ target: string; files: string[]; sha256: string; running: boolean } | null>(null);
+let takeoverRequest = 0;
 
 const xrayConfigForm = reactive({
   path: "",
@@ -295,12 +301,22 @@ onMounted(() => {
 });
 
 watch(selectedServerId, () => {
+  takeoverDialog.value = false;
   successMessage.value = "";
   syncRuntimeTunnelChainServerDefaults();
   syncRuntimeTunnelDeployDefaults();
   void refreshXraySnapshots();
   void refreshXrayRuntimeInventory();
 });
+
+watch(takeoverDialog, (open) => {
+  if (!open) {
+    takeoverRequest += 1;
+    takeoverBusy.value = false;
+    takeoverPreview.value = null;
+  }
+});
+onUnmounted(() => { takeoverRequest += 1; });
 
 function syncRuntimeTunnelDeployDefaults() {
   const server = selectedServer.value;
@@ -523,7 +539,74 @@ async function writeXrayFile() {
 }
 
 async function takeoverExternalXray() {
-  await queueOperation("xray_takeover_external");
+  takeoverDialog.value = true;
+  await previewTakeover();
+}
+
+async function waitTakeover(serverId: string, id: string, request: number) {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    if (request !== takeoverRequest || serverId !== selectedServerId.value) return null;
+    const response = await listServerCommands(serverId);
+    if (request !== takeoverRequest || serverId !== selectedServerId.value) return null;
+    commandsByServer.value = { ...commandsByServer.value, [serverId]: response.commands };
+    const command = response.commands.find((item) => item.id === id);
+    if (command?.status === "failed" || command?.status === "skipped") {
+      throw new Error(command.result_error || "Xray takeover command failed.");
+    }
+    if (command?.status === "succeeded") return asRecord(command.result_body);
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+  }
+  throw new Error("Xray takeover command is still pending. Check command history.");
+}
+
+async function previewTakeover() {
+  const serverId = selectedServerId.value;
+  const request = ++takeoverRequest;
+  takeoverPreview.value = null;
+  takeoverConfirmed.value = false;
+  takeoverError.value = "";
+  takeoverBusy.value = true;
+  try {
+    const queued = await queueAgentOperation(serverId, "xray_takeover_external", { preview: true });
+    const result = await waitTakeover(serverId, queued.command.id, request);
+    if (!result || request !== takeoverRequest) return;
+    if (result.preview !== true || typeof result.config_path !== "string" ||
+        typeof result.source_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(result.source_sha256) ||
+        !Array.isArray(result.source_files) || !result.source_files.every((item) => typeof item === "string")) {
+      throw new Error("This Agent did not return a supported takeover preview.");
+    }
+    takeoverPreview.value = {
+      target: result.config_path, files: result.source_files,
+      sha256: result.source_sha256, running: result.running === true,
+    };
+  } catch (error) {
+    if (request === takeoverRequest) takeoverError.value = readableError(error);
+  } finally {
+    if (request === takeoverRequest) takeoverBusy.value = false;
+  }
+}
+
+async function confirmTakeover() {
+  if (!takeoverConfirmed.value || !takeoverPreview.value || takeoverBusy.value) return;
+  const serverId = selectedServerId.value;
+  const request = ++takeoverRequest;
+  const sha256 = takeoverPreview.value.sha256;
+  takeoverBusy.value = true;
+  takeoverError.value = "";
+  try {
+    const queued = await queueAgentOperation(serverId, "xray_takeover_external", { confirm: true, expected_sha256: sha256 });
+    const result = await waitTakeover(serverId, queued.command.id, request);
+    if (!result || request !== takeoverRequest) return;
+    if (result.success !== true) throw new Error("Xray takeover did not complete.");
+    takeoverDialog.value = false;
+    successMessage.value = result.unchanged ? "Xray is already consolidated." : "Xray takeover completed.";
+    await refreshXraySnapshots();
+    await refreshXrayRuntimeInventory();
+  } catch (error) {
+    if (request === takeoverRequest) takeoverError.value = readableError(error);
+  } finally {
+    if (request === takeoverRequest) takeoverBusy.value = false;
+  }
 }
 
 async function writeNginxConfig() {
@@ -3030,5 +3113,36 @@ function formatDateTime(value: string) {
         />
       </v-sheet>
     </section>
+    <v-dialog v-model="takeoverDialog" max-width="640" scrollable>
+      <v-card class="takeover-dialog">
+        <v-card-title class="d-flex align-center">
+          <span>Xray takeover</span>
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" aria-label="Close takeover" @click="takeoverDialog = false" />
+        </v-card-title>
+        <v-card-text>
+          <div class="section-title compact-title">{{ selectedServer?.name }}</div>
+          <v-progress-linear v-if="takeoverBusy" indeterminate color="primary" class="my-4" />
+          <v-alert v-if="takeoverError" type="error" variant="tonal" class="my-3">{{ takeoverError }}</v-alert>
+          <template v-if="takeoverPreview">
+            <dl class="takeover-facts">
+              <dt>Target file</dt><dd>{{ takeoverPreview.target }}</dd>
+              <dt>Runtime</dt><dd>{{ takeoverPreview.running ? "Running" : "Stopped" }}</dd>
+              <dt>Source checksum</dt><dd><code>{{ takeoverPreview.sha256 }}</code></dd>
+            </dl>
+            <div class="section-title compact-title">{{ takeoverPreview.files.length }} source files</div>
+            <ul class="takeover-files"><li v-for="file in takeoverPreview.files" :key="file">{{ file }}</li></ul>
+            <v-checkbox v-model="takeoverConfirmed" :disabled="takeoverBusy" color="warning"
+              label="Replace source fragments and restart Xray if running" hide-details />
+          </template>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn :disabled="takeoverBusy" prepend-icon="mdi-refresh" @click="previewTakeover">Refresh</v-btn>
+          <v-spacer />
+          <v-btn color="warning" variant="flat" prepend-icon="mdi-source-merge"
+            :disabled="!takeoverConfirmed || !takeoverPreview || takeoverBusy" @click="confirmTakeover">Take over</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>

@@ -1467,10 +1467,10 @@ describe("inventory API client", () => {
       );
     };
 
-    await queueAgentOperation("srv_1", "xray_takeover_external", undefined, fetcher);
+    await queueAgentOperation("srv_1", "xray_takeover_external", { confirm: true, expected_sha256: "a".repeat(64) }, fetcher);
 
     expect(requestUrl).toBe("/api/v1/servers/srv_1/operations/xray/takeover-external");
-    expect(body).toBe("");
+    expect(JSON.parse(body)).toEqual({ confirm: true, expected_sha256: "a".repeat(64) });
   });
 
   it("queues high-level agent operations with JSON bodies", async () => {

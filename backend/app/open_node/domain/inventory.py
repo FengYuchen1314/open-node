@@ -1479,7 +1479,16 @@ class AgentXrayConfigFileWriteOperationRequest(BaseModel):
 
 
 class AgentXrayTakeoverExternalOperationRequest(BaseModel):
+    preview: bool = False
+    confirm: Literal[True] | None = None
+    expected_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     command_timeout_ms: int = Field(default=120_000, ge=1_000, le=300_000)
+
+    @model_validator(mode="after")
+    def confirmed_takeover(self) -> Self:
+        if not self.preview and self.confirm is not True:
+            raise ValueError("Explicit takeover confirmation is required")
+        return self
 
 
 class AgentNginxConfigOperationRequest(BaseModel):

@@ -341,6 +341,7 @@ class Agent:
         while True:
             try:
                 async with self.runtime.lock:
+                    await self.operations.takeover.recover()
                     if (
                         self.journal.desired_running(self.config.auto_start)
                         and not await self.runtime.running()

@@ -1503,6 +1503,60 @@ body {
   min-width: 0;
 }
 
+.takeover-dialog .v-card-title {
+  font-size: 20px;
+}
+
+.takeover-dialog {
+  max-height: calc(100dvh - 48px);
+}
+
+.takeover-dialog .v-card-text {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.takeover-dialog .v-card-title,
+.takeover-dialog .v-card-actions {
+  flex-shrink: 0;
+}
+
+.takeover-dialog .v-btn {
+  letter-spacing: 0;
+}
+
+.takeover-facts {
+  display: grid;
+  gap: 6px;
+  margin: 18px 0;
+}
+
+.takeover-facts dt {
+  font-size: 12px;
+}
+
+.takeover-facts dd {
+  margin: 0 0 10px;
+}
+
+.takeover-facts dd,
+.takeover-files li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.takeover-files {
+  padding-left: 20px;
+  margin: 12px 0;
+}
+
+.takeover-dialog .v-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .format-exclusion {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);

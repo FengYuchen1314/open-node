@@ -159,6 +159,8 @@ class Fixture:
                     self.xray_config,
                 ]
             )
+            if overrides.get("allow_takeover"):
+                args.append("--allow-takeover")
         result = run_command(*args, check=check)
         if action == "grant" and result.returncode == 0:
             self.granted = True

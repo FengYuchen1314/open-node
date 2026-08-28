@@ -122,8 +122,10 @@ See [Agent deployment](agent-deployment.md). The separate
 root-owned host files, dedicated account, explicit JSON config and live process
 before mutation. Scoped polkit rules authorize only that unit's start/stop/restart.
 Binding failures keep the connection alive; Agent shutdown leaves Xray running.
-HTTPS/WSS real-traffic verification covers this single-file mode, not arbitrary
-multi-file takeover.
+HTTPS/WSS real-traffic verification covers this binding and the separately
+opted-in [multifile takeover](xray-takeover.md). Takeover uses native Xray merge
+validation, private original-file receipts and a durable recovery journal; it
+does not expand host ownership or authorization.
 
 Optional [remote Agent lifecycle](agent-lifecycle.md) uses a root-owned helper
 with a host-approved HTTPS release source and a permission-restricted Unix
@@ -436,11 +438,15 @@ authenticated connection, and the next registration can try again. A report
 matching the current snapshot clears an obsolete pending recovery. A differing
 report preserves the current snapshot and awaits an operator decision.
 
-The Xray external takeover wrapper queues the active agent's
-`/api/child/external-xray/takeover` route. It lets an operator merge an
-existing external Xray `-config` plus `-confdir` layout into the single
-MMWX-managed config file before using the normal runtime inbounds, outbounds,
-and routing operations.
+The Xray external takeover wrapper queues GET on
+`/api/child/external-xray/takeover` for a read-only preview and POST only with
+explicit confirmation. A legacy Agent cannot mistake the preview for its old
+mutating POST handler. The independent Agent consolidates a bound external
+Xray JSON/JSONC layout using the actual core's merge rules, neutralizes the
+other input files, and keeps the existing service arguments. Private backups
+and a durable transaction restore interrupted writes and prior running intent.
+An independently modified file blocks recovery; interrupted RPCs retain their
+409 replay contract. See [takeover](xray-takeover.md) for host opt-in and limits.
 
 High-level workflow wrappers cover active agent inbound, outbound, routing,
 batch apply, certificate deployment, nginx SSL setup, nginx website inventory

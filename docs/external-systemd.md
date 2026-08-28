@@ -1,8 +1,10 @@
 # External Xray Systemd Service
 
 `runtime_mode: systemd` connects a separately deployed Open Node Agent to one
-host-owned Xray service. It does not import a running MMWX installation, merge
-configuration directories, replace its binary, or change its service definition.
+host-owned Xray service. It does not import a running MMWX installation, replace
+its binary, or change its service definition. Single-file binding is the default;
+an explicit [multifile takeover](xray-takeover.md) opt-in can consolidate existing
+JSON/JSONC inputs with private backups and durable recovery.
 The [managed deployment CLI](agent-deployment.md) remains separate. No activation,
 license server, or paid account is required.
 
@@ -20,8 +22,9 @@ must be available. Other versions need verification; missing metadata fails clos
   aliases and pending `daemon-reload` changes are rejected.
 - The unit executes `/absolute/xray run -config /absolute/xray.json` in a
   `Type=simple` or `Type=exec` foreground service. `-c`, `--config`, `=value`
-  syntax and explicit JSON format are accepted. Multiple files, `-confdir`,
-  shell wrappers, variable-dependent arguments, command prefixes, start/stop
+  syntax and explicit JSON format are accepted. Multiple files and `-confdir`
+  require the separate takeover opt-in. Shell wrappers, variable-dependent
+  arguments, command prefixes, start/stop
   hooks and `RemainAfterExit` are not accepted.
 - The single JSON file and its writable parent belong to this user. Use a private
   directory and file mode `0600` or `0640`. Symlinks, hard links and traversal
@@ -178,8 +181,10 @@ put external Xray in the Agent's cgroup.
 The normal [command journal contract](../agent/README.md#execution-contract)
 applies. A process crash during a config mutation is not a durable exactly-once
 rollback guarantee; reconcile interrupted commands before issuing new mutations.
-Host package upgrades/removal and multi-file takeover are not implemented by
-this mode. Managed release APIs refuse to replace/remove the external binary.
+The opted-in [takeover transaction](xray-takeover.md#recovery-and-backups) has
+its own durable file-recovery journal; that does not change the ordinary config
+mutation contract. Host package upgrades/removal remain separate. Managed release
+APIs refuse to replace/remove the external binary.
 Xray logs remain in the host journal; the Agent's owned `xray.log` is not that journal.
 
 See the [VPS fixture](testing.md#external-systemd-smoke). The implementation uses
