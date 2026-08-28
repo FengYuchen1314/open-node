@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
 import CommandInspector from "../components/CommandInspector.vue";
 import AgentLifecycleDialog from "../components/AgentLifecycleDialog.vue";
+import ServerTrafficPanel from "../components/ServerTrafficPanel.vue";
 import RouteProbeFields from "../components/RouteProbeFields.vue";
 import { diagnosticPaths, latencyCommandTimeout, routeTargets, selectedRouteTargets } from "../domain/diagnostics";
 import {
@@ -1131,6 +1132,7 @@ function truncateText(value: string, maxLength: number) {
           <v-icon color="secondary" icon="mdi-server-network-off" size="36" />
           <div>No servers yet.</div>
         </div>
+        <ServerTrafficPanel v-if="servers.length" :servers="servers" />
       </v-sheet>
 
       <v-sheet class="section-surface create-panel" border>

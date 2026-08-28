@@ -53,6 +53,8 @@ from open_node.domain.inventory import (
     ServerResponse,
     ServerScanResultResponse,
     ServerTelemetryResponse,
+    ServerTrafficRead,
+    ServerTrafficUpdate,
     ServerXrayConfigSnapshotsResponse,
     XrayConfigSnapshotRecoveryAcceptResponse,
     XrayConfigSnapshotRecoveryApplyRequest,
@@ -144,6 +146,40 @@ def latest_server_telemetry(
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ServerTelemetryResponse(server_id=server_id, latest=latest)
+
+
+@router.get("/{server_id}/traffic", response_model=ServerTrafficRead)
+def server_traffic(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ServerTrafficRead:
+    try:
+        return store._server_traffic().read(server_id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/{server_id}/traffic", response_model=ServerTrafficRead)
+def update_server_traffic(
+    server_id: UUID,
+    payload: ServerTrafficUpdate,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ServerTrafficRead:
+    try:
+        return store._server_traffic().update(server_id, payload)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{server_id}/traffic/reset", response_model=ServerTrafficRead)
+def reset_server_traffic(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ServerTrafficRead:
+    try:
+        return store._server_traffic().reset(server_id)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/{server_id}/scan/latest", response_model=ServerScanResultResponse)

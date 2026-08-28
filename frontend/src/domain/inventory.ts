@@ -1,5 +1,27 @@
 export type ConnectionMode = "auto" | "websocket" | "http" | "pull";
 export type ServerStatus = "pending" | "connected" | "offline";
+export type TrafficSource = "xray" | "system";
+export type TrafficStatsMode = "both" | "upload" | "download" | "max";
+
+export interface ServerTrafficUpdate {
+  traffic_limit: number;
+  traffic_reset_day: number;
+  traffic_source: TrafficSource;
+  traffic_stats_mode: TrafficStatsMode;
+}
+
+export interface ServerTraffic extends ServerTrafficUpdate {
+  server_id: string;
+  upload: number;
+  download: number;
+  used: number;
+  cumulative_upload: number;
+  cumulative_download: number;
+  last_reported_at: string | null;
+  last_reset_at: string | null;
+  next_reset_at: string | null;
+  license_required: false;
+}
 export type XrayMode = "external" | "embedded";
 export type RenewalCycle = "month" | "quarter" | "half_year" | "year";
 export type AgentServiceName = "xray" | "nginx";
@@ -87,6 +109,9 @@ export interface ServerCreateRequest {
   pull_port?: number;
   ipv6_enabled?: boolean;
   traffic_limit?: number;
+  traffic_reset_day?: number;
+  traffic_source?: TrafficSource;
+  traffic_stats_mode?: TrafficStatsMode;
   xray_mode?: XrayMode;
   region?: string | null;
   region_country?: string | null;

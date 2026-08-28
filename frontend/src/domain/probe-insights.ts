@@ -274,11 +274,11 @@ export function trafficHotspots(servers: ProbeServer[], limit = 5): ProbeTraffic
 }
 
 export function trafficUsed(server: ProbeServer): number {
-  if (server.traffic_used_total !== undefined && server.traffic_used_total !== null) {
-    return server.traffic_used_total;
-  }
   if (server.traffic_used !== undefined && server.traffic_used !== null) {
     return server.traffic_used;
+  }
+  if (server.traffic_used_total !== undefined && server.traffic_used_total !== null) {
+    return server.traffic_used_total;
   }
   return (server.traffic_used_up ?? 0) + (server.traffic_used_down ?? 0);
 }

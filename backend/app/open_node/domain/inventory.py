@@ -101,6 +101,7 @@ class TrafficStatsMode(StrEnum):
     BOTH = "both"
     UPLOAD = "upload"
     DOWNLOAD = "download"
+    MAX = "max"
 
 
 class XrayMode(StrEnum):
@@ -241,6 +242,7 @@ class ServerCreate(BaseModel):
     pull_port: int = Field(default=0, ge=0, le=65535)
     ipv6_enabled: bool = True
     traffic_limit: int = Field(default=0, ge=0)
+    traffic_reset_day: int = Field(default=0, ge=0, le=31)
     traffic_stats_mode: TrafficStatsMode = TrafficStatsMode.BOTH
     traffic_source: TrafficSource = TrafficSource.XRAY
     xray_mode: XrayMode = XrayMode.EXTERNAL
@@ -323,6 +325,29 @@ class ServerProbeMetadataUpdate(BaseModel):
         return normalized
 
 
+class ServerTrafficUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    traffic_limit: int = Field(ge=0, le=2**53 - 1)
+    traffic_reset_day: int = Field(ge=0, le=31)
+    traffic_stats_mode: TrafficStatsMode
+    traffic_source: TrafficSource
+
+
+class ServerTrafficRead(ServerTrafficUpdate):
+    traffic_limit: int
+    server_id: UUID
+    upload: int = 0
+    download: int = 0
+    used: int = 0
+    cumulative_upload: int = 0
+    cumulative_download: int = 0
+    last_reported_at: datetime | None = None
+    last_reset_at: datetime | None = None
+    next_reset_at: datetime | None = None
+    license_required: Literal[False] = False
+
+
 class ServerRead(BaseModel):
     id: UUID
     name: str
@@ -338,6 +363,8 @@ class ServerRead(BaseModel):
     pull_port: int
     ipv6_enabled: bool
     traffic_limit: int
+    traffic_reset_day: int = 0
+    last_traffic_reset_at: datetime | None = None
     traffic_stats_mode: TrafficStatsMode
     traffic_source: TrafficSource
     xray_mode: XrayMode

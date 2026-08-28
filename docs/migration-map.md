@@ -239,6 +239,11 @@ These passing command and snapshot checks do not prove a complete replacement:
   Vue/Vuetify control surface. Plan provisioning sends enforced caps before
   enabling credentials and rejects incapable Agents. External service opt-in
   and the failure/reconciliation contract remain explicit.
+- Server [traffic cycles](server-traffic.md) now persist per-source cumulative
+  and daily ledgers, selected-direction quotas, manual resets and UTC monthly
+  reset markers. Existing telemetry is replayed once during SQLite upgrade.
+  The dashboard and public probe use the configured billing total. These
+  server thresholds are informational and do not replace user access controls.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both

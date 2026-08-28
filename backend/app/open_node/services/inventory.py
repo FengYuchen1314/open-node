@@ -713,14 +713,6 @@ class ExpectedRuntimeCredential:
     email: str
 
 
-@dataclass(frozen=True)
-class ProbeTrafficTotals:
-    source: str
-    uplink: int
-    downlink: int
-    boot_time_unix: int | None = None
-
-
 class Base(DeclarativeBase):
     pass
 
@@ -743,6 +735,8 @@ class ServerModel(Base):
     pull_port: Mapped[int] = mapped_column(Integer)
     ipv6_enabled: Mapped[bool] = mapped_column(Boolean)
     traffic_limit: Mapped[int] = mapped_column(Integer)
+    traffic_reset_day: Mapped[int] = mapped_column(Integer, default=0)
+    last_traffic_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     traffic_stats_mode: Mapped[str] = mapped_column(String(24))
     traffic_source: Mapped[str] = mapped_column(String(24))
     xray_mode: Mapped[str] = mapped_column(String(24))
@@ -763,6 +757,34 @@ class ServerModel(Base):
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ServerTrafficModel(Base):
+    __tablename__ = "server_traffic"
+
+    server_id: Mapped[str] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(String(24), primary_key=True)
+    counters: Mapped[dict] = mapped_column(JSON, default=dict)
+    upload: Mapped[int] = mapped_column(BigInteger, default=0)
+    download: Mapped[int] = mapped_column(BigInteger, default=0)
+    baseline_upload: Mapped[int] = mapped_column(BigInteger, default=0)
+    baseline_download: Mapped[int] = mapped_column(BigInteger, default=0)
+    baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ServerTrafficDailyModel(Base):
+    __tablename__ = "server_traffic_daily"
+
+    server_id: Mapped[str] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(String(24), primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    upload: Mapped[int] = mapped_column(BigInteger, default=0)
+    download: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
 class AgentModel(Base):
@@ -1248,6 +1270,7 @@ class InventoryStore:
         Base.metadata.create_all(self._engine)
         self._migrate_schema()
         self._change_sets().migrate_legacy()
+        self._server_traffic().backfill()
 
     def _migrate_schema(self) -> None:
         if self._engine.dialect.name != "sqlite":
@@ -1323,6 +1346,8 @@ class InventoryStore:
                     "renewal_cycle": "VARCHAR(24)",
                     "renewal_currency": "VARCHAR(12)",
                     "telecom_paid_peer": "BOOLEAN",
+                    "traffic_reset_day": "INTEGER NOT NULL DEFAULT 0",
+                    "last_traffic_reset_at": "DATETIME",
                 },
             )
         if "probe_settings" in table_names:
@@ -1377,6 +1402,8 @@ class InventoryStore:
                 pull_port=payload.pull_port,
                 ipv6_enabled=payload.ipv6_enabled,
                 traffic_limit=payload.traffic_limit,
+                traffic_reset_day=payload.traffic_reset_day,
+                last_traffic_reset_at=now,
                 traffic_stats_mode=payload.traffic_stats_mode.value,
                 traffic_source=payload.traffic_source.value,
                 xray_mode=payload.xray_mode.value,
@@ -1514,7 +1541,7 @@ class InventoryStore:
         self,
         payload: AgentTelemetryReport,
     ) -> tuple[ServerRead, AgentTelemetryRead]:
-        with self._session() as session:
+        with self._coordinated_session() as session:
             server = self._server_by_token(session, payload.token)
             now = datetime.now(tz=UTC)
             reported_at = self._aware_datetime(payload.reported_at or now)
@@ -1547,6 +1574,7 @@ class InventoryStore:
                 latency=[sample.model_dump(mode="json") for sample in payload.latency],
             )
             session.add(telemetry)
+            self._server_traffic().record(session, server, telemetry)
             self._record_subscription_traffic_ledger(session, server, payload, reported_at, now)
             session.commit()
             session.refresh(server)
@@ -2535,7 +2563,8 @@ class InventoryStore:
             for server in servers:
                 latest = self._latest_telemetry_model(session, server.id)
                 ping = self._probe_ping_series(session, server.id, bucket_count=12, bucket_sec=300)
-                daily_traffic = self._probe_daily_traffic(session, server.id, day_count=7)
+                traffic = self._server_traffic()
+                daily_traffic = traffic.daily(session, server, day_count=7)
                 probe_servers.append(
                     self._probe_server(
                         server,
@@ -2543,6 +2572,7 @@ class InventoryStore:
                         ping,
                         daily_traffic,
                         return_routes.get(server.id),
+                        traffic.read_in_session(session, server),
                     )
                 )
             return ProbePayload(
@@ -4177,6 +4207,7 @@ class InventoryStore:
         ping_by_key: dict[str, ProbePingSeries],
         daily_traffic: list[ProbeDailyTraffic] | None = None,
         return_routes: list[ProbeReturnRoute] | None = None,
+        traffic=None,
     ) -> ProbeServer:
         probe = ProbeServer(
             name=server.name,
@@ -4200,18 +4231,16 @@ class InventoryStore:
             telecom_paid_peer=server.telecom_paid_peer,
         )
 
+        if traffic and traffic.last_reported_at is not None:
+            probe.traffic_used_up = traffic.upload
+            probe.traffic_used_down = traffic.download
+            probe.traffic_used_total = traffic.upload + traffic.download
+            probe.traffic_used = traffic.used
+
         if latest:
             if latest.system_tx_total is not None or latest.system_rx_total is not None:
                 probe.cumulative_up = latest.system_tx_total or 0
                 probe.cumulative_down = latest.system_rx_total or 0
-
-            if latest.stats:
-                up, down = self._traffic_totals_from_stats(latest.stats)
-                if up or down:
-                    probe.traffic_used_up = up
-                    probe.traffic_used_down = down
-                    probe.traffic_used_total = up + down
-                    probe.traffic_used = up + down
 
             if latest.sysmetrics:
                 metrics = ProbeSysMetrics.model_validate(latest.sysmetrics)
@@ -4263,97 +4292,6 @@ class InventoryStore:
         for routes in by_server.values():
             routes.sort(key=lambda item: order.get(item.carrier, 99))
         return by_server
-
-    def _probe_daily_traffic(
-        self,
-        session: Session,
-        server_id: str,
-        day_count: int,
-    ) -> list[ProbeDailyTraffic] | None:
-        day_count = max(1, day_count)
-        last_day = datetime.now(tz=UTC).date()
-        first_day = last_day - timedelta(days=day_count - 1)
-        seed_day = first_day - timedelta(days=1)
-        since = datetime.combine(seed_day, datetime.min.time(), tzinfo=UTC)
-        snapshots = session.scalars(
-            select(TelemetrySnapshotModel)
-            .where(
-                TelemetrySnapshotModel.server_id == server_id,
-                TelemetrySnapshotModel.reported_at >= since,
-            )
-            .order_by(TelemetrySnapshotModel.reported_at)
-        ).all()
-        if len(snapshots) < 2:
-            return None
-
-        totals_by_day: dict[date, dict[str, int]] = {
-            first_day + timedelta(days=offset): {"uplink": 0, "downlink": 0}
-            for offset in range(day_count)
-        }
-        previous = snapshots[0]
-        previous_totals = self._probe_snapshot_traffic_totals(previous)
-        for current in snapshots[1:]:
-            current_totals = self._probe_snapshot_traffic_totals(current)
-            if previous_totals and current_totals:
-                delta = self._probe_traffic_delta(previous_totals, current_totals)
-                day = self._aware_datetime(current.reported_at).date()
-                if delta and first_day <= day <= last_day:
-                    totals_by_day[day]["uplink"] += delta.uplink
-                    totals_by_day[day]["downlink"] += delta.downlink
-            previous = current
-            previous_totals = current_totals
-
-        rows = [
-            ProbeDailyTraffic(
-                date=day.isoformat(),
-                uplink=totals["uplink"],
-                downlink=totals["downlink"],
-                total=totals["uplink"] + totals["downlink"],
-            )
-            for day, totals in sorted(totals_by_day.items())
-        ]
-        return rows if any(row.total > 0 for row in rows) else None
-
-    @staticmethod
-    def _probe_snapshot_traffic_totals(
-        snapshot: TelemetrySnapshotModel,
-    ) -> ProbeTrafficTotals | None:
-        if snapshot.stats is not None:
-            uplink, downlink = InventoryStore._traffic_totals_from_stats(snapshot.stats)
-            return ProbeTrafficTotals(source="xray", uplink=uplink, downlink=downlink)
-        if snapshot.system_tx_total is not None and snapshot.system_rx_total is not None:
-            return ProbeTrafficTotals(
-                source="system",
-                uplink=snapshot.system_tx_total,
-                downlink=snapshot.system_rx_total,
-                boot_time_unix=snapshot.system_boot_time_unix,
-            )
-        return None
-
-    @staticmethod
-    def _probe_traffic_delta(
-        previous: ProbeTrafficTotals,
-        current: ProbeTrafficTotals,
-    ) -> ProbeTrafficTotals | None:
-        if previous.source != current.source:
-            return None
-        reset = (
-            current.source == "system"
-            and previous.boot_time_unix is not None
-            and current.boot_time_unix is not None
-            and previous.boot_time_unix != current.boot_time_unix
-        )
-        uplink = (
-            current.uplink
-            if reset or current.uplink < previous.uplink
-            else current.uplink - previous.uplink
-        )
-        downlink = (
-            current.downlink
-            if reset or current.downlink < previous.downlink
-            else current.downlink - previous.downlink
-        )
-        return ProbeTrafficTotals(source=current.source, uplink=uplink, downlink=downlink)
 
     def _probe_ping_series(
         self,
@@ -4739,20 +4677,6 @@ class InventoryStore:
         if isinstance(value, str) and value.isdigit():
             return int(value)
         return 0
-
-    @staticmethod
-    def _traffic_totals_from_stats(stats: dict[str, Any]) -> tuple[int, int]:
-        source = stats.get("inbound") or stats.get("user") or {}
-        if not isinstance(source, dict):
-            return 0, 0
-        uplink = 0
-        downlink = 0
-        for item in source.values():
-            if not isinstance(item, dict):
-                continue
-            uplink += int(item.get("uplink") or 0)
-            downlink += int(item.get("downlink") or 0)
-        return uplink, downlink
 
     @classmethod
     def _traffic_data_for_key(cls, source: dict[str, Any] | None, key: str | None) -> TrafficData:
@@ -6382,6 +6306,11 @@ class InventoryStore:
 
         return SubscriptionAccessCoordinator(self)
 
+    def _server_traffic(self):
+        from open_node.services.server_traffic import ServerTrafficCoordinator
+
+        return ServerTrafficCoordinator(self)
+
     @staticmethod
     def _server_record(server: ServerModel) -> ServerRecord:
         return ServerRecord(
@@ -6399,6 +6328,8 @@ class InventoryStore:
             pull_port=server.pull_port,
             ipv6_enabled=server.ipv6_enabled,
             traffic_limit=server.traffic_limit,
+            traffic_reset_day=server.traffic_reset_day,
+            last_traffic_reset_at=server.last_traffic_reset_at,
             traffic_stats_mode=TrafficStatsMode(server.traffic_stats_mode),
             traffic_source=TrafficSource(server.traffic_source),
             xray_mode=XrayMode(server.xray_mode),

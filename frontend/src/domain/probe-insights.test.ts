@@ -11,12 +11,18 @@ import {
   returnRouteBadges,
   summarizeSevenDayTraffic,
   trafficHotspots,
+  trafficUsed,
 } from "./probe-insights";
 
 const now = Date.parse("2026-08-27T00:00:00Z");
 const jpFlag = String.fromCodePoint(0x1f1ef, 0x1f1f5);
 
 describe("probe insights", () => {
+  it("uses billed traffic for quotas even when both directions are also available", () => {
+    expect(trafficUsed({ name: "edge", online: true, traffic_used: 60, traffic_used_total: 100 })).toBe(60);
+    expect(trafficUsed({ name: "edge", online: true, traffic_used: 0, traffic_used_total: 100 })).toBe(0);
+    expect(trafficUsed({ name: "legacy", online: true, traffic_used_total: 100 })).toBe(100);
+  });
   it("groups regions and filters by status or renewal state", () => {
     const servers: ProbeServer[] = [
       { name: "tokyo", online: true, region_country: "JP", region_city: "Tokyo" },

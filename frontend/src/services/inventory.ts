@@ -15,6 +15,8 @@ import type {
   ServerProbeMetadataUpdate,
   ServerResponse,
   ServerSummary,
+  ServerTraffic,
+  ServerTrafficUpdate,
   ServerXrayConfigSnapshotsResponse,
   XrayConfigSnapshotRecoveryAcceptResponse,
   XrayConfigSnapshotRecoveryApplyRequest,
@@ -157,6 +159,26 @@ export async function getLatestTelemetry(
     throw await apiError(response, "Server telemetry request failed");
   }
   return response.json() as Promise<ServerTelemetryResponse>;
+}
+
+export async function getServerTraffic(serverId: string, fetcher = authenticatedFetch): Promise<ServerTraffic> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/traffic`);
+  if (!response.ok) throw await apiError(response, "Server traffic request failed");
+  return response.json() as Promise<ServerTraffic>;
+}
+
+export async function updateServerTraffic(serverId: string, payload: ServerTrafficUpdate, fetcher = authenticatedFetch): Promise<ServerTraffic> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/traffic`, {
+    method: "PUT", headers: jsonHeaders, body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw await apiError(response, "Server traffic update failed");
+  return response.json() as Promise<ServerTraffic>;
+}
+
+export async function resetServerTraffic(serverId: string, fetcher = authenticatedFetch): Promise<ServerTraffic> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/traffic/reset`, { method: "POST" });
+  if (!response.ok) throw await apiError(response, "Server traffic reset failed");
+  return response.json() as Promise<ServerTraffic>;
 }
 
 export async function getLatestScanResult(

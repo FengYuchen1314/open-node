@@ -19,6 +19,7 @@ from open_node.services.certificates import CertificateStore
 from open_node.services.inventory import InventoryStore
 from open_node.services.probe_stream import PublicProbeStreamManager
 from open_node.services.secure_channel import AgentIdentity
+from open_node.services.server_traffic import ServerTrafficWorker
 from open_node.services.subscription_access import SubscriptionAccessWorker
 from open_node.web import FrontendFiles
 
@@ -41,15 +42,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             active_settings.subscription_access_poll_seconds,
         )
         access_task = asyncio.create_task(access.run())
+        traffic_task = asyncio.create_task(
+            ServerTrafficWorker(
+                app.state.inventory, active_settings.server_traffic_poll_seconds
+            ).run()
+        )
         try:
             yield
         finally:
             task.cancel()
             access_task.cancel()
+            traffic_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             with contextlib.suppress(asyncio.CancelledError):
                 await access_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await traffic_task
 
     app = FastAPI(
         title=active_settings.app_name,

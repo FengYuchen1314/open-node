@@ -21,9 +21,35 @@ import {
   queueAgentOperation,
   restoreXrayConfigSnapshot,
   updateServerProbeMetadata,
+  getServerTraffic,
+  updateServerTraffic,
+  resetServerTraffic,
 } from "./inventory";
 
 describe("inventory API client", () => {
+  it("reads, updates and resets server billing through authenticated routes", async () => {
+    const payload = { traffic_limit: 1024, traffic_reset_day: 31, traffic_source: "system" as const, traffic_stats_mode: "max" as const };
+    let count = 0;
+    const fetcher: typeof fetch = async (input, init) => {
+      expect(input.toString()).toBe("/api/v1/servers/edge/traffic" + (count === 2 ? "/reset" : ""));
+      expect(init?.method ?? "GET").toBe(["GET", "PUT", "POST"][count]);
+      if (count === 1) expect(JSON.parse(String(init?.body))).toEqual(payload);
+      count += 1;
+      return new Response(JSON.stringify({ ...payload, used: 120 }));
+    };
+    expect((await getServerTraffic("edge", fetcher)).used).toBe(120);
+    expect((await updateServerTraffic("edge", payload, fetcher)).traffic_reset_day).toBe(31);
+    expect((await resetServerTraffic("edge", fetcher)).used).toBe(120);
+    expect(count).toBe(3);
+  });
+
+  it("preserves server traffic permission errors", async () => {
+    const fetcher: typeof fetch = async () => new Response(JSON.stringify({ detail: "Permission denied" }), { status: 403 });
+    await expect(getServerTraffic("edge", fetcher)).rejects.toThrow("Permission denied");
+    await expect(resetServerTraffic("edge", fetcher)).rejects.toThrow("Permission denied");
+    await expect(updateServerTraffic("edge", { traffic_limit: 0, traffic_reset_day: 0, traffic_source: "xray", traffic_stats_mode: "both" }, fetcher)).rejects.toThrow("Permission denied");
+  });
+
   it.each(["limiter", "limiter_status"] as const)("queues %s with its native policy contract", async (operation) => {
     const payload = operation === "limiter"
       ? { inbound_tag: "edge", action: "remove" as const, expected_revision: "a".repeat(64) }
