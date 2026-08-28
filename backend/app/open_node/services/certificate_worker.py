@@ -11,6 +11,7 @@ from time import time
 
 from sqlalchemy import select
 
+from open_node.services.certificate_http import WebrootChallenges, harden_work
 from open_node.services.certificate_vault import material, private_path
 from open_node.services.certificates import (
     CertificateError,
@@ -27,8 +28,10 @@ class CertificateWorker:
     def __init__(self, store, connections):
         self.store, self.connections = store, connections
         self.settings = store.settings
+        self.webroots = WebrootChallenges(store.vault)
 
     def recover(self):
+        self.webroots.recover()
         with self.store.session.begin() as db:
             for job in db.scalars(select(CertificateJob).where(CertificateJob.status == "running")):
                 job.status, job.finished_at = "interrupted", time()
@@ -47,7 +50,7 @@ class CertificateWorker:
                 for row in db.scalars(
                     select(ManagedCertificate).where(
                         ManagedCertificate.auto_renew.is_(True),
-                        ManagedCertificate.provider_id.is_not(None),
+                        ManagedCertificate.directory_url.is_not(None),
                         ManagedCertificate.active_job_id.is_(None),
                         ManagedCertificate.next_attempt <= time(),
                     )
@@ -113,8 +116,12 @@ class CertificateWorker:
             job.status = "running"
             row = self.store.get(db, ManagedCertificate, job.certificate_id)
             row.status = "issuing" if job.kind == "issue" else "renewing"
-            provider = self.store.get(db, DNSProvider, row.provider_id)
         try:
+            self.store.check_challenge(row)
+            with self.store.session() as db:
+                provider = (
+                    self.store.get(db, DNSProvider, row.provider_id) if row.provider_id else None
+                )
             data = await self.obtain(row, provider, job, lock_fd)
             with self.store.session.begin() as db:
                 current = self.store.get(db, ManagedCertificate, row.id)
@@ -158,6 +165,7 @@ class CertificateWorker:
         root = self.store.vault.root
         work = private_path(root, root / row.id)
         work.mkdir(mode=0o700, exist_ok=True)
+        harden_work(work)
         filename = row.domains[0].replace("*.", "_.", 1)
         cert_file, key_file = (
             work / "certificates" / (filename + ".crt"),
@@ -179,7 +187,8 @@ class CertificateWorker:
                     return recovered
 
         environment = {"PATH": os.defpath, "HOME": str(work), "LANG": "C.UTF-8"}
-        environment.update(self.store.vault.open(provider.credentials))
+        if provider:
+            environment.update(self.store.vault.open(provider.credentials))
         if self.settings.certificate_ca_file:
             environment["LEGO_CA_CERTIFICATES"] = str(self.settings.certificate_ca_file)
         if row.eab:
@@ -196,8 +205,6 @@ class CertificateWorker:
             "--accept-tos",
             "--key-type",
             "ec256",
-            "--dns",
-            provider.provider,
             "--http-timeout",
             "15",
             "--dns-timeout",
@@ -207,27 +214,42 @@ class CertificateWorker:
             "--user-agent",
             "Open-Node/0.1",
         ]
+        webroot = None
+        if row.challenge_type == "dns":
+            args.extend(["--dns", provider.provider])
+            for resolver in self.settings.certificate_dns_resolvers:
+                args.extend(["--dns.resolvers", resolver])
+        elif row.challenge_type == "standalone":
+            args.extend(["--http", "--http.port", self.settings.certificate_http_address])
+        else:
+            webroot = self.settings.certificate_webroots[row.webroot_id]
+            self.webroots.prepare(webroot)
+            args.extend(["--http", "--http.webroot", str(webroot)])
         for domain in row.domains:
             args.extend(["--domains", domain])
-        for resolver in self.settings.certificate_dns_resolvers:
-            args.extend(["--dns.resolvers", resolver])
         if job.kind == "issue" or not cert_file.exists():
             args.append("run")
         elif job.force:
             args.extend(["renew", "--days", "9999", "--ari-disable", "--no-random-sleep"])
         else:
             args.extend(["renew", "--dynamic", "--no-random-sleep"])
-        await self.execute(args, environment, work, lock_fd)
+        try:
+            await self.execute(args, environment, work, lock_fd)
+        finally:
+            harden_work(work)
+            if webroot:
+                self.webroots.cleanup(webroot)
         data = read_candidate()
         return None if current and data["serial"] == current["serial"] else data
 
     async def execute(self, args, environment, work, lock_fd):
         # uvloop rejects Popen's umask option; exec preserves the lock FD and process group.
+        mask = "0o022" if "--http.webroot" in args else "0o077"
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-I",
             "-c",
-            "import os,sys; os.umask(0o077); os.execv(sys.argv[1], sys.argv[1:])",
+            f"import os,sys; os.umask({mask}); os.execv(sys.argv[1], sys.argv[1:])",
             *args,
             cwd=work,
             env=environment,
@@ -246,7 +268,7 @@ class CertificateWorker:
                         raise CertificateError("ACME client exceeded its output limit")
                 if await process.wait():
                     raise CertificateError(
-                        "ACME validation or issuance failed; check DNS and CA settings"
+                        "ACME validation or issuance failed; check HTTP/DNS routing and CA settings"
                     )
         except TimeoutError:
             raise CertificateError(

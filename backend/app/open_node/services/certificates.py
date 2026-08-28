@@ -4,7 +4,18 @@ from time import time
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Float, String, Text, UniqueConstraint, select, update
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Float,
+    String,
+    Text,
+    UniqueConstraint,
+    inspect,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from open_node.domain.certificates import DNS_FIELDS, DNS_REQUIRED
@@ -42,6 +53,8 @@ class ManagedCertificate(CertificateBase):
     domains: Mapped[list] = mapped_column(JSON)
     email: Mapped[str | None] = mapped_column(String(320))
     provider_id: Mapped[str | None] = mapped_column(String(36))
+    challenge_type: Mapped[str] = mapped_column(String(16), default="dns", server_default="dns")
+    webroot_id: Mapped[str | None] = mapped_column(String(64))
     directory_url: Mapped[str | None] = mapped_column(String(1024))
     eab: Mapped[str | None] = mapped_column(Text)
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -105,12 +118,36 @@ class CertificateStore:
         self.engine = create_inventory_engine(settings.database_url)
         self.session = sessionmaker(bind=self.engine, expire_on_commit=False)
         CertificateBase.metadata.create_all(self.engine)
+        self._migrate_schema()
         with self.session() as db:
             initialized = (
                 db.scalar(select(DNSProvider.id).limit(1)) is not None
                 or db.scalar(select(CertificateVersion.id).limit(1)) is not None
+                or db.scalar(
+                    select(ManagedCertificate.id)
+                    .where(ManagedCertificate.eab.is_not(None))
+                    .limit(1)
+                )
+                is not None
             )
         self.vault = CertificateVault(settings.certificate_state_dir, initialized=initialized)
+
+    def _migrate_schema(self):
+        if self.engine.dialect.name != "sqlite":
+            return
+        with self.engine.begin() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            columns = {
+                column["name"] for column in inspect(connection).get_columns("managed_certificates")
+            }
+            for name, kind in {
+                "challenge_type": "VARCHAR(16) NOT NULL DEFAULT 'dns'",
+                "webroot_id": "VARCHAR(64)",
+            }.items():
+                if name not in columns:
+                    connection.execute(
+                        text(f"ALTER TABLE managed_certificates ADD COLUMN {name} {kind}")
+                    )
 
     def capabilities(self):
         binary = self.settings.certificate_lego_binary
@@ -118,6 +155,12 @@ class CertificateStore:
             "available": bool(binary and binary.is_file() and os.access(binary, os.X_OK)),
             "license_required": False,
             "directories": self.settings.certificate_acme_directories,
+            "challenge_types": [
+                "dns",
+                *(["standalone"] if self.settings.certificate_http_address else []),
+                *(["webroot"] if self.settings.certificate_webroots else []),
+            ],
+            "webroots": sorted(self.settings.certificate_webroots),
             "providers": [
                 {"id": name, "fields": fields, "required": DNS_REQUIRED[name]}
                 for name, fields in DNS_FIELDS.items()
@@ -194,6 +237,7 @@ class CertificateStore:
             db.delete(row)
 
     def create(self, payload):
+        self.check_challenge(payload)
         if payload.directory_url not in self.settings.certificate_acme_directories:
             raise CertificateError("ACME directory is not enabled by the host administrator")
         if bool(payload.eab_kid) != bool(payload.eab_hmac_key):
@@ -209,13 +253,16 @@ class CertificateStore:
             else None
         )
         with self.session.begin() as db:
-            self.get(db, DNSProvider, payload.provider_id)
+            if payload.provider_id:
+                self.get(db, DNSProvider, payload.provider_id)
             row = ManagedCertificate(
                 id=str(uuid4()),
                 name=payload.name,
                 domains=payload.domains,
                 email=str(payload.email),
-                provider_id=str(payload.provider_id),
+                provider_id=str(payload.provider_id) if payload.provider_id else None,
+                challenge_type=payload.challenge_type,
+                webroot_id=payload.webroot_id,
                 directory_url=payload.directory_url,
                 auto_renew=payload.auto_renew,
                 eab=eab,
@@ -223,6 +270,19 @@ class CertificateStore:
             db.add(row)
             db.flush()
             return public_row(row, {"eab"})
+
+    def check_challenge(self, row):
+        if not row.email or "/" in row.email or "\\" in row.email:
+            raise CertificateError("ACME account email is missing or unsafe")
+        if row.challenge_type not in self.capabilities()["challenge_types"]:
+            raise CertificateError(
+                "Certificate challenge type is not enabled by the host administrator"
+            )
+        if (
+            row.challenge_type == "webroot"
+            and row.webroot_id not in self.settings.certificate_webroots
+        ):
+            raise CertificateError("Certificate webroot is not enabled by the host administrator")
 
     def list(self):
         with self.session() as db:
@@ -275,7 +335,7 @@ class CertificateStore:
     def edit(self, identifier, payload):
         with self.session.begin() as db:
             row = self.get(db, ManagedCertificate, identifier)
-            if payload.auto_renew and not row.provider_id:
+            if payload.auto_renew and not row.directory_url:
                 raise CertificateError(
                     "Imported certificates cannot renew without ACME configuration"
                 )
@@ -363,8 +423,9 @@ class CertificateStore:
             raise CertificateError("Configure certificate_lego_binary on the control-plane host")
         with self.session.begin() as db:
             row = self.get(db, ManagedCertificate, identifier)
-            if not row.provider_id:
-                raise CertificateError("Imported certificates do not have an ACME provider")
+            if not row.directory_url:
+                raise CertificateError("Imported certificates do not have ACME configuration")
+            self.check_challenge(row)
             if kind == "renew" and not row.version_id:
                 raise CertificateError("Issue the certificate before requesting renewal")
             if kind == "issue" and row.version_id:

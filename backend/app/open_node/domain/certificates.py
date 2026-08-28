@@ -3,7 +3,15 @@ from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 DNS_FIELDS = {
     "cloudflare": ["CF_DNS_API_TOKEN", "CF_ZONE_API_TOKEN"],
@@ -56,12 +64,40 @@ class CertificateCreate(CertificateInput):
     name: str = Field(min_length=1, max_length=120)
     domains: list[str] = Field(min_length=1, max_length=20)
     email: EmailStr
-    provider_id: UUID
+    challenge_type: Literal["dns", "standalone", "webroot"] = "dns"
+    provider_id: UUID | None = None
+    webroot_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     directory_url: str = "https://acme-v02.api.letsencrypt.org/directory"
     accept_terms: Literal[True]
     auto_renew: bool = True
     eab_kid: SecretStr | None = Field(default=None, min_length=1, max_length=8192)
     eab_hmac_key: SecretStr | None = Field(default=None, min_length=1, max_length=8192)
+
+    @field_validator("accept_terms", mode="before")
+    @classmethod
+    def explicit_terms(cls, value):
+        if value is not True:
+            raise ValueError("Explicit acceptance of the CA terms is required")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def account_path(cls, value):
+        if "/" in value or "\\" in value:
+            raise ValueError("ACME account email cannot contain filesystem separators")
+        return value
+
+    @model_validator(mode="after")
+    def challenge(self):
+        if self.challenge_type == "dns":
+            if not self.provider_id or self.webroot_id:
+                raise ValueError("DNS validation requires only a DNS provider")
+        else:
+            if self.provider_id or any(name.startswith("*.") for name in self.domains):
+                raise ValueError("HTTP validation cannot use DNS credentials or wildcard names")
+            if (self.challenge_type == "webroot") != bool(self.webroot_id):
+                raise ValueError("Only webroot validation requires a webroot ID")
+        return self
 
     @field_validator("domains")
     @classmethod

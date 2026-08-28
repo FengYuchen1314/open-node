@@ -1,4 +1,6 @@
+import re
 from functools import lru_cache
+from ipaddress import ip_address
 from pathlib import Path
 
 from pydantic import Field, field_validator
@@ -22,11 +24,41 @@ class Settings(BaseSettings):
         "https://acme-staging-v02.api.letsencrypt.org/directory",
     ]
     certificate_dns_resolvers: list[str] = []
+    certificate_http_address: str | None = None
+    certificate_webroots: dict[str, Path] = {}
     certificate_allow_loopback_http: bool = False
     certificate_poll_seconds: float = Field(default=30, ge=1, le=3600)
     certificate_job_timeout: int = Field(default=240, ge=5, le=600)
     frontend_dir: Path | None = None
     agent_identity_file: Path | None = None
+
+    @field_validator("certificate_http_address")
+    @classmethod
+    def http_listener(cls, value):
+        if value is None:
+            return value
+        host, separator, port = value.rpartition(":")
+        if not separator or not port.isascii() or not port.isdigit() or not 1 <= int(port) <= 65535:
+            raise ValueError("HTTP challenge listener requires an IP address and port")
+        if host.startswith("[") and host.endswith("]"):
+            if ip_address(host[1:-1]).version != 6:
+                raise ValueError("Bracketed HTTP challenge addresses must be IPv6")
+        elif host:
+            if ip_address(host).version != 4:
+                raise ValueError("IPv6 HTTP challenge addresses require brackets")
+        return value
+
+    @field_validator("certificate_webroots")
+    @classmethod
+    def webroot_paths(cls, values):
+        for identifier, path in values.items():
+            if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", identifier):
+                raise ValueError("Webroot IDs require 1-64 letters, digits, underscores or hyphens")
+            if not path.is_absolute() or path == Path(path.anchor) or ".." in path.parts:
+                raise ValueError("Webroots must be absolute non-root paths without traversal")
+        if len(set(values.values())) != len(values):
+            raise ValueError("Webroot paths must be distinct")
+        return values
 
     @field_validator("agent_identity_file", mode="before")
     @classmethod

@@ -2,7 +2,7 @@
 
 The FastAPI control plane owns certificate profiles, DNS credentials, ACME
 accounts, jobs and versions. The Vue **Certificates** workspace creates DNS
-providers and profiles, imports PEM pairs, issues/renews certificates, exports
+providers and DNS-01 or HTTP-01 profiles, imports PEM pairs, issues/renews certificates, exports
 material and assigns node deployment targets. No activation key, subscription
 payment or commercial entitlement is required.
 
@@ -78,6 +78,85 @@ CA's terms when creating a profile; creating a profile does not issue it.
 Optional EAB key ID and HMAC key must be supplied together. Accounts and
 private keys are retained in the profile's private lego directory.
 
+## HTTP-01 Validation
+
+Both HTTP modes run on the **control-plane host**, before certificate deployment
+to nodes. Every requested hostname must route its public HTTP port **80**
+challenge requests to that host. Check all published A/AAAA addresses and any
+CDN, firewall or reverse proxy. HTTP-01 cannot issue wildcard certificates;
+use DNS-01 for those. The panel neither changes DNS nor stops existing listeners.
+HTTP modes are disabled until explicitly configured by the host administrator.
+
+### Standalone Listener
+
+For a non-root backend behind an existing web server:
+
+```bash
+export OPEN_NODE_CERTIFICATE_HTTP_ADDRESS=127.0.0.1:8082
+```
+
+Route the challenge path on the public port-80 virtual host to this listener:
+
+```nginx
+location ^~ /.well-known/acme-challenge/ {
+    proxy_set_header Host $host;
+    proxy_pass http://127.0.0.1:8082;
+}
+```
+
+lego owns the listener only during a job; it closes after success, failure or
+cancellation. An occupied port fails the job without terminating the process
+that owns it. A direct listener such as `:80` is also supported if that port is
+free and the service account already has binding permission. Do not run the
+whole backend as root merely to bind port 80. In containers, configure the
+actual reachable interface and proxy network rather than assuming host
+loopback reaches the container. The API cannot choose addresses or ports.
+
+### Existing Webroot
+
+Configure a host-side allowlist; the browser selects an ID, never a disk path:
+
+```bash
+export OPEN_NODE_CERTIFICATE_WEBROOTS='{"site":"/srv/open-node-http01"}'
+```
+
+Create that directory beforehand, readable/traversable by the web server and
+writable by the backend account, for example mode `0755`. Serve its challenge
+directory from the public port-80 virtual host:
+
+```nginx
+location ^~ /.well-known/acme-challenge/ {
+    root /srv/open-node-http01;
+    try_files $uri =404;
+}
+```
+
+The allowed path may instead be the existing site's webroot. Open Node owns
+only `.well-known/acme-challenge` underneath it and leaves other website content
+alone. That challenge directory must be absent or empty on first use, owned by
+the backend account, and reserved exclusively for Open Node afterward. Do not
+share it with certbot or another ACME writer. Use a dedicated directory and the
+location above if the existing site's challenge directory is already occupied.
+Keep redirects in another location, not a server-level `return` that overrides
+the challenge route.
+
+Webroot paths and their components cannot be symlinks. The root and challenge
+directories cannot be group/world-writable, and a webroot cannot contain or sit
+inside the private certificate vault. Directory identity is recorded in the
+private vault before lego starts. Startup, failed-job and cancellation cleanup
+remove only valid challenge responses inside this registered directory;
+unexpected content, replaced directories, links and special files fail closed.
+No website files are deleted to make room for challenges.
+
+Challenge responses are public `0644` files; newly created challenge directories
+are `0755`. The webroot client uses umask `022`, but its account and certificate
+work remains behind a `0700` profile directory. lego-created private files are
+hardened to `0600` after the process exits and before reuse after interruption.
+No private keys are copied to the public webroot. If a configured site is removed
+or moved, finish outstanding jobs first; retained ownership records may need
+host-side review. A cleanup warning for an unavailable old site does not block
+unrelated certificates or node deployments.
+
 ## Renewal And Deployment
 
 The worker checks for due certificates every 30 seconds by default. Renewal
@@ -120,7 +199,7 @@ versions at the CA.
 DNS credentials, EAB credentials and stored certificate material are encrypted
 with a randomly generated Fernet key outside the database. Back up both the
 database and the entire private state directory, including `vault.key`,
-`vault.initialized` and lego account files. Stop the backend while taking a
+`vault.initialized`, HTTP webroot ownership records and lego account files. Stop the backend while taking a
 consistent filesystem backup, or use an equivalent coordinated snapshot.
 Losing the vault key makes encrypted data unreadable. A missing key beside an
 existing initialization marker or encrypted database rows fails closed instead
@@ -138,6 +217,13 @@ It does not revoke certificates, delete node files, cancel existing commands,
 or erase its private lego state. Retained account material requires deliberate
 host-side cleanup after checking backups and pending work.
 
+Existing SQLite certificate catalogs are upgraded additively on startup.
+DNS profiles keep their provider and default to DNS-01; imported PEM pairs
+remain non-renewable. Back up the database and vault together before upgrading.
+Webroot ownership records include filesystem identity: restoring to a different
+filesystem or recreating a challenge directory requires deliberate host-side
+revalidation of an empty directory before removing its old ownership record.
+
 ## Verification Limits
 
 The [VPS ACME smoke](testing.md#acme-lifecycle-smoke) uses real lego and Pebble
@@ -145,6 +231,8 @@ DNS-01/EAB with a private authoritative DNS fixture, checks actual renewal,
 and deploys certificates to real non-root Nginx instances over both Agent
 transports. It does not consume public-CA orders or real DNS-provider accounts.
 Cloudflare/AliDNS/Tencent/DNSPod/GoDaddy/NameSilo production credentials and
-external CA behavior still require operator staging validation. HTTP-01,
-webroot issuance, account editing/revocation and multi-host scheduling remain
-outside this implementation and are recorded as migration gates.
+external CA behavior still require operator staging validation. HTTP-01
+standalone/webroot coverage has a separate
+[HTTP-01 lifecycle smoke](testing.md#http-01-lifecycle-smoke), including a real
+non-root web server, forced interruption and actual automatic renewal.
+Account editing/revocation and multi-host scheduling remain migration gates.

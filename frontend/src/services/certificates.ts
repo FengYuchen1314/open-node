@@ -1,5 +1,7 @@
 import { authenticatedFetch } from "./auth";
 
+export type CertificateChallenge = "dns" | "standalone" | "webroot";
+
 export interface DNSProvider {
   id: string;
   name: string;
@@ -12,6 +14,9 @@ export interface ManagedCertificate {
   name: string;
   domains: string[];
   provider_id: string | null;
+  directory_url: string | null;
+  challenge_type: CertificateChallenge;
+  webroot_id: string | null;
   status: string;
   auto_renew: boolean;
   active_job_id: string | null;
@@ -23,6 +28,8 @@ export interface ManagedCertificate {
 export interface CertificateCapabilities {
   available: boolean;
   directories: string[];
+  challenge_types: CertificateChallenge[];
+  webroots: string[];
   providers: Array<{ id: string; fields: string[]; required: string[] }>;
 }
 

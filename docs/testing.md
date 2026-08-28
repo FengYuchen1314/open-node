@@ -397,6 +397,57 @@ historical version, checking trusted TLS leaf serials and HTTP bytes for
 both transports. Test services, accounts, DNS listeners and private state
 are removed on completion. No public CA or real DNS account is used.
 
+## HTTP-01 Lifecycle Smoke
+
+Use the same VPS dependencies, pinned binaries and free loopback DNS ports as
+the ACME lifecycle smoke above. Build the frontend on the VPS first. This test
+also needs the existing Debian `www-data` account for an independently running
+non-root Nginx:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-certificate-http.py \
+  --lego /path/to/lego-4.35.2/lego \
+  --pebble /path/to/pebble-linux-amd64/linux/amd64/pebble \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /path/to/extracted/usr/sbin/nginx \
+  --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so \
+  --screenshots /tmp/open-node-http01-screenshots
+```
+
+The browser creates and issues standalone and webroot profiles without a DNS
+provider. It checks mode-specific controls, wildcard rejection, CA consent,
+renewal controls, collapsed/expanded EAB fields and 1440/390/320px layouts.
+Pebble fetches actual challenge responses through a loopback fault-injection
+hop and Nginx: standalone requests reach lego's listener, while webroot
+requests read real public challenge files as a different Unix user.
+
+The test covers SAN issuance, not-due skips, deliberate HTTP validation
+failure, forced renewal, file/listener cleanup and active-version preservation.
+It kills the backend while lego survives, verifies the inherited worker lock,
+then kills lego and checks interrupted-job recovery and stale-token removal.
+Both modes renew automatically after actual elapsed time. HTTP-issued
+certificates are deployed to non-root Agent Nginx instances over WebSocket
+and HTTP, with trusted TLS serial checks and version rollback.
+
+The website's original content is checked unchanged, and all private vault
+files are checked for private permissions. Test listeners, processes, Agent
+services and data are disposable; public-CA orders and production websites
+are not used. This does not prove an operator's public DNS/port-80 routing.
+
+Verified on the designated Debian 12 x86-64 VPS:
+
+- Backend: 317 tests; Agent: 231 tests; frontend: 98 tests and production build.
+- HTTP-01 standalone/webroot and existing DNS-01/EAB lifecycle smokes passed,
+  including real automatic renewal and trusted Agent TLS/version rollback.
+- HTTP hard-crash recovery retained the old certificate and removed stale
+  challenge responses only after the surviving lego process released its lock.
+- The operator browser regression passed. HTTP forms and expanded EAB fields
+  were checked at 1440px, 390px and 320px, including fully visible submit controls.
+- Additive SQLite migration retained DNS/imported profiles. EAB-only HTTP
+  catalogs also detect missing vault keys instead of generating a replacement.
+- Ruff passed for changed backend modules and the HTTP smoke. Existing
+  Starlette/httpx deprecation and frontend bundle-size warnings remain.
+
 ## Reference-Agent Smoke
 
 After installing the backend development dependencies, run this on the VPS

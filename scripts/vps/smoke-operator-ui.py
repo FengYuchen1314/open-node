@@ -44,7 +44,7 @@ def check_layout(page) -> None:
     page.wait_for_function(
         """() =>
         [...document.querySelectorAll('form input:not([hidden]), form button')]
-        .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
+        .filter(el => el.checkVisibility({checkVisibilityCSS: true}))
         .every(el => {
             const box = el.getBoundingClientRect();
             return box.x >= 0 && box.right <= innerWidth + 1;

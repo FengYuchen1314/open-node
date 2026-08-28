@@ -71,12 +71,13 @@ WARP and fork-specific runtime workflows are still incomplete; control-plane wra
 for those operations do not imply the independent agent implements them.
 
 [Central certificate management](docs/certificates.md) now provides DNS
-credentials, PEM import/export, DNS-01 issuance and renewal through pinned
+credentials, PEM import/export, DNS-01 and HTTP-01 issuance and renewal through pinned
 lego v4, EAB, encrypted version history, and automatic Agent deployment.
 The VPS smoke uses a real Pebble test CA and authoritative DNS, including
 short-lived automatic renewal and trusted TLS/version rollback on both
-Agent transports. Public-CA/provider-account staging and HTTP-01/webroot
-coverage remain separate gates.
+Agent transports. HTTP-01 supports a standalone listener or an allowlisted
+webroot on the control-plane host. Public-CA/provider-account staging and
+account editing/revocation remain separate gates.
 
 The first milestone establishes the project skeleton, the no-license contract,
 persisted server/agent inventory, agent telemetry and command slices, initial

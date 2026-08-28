@@ -234,7 +234,9 @@ These passing command and snapshot checks do not prove a complete replacement:
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both
-  transports. Complete HTTP-01/webroot and account/revocation workflows;
+  transports. HTTP-01 standalone/webroot modes now use host-selected listeners
+  or owned public challenge directories, with interruption cleanup and the
+  same renewal/deployment flow. Complete account/revocation workflows;
   validate supported DNS adapters with operator-owned staging accounts before
   claiming public-provider production coverage. See [certificates.md](certificates.md).
 - Native high-level tunnel deployment now uses the independent Nginx ownership
