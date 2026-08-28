@@ -74,7 +74,9 @@ writes to the Agent's configuration/state directories and gives the service
 only the capability needed for low-numbered listener ports by default.
 The optional initial-install `--network-diagnostics` flag adds `CAP_NET_RAW`
 for [ICMP and return-route diagnostics](agent-diagnostics.md); it does not
-grant root or network administration privileges. `KillMode=control-group`
+grant root or network administration privileges. Existing installations use
+the root-only [host policy command](agent-host-policy.md) to change this setting
+without reinstalling. `KillMode=control-group`
 contains the owned Xray child if the Agent exits abruptly. Agent program files,
 the bootstrap runtime and installation metadata remain root-owned; tokens,
 config files, and the execution journal remain private. Service definitions or

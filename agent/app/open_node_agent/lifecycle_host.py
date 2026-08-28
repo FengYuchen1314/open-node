@@ -181,6 +181,7 @@ def enable_helper(deployment, base_url, ca_file=None):
         deployment.record["status"] != "installed"
         or deployment.record.get("pending")
         or deployment.record.get("staging")
+        or deployment.record.get("policy_restore")
         or deployment.record.get("lifecycle")
     ):
         raise service.DeploymentError(
@@ -460,7 +461,10 @@ def snapshot(deployment):
         "current": record["releases"].get(record["current"]),
         "previous": record["releases"].get(record.get("previous")),
         "recovery_required": bool(
-            record.get("pending") or record.get("staging") or record["status"] == "removing"
+            record.get("pending")
+            or record.get("staging")
+            or record.get("policy_restore")
+            or record["status"] == "removing"
         ),
     }
 

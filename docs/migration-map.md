@@ -225,8 +225,11 @@ These passing command and snapshot checks do not prove a complete replacement:
   supplied certificate deployment/rotation, and crash/transaction recovery are
   implemented in the independent agent. Native [diagnostics](agent-diagnostics.md)
   now include TCP/ICMP latency, structured NextTrace routes and scoped log
-  maintenance. In-place host permission changes and broader tracing-tool/OS
-  coverage remain outstanding. Native [WARP](warp.md) now supports free
+  maintenance. Root-only [host policy updates](agent-host-policy.md) now change
+  diagnostics permissions and verified NextTrace binaries in place, with
+  private rollback snapshots, crash recovery and unchanged old lifecycle
+  helpers. Broader tracing-tool/OS coverage remains outstanding.
+  Native [WARP](warp.md) now supports free
   registration, owned userspace outbounds, optional provider credentials and
   recoverable removal. Public Cloudflare registration/forwarding and the
   remaining host operations still require verification.

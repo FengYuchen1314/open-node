@@ -28,6 +28,8 @@ def command(request_id="upgrade-request", **overrides):
         {"request_id": ".."},
         {"method": "GET"},
         {"path": "/api/child/system/info"},
+        {"path": "/api/child/agent/policy", "body": {"network_diagnostics": True}},
+        {"body": {"version": "0.2.0", "sha256": "a" * 64, "network_diagnostics": True}},
         {"path": []},
         {"query": {}},
         {"query": "shell=true"},

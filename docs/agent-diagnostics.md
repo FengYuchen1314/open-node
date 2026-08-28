@@ -62,10 +62,11 @@ ICMP fallback also needs the host's `ping` package, typically `iputils-ping`.
 TCP latency does not require this additional permission.
 
 Existing installations retain their recorded service policy during upgrades.
-This release does not provide in-place permission expansion for an existing
-service; do not edit its managed unit or purge its state to force an upgrade.
-Deploy a separately named diagnostic instance where needed. A host policy
-update workflow is still outstanding. Remote commands cannot add capabilities,
+Use the current bootstrap's [host policy workflow](agent-host-policy.md) to
+enable/disable diagnostics or install/update a verified NextTrace executable
+in place. It retains node data, stopped/boot-disabled preferences and the old
+policy on failure. Do not edit the managed unit or purge state to change
+permissions. Remote commands cannot add capabilities,
 install arbitrary tools, select executable paths, or pass shell arguments.
 
 Trace requests contain one to three carrier targets, IPv4/IPv6 selection,

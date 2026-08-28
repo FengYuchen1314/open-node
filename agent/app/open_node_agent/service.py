@@ -12,6 +12,7 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,7 @@ from uuid import uuid4
 UNIT_PATTERN = r"open-node-agent(?:-[a-z0-9][a-z0-9-]{0,15})?\.service"
 RELEASE_PATTERN = r"[a-zA-Z0-9_.+-]+-[a-f0-9]{16}"
 MANIFEST_NAME = "installation.json"
+POLICY_FILE_LIMIT = 64 * 1024 * 1024
 
 
 def lifecycle_helper():
@@ -83,6 +85,37 @@ def write_file(path: Path, content: bytes, mode=0o600, owner=None):
         fsync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def read_owned(path, *, owner=0, private=False, missing_ok=False, limit=POLICY_FILE_LIMIT):
+    for parent in path.parents:
+        if parent.is_symlink():
+            raise DeploymentError(f"Refusing symlink component: {parent}")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        if missing_ok:
+            return None
+        raise
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_mode & 0o7000
+            or (owner is not None and info.st_uid != owner)
+            or info.st_mode & (0o077 if private else 0o022)
+            or info.st_size > limit
+        ):
+            raise DeploymentError(f"Unsafe file ownership, mode, type, or size: {path}")
+        data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise DeploymentError(f"File exceeds size limit: {path}")
+        return data
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest() if data is not None else None
 
 
 def validate_root(root: Path):
@@ -169,12 +202,17 @@ class Deployment:
                 )
         self.record = json.loads(self.manifest.read_text())
         if (
-            self.record.get("schema") != 1
+            self.record.get("schema") not in {1, 2}
             or self.record.get("root") != str(self.root)
             or self.record.get("unit") != self.unit
             or self.record.get("user") != self.user
         ):
             raise DeploymentError("Installation identity does not match")
+        if self.record["schema"] == 2 and (
+            not isinstance(self.record.get("pending"), dict)
+            or self.record["pending"].get("kind") != "policy"
+        ):
+            raise DeploymentError("Invalid policy transaction schema")
         for release in self.record.get("releases", {}):
             self.release_path(release)
         if self.record.get("staging"):
@@ -246,14 +284,14 @@ Environment=PYTHONNOUSERSITE=1
 WantedBy=multi-user.target
 """
 
-    def verify_unit(self, *, missing_ok=False):
+    def verify_unit(self, *, missing_ok=False, expected=None):
         if self.unit_file.is_symlink():
             raise DeploymentError("Service unit is not owned by this installation")
         if not self.unit_file.exists():
             if missing_ok:
                 return
             raise DeploymentError("Owned service unit is missing")
-        if self.unit_file.read_text() != self.unit_text():
+        if read_owned(self.unit_file).decode() != (expected or self.unit_text()):
             raise DeploymentError("Service unit was modified; refusing to overwrite or remove it")
         if self.unit_file.stat().st_uid != 0 or self.unit_file.stat().st_mode & 0o022:
             raise DeploymentError("Service unit must be writable only by root")
@@ -274,6 +312,333 @@ WantedBy=multi-user.target
 
     def account_owner(self):
         return self.record["uid"], self.record["gid"]
+
+    def require_recovered(self):
+        if self.record.get("pending") or self.record.get("policy_restore"):
+            raise DeploymentError("An interrupted transaction exists; run recover first")
+
+    def policy_unit(self, enabled):
+        original = self.unit_text()
+        old = "CAP_NET_BIND_SERVICE" + (
+            " CAP_NET_RAW" if self.record.get("network_diagnostics") else ""
+        )
+        new = "CAP_NET_BIND_SERVICE" + (" CAP_NET_RAW" if enabled else "")
+        lines = original.splitlines(keepends=True)
+        for name in ("CapabilityBoundingSet", "AmbientCapabilities"):
+            matches = [i for i, line in enumerate(lines) if line.startswith(name + "=")]
+            if len(matches) != 1 or lines[matches[0]] != f"{name}={old}\n":
+                raise DeploymentError("Unrecognized recorded capability policy")
+            lines[matches[0]] = f"{name}={new}\n"
+        return "".join(lines)
+
+    def policy_helpers(self):
+        if not self.record.get("lifecycle"):
+            return [], []
+        helper = lifecycle_helper()
+        helper.verify_helper(self)
+        if helper.JobStore(self.root / "lifecycle/private").rows("status IN ('queued', 'running')"):
+            raise DeploymentError("Remote lifecycle job is pending; wait before changing policy")
+        units, active = list(helper.unit_names(self)), []
+        for unit in units:
+            state = command(
+                "systemctl", "show", unit, "--property=ActiveState", "--value"
+            ).stdout.strip()
+            if state not in {"active", "inactive", "failed"}:
+                raise DeploymentError("Lifecycle helper is changing state; retry later")
+            if state == "active":
+                active.append(unit)
+        return units, active
+
+    def policy_path(self, identity):
+        if not isinstance(identity, str) or not re.fullmatch(r"[a-f0-9]{32}", identity):
+            raise DeploymentError("Invalid policy transaction identity")
+        path = self.root / ("policy-" + identity)
+        if path.is_symlink() or not path.is_dir():
+            raise DeploymentError("Private policy recovery directory is missing or unsafe")
+        info = path.stat()
+        if info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o700:
+            raise DeploymentError("Policy recovery directory must be private and root-owned")
+        return path
+
+    def policy_files(self):
+        return {
+            "unit": (self.unit_file, 0, False, 0o644),
+            "config": (self.config, self.record["uid"], True, 0o600),
+            "tool": (self.root / "runtime/nexttrace", 0, False, 0o755),
+        }
+
+    def verify_policy(self, enabled, *, active):
+        output = command(
+            "systemctl",
+            "show",
+            self.unit,
+            "--property=CapabilityBoundingSet,AmbientCapabilities",
+        ).stdout
+        values = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+        expected = {"cap_net_bind_service"}
+        if enabled:
+            expected.add("cap_net_raw")
+        for key in ("CapabilityBoundingSet", "AmbientCapabilities"):
+            if set(values.get(key, "").lower().split()) != expected:
+                raise DeploymentError("Loaded service capabilities do not match host policy")
+        if not active:
+            return
+        pid = int(self.properties().get("MainPID") or 0)
+        if pid <= 0:
+            raise DeploymentError("Agent has no running process")
+        status = dict(
+            line.split(":", 1)
+            for line in (Path("/proc") / str(pid) / "status").read_text().splitlines()
+            if ":" in line
+        )
+        # Linux UAPI capability numbers: NET_BIND_SERVICE=10, NET_RAW=13.
+        mask = (1 << 10) | ((1 << 13) if enabled else 0)
+        if (
+            set(status.get("Uid", "").split()) != {str(self.record["uid"])}
+            or self.record["uid"] == 0
+            or status.get("NoNewPrivs", "").strip() != "1"
+            or any(int(status.get(key, "0"), 16) != mask for key in ("CapEff", "CapBnd", "CapAmb"))
+        ):
+            raise DeploymentError("Agent process privileges do not match host policy")
+
+    def finish_policy_helpers(self):
+        restoration = self.record.get("policy_restore")
+        if not restoration:
+            return
+        directory = self.policy_path(restoration["id"])
+        units = restoration["helpers"]
+        allowed = list(lifecycle_helper().unit_names(self)) if self.record.get("lifecycle") else []
+        if not isinstance(units, list) or any(unit not in allowed for unit in units):
+            raise DeploymentError("Invalid lifecycle restoration state")
+        if allowed:
+            lifecycle_helper().verify_helper(self)
+        if units:
+            command("systemctl", "reset-failed", *units, check=False)
+            command("systemctl", "start", *units)
+            for unit in units:
+                if command("systemctl", "is-active", unit).stdout.strip() != "active":
+                    raise DeploymentError("Lifecycle helper did not become active")
+        self.record.pop("policy_restore")
+        try:
+            self.save()
+        except BaseException:
+            self.record["policy_restore"] = restoration
+            raise
+        self.remove_owned(directory)
+        fsync_directory(self.root)
+
+    def policy(self, enabled, *, nexttrace=None, digest=None, geoip=None):
+        self.load()
+        self.require_recovered()
+        if self.record["status"] != "installed" or self.record.get("staging"):
+            raise DeploymentError("Policy changes require an installed, recovered deployment")
+        self.verify_unit()
+        if type(enabled) is not bool or (geoip is not None and type(geoip) is not bool):
+            raise DeploymentError("Policy options must be explicit booleans")
+        if bool(nexttrace) != bool(digest) or (
+            digest and not re.fullmatch(r"[a-fA-F0-9]{64}", digest)
+        ):
+            raise DeploymentError("NextTrace requires a trusted local file and its SHA256")
+        if nexttrace and not enabled:
+            raise DeploymentError("Enable network diagnostics when installing NextTrace")
+        before = {}
+        for name, (path, owner, private, _) in self.policy_files().items():
+            before[name] = read_owned(path, owner=owner, private=private, missing_ok=name == "tool")
+        config = json.loads(before["config"])
+        tool_path = str(self.root / "runtime/nexttrace")
+        if config.get("nexttrace_binary") not in {None, tool_path}:
+            raise DeploymentError("NextTrace configuration is outside the owned runtime")
+        if nexttrace and not config.get("nexttrace_binary") and geoip is None:
+            raise DeploymentError("First NextTrace installation requires --nexttrace-geoip on|off")
+        if geoip is not None and not (config.get("nexttrace_binary") or nexttrace):
+            raise DeploymentError("NextTrace is not configured")
+        after = dict(before)
+        after["unit"] = self.policy_unit(enabled).encode()
+        if nexttrace:
+            after["tool"] = read_owned(nexttrace, owner=None)
+            if not after["tool"] or sha256(after["tool"]) != digest.lower():
+                raise DeploymentError("NextTrace SHA256 does not match")
+            config["nexttrace_binary"] = tool_path
+        if geoip is not None:
+            config["nexttrace_geoip"] = geoip
+        if config.get("nexttrace_binary") and after["tool"] is None:
+            raise DeploymentError("Configured NextTrace is missing; provide a verified replacement")
+        if config != json.loads(before["config"]):
+            after["config"] = json.dumps(config, indent=2).encode()
+        if before == after:
+            self.verify_policy(enabled, active=self.properties().get("ActiveState") == "active")
+            return
+        if enabled:
+            command(
+                "runuser",
+                "-u",
+                self.user,
+                "--",
+                self.release_path(self.record["current"]) / "bin/python",
+                "-c",
+                "import open_node_agent.diagnostics",
+            )
+        units, active_helpers = self.policy_helpers()
+        state = self.properties().get("ActiveState")
+        if state not in {"active", "inactive", "failed"}:
+            raise DeploymentError("Agent is changing state; retry later")
+        identity = uuid4().hex
+        directory = self.root / ("policy-" + identity)
+        directory.mkdir(mode=0o700)
+        undo = {
+            "installation_id": self.record["installation_id"],
+            "current": self.record["current"],
+            "network_diagnostics": bool(self.record.get("network_diagnostics")),
+            "helpers": active_helpers,
+            "files": {},
+        }
+        try:
+            for name, (path, _, _, mode) in self.policy_files().items():
+                undo["files"][name] = {
+                    "before": sha256(before[name]),
+                    "after": sha256(after[name]),
+                    "mode": stat.S_IMODE(path.stat().st_mode) if before[name] is not None else mode,
+                }
+                for side, contents in (("before", before), ("after", after)):
+                    if contents[name] is not None:
+                        write_file(directory / f"{name}.{side}", contents[name])
+            metadata = json.dumps(undo).encode()
+            write_file(directory / "undo.json", metadata)
+            fsync_directory(self.root)
+        except BaseException:
+            self.remove_owned(directory)
+            raise
+        # Schema 2 makes older standalone bootstraps fail closed during this transaction.
+        self.record.update(
+            schema=2,
+            pending={
+                "kind": "policy",
+                "id": identity,
+                "sha256": sha256(metadata),
+                "from": self.record["current"],
+                "to": self.record["current"],
+                "was_active": state == "active",
+            },
+        )
+        self.save()
+        try:
+            if units:
+                command("systemctl", "stop", *units)
+            command("systemctl", "stop", self.unit)
+            self.policy_snapshot()
+            for name, (path, _, _, mode) in self.policy_files().items():
+                if after[name] != before[name]:
+                    write_file(
+                        path,
+                        after[name],
+                        mode=mode,
+                        owner=self.account_owner() if name == "config" else None,
+                    )
+            command("systemctl", "daemon-reload")
+            self.verify_unit(expected=after["unit"].decode())
+            self.preflight(self.record["current"])
+            if nexttrace:
+                command("runuser", "-u", self.user, "--", tool_path, "--version", timeout=15)
+            if state == "active":
+                started = time.time()
+                command("systemctl", "reset-failed", self.unit, check=False)
+                command("systemctl", "start", self.unit)
+                self.ready(self.record["current"], started)
+            self.verify_policy(enabled, active=state == "active")
+        except BaseException as error:
+            try:
+                self.recover_policy()
+            except Exception as recovery_error:
+                raise DeploymentError(
+                    "Policy update failed; recovery is incomplete. Run recover with this "
+                    "bootstrap after correcting the host fault."
+                ) from recovery_error
+            raise DeploymentError("Policy update failed; previous host policy restored") from error
+        self.record.update(
+            schema=1,
+            pending=None,
+            network_diagnostics=enabled,
+            unit_text=after["unit"].decode(),
+            policy_restore={"id": identity, "helpers": active_helpers},
+        )
+        self.save()
+        try:
+            self.finish_policy_helpers()
+        except Exception as error:
+            raise DeploymentError(
+                "Policy committed; run recover to finish helper restoration"
+            ) from error
+
+    def policy_snapshot(self):
+        pending = self.record["pending"]
+        directory = self.policy_path(pending["id"])
+        metadata = read_owned(directory / "undo.json", private=True, limit=1024 * 1024)
+        if sha256(metadata) != pending["sha256"]:
+            raise DeploymentError("Policy recovery metadata changed")
+        undo = json.loads(metadata)
+        if (
+            undo["installation_id"] != self.record["installation_id"]
+            or undo["current"] != self.record["current"]
+            or pending["from"] != undo["current"]
+            or pending["to"] != undo["current"]
+            or (self.root / "current").resolve() != self.release_path(undo["current"]).resolve()
+        ):
+            raise DeploymentError("Policy recovery installation changed")
+        contents = {}
+        for name, (path, owner, private, _) in self.policy_files().items():
+            versions = {}
+            for side in ("before", "after"):
+                expected = undo["files"][name][side]
+                data = read_owned(
+                    directory / f"{name}.{side}", private=True, missing_ok=expected is None
+                )
+                if sha256(data) != expected:
+                    raise DeploymentError("Policy recovery snapshot changed")
+                versions[side] = data
+            actual = read_owned(path, owner=owner, private=private, missing_ok=name == "tool")
+            if actual not in versions.values():
+                raise DeploymentError(f"Policy file was modified outside this transaction: {name}")
+            contents[name] = versions
+        self.verify_unit(expected=read_owned(self.unit_file).decode())
+        if self.record.get("lifecycle"):
+            lifecycle_helper().verify_helper(self)
+        return undo, contents
+
+    def recover_policy(self):
+        undo, contents = self.policy_snapshot()
+        pending = self.record["pending"]
+        if self.record.get("lifecycle"):
+            command("systemctl", "stop", *lifecycle_helper().unit_names(self))
+        command("systemctl", "stop", self.unit)
+        self.policy_snapshot()
+        for name, (path, _, _, _) in self.policy_files().items():
+            data = contents[name]["before"]
+            if data is None:
+                path.unlink(missing_ok=True)
+                fsync_directory(path.parent)
+            else:
+                write_file(
+                    path,
+                    data,
+                    mode=undo["files"][name]["mode"],
+                    owner=self.account_owner() if name == "config" else None,
+                )
+        command("systemctl", "daemon-reload")
+        if pending["was_active"]:
+            started = time.time()
+            command("systemctl", "reset-failed", self.unit, check=False)
+            command("systemctl", "start", self.unit)
+            self.ready(self.record["current"], started)
+        self.verify_policy(undo["network_diagnostics"], active=pending["was_active"])
+        self.record.update(
+            schema=1,
+            pending=None,
+            network_diagnostics=undo["network_diagnostics"],
+            unit_text=contents["unit"]["before"].decode(),
+            policy_restore={"id": pending["id"], "helpers": undo["helpers"]},
+        )
+        self.save()
+        self.finish_policy_helpers()
 
     def stage(self, wheel: Path):
         if self.record.get("staging"):
@@ -552,6 +917,7 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
         )
 
     def activate(self, release):
+        self.require_recovered()
         if (
             self.record.get("pending")
             or self.record.get("staging")
@@ -595,6 +961,12 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
             ) from error
 
     def recover(self):
+        if (self.record.get("pending") or {}).get("kind") == "policy":
+            self.recover_policy()
+            return
+        if self.record.get("policy_restore"):
+            self.finish_policy_helpers()
+            return
         if self.record["status"] == "removing":
             self.uninstall(keep_lifecycle=True)
             return
@@ -640,9 +1012,10 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
             self.initialize(network_diagnostics=network_diagnostics)
         else:
             self.load()
+            self.require_recovered()
             if network_diagnostics and not self.record.get("network_diagnostics"):
                 raise DeploymentError(
-                    "Network diagnostics permission is selected at initial installation"
+                    "Use policy --network-diagnostics on to change installed host permissions"
                 )
             if self.record.get("pending") or self.record.get("staging"):
                 raise DeploymentError("An interrupted transaction exists; run recover first")
@@ -679,6 +1052,7 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
 
     def upgrade(self, wheel):
         self.load()
+        self.require_recovered()
         self.verify_unit()
         if (
             self.record["status"] != "installed"
@@ -699,6 +1073,11 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
 
     def uninstall(self, *, purge=False, keep_lifecycle=False):
         self.load()
+        if (
+            self.record.get("policy_restore")
+            or (self.record.get("pending") or {}).get("kind") == "policy"
+        ):
+            self.require_recovered()
         if self.record["status"] == "removing":
             # Removal may have stopped between unlinking the unit and reloading systemd.
             command("systemctl", "daemon-reload")
@@ -751,6 +1130,11 @@ def main():
     )
     upgrade = actions.add_parser("upgrade")
     upgrade.add_argument("--wheel", type=Path, required=True)
+    policy = actions.add_parser("policy", help="Change host-only diagnostics permissions in place")
+    policy.add_argument("--network-diagnostics", choices=("on", "off"), required=True)
+    policy.add_argument("--nexttrace", type=Path)
+    policy.add_argument("--nexttrace-sha256")
+    policy.add_argument("--nexttrace-geoip", choices=("on", "off"))
     actions.add_parser("rollback")
     actions.add_parser("recover")
     actions.add_parser("status")
@@ -780,12 +1164,20 @@ def main():
                 )
             elif args.action == "upgrade":
                 deployment.upgrade(args.wheel)
+            elif args.action == "policy":
+                deployment.policy(
+                    args.network_diagnostics == "on",
+                    nexttrace=args.nexttrace,
+                    digest=args.nexttrace_sha256,
+                    geoip=None if args.nexttrace_geoip is None else args.nexttrace_geoip == "on",
+                )
             elif args.action == "rollback":
                 deployment.rollback()
             elif args.action == "uninstall":
                 deployment.uninstall(purge=args.purge)
             elif args.action == "enable-remote":
                 deployment.load()
+                deployment.require_recovered()
                 lifecycle_helper().enable_helper(deployment, args.release_base_url, args.release_ca)
             else:
                 deployment.load()
@@ -800,6 +1192,8 @@ def main():
                         "current": deployment.record.get("current"),
                         "previous": deployment.record.get("previous"),
                         "pending": deployment.record.get("pending"),
+                        "network_diagnostics": bool(deployment.record.get("network_diagnostics")),
+                        "policy_restore_pending": bool(deployment.record.get("policy_restore")),
                     }
                 )
             )

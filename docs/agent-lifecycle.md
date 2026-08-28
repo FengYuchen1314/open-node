@@ -111,6 +111,13 @@ leases may expire earlier and be redelivered; that is not a second installation.
 Recovery failures retain the transaction for local correction and `recover`.
 Readiness cannot establish compatibility with arbitrary future data migrations.
 
+Host-local [policy updates](agent-host-policy.md) temporarily pause the helper
+and use a separate recovery contract. Its copied source files and boot-enable
+preferences are preserved. Older helpers reject the temporary schema-2 policy
+transaction; use the current host bootstrap to recover it. A committed policy
+with a pending helper restart remains committed when `recover` retries that
+restart. Policy changes are never submitted as remote lifecycle jobs.
+
 Final reports run as the Agent account, not root. The reporter reads that
 account's private configuration and uses the normal node token and verified
 controller HTTPS connection. Both WebSocket and HTTP Agents also replay durable

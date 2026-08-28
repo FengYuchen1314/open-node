@@ -58,6 +58,54 @@ cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
 
+## Host Policy Smoke
+
+Build the current Agent wheel on the VPS. Keep a trusted pre-policy bootstrap
+checkout (including its sibling lifecycle modules) to exercise old-helper
+compatibility. Use the backend test environment, Debian Nginx and the pinned
+NextTrace binary from [agent-diagnostics.md](agent-diagnostics.md):
+
+```bash
+python scripts/vps/smoke-host-policy.py \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nexttrace /path/to/verified/nexttrace \
+  --nginx /path/to/nginx \
+  --previous-bootstrap /path/to/previous-checkout/agent/app/open_node_agent/service.py
+```
+
+The root-only fixture installs isolated non-root systemd services using the
+previous installer and copied lifecycle helpers. It exercises both HTTPS leases
+and WSS, actual TCP/ICMP and IPv4/IPv6 NextTrace results, capability removal,
+unchanged PID on no-op, checksum-verified executable replacement failure,
+SIGKILL during the transaction, old-bootstrap refusal, and separate helper
+restart recovery. It preserves helper hashes and boot-enable preferences,
+verifies stopped Agent/Xray intent, performs a real remote wheel upgrade through
+the old helper, and checks VLESS forwarding after transitions. A deliberately
+faulty fixture wheel exits only under the newly granted raw capability, proving
+rollback after a real systemd startup failure. No fixture wheels are published.
+GeoIP is disabled; this smoke does not query public IP/ASN providers or register
+public accounts. The designated VPS denies unprivileged ICMP datagram sockets
+(`ping_group_range: 1 0`), so removing the raw capability also denies ICMP
+fallback there. The smoke does not change that global setting. It removes the
+isolated units/accounts on exit.
+
+Verified on 2026-08-28 (UTC), on the designated Debian 12 x86-64 VPS:
+
+- Backend: 360 tests; Agent: 269 tests; frontend: 98 tests and production build.
+- Agent Ruff and the new smoke's Ruff checks passed. Existing Starlette/httpx
+  deprecation and frontend bundle-size warnings remain.
+- The full host-policy smoke passed over both transports using the previous
+  bootstrap from commit `84d0bc3`, including genuine process termination and
+  startup failure, private recovery metadata and unchanged helper hashes.
+- The separate systemd installation/upgrade/rollback/uninstall smoke passed.
+- The current remote lifecycle helper passed its complete regression smoke,
+  including interrupted staging/switch/removal, durable final callbacks,
+  retained data, real VLESS forwarding and confirmed desktop/mobile/narrow
+  browser actions. Desktop and narrow/mobile screenshots were inspected.
+- These results do not establish other OS/architecture coverage, public
+  provider registration, fork-specific protocols or the remaining migration
+  gates in [migration-map.md](migration-map.md).
+
 ## Native WARP Smoke
 
 Build the current Agent wheel and frontend on the VPS. Use the backend test
