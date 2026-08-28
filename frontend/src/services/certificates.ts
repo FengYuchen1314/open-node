@@ -13,6 +13,7 @@ export interface ManagedCertificate {
   id: string;
   name: string;
   domains: string[];
+  email: string | null;
   provider_id: string | null;
   directory_url: string | null;
   challenge_type: CertificateChallenge;
@@ -27,15 +28,25 @@ export interface ManagedCertificate {
 
 export interface CertificateCapabilities {
   available: boolean;
+  account_management: boolean;
+  revocation: boolean;
   directories: string[];
   challenge_types: CertificateChallenge[];
   webroots: string[];
   providers: Array<{ id: string; fields: string[]; required: string[] }>;
 }
 
+export interface CertificateVersion {
+  id: string;
+  created_at: number;
+  details: { serial: string; issuer: string; expires_at: number };
+  revocation: { status: "pending" | "unknown" | "revoked"; reason: number; confirmed_at: number | null; directory_url: string } | null;
+}
+
 export interface CertificateDetail {
   certificate: ManagedCertificate;
-  versions: Array<{ id: string; created_at: number; details: { serial: string; issuer: string; expires_at: number } }>;
+  account: { email: string; state: string; uri: string | null; eab_configured: boolean; pending_email: string | null; retry_job_id: string | null } | null;
+  versions: CertificateVersion[];
   jobs: Array<{ id: string; kind: string; status: string; message: string | null; created_at: number }>;
   targets: Array<{ id: string; server_id: string; domain: string; cert_name: string; status: string; error: string | null; auto_deploy: boolean }>;
 }

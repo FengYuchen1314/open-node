@@ -2,16 +2,20 @@
 
 The FastAPI control plane owns certificate profiles, DNS credentials, ACME
 accounts, jobs and versions. The Vue **Certificates** workspace creates DNS
-providers and DNS-01 or HTTP-01 profiles, imports PEM pairs, issues/renews certificates, exports
-material and assigns node deployment targets. No activation key, subscription
+providers and DNS-01 or HTTP-01 profiles, imports PEM pairs, issues/renews certificates,
+edits CA account contacts, revokes individual versions, exports material and
+assigns node deployment targets. No activation key, subscription
 payment or commercial entitlement is required.
 
 ## Host Setup
 
 ACME execution currently requires Linux and the
 [lego v4.35.2 executable](https://github.com/go-acme/lego/releases/tag/v4.35.2).
-Open Node delegates ACME and provider protocols to this MIT-licensed client;
-it does not copy the reference product's implementation. Install a trusted,
+Open Node delegates issuance and provider protocols to this MIT-licensed client.
+Account contact and revocation operations use the Apache-2.0-licensed
+[Certbot ACME client 5.7.0](https://github.com/certbot/certbot/releases/tag/v5.7.0),
+installed with the backend dependencies. It does not copy the reference product's
+implementation. Install a trusted,
 version-pinned executable outside the repository, readable/executable by the
 backend service account. The verified Linux amd64 release archive is:
 
@@ -38,8 +42,9 @@ election and network-filesystem locks are not supported. A file lock elects
 one worker and is inherited by the ACME child, preventing another worker
 from issuing while a surviving child still owns the lock.
 
-Without a configured executable, PEM import/export and automatic/manual node
-deployment remain available; ACME issuance/renewal is unavailable. Deployments
+Without a configured executable, PEM import/export, account editing, revocation
+and automatic/manual node deployment remain available on Linux;
+ACME issuance/renewal is unavailable. Deployments
 require an installed, scanned Open Node Agent with an owned certificate
 directory. Agent credentials and management authentication remain separate.
 
@@ -77,6 +82,26 @@ other trusted HTTPS directories. Operators must explicitly accept the selected
 CA's terms when creating a profile; creating a profile does not issue it.
 Optional EAB key ID and HMAC key must be supplied together. Accounts and
 private keys are retained in the profile's private lego directory.
+
+### Account Edits
+
+The account section shows its configured contact, local registration state,
+EAB credential presence and any unresolved requested email. Editing a registered
+account updates the contact at the CA before committing the new email to the
+database. The original account key, account URI and private storage alias remain
+unchanged; later lego renewals use the updated account file.
+
+Before registration, the email and EAB credentials may be replaced or removed.
+Replacing EAB requires both fields. A key left by a failed registration is looked
+up at the CA and preserved, never overwritten with a different account/key.
+An established CA EAB binding cannot be changed by editing this profile. Use
+another profile when another account is required.
+
+Account updates are serialized with issuance, renewal and revocation. If a
+response is lost, the requested email remains visible with a retry action.
+Only the latest failed account update can be retried; it retains encrypted EAB
+parameters without returning them to the browser. A retry queries the CA first
+and does not resend a contact change already accepted there.
 
 ## HTTP-01 Validation
 
@@ -167,9 +192,9 @@ lego also applies its renewal and ARI decisions. A forced manual renewal
 bypasses the normal age/ARI decision; use it sparingly because CA limits still
 apply. Only one queued/running job per certificate is allowed.
 
-Failed or interrupted jobs retain the last active version and record a safe
+Failed or interrupted issuance/renewal jobs retain the last active version and record a safe
 error. Automatic retry is delayed an hour after failure; operators can retry
-manually sooner. A restarted worker marks unfinished running jobs interrupted
+manually sooner. A restarted worker marks unfinished running issuance jobs interrupted
 and resumes queued jobs. A valid newly written certificate left by an
 interrupted job can be recovered on a normal retry, avoiding an extra CA order.
 The worker bounds execution time and output and terminates its process group
@@ -182,8 +207,8 @@ belong to only one certificate profile. Automatic deployment queues once per
 new active version, including version activation. The target tracks the last
 queued version and command status; a queued/failed command is not proof of a
 successful deployment. Inspect its result and explicitly retry failed commands.
-Pending commands block duplicate deployment. Removing a target does not cancel
-already queued commands.
+Pending commands block duplicate deployment and removal of that target.
+Deleting a profile does not cancel already queued commands.
 
 The control plane uses the directory from the Agent's current owned scan.
 The Agent validates SAN coverage, key matching and dates, installs the PEM
@@ -194,12 +219,48 @@ The filename must match the site's configured certificate paths. Version
 activation requires a matching, still-valid version; it does not revoke other
 versions at the CA.
 
+## Version Revocation
+
+Revocation is irreversible. Select the exact version, reason and confirmation
+in its dialog. Managed profiles use their original CA directory; imported
+certificates require an explicit issuing CA from the host allowlist. The worker
+proves possession with that certificate's private key using the ACME client.
+It does not send the private key to the CA.
+
+A persistent SHA-256 leaf-certificate ledger covers every matching stored copy,
+including historical versions and legacy rows. Pending, unconfirmed and confirmed
+revocations block version activation, managed deployment and reimport of that
+same certificate. The ledger survives profile deletion. These are local records,
+not an OCSP/CRL monitor or a guarantee that a certificate without a record has
+never been revoked externally.
+
+Active jobs on matching copies and unfinished certificate deployments block
+revocation. Retained queued deployment commands are checked even when an older
+release removed their target. Revoking a current certificate disables automatic
+renewal for affected profiles; revoking only an older version does not disable
+renewal of a different current certificate.
+
+A timeout or lost response is **unconfirmed**, never presumed successful or
+presumed safe to reuse. Retry the version's revocation with confirmation; a CA
+`alreadyRevoked` response reconciles it as revoked. Administration helpers retain
+the worker lock across a backend crash and write private, durable result receipts.
+On restart, interrupted administration jobs resume with the same ID and reconcile
+their receipt or CA state. Temporary request files are removed after execution.
+
+Revocation does **not** delete node files or reload/stop Nginx/Xray. Already
+deployed copies may still be served until the operator replaces them. A managed
+profile can explicitly reissue: renewal is forced, uses a new certificate key,
+and cannot recover the revoked PEM left on lego's disk. Automatic deployment
+targets may then receive the new version; auto-renew remains off until enabled
+again. Retained private-key exports remain available for operator recovery.
+
 ## Secrets And Backups
 
 DNS credentials, EAB credentials and stored certificate material are encrypted
 with a randomly generated Fernet key outside the database. Back up both the
 database and the entire private state directory, including `vault.key`,
-`vault.initialized`, HTTP webroot ownership records and lego account files. Stop the backend while taking a
+`vault.initialized`, HTTP webroot ownership records, administration receipts and
+lego account files. Stop the backend while taking a
 consistent filesystem backup, or use an equivalent coordinated snapshot.
 Losing the vault key makes encrypted data unreadable. A missing key beside an
 existing initialization marker or encrypted database rows fails closed instead
@@ -214,7 +275,7 @@ requested; UI private-key downloads require confirmation. Responses use
 
 Deleting a profile removes its catalog, jobs, encrypted versions and targets.
 It does not revoke certificates, delete node files, cancel existing commands,
-or erase its private lego state. Retained account material requires deliberate
+erase revocation records or erase its private lego state. Retained account material requires deliberate
 host-side cleanup after checking backups and pending work.
 
 Existing SQLite certificate catalogs are upgraded additively on startup.
@@ -235,4 +296,8 @@ external CA behavior still require operator staging validation. HTTP-01
 standalone/webroot coverage has a separate
 [HTTP-01 lifecycle smoke](testing.md#http-01-lifecycle-smoke), including a real
 non-root web server, forced interruption and actual automatic renewal.
-Account editing/revocation and multi-host scheduling remain migration gates.
+The [administration smoke](testing.md#certificate-administration-smoke) additionally
+checks actual CA account contacts, exact-version revocation, orphaned account keys,
+EAB edits, lost responses, hard restart and duplicate/import protection.
+Public CA/provider staging, remote-node issuance and multi-host scheduling remain
+migration gates.

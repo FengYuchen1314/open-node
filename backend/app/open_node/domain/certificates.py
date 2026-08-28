@@ -127,6 +127,52 @@ class CertificateUpdate(CertificateInput):
     auto_renew: bool
 
 
+class CertificateAccountUpdate(CertificateInput):
+    email: EmailStr
+    eab_action: Literal["keep", "replace", "remove"] = "keep"
+    eab_kid: SecretStr | None = Field(default=None, min_length=1, max_length=8192)
+    eab_hmac_key: SecretStr | None = Field(default=None, min_length=1, max_length=8192)
+
+    @field_validator("email")
+    @classmethod
+    def account_path(cls, value):
+        return CertificateCreate.account_path(value)
+
+    @model_validator(mode="after")
+    def binding(self):
+        if self.eab_action == "replace":
+            if not self.eab_kid or not self.eab_hmac_key:
+                raise ValueError("Both replacement EAB credentials are required")
+        elif self.eab_kid or self.eab_hmac_key:
+            raise ValueError("EAB credentials require the replacement action")
+        return self
+
+
+class CertificateRevoke(CertificateInput):
+    confirm: Literal[True]
+    reason: Literal[0, 1, 3, 4, 5, 9] = 0
+    directory_url: str | None = None
+
+    @field_validator("confirm", mode="before")
+    @classmethod
+    def explicit_confirmation(cls, value):
+        if value is not True:
+            raise ValueError("Explicit certificate revocation confirmation is required")
+        return value
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def strict_reason(cls, value):
+        if type(value) is not int:
+            raise ValueError("A numeric certificate revocation reason is required")
+        return value
+
+    @field_validator("directory_url")
+    @classmethod
+    def directory(cls, value):
+        return CertificateCreate.directory(value) if value else value
+
+
 class CertificateImport(CertificateInput):
     name: str = Field(min_length=1, max_length=120)
     cert_pem: str = Field(min_length=1, max_length=131072)

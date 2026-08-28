@@ -2,20 +2,25 @@
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import logging
 import os
 import signal
 import sys
 import traceback
+from pathlib import Path
 from time import time
 
 from sqlalchemy import select
 
+from open_node.services.certificate_acme import ADMIN_ERRORS, fingerprint
 from open_node.services.certificate_http import WebrootChallenges, harden_work
 from open_node.services.certificate_vault import material, private_path
 from open_node.services.certificates import (
     CertificateError,
     CertificateJob,
+    CertificateRevocation,
     CertificateTarget,
     DNSProvider,
     ManagedCertificate,
@@ -32,13 +37,18 @@ class CertificateWorker:
 
     def recover(self):
         self.webroots.recover()
-        with self.store.session.begin() as db:
+        with self.store.write() as db:
             for job in db.scalars(select(CertificateJob).where(CertificateJob.status == "running")):
+                row = db.get(ManagedCertificate, job.certificate_id)
+                if job.kind in {"account", "revoke"} and row and row.active_job_id == job.id:
+                    job.status, job.finished_at = "queued", None
+                    job.message = "Resuming reconciliation with the CA"
+                    row.status = "queued"
+                    continue
                 job.status, job.finished_at = "interrupted", time()
                 job.message = (
                     "ACME execution was interrupted; retry after inspecting the certificate"
                 )
-                row = db.get(ManagedCertificate, job.certificate_id)
                 if row and row.active_job_id == job.id:
                     row.active_job_id, row.status, row.last_error = None, "failed", job.message
                     row.next_attempt = time() + 3600
@@ -78,7 +88,7 @@ class CertificateWorker:
                 command = self.store.deploy(identifier, target)
                 await self.connections.dispatch_command(self.store.inventory, command)
             except CertificateError as exc:
-                with self.store.session.begin() as db:
+                with self.store.write() as db:
                     row = db.get(CertificateTarget, target)
                     if row:
                         row.last_error = str(exc)
@@ -94,8 +104,8 @@ class CertificateWorker:
                         await self.deploy_pending()
                         if self.settings.certificate_lego_binary:
                             self.schedule()
-                            if await self.run_one(lock_fd):
-                                continue
+                        if await self.run_one(lock_fd):
+                            continue
                         await asyncio.sleep(self.settings.certificate_poll_seconds)
             except asyncio.CancelledError:
                 raise
@@ -104,7 +114,7 @@ class CertificateWorker:
                 await asyncio.sleep(self.settings.certificate_poll_seconds)
 
     async def run_one(self, lock_fd):
-        with self.store.session.begin() as db:
+        with self.store.write() as db:
             job = db.scalar(
                 select(CertificateJob)
                 .where(CertificateJob.status == "queued")
@@ -115,18 +125,43 @@ class CertificateWorker:
                 return False
             job.status = "running"
             row = self.store.get(db, ManagedCertificate, job.certificate_id)
-            row.status = "issuing" if job.kind == "issue" else "renewing"
+            row.status = {
+                "issue": "issuing",
+                "renew": "renewing",
+                "account": "updating_account",
+                "revoke": "revoking",
+            }[job.kind]
+        administration = job.kind in {"account", "revoke"}
         try:
-            self.store.check_challenge(row)
-            with self.store.session() as db:
-                provider = (
-                    self.store.get(db, DNSProvider, row.provider_id) if row.provider_id else None
-                )
-            data = await self.obtain(row, provider, job, lock_fd)
-            with self.store.session.begin() as db:
+            if administration:
+                data = await self.administer(row, job, lock_fd)
+            else:
+                if not self.store.capabilities()["available"]:
+                    raise CertificateError("ACME issuance client is unavailable")
+                self.store.check_challenge(row)
+                with self.store.session() as db:
+                    provider = (
+                        self.store.get(db, DNSProvider, row.provider_id)
+                        if row.provider_id
+                        else None
+                    )
+                data = await self.obtain(row, provider, job, lock_fd)
+            with self.store.write() as db:
                 current = self.store.get(db, ManagedCertificate, row.id)
                 active_job = self.store.get(db, CertificateJob, job.id)
-                if data is not None:
+                if administration:
+                    if job.kind == "account":
+                        self.store.apply_account(current, job, data)
+                    else:
+                        self.store.mark_revocation(db, job, "revoked")
+                    current.status, current.last_error = self.store.state(db, current), None
+                    active_job.status = "succeeded"
+                    active_job.message = (
+                        "CA reports this certificate is already revoked"
+                        if data.get("already_revoked")
+                        else None
+                    )
+                elif data is not None:
                     self.store.publish(db, current, data)
                     active_job.status = "succeeded"
                 else:
@@ -143,21 +178,118 @@ class CertificateWorker:
             message = (
                 str(exc)
                 if isinstance(exc, CertificateError)
-                else "ACME job failed; existing certificate remains active"
+                else (
+                    "CA administration did not finish; retry to reconcile its result"
+                    if administration
+                    else "ACME job failed; existing certificate material was retained"
+                )
             )
-            with self.store.session.begin() as db:
+            with self.store.write() as db:
                 current = self.store.get(db, ManagedCertificate, row.id)
                 active_job = self.store.get(db, CertificateJob, job.id)
-                active_job.status = (
-                    "interrupted" if isinstance(exc, asyncio.CancelledError) else "failed"
-                )
-                active_job.message, active_job.finished_at = message, time()
-                current.active_job_id, current.status = None, "failed"
-                current.last_error, current.next_attempt = message, time() + 3600
+                if administration and isinstance(exc, asyncio.CancelledError):
+                    active_job.status, active_job.finished_at = "queued", None
+                    active_job.message = "Operation paused; reconciliation resumes after restart"
+                    current.status = "queued"
+                else:
+                    active_job.status = (
+                        "interrupted" if isinstance(exc, asyncio.CancelledError) else "failed"
+                    )
+                    active_job.message, active_job.finished_at = message, time()
+                    current.active_job_id = None
+                    if job.kind == "revoke":
+                        self.store.mark_revocation(db, job, "unknown")
+                    current.status = self.store.state(
+                        db, current, default=None if administration else "failed"
+                    )
+                    current.last_error = message
+                    if not administration:
+                        current.next_attempt = time() + 3600
             if isinstance(exc, asyncio.CancelledError):
                 raise
         await self.deploy_pending()
         return True
+
+    async def administer(self, row, job, lock_fd):
+        root = self.store.vault.root
+        work = private_path(root, root / row.id)
+        directory = job.parameters.get("directory_url", row.directory_url)
+        if directory not in self.settings.certificate_acme_directories:
+            raise CertificateError("ACME directory is not enabled by the host administrator")
+        request = {
+            "job_id": job.id,
+            "kind": job.kind,
+            "directory_url": directory,
+            "ca_file": str(self.settings.certificate_ca_file)
+            if self.settings.certificate_ca_file
+            else None,
+            "profile_work": str(work),
+        }
+        if job.kind == "account":
+            request.update(
+                email=job.parameters["email"],
+                storage_email=row.account_email or row.email,
+                eab_action=job.parameters["eab_action"],
+            )
+        else:
+            request.update(
+                material=self.store.export(row.id, job.parameters["version_id"]),
+                reason=job.parameters["reason"],
+            )
+        raw = json.dumps(request, sort_keys=True).encode()
+        request_path = work / "jobs" / job.id / "request.json"
+        result_path = request_path.with_name("result.json")
+        self.store.vault.write(request_path, raw)
+        digest = hashlib.sha256(raw).hexdigest()
+
+        def read_receipt():
+            data = json.loads(self.store.vault.read(result_path))
+            if data.get("job_id") != job.id or data.get("request_digest") != digest:
+                return None
+            return data
+
+        try:
+            harden_work(work)
+            data = read_receipt() if result_path.exists() else None
+            if data is None:
+                args = [
+                    sys.executable,
+                    "-P",
+                    "-s",
+                    "-m",
+                    "open_node.services.certificate_acme",
+                    str(root),
+                    str(request_path),
+                ]
+                environment = {
+                    "PATH": os.defpath,
+                    "HOME": str(request_path.parent),
+                    "LANG": "C.UTF-8",
+                    "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
+                }
+                await self.execute(args, environment, request_path.parent, lock_fd)
+                data = read_receipt()
+            if not data or data.get("status") != "succeeded":
+                code = data.get("error_code") if data else None
+                if code in ADMIN_ERRORS:
+                    raise CertificateError(ADMIN_ERRORS[code])
+                suffix = (
+                    f" ({code})"
+                    if code
+                    in {
+                        "unauthorized",
+                        "badRevocationReason",
+                        "accountDoesNotExist",
+                        "serverInternal",
+                    }
+                    else ""
+                )
+                raise CertificateError("CA result is not confirmed; retry to reconcile" + suffix)
+            if job.kind == "revoke" and data.get("fingerprint") != job.parameters["fingerprint"]:
+                raise CertificateError("CA revocation result does not match the certificate")
+            return data
+        finally:
+            private_path(root, request_path).unlink(missing_ok=True)
 
     async def obtain(self, row, provider, job, lock_fd):
         if job.kind == "renew" and not job.force and not self.store.due(row):
@@ -180,10 +312,19 @@ class CertificateWorker:
                 row.domains,
             )
 
-        if not job.force and cert_file.exists() and key_file.exists():
+        unsafe_candidate = False
+        if cert_file.exists() and key_file.exists():
             with contextlib.suppress(ValueError, OSError):
                 recovered = read_candidate()
-                if not current or recovered["serial"] != current["serial"]:
+                with self.store.session() as db:
+                    unsafe_candidate = (
+                        db.get(CertificateRevocation, fingerprint(recovered)) is not None
+                    )
+                if (
+                    not job.force
+                    and not unsafe_candidate
+                    and (not current or recovered["serial"] != current["serial"])
+                ):
                     return recovered
 
         environment = {"PATH": os.defpath, "HOME": str(work), "LANG": "C.UTF-8"}
@@ -201,7 +342,7 @@ class CertificateWorker:
             "--server",
             row.directory_url,
             "--email",
-            row.email,
+            row.account_email or row.email,
             "--accept-tos",
             "--key-type",
             "ec256",
@@ -229,7 +370,7 @@ class CertificateWorker:
             args.extend(["--domains", domain])
         if job.kind == "issue" or not cert_file.exists():
             args.append("run")
-        elif job.force:
+        elif job.force or unsafe_candidate:
             args.extend(["renew", "--days", "9999", "--ari-disable", "--no-random-sleep"])
         else:
             args.extend(["renew", "--dynamic", "--no-random-sleep"])
@@ -272,7 +413,7 @@ class CertificateWorker:
                     )
         except TimeoutError:
             raise CertificateError(
-                "ACME job timed out; existing certificate remains active"
+                "ACME job timed out; verify the result before retrying"
             ) from None
         finally:
 

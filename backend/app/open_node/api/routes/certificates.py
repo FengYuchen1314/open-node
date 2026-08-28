@@ -7,10 +7,12 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from open_node.domain.certificates import (
+    CertificateAccountUpdate,
     CertificateCreate,
     CertificateDeployment,
     CertificateImport,
     CertificateJobRequest,
+    CertificateRevoke,
     CertificateUpdate,
     DNSProviderInput,
 )
@@ -135,6 +137,21 @@ def renew(request: Request, identifier: UUID, payload: CertificateJobRequest):
 @router.post("/{identifier}/versions/{version_id}/activate")
 def activate(request: Request, identifier: UUID, version_id: UUID):
     return request.app.state.certificates.activate(identifier, version_id)
+
+
+@router.post("/{identifier}/account", status_code=202)
+def update_account(request: Request, identifier: UUID, payload: CertificateAccountUpdate):
+    return request.app.state.certificates.queue_account(identifier, payload)
+
+
+@router.post("/{identifier}/account/jobs/{job_id}/retry", status_code=202)
+def retry_account(request: Request, identifier: UUID, job_id: UUID):
+    return request.app.state.certificates.retry_account(identifier, job_id)
+
+
+@router.post("/{identifier}/versions/{version_id}/revoke", status_code=202)
+def revoke(request: Request, identifier: UUID, version_id: UUID, payload: CertificateRevoke):
+    return request.app.state.certificates.queue_revocation(identifier, version_id, payload)
 
 
 @router.post("/{identifier}/targets", status_code=201)

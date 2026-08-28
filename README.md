@@ -76,8 +76,9 @@ lego v4, EAB, encrypted version history, and automatic Agent deployment.
 The VPS smoke uses a real Pebble test CA and authoritative DNS, including
 short-lived automatic renewal and trusted TLS/version rollback on both
 Agent transports. HTTP-01 supports a standalone listener or an allowlisted
-webroot on the control-plane host. Public-CA/provider-account staging and
-account editing/revocation remain separate gates.
+webroot on the control-plane host. Account contact editing and exact-version
+revocation include crash reconciliation and persistent duplicate protection.
+Public-CA/provider-account staging and remote-node issuance remain separate gates.
 
 The first milestone establishes the project skeleton, the no-license contract,
 persisted server/agent inventory, agent telemetry and command slices, initial

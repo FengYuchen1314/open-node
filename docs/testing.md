@@ -448,6 +448,54 @@ Verified on the designated Debian 12 x86-64 VPS:
 - Ruff passed for changed backend modules and the HTTP smoke. Existing
   Starlette/httpx deprecation and frontend bundle-size warnings remain.
 
+## Certificate Administration Smoke
+
+Use the same pinned lego/Pebble binaries, backend development/browser/ACME-test
+extras and free loopback DNS ports as the lifecycle smokes. Build the frontend
+on the VPS first:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-certificate-administration.py \
+  --lego /path/to/lego-4.35.2/lego \
+  --pebble /path/to/pebble-linux-amd64/linux/amd64/pebble \
+  --screenshots /tmp/open-node-ca-admin-screenshots
+```
+
+The fixture uses real HTTP-01 issuance and an EAB-required CA. It preserves a key
+left by failed registration, edits EAB before registration, updates the registered
+CA contact while checking the original key/URI, and renews with lego afterward.
+Historical-version revocation is independently checked at Pebble's management API.
+
+A TLS-verified forwarding fixture deliberately loses accepted account/revocation
+responses. Retries must query and reconcile actual CA state, including
+`alreadyRevoked`. A backend hard kill while the helper holds a confirmed response
+verifies inherited locking and durable receipt recovery without a duplicate request.
+The test also checks forced new-key reissuance, imported certificate revocation,
+duplicate blocking and ledger retention after profile deletion.
+
+Playwright operates account/EAB and revoke/retry dialogs with real backend requests.
+Screenshots and layout checks cover 1440px, 390px and 320px, including visible
+confirmation controls, masked credentials and disabled revoked-version actions.
+The fixture checks private permissions and removes temporary request files.
+No public CA, DNS-provider credential, production certificate or website is used.
+
+The focused `test_certificate_administration.py` suite additionally exercises
+input/secret validation, additive schema migration, competing deployment/revocation
+and import transactions, retained commands without targets, receipt mismatches,
+graceful cancellation and revoked on-disk candidate recovery.
+
+Verified on the designated Debian 12 x86-64 VPS:
+
+- Backend: 360 tests; Agent: 231 tests; frontend: 98 tests and production build.
+- The administration smoke passed with actual CA contact/status checks, lost
+  responses, hard restart, duplicate/import protection and new-key reissuance.
+- Existing DNS-01/EAB and HTTP-01 standalone/webroot smokes passed, including
+  automatic renewal, both Agent transports, trusted TLS and version rollback.
+- Operator UI regression and 1440/390/320px account/revocation layouts passed.
+  The final browser run also checks the revocation icon's loaded glyph.
+- Ruff passed for changed backend code and the new smoke. Existing
+  Starlette/httpx deprecation and frontend bundle-size warnings remain.
+
 ## Reference-Agent Smoke
 
 After installing the backend development dependencies, run this on the VPS

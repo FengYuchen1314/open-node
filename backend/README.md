@@ -12,4 +12,6 @@ configuration, account recovery, HTTPS deployment requirements, and API access.
 
 [Certificate management](../docs/certificates.md) covers the optional pinned
 lego runtime, DNS credentials, central issuance/renewal, private backups,
-version history, and deployment to owned Agent certificate directories.
+version history, account contact editing, version revocation, and deployment to
+owned Agent certificate directories. Updating this package installs the pinned
+Certbot ACME client used for account/revocation operations.

@@ -3,6 +3,7 @@
 import json
 import os
 import stat
+import tempfile
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -90,6 +91,28 @@ class CertificateVault:
         if len(content) > limit:
             raise ValueError("Certificate file exceeds its size limit")
         return content
+
+    def write(self, path: Path, content: bytes):
+        self.prepare()
+        private_path(self.root, path)
+        parent = self.root
+        for component in path.relative_to(self.root).parts[:-1]:
+            parent /= component
+            private_path(self.root, parent).mkdir(mode=0o700, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            try:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     def seal(self, value) -> str:
         return self.cipher().encrypt(json.dumps(value).encode()).decode()

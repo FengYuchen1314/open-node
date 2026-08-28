@@ -236,7 +236,9 @@ These passing command and snapshot checks do not prove a complete replacement:
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both
   transports. HTTP-01 standalone/webroot modes now use host-selected listeners
   or owned public challenge directories, with interruption cleanup and the
-  same renewal/deployment flow. Complete account/revocation workflows;
+  same renewal/deployment flow. Account contact/EAB editing and exact-version
+  revocation now include durable receipts, retry and persistent duplicate protection.
+  Remote-node issuance and public CA/provider staging remain unverified;
   validate supported DNS adapters with operator-owned staging accounts before
   claiming public-provider production coverage. See [certificates.md](certificates.md).
 - Native high-level tunnel deployment now uses the independent Nginx ownership
