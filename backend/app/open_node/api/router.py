@@ -7,6 +7,7 @@ from open_node.api.routes import (
     certificates,
     changes,
     license,
+    plan_management,
     probe,
     public,
     server_management,
@@ -23,6 +24,7 @@ private_router.include_router(certificates.router)
 private_router.include_router(changes.router)
 private_router.include_router(probe.router)
 private_router.include_router(subscriptions.router)
+private_router.include_router(plan_management.router)
 api_router.include_router(private_router)
 api_router.include_router(auth.router)
 api_router.include_router(system.router)

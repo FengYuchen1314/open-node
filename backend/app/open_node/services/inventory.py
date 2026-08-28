@@ -6366,6 +6366,11 @@ class InventoryStore:
 
         return ServerManagement(self)
 
+    def _plan_management(self):
+        from open_node.services.plan_management import PlanManagement
+
+        return PlanManagement(self)
+
     @staticmethod
     def _server_record(server: ServerModel) -> ServerRecord:
         return ServerRecord(

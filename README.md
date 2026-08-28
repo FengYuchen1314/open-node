@@ -46,6 +46,11 @@ Remaining migration gates still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
 
+Plan [editing, unassignment and removal](docs/plan-management.md) now preserve
+credentials and charged usage while coordinating node membership and limits.
+Revision guards protect concurrent edits, and the dialog tracks remote access
+confirmation, including pending withdrawal from an offline Agent.
+
 Server [editing and removal](docs/server-management.md) now include guarded
 profile updates, selective node-address synchronization and an impact preview.
 Removal retains user usage and change history while revoking controller access;

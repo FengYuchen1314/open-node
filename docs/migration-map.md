@@ -250,6 +250,14 @@ These passing command and snapshot checks do not prove a complete replacement:
   user usage and settled change history, cleans server-owned records and
   rejects old Agent connections. It is not remote uninstall or credential
   revocation; active changes and certificate challenges must be resolved first.
+- Plan [editing/unassignment/removal](plan-management.md) now retain credentials,
+  tokens and charged usage. Edits preserve existing assignment dates and reset
+  settings while updating node membership and native limits. Unassignment/removal keep durable
+  withdrawal intents, including for offline Agents and stored preview-only
+  credentials. Revision guards, transaction rollback and per-user deployment
+  status protect concurrent changes. Per-plan node aliases, automatic speed-rule
+  binding and custom Clash/Surge template selection remain to be migrated;
+  ordinary user and node editing/removal remain open product workflows.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both

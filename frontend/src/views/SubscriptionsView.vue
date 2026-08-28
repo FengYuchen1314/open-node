@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import SubscriptionAccessPanel from "../components/SubscriptionAccessPanel.vue";
+import PlanManagementDialog from "../components/PlanManagementDialog.vue";
+import type { PlanOperation } from "../services/plan-management";
 
 import type { ServerSummary } from "../domain/inventory";
 import type {
@@ -53,6 +55,10 @@ const servers = ref<ServerSummary[]>([]);
 const users = ref<ProductUser[]>([]);
 const nodes = ref<ManagedNode[]>([]);
 const plans = ref<SubscriptionPlan[]>([]);
+const planManagement = reactive({ id: "", mode: "edit" as PlanOperation, open: false });
+function managePlan(id: string, mode: PlanOperation) {
+  Object.assign(planManagement, { id, mode, open: true });
+}
 const nodePresets = ref<SubscriptionTemplatePreset[]>([]);
 const loading = ref(false);
 const savingAction = ref<
@@ -1630,13 +1636,18 @@ function formatBytes(value: number) {
               <div class="server-name">{{ user.display_name || user.username }}</div>
               <div class="server-subline">{{ user.username }}</div>
             </div>
-            <v-chip
-              :color="user.current_plan_id ? 'primary' : 'default'"
-              size="small"
-              variant="tonal"
-            >
-              {{ formatDate(user.plan_expires_at) }}
-            </v-chip>
+            <div class="catalog-controls">
+              <v-tooltip v-if="user.current_plan_id" text="Unassign plan"><template #activator="{ props: tip }">
+                <v-btn v-bind="tip" :aria-label="`Unassign plan for ${user.username}`" icon="mdi-link-off" variant="text" size="small" @click="managePlan(user.username, 'unassign')" />
+              </template></v-tooltip>
+              <v-chip
+                :color="user.current_plan_id ? 'primary' : 'default'"
+                size="small"
+                variant="tonal"
+              >
+                {{ formatDate(user.plan_expires_at) }}
+              </v-chip>
+            </div>
           </div>
 
           <v-divider />
@@ -1650,9 +1661,13 @@ function formatBytes(value: number) {
                 {{ formatTraffic(plan) }} / {{ plan.cycle_days }} days
               </div>
             </div>
-            <v-chip color="secondary" size="small" variant="tonal">
-              {{ plan.node_ids.length }} nodes
-            </v-chip>
+            <div class="catalog-controls">
+              <v-tooltip text="Edit plan"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit plan ${plan.name}`" icon="mdi-pencil-outline" variant="text" size="small" @click="managePlan(plan.id, 'edit')" /></template></v-tooltip>
+              <v-tooltip text="Remove plan"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Remove plan ${plan.name}`" icon="mdi-delete-outline" variant="text" size="small" @click="managePlan(plan.id, 'remove')" /></template></v-tooltip>
+              <v-chip color="secondary" size="small" variant="tonal">
+                {{ plan.node_ids.length }} nodes
+              </v-chip>
+            </div>
           </div>
 
           <v-divider />
@@ -1696,5 +1711,12 @@ function formatBytes(value: number) {
         </div>
       </v-sheet>
     </section>
+    <PlanManagementDialog v-model:open="planManagement.open" :id="planManagement.id" :mode="planManagement.mode" :nodes="nodes" @changed="refresh" />
   </div>
 </template>
+
+<style scoped>
+.catalog-item > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.catalog-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; max-width: 148px; }
+@media (max-width: 600px) { .catalog-controls { max-width: 88px; } }
+</style>
