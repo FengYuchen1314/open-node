@@ -117,8 +117,13 @@ process/package identity and fresh Agent health, and persists release-switch
 transactions before stopping the current service. Failed activation restores
 the previous release; interrupted switches can be recovered explicitly.
 Uninstall preserves configuration/state unless purge is explicitly selected.
-See [Agent deployment](agent-deployment.md). External systemd runtime mode remains
-a separate release gate.
+See [Agent deployment](agent-deployment.md). The separate
+[external systemd mode](external-systemd.md) verifies the canonical unit,
+root-owned host files, dedicated account, explicit JSON config and live process
+before mutation. Scoped polkit rules authorize only that unit's start/stop/restart.
+Binding failures keep the connection alive; Agent shutdown leaves Xray running.
+HTTPS/WSS real-traffic verification covers this single-file mode, not arbitrary
+multi-file takeover.
 
 Optional [remote Agent lifecycle](agent-lifecycle.md) uses a root-owned helper
 with a host-approved HTTPS release source and a permission-restricted Unix

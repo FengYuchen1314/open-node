@@ -18,11 +18,15 @@ class RuntimeFailure(ValueError):
     pass
 
 
-async def run_command(*args: str, timeout: float = 20) -> tuple[int, str]:
+async def run_command(
+    *args: str, timeout: float = 20, env: dict | None = None, cwd: str | None = None
+) -> tuple[int, str]:
     process = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
+        env=env,
+        cwd=cwd,
     )
     output = bytearray()
     try:
@@ -88,10 +92,30 @@ class XrayRuntime:
         os.chmod(config.state_dir / "xray.log", 0o600)
         self.log.addHandler(self.log_handler)
         self.lock = asyncio.Lock()
+        self.binding_error: str | None = None
+        self.systemd = None
+        if config.runtime_mode == "systemd":
+            from open_node_agent.systemd_runtime import SystemdRuntime
+
+            self.systemd = SystemdRuntime(config)
+
+    async def binding(self):
+        if self.systemd is None:
+            return None
+        try:
+            value = await self.systemd.inspect()
+        except (OSError, ValueError, TimeoutError) as exc:
+            self.binding_error = str(exc)[:2048]
+            raise
+        self.binding_error = None
+        return value
 
     def read(self) -> dict:
-        with self.config.xray_config.open("rb") as source:
-            raw = source.read(MAX_CONFIG_BYTES + 1)
+        if self.systemd:
+            raw = self.systemd.read_config()
+        else:
+            with self.config.xray_config.open("rb") as source:
+                raw = source.read(MAX_CONFIG_BYTES + 1)
         if len(raw) > MAX_CONFIG_BYTES:
             raise RuntimeFailure("Xray configuration exceeds 2 MiB")
         return decode_config(raw.decode())
@@ -100,6 +124,9 @@ class XrayRuntime:
         self, content: str | dict, *, binary: Path | None = None
     ) -> tuple[bool, str]:
         config = decode_config(content)
+        binding = await self.binding()
+        if binding and binary is not None and binary != self.binary:
+            raise RuntimeFailure("An external Xray executable is managed on its host")
         self.config.xray_config.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         fd, path = tempfile.mkstemp(
             prefix=".open-node-test-", suffix=".json", dir=self.config.xray_config.parent
@@ -107,33 +134,33 @@ class XrayRuntime:
         try:
             with os.fdopen(fd, "w") as stream:
                 json.dump(config, stream)
+            options = {"env": binding.environment, "cwd": binding.directory} if binding else {}
             code, output = await run_command(
-                str(binary or self.binary), "run", "-test", "-config", path
+                str(binary or self.binary), "run", "-test", "-config", path, **options
             )
             return code == 0, output[-8192:]
         finally:
             os.unlink(path)
 
     async def running(self) -> bool:
-        if self.config.runtime_mode == "systemd":
-            code, _ = await run_command(
-                "systemctl", "is-active", "--quiet", self.config.xray_service
-            )
-            return code == 0
+        if self.systemd:
+            try:
+                return (await self.binding()).running
+            except (OSError, ValueError, TimeoutError):
+                return False
         return self.process is not None and self.process.returncode is None
 
     async def start(self) -> None:
         if not self.enabled:
             raise RuntimeFailure("Xray is removed; install a runtime before starting it")
+        await self.binding()
         if await self.running():
             return
         ok, output = await self.validate(self.read())
         if not ok:
             raise RuntimeFailure(f"Xray validation failed: {output}")
-        if self.config.runtime_mode == "systemd":
-            code, output = await run_command("systemctl", "start", self.config.xray_service)
-            if code:
-                raise RuntimeFailure(f"Xray start failed: {output[-8192:]}")
+        if self.systemd:
+            await self.systemd.control("start")
         else:
             self.process = await asyncio.create_subprocess_exec(
                 str(self.binary),
@@ -146,17 +173,18 @@ class XrayRuntime:
             self.log_task = asyncio.create_task(self._capture_logs(self.process))
         await asyncio.sleep(0.25)
         if not await self.running():
-            raise RuntimeFailure("Xray exited during startup; inspect the agent Xray log")
+            raise RuntimeFailure(
+                self.binding_error
+                or "Xray exited during startup; inspect its runtime log or unit journal"
+            )
 
     async def _capture_logs(self, process) -> None:
         while block := await process.stdout.read(4096):
             self.log.info("%s", block.decode(errors="replace").rstrip())
 
     async def stop(self) -> None:
-        if self.config.runtime_mode == "systemd":
-            code, output = await run_command("systemctl", "stop", self.config.xray_service)
-            if code:
-                raise RuntimeFailure(f"Xray stop failed: {output[-8192:]}")
+        if self.systemd:
+            await self.systemd.control("stop")
         elif self.process and self.process.returncode is None:
             self.process.terminate()
             try:
@@ -169,6 +197,18 @@ class XrayRuntime:
             self.log_task = None
 
     async def restart(self) -> None:
+        if self.systemd:
+            ok, output = await self.validate(self.read())
+            if not ok:
+                raise RuntimeFailure(f"Xray validation failed: {output}")
+            await self.systemd.control("restart")
+            await asyncio.sleep(0.25)
+            if not await self.running():
+                raise RuntimeFailure(
+                    self.binding_error
+                    or "External Xray failed to restart; inspect its unit journal"
+                )
+            return
         await self.stop()
         await self.start()
 
@@ -177,8 +217,15 @@ class XrayRuntime:
         ok, output = await self.validate(candidate)
         if not ok:
             raise RuntimeFailure(f"Xray validation failed: {output}")
-        old = self.config.xray_config.read_bytes() if self.config.xray_config.exists() else None
+        old = (
+            self.systemd.read_config()
+            if self.systemd
+            else self.config.xray_config.read_bytes()
+            if self.config.xray_config.exists()
+            else None
+        )
         was_running = await self.running()
+        await self.binding()
         atomic_write(self.config.xray_config, json.dumps(candidate, indent=2).encode() + b"\n")
         try:
             if restart and was_running:
@@ -195,6 +242,15 @@ class XrayRuntime:
         return {"success": True, "restart_required": was_running and not restart}
 
     async def scan(self) -> dict:
+        running = await self.running()
+        if self.binding_error:
+            return {
+                "xray_running": False,
+                "xray_version": None,
+                "config_path": str(self.config.xray_config),
+                "inbounds": [],
+                "message": self.binding_error,
+            }
         try:
             config = self.read()
         except (OSError, ValueError):
@@ -205,10 +261,11 @@ class XrayRuntime:
         except (OSError, ValueError, TimeoutError):
             version = None
         return {
-            "xray_running": await self.running(),
+            "xray_running": running,
             "xray_version": version,
             "config_path": str(self.config.xray_config),
             "inbounds": config.get("inbounds", []),
+            "message": None,
         }
 
     def stats_endpoint(self) -> str | None:

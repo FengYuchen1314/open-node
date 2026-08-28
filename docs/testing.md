@@ -304,6 +304,41 @@ any cleanup that needs attention. Stopped-Agent upgrades and path/ownership
 guards have additional focused unit tests. External `runtime_mode: systemd`
 and arbitrary future schema rollback are not covered by this smoke.
 
+## External Systemd Smoke
+
+Build the Agent wheel and install it into a separate, root-owned virtual
+environment readable by the disposable service account. On the designated
+systemd/polkit VPS, with the existing smoke dependencies and trusted Nginx:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-external-systemd.py \
+  --agent-python /path/to/installed-agent/bin/python \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /path/to/nginx
+```
+
+The root-only fixture creates unique non-root accounts, independent Agent/Xray
+units and exact polkit rules. For HTTPS polling and WSS it verifies actual
+VLESS forwarding, provisioning, user stats, invalid-write rejection, failed
+restart rollback, Agent restart without Xray interruption, remembered stop
+intent, binding mismatch while the Agent stays online, and grant revocation
+without stopping the host-owned runtime. It rejects aliases, mismatched binary
+paths and writable unit files. Negative permission checks cover unrelated
+services, manager reload and enablement. The polling fixture also exercises
+`CAP_NET_BIND_SERVICE` on both services. Modified rules cannot be overwritten
+or removed; fixture resources are cleaned up after the run.
+
+This proves the [documented single-file binding](external-systemd.md), not
+multi-file takeover, other OS/architectures, public providers, or a durable
+rollback after a crash in the middle of an ordinary config mutation.
+
+Recorded verification for this milestone on the designated Debian 12 VPS:
+365 Agent tests, 387 backend tests, 98 frontend tests, the production frontend
+build, and Ruff checks passed. The final installed wheel passed the external
+fixture over both transports. The independent managed-runtime smoke and real
+host install/upgrade/rollback/interruption/uninstall smoke also passed. These
+results do not close the other [migration gates](migration-map.md).
+
 ## Remote Agent Lifecycle
 
 Build the Agent wheel and production Vue assets first. On the designated VPS,

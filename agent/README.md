@@ -52,7 +52,9 @@ example with per-user traffic accounting enabled.
 Create the Xray configuration before starting. The agent never overwrites an
 existing MMWX configuration or takes over a running process by discovery.
 For an existing dedicated systemd service, select `runtime_mode: systemd` and
-set `xray_service` to its unit name. Only that configured service is controlled.
+follow the [external systemd setup](../docs/external-systemd.md). Both processes
+use a dedicated non-root account, verified unit/binary/config binding, and an
+explicit host-installed polkit grant for only that canonical service.
 In managed mode the agent stops its own child on graceful shutdown; use a
 systemd service with `KillMode=control-group` to contain abrupt agent termination.
 
@@ -132,7 +134,9 @@ The installed-wheel smoke covers both transports with real VLESS forwarding,
 new client provisioning/revocation, Xray statistics reaching FastAPI, rejected invalid
 writes, failed-restart rollback, ordered recovery, command deduplication across
 process restarts, and persistent service-stop intent. This is not evidence for
-every protocol or external systemd runtime mode. A separate lifecycle smoke
+every protocol. A separate [external systemd smoke](../docs/testing.md#external-systemd-smoke)
+covers authorization, binding failures, live traffic and independent ownership
+over HTTPS/WSS. A separate lifecycle smoke
 verifies installation, upgrades, recovery, and removal of the owned systemd
 service with a non-root account.
 See [VPS test instructions](../docs/testing.md#independent-agent-smoke).

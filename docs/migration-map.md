@@ -257,8 +257,12 @@ These passing command and snapshot checks do not prove a complete replacement:
   configurations. Actual VLESS traffic is verified using official Xray with
   the independent agent; the reference-agent smoke still uses external mode
   without a running Xray. Neither proves full fork protocol compatibility.
-- Verify external `runtime_mode: systemd` and wider OS/architecture deployment
-  coverage. The verified non-root systemd installation owns a managed Xray child.
+- External [systemd runtime mode](external-systemd.md) now verifies a dedicated
+  non-root service's binary/config binding and uses scoped host-installed
+  polkit authorization. Both transports have real forwarding, provisioning,
+  stop-intent, independent ownership and failure recovery coverage. Multi-file
+  takeover and wider OS/architecture coverage remain unverified; the managed
+  installer still owns a separate child.
 - Multi-server change-set coordination now includes already-started dependency
   sequences, new-work reservations and reverse compensation. It coordinates
   the Open Node command queue, not external shell edits or other host managers.

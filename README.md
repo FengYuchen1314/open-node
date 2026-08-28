@@ -57,6 +57,9 @@ including newly provisioned users, failed-restart rollback, and restart-safe
 command deduplication. The [host deployment CLI](docs/agent-deployment.md) adds
 a dedicated systemd account, per-release environments, upgrade rollback,
 interrupted-switch recovery, and data-preserving uninstall/reinstall.
+Separately owned Xray services use the [external systemd mode](docs/external-systemd.md),
+with non-root scoped authorization, verified config binding and independent
+process ownership. Both modes have real forwarding coverage over HTTPS/WSS.
 Managed [Xray release operations](docs/xray-releases.md) add checksum-pinned
 installation, version switching, explicit rollback and data-preserving removal.
 They preserve the root-owned bootstrap binary and recover the prior runtime

@@ -8,6 +8,8 @@ license service is used. Debian 12 x86-64 is the verified host configuration.
 This deploys the Agent and its owned Xray child, not the FastAPI/Vue control
 plane. The control plane must already be reachable and have issued this node's
 token. Do not reuse a production token while its previous agent is still running.
+For a separately owned existing Xray service, use the
+[external systemd setup](external-systemd.md), not this managed-child installer.
 
 Optional [Nginx and certificate management](nginx-management.md) runs another
 owned child under this account. Set `nginx_binary` and optional `nginx_modules`

@@ -60,6 +60,7 @@ class Agent:
 
     async def health_report(self) -> dict:
         desired = self.journal.desired_running(self.config.auto_start)
+        running = await self.runtime.running()
         return {
             "pid": os.getpid(),
             "agent_version": __version__,
@@ -71,7 +72,8 @@ class Agent:
                 and time.monotonic() - self.last_contact
                 <= max(45, self.config.heartbeat_seconds * 3)
             ),
-            "runtime_ready": (not desired or await self.runtime.running())
+            "runtime_ready": not self.runtime.binding_error
+            and (not desired or running)
             and (
                 not self.journal.desired_running(False, "nginx")
                 or await self.operations.nginx.running()

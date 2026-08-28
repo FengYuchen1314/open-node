@@ -265,6 +265,7 @@ class Operations:
                 if supplied_path and supplied_path != str(self.runtime.config.xray_config):
                     raise RuntimeFailure("Only the configured Xray file may be accessed")
                 if method == "GET":
+                    await self.runtime.binding()
                     return {
                         "success": True,
                         "config": json.dumps(self.runtime.read()),
@@ -284,6 +285,7 @@ class Operations:
                     "xray": {
                         "running": await self.runtime.running(),
                         "mode": self.runtime.config.runtime_mode,
+                        "message": self.runtime.binding_error,
                     },
                 }
             if path == "/api/child/services/control" and method == "POST":
