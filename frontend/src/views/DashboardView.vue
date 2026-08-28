@@ -98,6 +98,10 @@ const nginxToolsForm = reactive({
   stream_port: 443,
 });
 const xrayInstallOpen = ref(false);
+const warpAction = ref<"warp_install" | "warp_remove" | "">("");
+const warpTarget = ref("");
+const warpConfirmed = ref(false);
+watch(() => commandForm.server_id, () => { agentSettingsForm.warp_license = ""; });
 const agentLifecycleOpen = ref(false);
 const agentLifecycleTarget = ref("");
 const agentLifecycleAction = ref<"agent_upgrade" | "agent_rollback" | "agent_uninstall">("agent_upgrade");
@@ -532,6 +536,13 @@ async function queueQuickOperation(kind: SimpleAgentOperation) {
     xrayInstallOpen.value = true;
     return;
   }
+  if (kind === "warp_install" || kind === "warp_remove") {
+    warpTarget.value = commandForm.server_id;
+    warpConfirmed.value = false;
+    errorMessage.value = "";
+    warpAction.value = kind;
+    return;
+  }
   if (kind === "agent_upgrade" || kind === "agent_rollback" || kind === "agent_uninstall") {
     agentLifecycleTarget.value = commandForm.server_id;
     agentLifecycleAction.value = kind;
@@ -559,7 +570,7 @@ async function queueQuickOperation(kind: SimpleAgentOperation) {
 }
 
 async function queuePayloadOperation(
-  kind: PayloadAgentOperation | "xray_install" | "xray_remove" | "xray_rollback",
+  kind: PayloadAgentOperation | "xray_install" | "xray_remove" | "xray_rollback" | "warp_install" | "warp_remove",
   payload: AgentOperationPayload,
   serverId = commandForm.server_id,
 ) {
@@ -592,6 +603,12 @@ async function installXrayRelease() {
   if (queued) xrayInstallOpen.value = false;
 }
 
+async function confirmWarpAction() {
+  if (!warpAction.value || !warpConfirmed.value || savingOperation.value) return;
+  const payload = warpAction.value === "warp_install" ? { accept_terms: true } : { confirm: true as const };
+  if (await queuePayloadOperation(warpAction.value, payload, warpTarget.value)) warpAction.value = "";
+}
+
 async function refreshLifecycleCommands() {
   try {
     await refreshCommands(servers.value);
@@ -606,6 +623,7 @@ let disposed = false;
 const pendingLifecycle = computed(() => Object.values(commandsByServer.value).flat().some(command =>
   ["pending", "leased", "waiting"].includes(command.status)
   && (diagnosticPaths.has(command.path)
+    || command.path.startsWith("/api/child/warp/")
     || /^\/api\/child\/agent\/(upgrade(?:-stream)?|uninstall(?:-stream)?|rollback)$/.test(command.path))));
 
 function scheduleLifecycleRefresh() {
@@ -679,7 +697,7 @@ async function clearNginxStreamPort() {
 async function submitWarpLicense() {
   const license = agentSettingsForm.warp_license.trim();
   if (!license) {
-    errorMessage.value = "WARP credential is required.";
+    errorMessage.value = "WARP+ credential is required.";
     return;
   }
   const queued = await queuePayloadOperation("warp_license", { license });
@@ -1609,7 +1627,7 @@ function truncateText(value: string, maxLength: number) {
             <v-text-field
               v-model="agentSettingsForm.warp_license"
               density="comfortable"
-              label="WARP credential"
+              label="WARP+ credential (optional)"
               prepend-inner-icon="mdi-key-variant"
               type="password"
               variant="outlined"
@@ -1623,7 +1641,7 @@ function truncateText(value: string, maxLength: number) {
               variant="tonal"
               @click="submitWarpLicense"
             >
-              Set WARP
+              Update WARP+
             </v-btn>
           </div>
         </v-form>
@@ -1758,6 +1776,32 @@ function truncateText(value: string, maxLength: number) {
         />
       </v-sheet>
     </section>
+    <v-dialog :model-value="Boolean(warpAction)" max-width="480"
+      @update:model-value="!$event && (warpAction = '')">
+      <v-card :title="warpAction === 'warp_install' ? 'Install free WARP' : 'Remove WARP'">
+        <v-card-text>
+          <p class="mb-4">{{ servers.find(server => server.id === warpTarget)?.name }}</p>
+          <v-alert v-if="errorMessage" type="error" variant="tonal" class="mb-4">{{ errorMessage }}</v-alert>
+          <v-checkbox v-model="warpConfirmed" :disabled="Boolean(savingOperation)" hide-details>
+            <template #label>
+              <span v-if="warpAction === 'warp_install'">I accept the
+                <a href="https://www.cloudflare.com/application/terms/" target="_blank" rel="noopener noreferrer"
+                  @click.stop>Cloudflare application terms</a>
+              </span>
+              <span v-else>Confirm WARP device and outbound removal</span>
+            </template>
+          </v-checkbox>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn :disabled="Boolean(savingOperation)" @click="warpAction = ''">Cancel</v-btn>
+          <v-btn :disabled="!warpConfirmed || Boolean(savingOperation)" :loading="Boolean(savingOperation)"
+            :color="warpAction === 'warp_install' ? 'primary' : 'error'"
+            :prepend-icon="warpAction === 'warp_install' ? 'mdi-cloud-download-outline' : 'mdi-cloud-remove-outline'"
+            @click="confirmWarpAction">{{ warpAction === 'warp_install' ? 'Install' : 'Remove' }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
     <AgentLifecycleDialog v-model="agentLifecycleOpen" :server-id="agentLifecycleTarget"
       :server-name="servers.find(server => server.id === agentLifecycleTarget)?.name ?? ''"
       :action="agentLifecycleAction" @updated="refreshLifecycleCommands" />

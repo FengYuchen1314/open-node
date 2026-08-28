@@ -226,7 +226,10 @@ These passing command and snapshot checks do not prove a complete replacement:
   implemented in the independent agent. Native [diagnostics](agent-diagnostics.md)
   now include TCP/ICMP latency, structured NextTrace routes and scoped log
   maintenance. In-place host permission changes and broader tracing-tool/OS
-  coverage remain outstanding. Complete WARP and the remaining host operations.
+  coverage remain outstanding. Native [WARP](warp.md) now supports free
+  registration, owned userspace outbounds, optional provider credentials and
+  recoverable removal. Public Cloudflare registration/forwarding and the
+  remaining host operations still require verification.
   Unimplemented operations return 501.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with

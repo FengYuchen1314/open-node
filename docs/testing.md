@@ -58,6 +58,47 @@ cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
 
+## Native WARP Smoke
+
+Build the current Agent wheel and frontend on the VPS. Use the backend test
+environment with Playwright/Chromium and a trusted Debian Nginx executable:
+
+```bash
+python scripts/vps/smoke-warp.py \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /path/to/nginx \
+  --output /tmp/open-node-warp-shots
+```
+
+The root-only fixture installs disposable non-root systemd services and uses a
+local TLS provider fixture with actual Xray WireGuard peers. Tests cover both
+Agent transports, explicit first-registration consent, free-account status,
+real IPv4/IPv6 encrypted forwarding, reapply, optional account/config updates,
+Agent restart, blocked referenced-outbound removal, retryable provider failure,
+preserved direct traffic, private state and non-disclosure in WARP results/logs.
+Browser checks cover 1440px, 390px and 320px confirmation/result layouts. Host
+routes and interface names must be unchanged after cleanup.
+
+This does not create a public Cloudflare account or establish public-provider
+compatibility. Live registration and deletion require operator acceptance of
+Cloudflare terms. See [warp.md](warp.md#verification-boundary). The wheel is a
+source build, not a replacement for immutable published Agent 0.1.0 artifacts.
+
+Verified on 2026-08-28 (UTC), on the designated Debian 12 x86-64 VPS:
+
+- Backend: 269 tests; Agent: 231 tests; frontend: 98 tests and production build.
+- Agent/backend Ruff checks and the WARP smoke passed. Existing Starlette/httpx
+  deprecation and frontend bundle-size warnings remain.
+- The full non-root WARP fixture smoke passed over both transports, including
+  real encrypted IPv4/IPv6 forwarding, restart, provider-failure recovery and
+  inspection of desktop/mobile/narrow screenshots. No routes or interfaces changed.
+- A fresh installation of the unmodified built wheel passed the independent
+  Agent runtime smoke on both transports, including real VLESS traffic,
+  provisioning/revocation, statistics, failed configuration recovery and
+  persistent stopped-runtime intent.
+- These results do not verify Cloudflare public registration or a paid WARP+
+  account. No public provider terms were accepted by the test harness.
+
 ## Native Diagnostics Smoke
 
 Build the current Agent wheel and frontend on the VPS first. Use the backend

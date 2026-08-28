@@ -754,6 +754,10 @@ export interface AgentWarpLicenseOperationRequest {
   command_timeout_ms?: number;
 }
 
+export interface AgentWarpInstallOperationRequest {
+  accept_terms: boolean;
+}
+
 export interface AgentSwitchXrayModeOperationRequest {
   xray_mode: XrayMode;
   command_timeout_ms?: number;
@@ -805,6 +809,7 @@ export type AgentOperationPayload =
   | AgentNginxConfigFileReadOperationRequest
   | AgentNginxConfigFileWriteOperationRequest
   | AgentWarpLicenseOperationRequest
+  | AgentWarpInstallOperationRequest
   | AgentSwitchXrayModeOperationRequest
   | AgentSwitchListenPortOperationRequest
   | AgentProbeMasterURLOperationRequest

@@ -14,6 +14,7 @@ from open_node_agent.lifecycle import HostLifecycle
 from open_node_agent.logs import OwnedLogs
 from open_node_agent.nginx import NginxRuntime
 from open_node_agent.runtime import RuntimeFailure, XrayRuntime
+from open_node_agent.warp import Warp
 from open_node_agent.xray_releases import XrayReleases
 
 
@@ -176,6 +177,7 @@ class Operations:
         self.lifecycle = HostLifecycle(runtime.config)
         self.diagnostics = Diagnostics(runtime.config)
         self.logs = OwnedLogs(runtime.config)
+        self.warp = Warp(runtime)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
 
@@ -184,6 +186,7 @@ class Operations:
             **await self.runtime.scan(),
             "nginx": await self.nginx.status(),
             "runtime_release": self.releases.status(),
+            "warp": self.warp.snapshot(),
         }
 
     def network_speed(self) -> dict:
@@ -221,6 +224,8 @@ class Operations:
             if method == "DELETE":
                 return self.logs.delete(query)
         async with self.runtime.lock:
+            if path.startswith("/api/child/warp/"):
+                return await self.warp.handle(method, path, body)
             if path == "/api/child/agent/lifecycle" and method == "GET":
                 return await self.lifecycle.status()
             if (

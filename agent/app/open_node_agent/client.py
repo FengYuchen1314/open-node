@@ -92,6 +92,7 @@ class Agent:
             "connection_mode": self.config.connection_mode,
             "xray_mode": "external",
             "listen_port": 0,
+            "warp_installed": self.operations.warp.snapshot()["installed"],
             "capabilities": {
                 "rpc": True,
                 "stream": True,
@@ -176,7 +177,9 @@ class Agent:
     async def websocket_reports(self) -> None:
         next_telemetry = 0.0
         while True:
-            await self.send("heartbeat", {})
+            await self.send(
+                "heartbeat", {"warp_installed": self.operations.warp.snapshot()["installed"]}
+            )
             for result in self.journal.pending_results():
                 await self.send("rpc_reply", result)
             if time.monotonic() >= next_telemetry:
@@ -305,7 +308,14 @@ class Agent:
     async def http_reports(self, client, base, token):
         next_report = 0.0
         while True:
-            await self._post(client, base + "/heartbeat", {"token": token})
+            await self._post(
+                client,
+                base + "/heartbeat",
+                {
+                    "token": token,
+                    "warp_installed": self.operations.warp.snapshot()["installed"],
+                },
+            )
             self.control_contact()
             if time.monotonic() >= next_report:
                 await self._post(

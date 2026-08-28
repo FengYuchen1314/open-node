@@ -2,6 +2,7 @@
 import type { AgentCommand, AgentCommandStreamFrame } from "../domain/inventory";
 import { diagnosticPaths } from "../domain/diagnostics";
 import DiagnosticResult from "./DiagnosticResult.vue";
+import WarpStatus from "./WarpStatus.vue";
 
 defineProps<{
   commands: AgentCommand[];
@@ -31,11 +32,16 @@ function commandTarget(command: AgentCommand) {
 }
 
 function commandTitle(command: AgentCommand) {
+  if (command.path.startsWith("/api/child/warp/")) return "WARP " + command.path.split("/").at(-1);
   if (command.path === "/api/child/domains/latency") return "Domain latency";
   if (command.path === "/api/child/network/return-route-test") return "Return route";
   if (command.path === "/api/child/logs") return "Service logs";
   if (command.path === "/api/child/logs/files") return command.method === "DELETE" ? "Clear log files" : "Log files";
   return command.method + " " + commandTarget(command);
+}
+
+function hasSummary(command: AgentCommand) {
+  return diagnosticPaths.has(command.path) || command.path.startsWith("/api/child/warp/");
 }
 
 function formatJson(value: unknown) {
@@ -90,12 +96,16 @@ function framesText(frames: AgentCommandStreamFrame[]) {
           v-if="diagnosticPaths.has(command.path) && command.result_body != null"
           :path="command.path" :body="command.result_body"
         />
-        <details v-if="diagnosticPaths.has(command.path)" class="diagnostic-request">
+        <WarpStatus v-if="command.path.startsWith('/api/child/warp/') && command.result_body != null"
+          :body="command.result_body" />
+        <details v-if="hasSummary(command)" class="diagnostic-request">
           <summary>Request details</summary>
           <div class="detail-value">{{ command.method }} {{ commandTarget(command) }}</div>
           <div class="detail-value">{{ command.request_id }}</div>
           <div class="detail-value">{{ command.timeout_ms }} ms | {{ command.created_at }}</div>
-          <pre v-if="command.body != null" class="command-json">{{ formatJson(command.body) }}</pre>
+          <pre v-if="command.body != null" class="command-json">{{
+            command.path === '/api/child/warp/license' ? 'WARP+ credential: [redacted]' : formatJson(command.body)
+          }}</pre>
         </details>
         <div v-else class="command-detail-grid">
           <div>
@@ -120,7 +130,7 @@ function framesText(frames: AgentCommandStreamFrame[]) {
           </div>
         </div>
 
-        <pre v-if="!diagnosticPaths.has(command.path) && command.body != null" class="command-json">{{
+        <pre v-if="!hasSummary(command) && command.body != null" class="command-json">{{
           formatJson(command.body)
         }}</pre>
 
@@ -135,7 +145,7 @@ function framesText(frames: AgentCommandStreamFrame[]) {
         </v-alert>
 
         <pre
-          v-if="!diagnosticPaths.has(command.path) && command.result_body != null"
+          v-if="!hasSummary(command) && command.result_body != null"
           class="command-json"
         >{{ formatJson(command.result_body) }}</pre>
 

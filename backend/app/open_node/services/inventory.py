@@ -1437,6 +1437,8 @@ class InventoryStore:
             if agent:
                 agent.last_seen_at = now
                 agent.listen_port = server.listen_port
+                if payload.warp_installed is not None:
+                    agent.warp_installed = payload.warp_installed
                 agent.public_ipv4 = payload.public_ipv4 or agent.public_ipv4
                 agent.public_ipv6 = payload.public_ipv6 or agent.public_ipv6
 

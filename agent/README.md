@@ -94,6 +94,10 @@ Native [diagnostics](../docs/agent-diagnostics.md) include concurrent TCP latenc
 optional ICMP fallback, NextTrace return-route evidence, and ownership-scoped
 log file listing/clearing. Raw network probes require explicit host permissions;
 TCP latency works without them.
+Native [WARP outbounds](../docs/warp.md) include explicitly consented free
+registration, optional provider WARP+ updates, userspace WireGuard, durable
+configuration recovery and retryable provider removal. Existing routing is
+preserved; no host route or network-admin permission changes are needed.
 Managed [Xray release operations](../docs/xray-releases.md) install explicit
 official versions using archive SHA-256 pins, validate existing configuration,
 retain a previous selection and recover failed/interrupted switches. Remote
@@ -110,8 +114,8 @@ loopback Xray `api.listen`; explicit `stats_address` takes precedence.
 ACME DNS-01 issuance and renewal are handled by the
 [control plane](../docs/certificates.md), which sends certificate deployment
 commands to this Agent. No Agent-local ACME runtime is required.
-Unsupported operations return 501 rather than reporting success. WARP,
-fork-only protocols and
+Unsupported operations return 501 rather than reporting success. Public WARP
+provider verification, fork-only protocols and
 further migration workflows remain release gates.
 
 ## Verification

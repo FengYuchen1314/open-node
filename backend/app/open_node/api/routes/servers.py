@@ -36,6 +36,7 @@ from open_node.domain.inventory import (
     AgentUpdateMasterURLOperationRequest,
     AgentUpgradeOperationRequest,
     AgentValidateSiteOperationRequest,
+    AgentWarpInstallOperationRequest,
     AgentWarpLicenseOperationRequest,
     AgentXrayConfigFileReadOperationRequest,
     AgentXrayConfigFileWriteOperationRequest,
@@ -1962,10 +1963,14 @@ async def queue_warp_install_operation(
     server_id: UUID,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+    payload: AgentWarpInstallOperationRequest | None = None,
 ) -> AgentCommandCreateResponse:
     return await _queue_server_command(
         server_id,
-        AgentCommandCreate(method="POST", path="/api/child/warp/install", timeout_ms=60_000),
+        AgentCommandCreate(
+            method="POST", path="/api/child/warp/install", timeout_ms=60_000,
+            body={"accept_terms": payload.accept_terms if payload else False},
+        ),
         store,
         connections,
     )
@@ -2020,12 +2025,16 @@ async def queue_warp_license_operation(
 )
 async def queue_warp_remove_operation(
     server_id: UUID,
+    payload: AgentLifecycleConfirmationRequest,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentCommandCreateResponse:
     return await _queue_server_command(
         server_id,
-        AgentCommandCreate(method="POST", path="/api/child/warp/remove", timeout_ms=60_000),
+        AgentCommandCreate(
+            method="POST", path="/api/child/warp/remove", timeout_ms=60_000,
+            body={"confirm": payload.confirm},
+        ),
         store,
         connections,
     )

@@ -392,6 +392,7 @@ class AgentRegistrationRequest(BaseModel):
 
 class AgentHeartbeatRequest(BaseModel):
     token: str = Field(min_length=1)
+    warp_installed: bool | None = None
     upload_speed: int = Field(default=0, ge=0)
     download_speed: int = Field(default=0, ge=0)
     listen_port: int | None = Field(default=None, ge=0, le=65535)
@@ -1502,6 +1503,11 @@ class AgentNginxConfigFileWriteOperationRequest(BaseModel):
     @classmethod
     def validate_content(cls, value: str) -> str:
         return _validate_required_content(value, "content")
+
+
+class AgentWarpInstallOperationRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    accept_terms: bool = Field(default=False, strict=True)
 
 
 class AgentWarpLicenseOperationRequest(BaseModel):

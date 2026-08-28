@@ -4017,7 +4017,9 @@ def test_warp_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
 
     install = client.post(f"/api/v1/servers/{server_id}/operations/warp/install")
     status = client.post(f"/api/v1/servers/{server_id}/operations/warp/status")
-    remove = client.post(f"/api/v1/servers/{server_id}/operations/warp/remove")
+    remove = client.post(
+        f"/api/v1/servers/{server_id}/operations/warp/remove", json={"confirm": True}
+    )
 
     assert install.status_code == 201
     assert status.status_code == 201
@@ -4030,6 +4032,39 @@ def test_warp_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
     assert remove.json()["command"]["path"] == "/api/child/warp/remove"
     assert install.json()["command"]["stream"] is False
     assert status.json()["license_required"] is False
+
+
+def test_warp_consent_and_removal_confirmation(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    server_id = client.post("/api/v1/servers", json={"name": "warp-consent"}).json()["server"]["id"]
+    base = f"/api/v1/servers/{server_id}/operations/warp"
+    for value in (False, "true", 1, None):
+        assert client.post(base + "/remove", json={"confirm": value}).status_code == 422
+    assert client.post(base + "/remove").status_code == 422
+    for value in ("true", 1):
+        assert client.post(base + "/install", json={"accept_terms": value}).status_code == 422
+    assert client.post(base + "/install").json()["command"]["body"] == {"accept_terms": False}
+    response = client.post(base + "/install", json={"accept_terms": True})
+    assert response.status_code == 201
+    assert response.json()["command"]["body"] == {"accept_terms": True}
+    assert response.json()["license_required"] is False
+
+
+def test_warp_heartbeat_updates_without_resetting_legacy_reports(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "warp-heartbeat"}).json()
+    token = created["agent_token"]
+    assert client.post("/api/v1/agents/register", json={
+        "token": token, "hostname": "warp-agent", "warp_installed": False,
+    }).status_code == 201
+    assert client.post("/api/v1/agents/heartbeat", json={
+        "token": token, "warp_installed": True,
+    }).status_code == 200
+    assert client.get("/api/v1/agents").json()[0]["warp_installed"] is True
+    client.post("/api/v1/agents/heartbeat", json={"token": token})
+    assert client.get("/api/v1/agents").json()[0]["warp_installed"] is True
+    client.post("/api/v1/agents/heartbeat", json={"token": token, "warp_installed": False})
+    assert client.get("/api/v1/agents").json()[0]["warp_installed"] is False
 
 
 def test_agent_command_rejects_non_child_paths(tmp_path: Path) -> None:

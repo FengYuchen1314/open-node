@@ -263,6 +263,7 @@ async def _handle_agent_ws_message(
         try:
             heartbeat = AgentHeartbeatRequest(
                 token=token,
+                warp_installed=payload.get("warp_installed"),
                 listen_port=payload.get("listen_port"),
                 public_ipv4=payload.get("public_ipv4"),
                 public_ipv6=payload.get("public_ipv6"),
