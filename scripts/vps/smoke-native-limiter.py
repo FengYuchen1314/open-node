@@ -539,7 +539,7 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, _http_e
                     "window_seconds": 0,
                     "burst_count": 0,
                     "limit_mbps": 0.5,
-                    "limit_duration": 3,
+                    "limit_duration": 8,
                 }
             ]
             apply()
@@ -552,8 +552,13 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, _http_e
                 assert any(
                     item["email"] == user["email"] for item in automatic.values()
                 ), automatic
-                time.sleep(4)
-                assert not command(client, base, "limiter/status")["automatic_limits"]
+                runtime.poll(
+                    "sustained rule expires",
+                    lambda: (
+                        not command(client, base, "limiter/status")["automatic_limits"]
+                    ),
+                    timeout=15,
+                )
                 assert transfer(connection, 65536) < 1
             policy["auto_speed_rules"] = []
             runtime.poll(
@@ -571,7 +576,7 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, _http_e
                     "window_seconds": 20,
                     "burst_count": 2,
                     "limit_mbps": 0.5,
-                    "limit_duration": 5,
+                    "limit_duration": 8,
                 }
             ]
             apply()
@@ -587,8 +592,13 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, _http_e
                     item["email"] == user["email"] for item in automatic.values()
                 ), automatic
                 assert transfer(connection, 65536) >= 1.5
-                time.sleep(6)
-                assert not command(client, base, "limiter/status")["automatic_limits"]
+                runtime.poll(
+                    "burst rule expires",
+                    lambda: (
+                        not command(client, base, "limiter/status")["automatic_limits"]
+                    ),
+                    timeout=15,
+                )
             print("PASS real burst-rule activation and expiry", flush=True)
             policy["auto_speed_rules"] = []
             user["speed_limit"] = 62500

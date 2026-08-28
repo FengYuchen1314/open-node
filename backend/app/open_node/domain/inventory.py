@@ -7,7 +7,9 @@ from typing import Any, Literal, Self
 from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
+
+from open_node.domain.auto_speed import AutoSpeedRule
 
 MAX_AGENT_MESSAGE_BYTES = 4 * 1024 * 1024
 
@@ -226,6 +228,7 @@ class AgentCapabilities(BaseModel):
     stream: bool = False
     return_route_test: bool = False
     native_limiter: bool = False
+    user_auto_speed_rules: bool = False
     subscription_access: bool = False
     node_cleanup: bool = False
 
@@ -1413,6 +1416,14 @@ class AgentLimiterUser(BaseModel):
     speed_limit: int = Field(default=0, ge=0, le=1 << 50)
     device_limit: int = Field(default=0, ge=0, le=1_000_000)
     conn_group: str = Field(default="", max_length=255)
+    auto_speed_rules: list[AutoSpeedRule] = Field(default_factory=list, max_length=100)
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        value = handler(self)
+        if not self.auto_speed_rules:
+            value.pop("auto_speed_rules", None)
+        return value
 
     @field_validator("email")
     @classmethod

@@ -27,6 +27,7 @@ export function planSettings(plan: SubscriptionPlan): PlanSettings {
     traffic_mode: plan.traffic_mode, node_ids: [...plan.node_ids],
     node_multipliers: { ...plan.node_multipliers }, node_speed_limits: { ...plan.node_speed_limits },
     node_name_overrides: { ...plan.node_name_overrides }, node_name_override_enabled: plan.node_name_override_enabled ?? false,
+    auto_speed_rules: (plan.auto_speed_rules ?? []).map(rule => ({ ...rule })),
     node_device_limits: { ...plan.node_device_limits },
   };
 }

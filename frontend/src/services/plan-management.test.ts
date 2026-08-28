@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { getPlanManagement, planSettings, removePlan, savePlan } from "./plan-management";
 import type { SubscriptionPlan } from "../domain/subscriptions";
+import { newAutoSpeedRule } from "../domain/auto-speed";
 
 describe("plan management", () => {
   const plan = { id: "id", name: "Plan", description: "", traffic_limit_gb: 1, cycle_days: 30,
     is_reset: true, reset_day: 31, node_ids: ["node"], node_multipliers: { node: 2 },
     node_name_overrides: { node: "Tokyo" }, node_name_override_enabled: true,
+    auto_speed_rules: [newAutoSpeedRule()],
     node_speed_limits: { node: 0 }, node_device_limits: { node: 4 }, speed_limit_mbps: 10,
     device_limit: 1, traffic_mode: "twoway", created_at: "old", updated_at: "now", traffic_limit_bytes: 1024 ** 3 } as SubscriptionPlan;
   it("preserves settings and zero-valued overrides without sending read-only fields", () => {
@@ -18,6 +20,8 @@ describe("plan management", () => {
     settings.node_name_overrides.node = "Osaka";
     expect(plan.node_name_overrides.node).toBe("Tokyo");
     expect(settings.node_name_override_enabled).toBe(true);
+    settings.auto_speed_rules[0].limit_mbps = 20;
+    expect(plan.auto_speed_rules[0].limit_mbps).toBe(10);
   });
   it("uses revisions and explicit runtime acknowledgment for changes", async () => {
     const calls: Array<[string, RequestInit | undefined]> = [];

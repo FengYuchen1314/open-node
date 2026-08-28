@@ -167,8 +167,11 @@ class PlanManagement:
                 getattr(payload, key) == getattr(before.plan, key)
                 for key in SubscriptionPlanCreate.model_fields
                 if key not in {"node_name_overrides", "node_name_override_enabled"}
+                and (key != "auto_speed_rules" or key in payload.model_fields_set)
             )
             plan.node_name_overrides, plan.node_name_override_enabled = aliases, aliases_enabled
+            if "auto_speed_rules" in payload.model_fields_set:
+                plan.auto_speed_rules = [rule.model_dump() for rule in payload.auto_speed_rules]
             for key in (
                 "name",
                 "description",

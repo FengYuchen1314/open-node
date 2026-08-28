@@ -3,6 +3,8 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import SubscriptionAccessPanel from "../components/SubscriptionAccessPanel.vue";
 import PlanManagementDialog from "../components/PlanManagementDialog.vue";
 import PlanNodeAliases from "../components/PlanNodeAliases.vue";
+import AutoSpeedRuleEditor from "../components/AutoSpeedRuleEditor.vue";
+import type { AutoSpeedRule } from "../domain/auto-speed";
 import UserManagementDialog from "../components/UserManagementDialog.vue";
 import UserLoginDialog from "../components/UserLoginDialog.vue";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog.vue";
@@ -148,9 +150,11 @@ const planForm = reactive({
   traffic_mode: "twoway" as SubscriptionTrafficMode,
   node_ids: [] as string[],
   node_name_overrides: {} as Record<string, string>,
+  auto_speed_rules: [] as AutoSpeedRule[],
   node_name_override_enabled: false,
 });
 const planAliasesValid = ref(true);
+const planRulesValid = ref(true);
 const planAliasNodes = computed(() => planForm.node_ids.map(id => ({ id, name: nodes.value.find(node => node.id === id)?.name ?? id })));
 const assignForm = reactive({
   username: "",
@@ -408,7 +412,7 @@ async function createPresetNode() {
 }
 
 async function submitPlan() {
-  if (!planAliasesValid.value) return;
+  if (!planAliasesValid.value || !planRulesValid.value) return;
   const name = planForm.name.trim();
   if (!name) {
     errorMessage.value = "Plan name is required.";
@@ -429,6 +433,7 @@ async function submitPlan() {
       node_ids: [...planForm.node_ids],
       node_name_overrides: { ...planForm.node_name_overrides },
       node_name_override_enabled: planForm.node_name_override_enabled,
+      auto_speed_rules: planForm.auto_speed_rules.map(rule => ({ ...rule })),
       node_multipliers: Object.fromEntries(planForm.node_ids.map((nodeId) => [nodeId, 1])),
       speed_limit_mbps: planForm.speed_limit_mbps,
       device_limit: planForm.device_limit,
@@ -731,6 +736,7 @@ function resetPlanForm() {
     traffic_mode: "twoway" as SubscriptionTrafficMode,
     node_ids: [],
     node_name_overrides: {},
+    auto_speed_rules: [],
     node_name_override_enabled: false,
   });
 }
@@ -1233,9 +1239,10 @@ function formatBytes(value: number) {
                 variant="outlined"
               />
               <PlanNodeAliases v-model:names="planForm.node_name_overrides" v-model:enabled="planForm.node_name_override_enabled" :nodes="planAliasNodes" :disabled="savingAction === 'plan'" @valid="planAliasesValid = $event" />
+              <AutoSpeedRuleEditor v-model="planForm.auto_speed_rules" :disabled="savingAction === 'plan'" @valid="planRulesValid = $event" />
               <v-btn
                 :loading="savingAction === 'plan'"
-                :disabled="!planAliasesValid"
+                :disabled="!planAliasesValid || !planRulesValid"
                 color="primary"
                 prepend-icon="mdi-plus"
                 type="submit"

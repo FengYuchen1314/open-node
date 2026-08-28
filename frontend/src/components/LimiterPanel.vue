@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
+import AutoSpeedRuleEditor from "./AutoSpeedRuleEditor.vue";
+import { validAutoSpeedRule, type AutoSpeedRule as Rule } from "../domain/auto-speed";
 
 import type { AgentCommand, AgentLimiterOperationRequest, XrayRuntimeInbound } from "../domain/inventory";
 import { listServerCommands, queueAgentOperation } from "../services/inventory";
 
-type User = { uid: number; email: string; speed_limit: number; device_limit: number; conn_group?: string };
-type Rule = {
-  type: "sustained" | "burst"; threshold_mbps: number; sustained_seconds: number;
-  window_seconds: number; burst_count: number; limit_mbps: number; limit_duration: number;
-};
+type User = { uid: number; email: string; speed_limit: number; device_limit: number; conn_group?: string; auto_speed_rules?: Rule[] };
 type Policy = { inbound_tag: string; node_limit: number; users: User[] | null; auto_speed_rules: Rule[] | null };
 type Snapshot = {
   available: boolean; message?: string; revision?: string; inbounds?: Policy[];
@@ -16,15 +14,14 @@ type Snapshot = {
   connection_rejections?: Record<string, number>;
   automatic_limits?: Record<string, { bytes_per_second: number; until: string }>;
 };
-type UserRow = { key: number; uid: number; email: string; mbps: number; connections: number; group: string };
-type RuleRow = Rule & { key: number };
+type UserRow = { key: number; uid: number; email: string; mbps: number; connections: number; group: string; auto_speed_rules: Rule[] };
 
 const props = defineProps<{ serverId: string; inbounds: XrayRuntimeInbound[] }>();
 const emit = defineEmits<{ commands: [serverId: string, commands: AgentCommand[]] }>();
 const snapshot = ref<Snapshot | null>(null);
 const selectedTag = ref("");
 const users = ref<UserRow[]>([]);
-const rules = ref<RuleRow[]>([]);
+const rules = ref<Rule[]>([]);
 const nodeMbps = ref(0);
 const search = ref("");
 const page = ref(1);
@@ -58,14 +55,7 @@ const valid = computed(() => {
         !Number.isInteger(user.connections) || user.connections < 0 || user.connections > 1000000) return false;
     emails.add(user.email.trim());
   }
-  return rules.value.every((rule) =>
-    validRate(rule.threshold_mbps, false) && validRate(rule.limit_mbps, false) &&
-    Number.isInteger(rule.sustained_seconds) && rule.sustained_seconds >= 1 && rule.sustained_seconds <= 86400 &&
-    Number.isInteger(rule.limit_duration) && rule.limit_duration >= 1 && rule.limit_duration <= 86400 &&
-    (rule.type !== "burst" || (Number.isInteger(rule.window_seconds) &&
-      rule.window_seconds >= rule.sustained_seconds && rule.window_seconds <= 86400 &&
-      Number.isInteger(rule.burst_count) && rule.burst_count >= 1 && rule.burst_count <= 10000)),
-  );
+  return rules.value.length <= 100 && rules.value.every(validAutoSpeedRule);
 });
 
 watch(() => props.serverId, () => {
@@ -92,13 +82,14 @@ function populate() {
   const policy = snapshot.value?.inbounds?.find((item) => item.inbound_tag === selectedTag.value);
   const emails = props.inbounds.find((item) => item.tag === selectedTag.value)?.user_emails ?? [];
   nodeMbps.value = (policy?.node_limit ?? 0) / 125000;
-  users.value = (policy?.users ?? emails.map((email) => ({
+  users.value = (policy?.users ?? emails.map((email): User => ({
     uid: 0, email, speed_limit: 0, device_limit: 0, conn_group: "",
   }))).map((user) => ({
     key: ++key, uid: user.uid, email: user.email, mbps: user.speed_limit / 125000,
     connections: user.device_limit, group: user.conn_group ?? "",
+    auto_speed_rules: (user.auto_speed_rules ?? []).map(rule => ({ ...rule })),
   }));
-  rules.value = (policy?.auto_speed_rules ?? []).map((rule) => ({ ...rule, key: ++key }));
+  rules.value = (policy?.auto_speed_rules ?? []).map((rule) => ({ ...rule }));
   search.value = "";
   page.value = 1;
 }
@@ -148,14 +139,9 @@ async function refresh() { await run("limiter_status"); }
 function addUser() {
   const emails = props.inbounds.find((item) => item.tag === selectedTag.value)?.user_emails ?? [];
   users.value.push({ key: ++key, uid: 0, email: emails.find((email) => !users.value.some((user) => user.email === email)) ?? "",
-    mbps: 0, connections: 0, group: "" });
+    mbps: 0, connections: 0, group: "", auto_speed_rules: [] });
   search.value = "";
   page.value = Math.ceil(users.value.length / 8);
-}
-
-function addRule() {
-  rules.value.push({ key: ++key, type: "sustained", threshold_mbps: 50,
-    sustained_seconds: 30, window_seconds: 300, burst_count: 3, limit_mbps: 10, limit_duration: 60 });
 }
 
 async function save() {
@@ -166,8 +152,9 @@ async function save() {
     users: users.value.map((user) => ({
       uid: user.uid, email: user.email.trim(), speed_limit: Math.round(user.mbps * 125000),
       device_limit: user.connections, conn_group: user.group.trim(),
+      ...(user.auto_speed_rules.length ? { auto_speed_rules: user.auto_speed_rules.map(rule => ({ ...rule })) } : {}),
     })),
-    auto_speed_rules: rules.value.map(({ key: _key, ...rule }) => rule),
+    auto_speed_rules: rules.value.map(rule => ({ ...rule })),
   });
 }
 
@@ -221,6 +208,7 @@ async function remove() {
           <span>{{ snapshot.conn_counts?.[user.group || user.email] ?? 0 }} active</span>
           <span>{{ ((snapshot.user_speeds?.[user.email] ?? 0) / 125000).toFixed(2) }} Mbps</span>
           <span>{{ snapshot.connection_rejections?.[user.email] ?? 0 }} rejected</span>
+          <span v-if="user.auto_speed_rules.length">{{ user.auto_speed_rules.length }} automatic rules</span>
           <span v-if="snapshot.automatic_limits?.[selectedTag + '\0' + user.email]">
             Auto {{ (snapshot.automatic_limits[selectedTag + '\0' + user.email].bytes_per_second / 125000).toFixed(2) }} Mbps
           </span>
@@ -234,35 +222,7 @@ async function remove() {
       </div>
       <p v-if="!visibleUsers.length" class="limiter-empty">No users</p>
       <v-pagination v-if="pages > 1" v-model="page" :length="pages" :total-visible="4" density="compact" />
-      <div class="limiter-toolbar">
-        <h3 class="section-title compact-title">Automatic limits</h3>
-        <v-spacer />
-        <v-tooltip text="Add automatic rule"><template #activator="{ props: tip }">
-          <v-btn v-bind="tip" icon="mdi-plus" variant="text" aria-label="Add automatic rule"
-            :disabled="busy || rules.length >= 100 || !selectedTag" @click="addRule" />
-        </template></v-tooltip>
-      </div>
-      <div v-for="(rule, index) in rules" :key="rule.key" class="limiter-rule">
-        <div class="limiter-toolbar">
-          <v-btn-toggle v-model="rule.type" mandatory variant="outlined" density="compact" :disabled="busy">
-            <v-btn value="sustained">Sustained</v-btn><v-btn value="burst">Burst</v-btn>
-          </v-btn-toggle>
-          <v-spacer />
-          <v-tooltip text="Remove automatic rule"><template #activator="{ props: tip }">
-            <v-btn v-bind="tip" icon="mdi-delete-outline" variant="text" size="small" :disabled="busy"
-              :aria-label="'Remove automatic rule ' + (index + 1)" @click="rules = rules.filter((item) => item.key !== rule.key)" />
-          </template></v-tooltip>
-        </div>
-        <div class="limiter-rule-fields">
-          <v-text-field v-model.number="rule.threshold_mbps" label="Trigger Mbps" type="number" min="0.000008" step="any" variant="outlined" density="compact" hide-details />
-          <v-text-field v-model.number="rule.sustained_seconds" label="Hold seconds" type="number" min="1" step="1" variant="outlined" density="compact" hide-details />
-          <v-text-field v-model.number="rule.limit_mbps" label="Cap Mbps" type="number" min="0.000008" step="any" variant="outlined" density="compact" hide-details />
-          <v-text-field v-model.number="rule.limit_duration" label="Duration seconds" type="number" min="1" step="1" variant="outlined" density="compact" hide-details />
-          <v-text-field v-if="rule.type === 'burst'" v-model.number="rule.window_seconds" label="Window seconds" type="number" min="1" step="1" variant="outlined" density="compact" hide-details />
-          <v-text-field v-if="rule.type === 'burst'" v-model.number="rule.burst_count" label="Bursts" type="number" min="1" step="1" variant="outlined" density="compact" hide-details />
-        </div>
-      </div>
-      <p v-if="!rules.length" class="limiter-empty">No automatic rules</p>
+      <AutoSpeedRuleEditor v-model="rules" :disabled="busy || !selectedTag" />
       <div class="limiter-actions">
         <v-btn type="submit" prepend-icon="mdi-check" color="primary" :disabled="busy || !valid">Save limits</v-btn>
         <v-btn prepend-icon="mdi-delete-outline" variant="text" color="error" :disabled="busy || !hasPolicy"

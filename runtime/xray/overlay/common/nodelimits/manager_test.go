@@ -243,6 +243,99 @@ func TestAutomaticRules(t *testing.T) {
 	}
 }
 
+func TestPerUserAutomaticRules(t *testing.T) {
+	for _, kind := range []string{"sustained", "burst"} {
+		t.Run(kind, func(t *testing.T) {
+			m := fixture(t)
+			p := policy()
+			p.Users[0].DeviceLimit = 0
+			p.Users[1].DeviceLimit = 0
+			p.Users[0].AutoSpeedRules = []Rule{{Type: kind, ThresholdMbps: .001,
+				SustainedSeconds: 1, WindowSeconds: 10, BurstCount: 2,
+				LimitMbps: .0008, LimitDuration: 5}}
+			applyPolicy(t, m, p)
+			alice, cancel, err := connect(m, "alice", func() {})
+			defer cancel()
+			if err != nil {
+				t.Fatal(err)
+			}
+			other, otherCancel, err := connect(m, "alias", func() {})
+			defer otherCancel()
+			if err != nil {
+				t.Fatal(err)
+			}
+			start := m.lastTick
+			sample := func(second int, bytes int64) {
+				alice.state.total.Add(bytes)
+				other.state.total.Add(bytes)
+				m.evaluate(start.Add(time.Duration(second) * time.Second))
+			}
+			sample(1, 10000)
+			if kind == "sustained" {
+				sample(2, 10000)
+			} else {
+				sample(2, 0)
+				sample(3, 10000)
+				sample(4, 0)
+			}
+			if alice.state.autoRate != 100 || other.state.autoRate != 0 {
+				t.Fatal("automatic rule crossed user boundary")
+			}
+			until := alice.state.until
+			p.Users[1].SpeedLimit = 500
+			applyPolicy(t, m, p)
+			if alice.state.until != until {
+				t.Fatal("unrelated user edit reset active cap")
+			}
+			p.Users[0].SpeedLimit = 50
+			applyPolicy(t, m, p)
+			if float64(alice.state.bucket.limiter.Limit()) != 50 || alice.state.until != until {
+				t.Fatal("automatic cap relaxed a stricter static cap")
+			}
+			sample(10, 0)
+			if alice.state.autoRate != 0 || float64(alice.state.bucket.limiter.Limit()) != 50 {
+				t.Fatal("automatic expiry did not restore static cap")
+			}
+			p.Users[0].AutoSpeedRules = nil
+			applyPolicy(t, m, p)
+			if len(alice.state.configuration) != 0 {
+				t.Fatal("removed user rules still active")
+			}
+		})
+	}
+}
+
+func TestPerUserRuleValidationAndInboundPriority(t *testing.T) {
+	p := policy()
+	p.Users[0].AutoSpeedRules = []Rule{{Type: "invalid"}}
+	if p.validate() == nil {
+		t.Fatal("invalid user rule accepted")
+	}
+	p.Users[0].AutoSpeedRules = make([]Rule, 101)
+	if p.validate() == nil {
+		t.Fatal("too many user rules accepted")
+	}
+	m := fixture(t)
+	rule := Rule{Type: "sustained", ThresholdMbps: .001, SustainedSeconds: 1, LimitMbps: .0008, LimitDuration: 5}
+	p.AutoSpeedRules = []Rule{rule}
+	rule.LimitMbps = .0016
+	p.Users[0].AutoSpeedRules = []Rule{rule}
+	applyPolicy(t, m, p)
+	f, cancel, err := connect(m, "alice", func() {})
+	defer cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := m.lastTick
+	for second := 1; second <= 2; second++ {
+		f.state.total.Add(10000)
+		m.evaluate(start.Add(time.Duration(second) * time.Second))
+	}
+	if f.state.autoRate != 100 {
+		t.Fatal("inbound rules lost precedence")
+	}
+}
+
 func TestPersistenceAndRevision(t *testing.T) {
 	m := fixture(t)
 	before := m.snapshot()["revision"].(string)

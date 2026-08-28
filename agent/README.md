@@ -137,6 +137,11 @@ Optional [native limits](../docs/native-limits.md) enforce user rates, shared
 concurrent-connection quotas and automatic caps inside the free runtime.
 Limited plan batches persist their policies before enabling credentials;
 unsupported binaries and old Agents cannot silently discard those limits.
+Per-plan sustained/burst rules bind to individual credential identities. The
+Agent advertises `user_auto_speed_rules` and requires the free core's integer
+`user_auto_speed_rules: 1` capability before saving them. Upgrade both components
+for this feature. Stored per-user rules block an incompatible core downgrade;
+static-only policies still support the earlier free limiter core.
 Unsupported operations return 501 rather than reporting success. Public WARP
 provider verification and further migration workflows remain release gates.
 Native [fork protocol user management](../docs/fork-runtime.md) now edits

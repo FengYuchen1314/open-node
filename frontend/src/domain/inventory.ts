@@ -724,6 +724,7 @@ export interface AgentLimiterUser {
   speed_limit?: number;
   device_limit?: number;
   conn_group?: string;
+  auto_speed_rules?: import("./auto-speed").AutoSpeedRule[];
 }
 
 export interface AgentLimiterOperationRequest {

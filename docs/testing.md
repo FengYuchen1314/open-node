@@ -119,6 +119,27 @@ real traffic. Credentials, subscription keys, the unrelated plan and runtime
 PID remain unchanged. It captures 1440/390/320px views and removes its temporary
 Agent installation. See [plan-management.md](plan-management.md) for semantics.
 
+## Plan Speed Rules Smoke
+
+Use the current Agent wheel, built frontend and a free Xray binary reporting
+`user_auto_speed_rules: 1` on the VPS:
+
+```bash
+python scripts/vps/smoke-plan-speed-rules.py \
+  --xray /absolute/path/to/xray \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /absolute/path/to/nginx \
+  --output /tmp/open-node-plan-rule-screenshots \
+  --transport websocket
+```
+
+Repeat with `--transport http`. Real clients exercise sustained and burst
+activation, measured throttling, expiry, an unrelated plan, hot refresh and
+restart persistence. Browser coverage includes creation, ordered edits,
+invalid values, continuous typing, clearing and preservation from Config >
+Limits. Exports, credentials and subscription keys remain unchanged.
+Screenshots cover 1440/390/320px. The fixture removes its non-root Agent.
+
 ## Subscription Client Smoke
 
 Build the frontend and [patched runtime](fork-runtime.md) on the VPS. Use the
@@ -1022,6 +1043,42 @@ lease races, overlapping reservations, draining earlier sequences, late
 rollback rejection, restart persistence and missing-column SQLite migration.
 
 ## Latest Verification
+
+Per-plan automatic speed rules passed on the designated VPS:
+
+- Backend full regression: 815 tests. The final command-payload guard then
+  passed 99 focused tests, including four new malformed-payload cases.
+  Agent: 536 tests and wheel build; frontend: 202 tests and production build.
+- The free core rebuilt successfully; protocol/core tests and the native
+  limiter/dispatcher race tests passed. The existing multi-protocol smoke
+  passed real TCP and supported UDP limits, Vision TLS bulk, shared connection
+  quotas, live updates, sustained/burst rules, expiry and restart persistence.
+- HTTP and WebSocket plan smokes passed create/edit/order/clear, validation,
+  sequential input, native-editor preservation and independent subscribers.
+  A 64 KiB echo took about 2.00 seconds under the automatic 0.5 Mbps combined
+  cap, and under 1 ms for the other plan and after expiry, on this local VPS
+  fixture. This is an enforcement check, not a network performance benchmark.
+- Credentials, subscription exports and tokens stayed unchanged. Runtime
+  policy survived restart; unchanged hot policy saves preserved active timers.
+  Old Agent/core capability rejection, catalog roundtrips, legacy omission
+  and additive schema upgrades passed focused tests.
+- Desktop 1440px, mobile 390px and narrow 320px screenshots were inspected.
+  Ruff passed for changed Python sources and smoke scripts. Temporary non-root
+  Agent installations were removed after each smoke.
+
+Verified Linux amd64 artifacts for this milestone:
+
+- Agent wheel SHA-256:
+  `7cf9f6463e13f691dbf198ded77fa49f3923cd600d64f507a47f2fb52a4374ca`.
+- Free core SHA-256:
+  `348434f6700cd49df8015c7707910fdc1bbfd196f9ea3fea05f8ed4189d4dc7a`.
+- Matching MPL-2.0 source archive SHA-256:
+  `4c0fa9c730ea58f88e3b0d5dca5b1a456085a3933a69d29eb73cf1dc79f63d43`.
+
+The existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+These results do not close the remaining [migration gates](migration-map.md).
+
+## Earlier Plan Alias Verification
 
 Plan node aliases passed on the designated VPS:
 

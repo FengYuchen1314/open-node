@@ -257,8 +257,10 @@ These passing command and snapshot checks do not prove a complete replacement:
   credentials. Revision guards, transaction rollback and per-user deployment
   status protect concurrent changes. Per-plan node aliases now support a saved
   enable switch, validation, all five subscription formats, catalog remapping
-  and removal cleanup without changing runtime identity. Automatic speed-rule
-  binding and custom Clash/Surge template selection remain to be migrated.
+  and removal cleanup without changing runtime identity. Ordered automatic
+  speed rules bind to each subscriber's credentials, preserve other plans and
+  inbound rules, and reject incapable Agents/runtimes. Custom Clash/Surge
+  template selection remains to be migrated.
 - Native [node resource cleanup](node-cleanup.md) now supplies revision-guarded
   remote removal, suspended-template and limiter cleanup, local outbound
   dependency closure, shared-rule preservation and recoverable receipts.

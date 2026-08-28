@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import PlanNodeAliases from "./PlanNodeAliases.vue";
+import AutoSpeedRuleEditor from "./AutoSpeedRuleEditor.vue";
 import type { ManagedNode, SubscriptionAccessResponse } from "../domain/subscriptions";
 import { getSubscriptionAccess, syncSubscriptionAccess } from "../services/subscriptions";
 import { getPlanManagement, planSettings, removePlan, savePlan, type PlanManagementRead, type PlanManagementResult, type PlanOperation, type PlanSettings } from "../services/plan-management";
@@ -15,6 +16,7 @@ const error = ref("");
 const acknowledgment = ref(false);
 const confirmName = ref("");
 const aliasesValid = ref(true);
+const rulesValid = ref(true);
 const states = reactive<Record<string, SubscriptionAccessResponse>>({});
 const stateErrors = reactive<Record<string, string>>({});
 let version = 0;
@@ -24,7 +26,7 @@ const removed = computed(() => !!result.value && props.mode !== "edit");
 const expectedName = computed(() => props.mode === "unassign" ? props.id : detail.value?.plan.name ?? "");
 const options = computed(() => props.nodes.filter(node => !node.removal_id).map(node => ({ title: node.name, value: node.id })));
 const selectedNodes = computed(() => form.value?.node_ids.map(id => ({ id, name: props.nodes.find(node => node.id === id)?.name ?? id })) ?? []);
-const canSubmit = computed(() => !busy.value && !!detail.value && acknowledgment.value && !removed.value && (props.mode === "edit" ? !!form.value?.name.trim() && aliasesValid.value : confirmName.value === expectedName.value));
+const canSubmit = computed(() => !busy.value && !!detail.value && acknowledgment.value && !removed.value && (props.mode === "edit" ? !!form.value?.name.trim() && aliasesValid.value && rulesValid.value : confirmName.value === expectedName.value));
 
 function resetStatus() {
   clearTimeout(timer);
@@ -133,6 +135,7 @@ onBeforeUnmount(() => { ++version; resetStatus(); });
               </div>
               </template>
             </PlanNodeAliases>
+            <AutoSpeedRuleEditor v-model="form.auto_speed_rules" :disabled="busy" @valid="rulesValid = $event" />
           </v-form>
           <h3 v-else>{{ detail.plan.name }}</h3>
           <section class="plan-subscribers" aria-label="Affected subscribers">

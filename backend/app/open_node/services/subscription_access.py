@@ -296,7 +296,7 @@ class SubscriptionAccessCoordinator:
                     (limit.device_limit for limit in limits if limit.device_limit),
                     default=0,
                 )
-                if speed or devices or native:
+                if speed or devices or native or plan.auto_speed_rules:
                     group = json.dumps(
                         [row.username, row.server_id, binding["tag"]], separators=(",", ":")
                     ).encode()
@@ -310,6 +310,10 @@ class SubscriptionAccessCoordinator:
                             "conn_group": "account-" + hashlib.sha256(group).hexdigest(),
                         },
                     }
+                    if plan.auto_speed_rules:
+                        entry["limiter"]["user"]["auto_speed_rules"] = copy.deepcopy(
+                            plan.auto_speed_rules
+                        )
                 for node in nodes:
                     route = {"user_email": binding["client"]["email"]}
                     if node.routed_rule_marktag:
@@ -421,12 +425,16 @@ class SubscriptionAccessCoordinator:
                     continue
                 expected = (entry.get("limiter") or {}).get("user", {})
                 actual = requested.get(key, {})
-                if any(
-                    actual.get(field, 0) != expected.get(field, 0)
-                    for field in ("speed_limit", "device_limit")
-                ) or (
-                    expected.get("device_limit")
-                    and actual.get("conn_group") != expected.get("conn_group")
+                if (
+                    any(
+                        actual.get(field, 0) != expected.get(field, 0)
+                        for field in ("speed_limit", "device_limit")
+                    )
+                    or (actual.get("auto_speed_rules", []) != expected.get("auto_speed_rules", []))
+                    or (
+                        expected.get("device_limit")
+                        and actual.get("conn_group") != expected.get("conn_group")
+                    )
                 ):
                     self.skip(
                         session,
@@ -446,6 +454,14 @@ class SubscriptionAccessCoordinator:
             error = "Not sent: upgrade the Agent for managed subscription access"
         elif any(entry.get("limiter") for entry in entries) and not agent.capability_native_limiter:
             error = "Not sent: managed plan limits require native limiter support"
+        elif (
+            any(
+                (entry.get("limiter") or {}).get("user", {}).get("auto_speed_rules")
+                for entry in entries
+            )
+            and not agent.capability_user_auto_speed_rules
+        ):
+            error = "Not sent: upgrade the Agent for per-user automatic speed rules"
         row = session.scalar(
             select(SubscriptionAccessModel).where(SubscriptionAccessModel.command_id == command.id)
         )

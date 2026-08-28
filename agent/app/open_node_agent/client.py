@@ -105,6 +105,7 @@ class Agent:
                 "stream": True,
                 "return_route_test": self.operations.diagnostics.route_available(),
                 "native_limiter": True,
+                "user_auto_speed_rules": True,
                 "subscription_access": True,
                 "node_cleanup": True,
             },

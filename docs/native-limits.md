@@ -7,7 +7,8 @@ requests. The control plane remains MIT; the runtime extension is MPL-2.0.
 ## Runtime Setup
 
 Build the pinned compatibility runtime with the included limiter patch and
-overlay. `xray open-node-capabilities` reports `limiter: 1`. Install that
+overlay. `xray open-node-capabilities` reports `limiter: 1` and
+`user_auto_speed_rules: 1`. Install that
 binary through the host deployment CLI. Managed mode supplies
 `OPEN_NODE_LIMITER_DIR=<agent state directory>/limits` to Xray automatically.
 Official Xray continues to work for unlimited configurations.
@@ -60,12 +61,17 @@ completed above-threshold periods of that length within `window_seconds`;
 it triggers after `burst_count` occurrences. The first matching rule applies
 `limit_mbps` for `limit_duration` seconds without relaxing a stricter static
 cap. Expiry restores the static cap. An unchanged policy refresh preserves an
-active automatic cap; automatic timers and live counters restart with Xray.
+active automatic cap. Inbound-wide rules run before the user's ordered rules.
+Changing another user's rules preserves this user's active timer; changing
+the user's effective rules resets its timer. Automatic timers and live
+counters restart with Xray.
 
 ## Operations
 
 Config > Limits reads native state, edits user and per-user inbound ceilings,
-manages automatic rules and confirms policy removal. Save/remove include the
+manages inbound-wide automatic rules and confirms policy removal. It preserves
+per-user rules supplied by plans when saving static or inbound-wide settings.
+Save/remove include the
 observed revision. A conflicting edit fails and requires a refresh.
 
 - `POST /api/v1/servers/{id}/operations/limiter/status` queues a GET of native
@@ -88,6 +94,22 @@ Queued plan provisioning sends per-user caps alongside credentials.
 including direct-parent and explicit-unlimited handling. Aliases of the same account
 and parent inbound share a connection group. Conflicting limits for the same
 credential use their smallest positive values.
+
+Plans also carry an ordered `auto_speed_rules` list, edited in their create
+and settings forms. Rules bind to each subscriber credential, not every user
+of a shared inbound. An empty list disables package rules; explicit zero
+static overrides do not disable them. Inbound-wide administrator rules remain
+independent and take precedence when both match. Plan changes use the managed
+access reconciliation contract and may restart Xray; they are not guaranteed
+to be hot updates like the direct limiter operation.
+
+Upgrade both the Agent and the free runtime before enabling package rules.
+The Agent advertises `user_auto_speed_rules`, and the runtime must return the
+integer capability `user_auto_speed_rules: 1`. An older Agent cannot lease
+commands containing per-user rules. A current Agent rejects an older runtime
+before writing rules or credentials. Stored rules also block a downgrade to
+a runtime that cannot enforce them. Empty per-user rule fields are omitted
+from the wire so static-only policies still work with the earlier free core.
 
 The Agent validates the candidate Xray configuration, then persists the native
 caps before writing credentials. A config-write/restart failure can therefore

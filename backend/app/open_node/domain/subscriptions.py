@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from open_node.domain.auto_speed import AutoSpeedRule
 from open_node.domain.inventory import AgentCommandRead
 from open_node.domain.user_limits import CatalogUserLimitOverrides, UserLimitOverrides
 
@@ -687,6 +688,7 @@ class SubscriptionCatalogPlanEntry(BaseModel):
     node_multipliers: dict[str, float] = Field(default_factory=dict)
     node_name_overrides: dict[str, str] = Field(default_factory=dict, max_length=1000)
     node_name_override_enabled: bool = False
+    auto_speed_rules: list[AutoSpeedRule] = Field(default_factory=list, max_length=100)
     node_speed_limits: dict[str, float] = Field(default_factory=dict)
     node_device_limits: dict[str, int] = Field(default_factory=dict)
     speed_limit_mbps: float = Field(default=0, ge=0, le=(1 << 50) / 125000, allow_inf_nan=False)
@@ -789,6 +791,7 @@ class SubscriptionPlanCreate(BaseModel):
     node_multipliers: dict[UUID, float] = Field(default_factory=dict)
     node_name_overrides: dict[UUID, str] = Field(default_factory=dict, max_length=1000)
     node_name_override_enabled: bool = False
+    auto_speed_rules: list[AutoSpeedRule] = Field(default_factory=list, max_length=100)
     node_speed_limits: dict[UUID, float] = Field(default_factory=dict)
     node_device_limits: dict[UUID, int] = Field(default_factory=dict)
     speed_limit_mbps: float = Field(default=0, ge=0, le=(1 << 50) / 125000, allow_inf_nan=False)

@@ -14,11 +14,12 @@ const MaxBytes = 2 * 1024 * 1024
 const maxRate = 1 << 50
 
 type User struct {
-	UID         int64  `json:"uid"`
-	Email       string `json:"email"`
-	SpeedLimit  int64  `json:"speed_limit"`
-	DeviceLimit int    `json:"device_limit"`
-	ConnGroup   string `json:"conn_group,omitempty"`
+	UID            int64  `json:"uid"`
+	Email          string `json:"email"`
+	SpeedLimit     int64  `json:"speed_limit"`
+	DeviceLimit    int    `json:"device_limit"`
+	ConnGroup      string `json:"conn_group,omitempty"`
+	AutoSpeedRules []Rule `json:"auto_speed_rules,omitempty"`
 }
 
 type Rule struct {
@@ -76,12 +77,23 @@ func (p Policy) validate() error {
 			return errors.New("invalid or duplicate limiter user")
 		}
 		seen[u.Email] = true
+		if err := validateRules(u.AutoSpeedRules); err != nil {
+			return err
+		}
 	}
-	for _, r := range p.AutoSpeedRules {
+	return validateRules(p.AutoSpeedRules)
+}
+
+func validateRules(rules []Rule) error {
+	if len(rules) > 100 {
+		return errors.New("too many automatic speed rules")
+	}
+	for _, r := range rules {
 		if (r.Type != "sustained" && r.Type != "burst") ||
 			!positiveMbps(r.ThresholdMbps) || !positiveMbps(r.LimitMbps) ||
 			r.SustainedSeconds < 1 || r.SustainedSeconds > 86400 ||
 			r.LimitDuration < 1 || r.LimitDuration > 86400 ||
+			r.WindowSeconds < 0 || r.WindowSeconds > 86400 || r.BurstCount < 0 || r.BurstCount > 10000 ||
 			(r.Type == "burst" && (r.WindowSeconds < r.SustainedSeconds ||
 				r.WindowSeconds > 86400 || r.BurstCount < 1 || r.BurstCount > 10000)) {
 			return errors.New("invalid automatic speed rule")

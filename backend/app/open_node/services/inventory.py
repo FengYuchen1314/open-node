@@ -823,6 +823,7 @@ class AgentModel(Base):
     capability_stream: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_return_route_test: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_native_limiter: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_user_auto_speed_rules: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_subscription_access: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_node_cleanup: Mapped[bool] = mapped_column(Boolean, default=False)
     warp_installed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -1162,6 +1163,7 @@ class SubscriptionPlanModel(Base):
     node_multipliers: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
     node_name_overrides: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     node_name_override_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_speed_rules: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     node_speed_limits: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
     node_device_limits: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
     speed_limit_mbps: Mapped[float] = mapped_column(Float, default=0)
@@ -1366,6 +1368,7 @@ class InventoryStore:
                 {
                     "node_name_overrides": "JSON NOT NULL DEFAULT '{}'",
                     "node_name_override_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+                    "auto_speed_rules": "JSON NOT NULL DEFAULT '[]'",
                 },
             )
         if "product_user_subscription_tokens" in table_names:
@@ -1392,6 +1395,7 @@ class InventoryStore:
                 "agents",
                 {
                     "capability_native_limiter": "BOOLEAN NOT NULL DEFAULT 0",
+                    "capability_user_auto_speed_rules": "BOOLEAN NOT NULL DEFAULT 0",
                     "capability_subscription_access": "BOOLEAN NOT NULL DEFAULT 0",
                     "capability_node_cleanup": "BOOLEAN NOT NULL DEFAULT 0",
                 },
@@ -1629,6 +1633,7 @@ class InventoryStore:
             agent.capability_stream = payload.capabilities.stream
             agent.capability_return_route_test = payload.capabilities.return_route_test
             agent.capability_native_limiter = payload.capabilities.native_limiter
+            agent.capability_user_auto_speed_rules = payload.capabilities.user_auto_speed_rules
             agent.capability_subscription_access = payload.capabilities.subscription_access
             agent.capability_node_cleanup = payload.capabilities.node_cleanup
             agent.warp_installed = payload.warp_installed
@@ -3378,6 +3383,7 @@ class InventoryStore:
                     str(key): value for key, value in payload.node_name_overrides.items()
                 },
                 node_name_override_enabled=payload.node_name_override_enabled,
+                auto_speed_rules=[rule.model_dump() for rule in payload.auto_speed_rules],
                 node_speed_limits=self._uuid_keyed_float_map(payload.node_speed_limits),
                 node_device_limits=self._uuid_keyed_int_map(payload.node_device_limits),
                 speed_limit_mbps=payload.speed_limit_mbps,
@@ -5080,6 +5086,7 @@ class InventoryStore:
                 UUID(node_id): name for node_id, name in (plan.node_name_overrides or {}).items()
             },
             node_name_override_enabled=plan.node_name_override_enabled,
+            auto_speed_rules=plan.auto_speed_rules or [],
             node_speed_limits={
                 UUID(node_id): limit for node_id, limit in (plan.node_speed_limits or {}).items()
             },
@@ -5125,6 +5132,7 @@ class InventoryStore:
                 node_names,
             ),
             node_name_override_enabled=plan.node_name_override_enabled,
+            auto_speed_rules=plan.auto_speed_rules or [],
             node_speed_limits=InventoryStore._catalog_map_keys_to_names(
                 plan.node_speed_limits or {},
                 node_names,
@@ -5240,6 +5248,7 @@ class InventoryStore:
                 entry.node_name_overrides, node_ids_by_name
             ),
             node_name_override_enabled=entry.node_name_override_enabled,
+            auto_speed_rules=[rule.model_dump() for rule in entry.auto_speed_rules],
             node_speed_limits=cls._catalog_map_keys_to_ids(
                 entry.node_speed_limits,
                 node_ids_by_name,
@@ -5270,6 +5279,8 @@ class InventoryStore:
         plan.is_reset = entry.is_reset
         plan.reset_day = entry.reset_day
         plan.node_ids = node_ids
+        if "auto_speed_rules" in entry.model_fields_set:
+            plan.auto_speed_rules = [rule.model_dump() for rule in entry.auto_speed_rules]
         if "node_name_overrides" in entry.model_fields_set:
             plan.node_name_overrides = cls._catalog_map_keys_to_ids(
                 entry.node_name_overrides, node_ids_by_name
@@ -5461,7 +5472,7 @@ class InventoryStore:
                 connections = limits.device_limit
                 agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
                 native = agent is not None and agent.capability_native_limiter
-                if speed or connections or native:
+                if speed or connections or native or plan.auto_speed_rules:
                     group_data = json.dumps(
                         [user.username, server.id, node.inbound_tag], separators=(",", ":")
                     ).encode()
@@ -5476,6 +5487,8 @@ class InventoryStore:
                         },
                     }
                     previous = limiter_bindings.get(inbound_key)
+                    if plan.auto_speed_rules:
+                        binding["user"]["auto_speed_rules"] = deepcopy(plan.auto_speed_rules)
                     if previous:
                         for field in ("speed_limit", "device_limit"):
                             values = [previous["user"][field], binding["user"][field]]
@@ -5485,10 +5498,15 @@ class InventoryStore:
                     else:
                         limiter_bindings[inbound_key] = binding
                         body.setdefault("limiter_users", []).append(binding)
-                    if not native and (speed or connections):
+                    if not native and (speed or connections or plan.auto_speed_rules):
                         warnings.append(
                             f"node {node.name}: limits require a native-limiter Open Node Agent; "
                             "unsupported agents will not receive this provisioning batch"
+                        )
+                    elif plan.auto_speed_rules and not agent.capability_user_auto_speed_rules:
+                        warnings.append(
+                            f"node {node.name}: upgrade the Agent for "
+                            "per-user automatic speed rules"
                         )
 
             if node.routed_rule_marktag or node.routed_outbound_tag:
@@ -6789,6 +6807,7 @@ class InventoryStore:
                 stream=agent.capability_stream,
                 return_route_test=agent.capability_return_route_test,
                 native_limiter=agent.capability_native_limiter,
+                user_auto_speed_rules=agent.capability_user_auto_speed_rules,
                 subscription_access=agent.capability_subscription_access,
                 node_cleanup=agent.capability_node_cleanup,
             ),
@@ -8975,14 +8994,30 @@ class InventoryStore:
             and isinstance(command.body, dict)
             and command.body.get("limiter_users")
         )
-        required_capability = (
-            "native_limiter"
-            if needs_limiter
-            else "node_cleanup"
-            if command.path == "/api/child/node-cleanup"
-            else None
+        body = command.body if isinstance(command.body, dict) else {}
+        raw_users = (
+            body.get("users", [])
+            if command.path == "/api/child/limiter"
+            else body.get("limiter_users", [])
+            if command.path == "/api/child/batch-apply"
+            else []
         )
-        if required_capability:
+        rule_users = raw_users if isinstance(raw_users, list) else []
+        if command.path == "/api/child/batch-apply":
+            rule_users = [item.get("user", {}) for item in rule_users if isinstance(item, dict)]
+        needs_user_rules = any(
+            isinstance(user, dict) and user.get("auto_speed_rules") for user in rule_users
+        )
+        required_capabilities = [
+            capability
+            for capability, needed in (
+                ("native_limiter", needs_limiter),
+                ("user_auto_speed_rules", needs_user_rules),
+                ("node_cleanup", command.path == "/api/child/node-cleanup"),
+            )
+            if needed
+        ]
+        for required_capability in required_capabilities:
             agent = session.scalar(
                 select(AgentModel).where(AgentModel.server_id == command.server_id)
             )
@@ -9076,6 +9111,7 @@ class InventoryStore:
                 or not isinstance(item.get("user"), dict)
                 or item["user"].get("speed_limit", 0) != 0
                 or item["user"].get("device_limit", 0) != 0
+                or bool(item["user"].get("auto_speed_rules"))
                 for item in command.body["limiter_users"]
             )
             revision = confirmation.get("revision") if isinstance(confirmation, dict) else None

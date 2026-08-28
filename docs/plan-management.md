@@ -8,7 +8,7 @@ There is no activation service, license key, paid tier or third-party account.
 
 Editing changes the plan name, description, quota, counted traffic directions,
 default duration/reset preferences, node membership, node aliases, display multipliers and
-native speed/concurrent-connection limits. Per-node limits override plan
+native speed/concurrent-connection limits and automatic speed rules. Per-node limits override plan
 defaults; a blank override inherits, and an explicit zero means unlimited.
 Direct-parent inheritance and [user overrides](user-limits.md) participate in
 the same resolver. User overrides survive edits and take precedence over plan
@@ -63,6 +63,34 @@ warnings. Legacy edits/imports that omit the new fields preserve saved aliases
 on retained nodes. Explicit empty maps clear them. Removing a node or server
 prunes only the associated entries. SQLite upgrades add the two columns with
 empty/disabled defaults and preserve existing plans and credentials.
+
+## Automatic Speed Rules
+
+Create and edit forms support an ordered list of sustained or burst rules.
+Each rule specifies a positive trigger Mbps, hold seconds, cap Mbps and cap
+duration. Burst rules also specify a window and occurrence count. The editor
+supports reordering and removal; invalid values prevent saving. A plan holds
+at most 100 rules, durations are 1-86400 seconds, and the burst window must
+cover the hold duration. Rates must be finite and at least one byte/second.
+
+`auto_speed_rules` bind only to the plan's subscriber credentials. Two plans
+sharing an inbound do not acquire each other's rules. Inbound-wide rules are
+preserved and evaluated first, followed by the user's rules in saved order;
+the first match applies, without relaxing a stricter static cap. Static user
+overrides, including explicit zero, do not remove automatic rules. See
+[native limits](native-limits.md) for sampling and expiry semantics.
+
+Saving updates the durable access intent for managed subscribers, with the
+ordinary restart acknowledgment and pending/applied status. Tokens, credentials
+and exported client configurations remain unchanged. Clearing the list removes
+package rules. Rules persist across runtime restarts, but active timers restart.
+Both the current Agent and the per-user-rule-capable free core are required;
+old components cannot report unenforced rules as applied.
+
+Catalog exports/imports preserve ordered rules. A legacy edit/import that omits
+the field preserves existing rules; an explicit empty list clears them. SQLite
+upgrades default existing plans to an empty list and the new Agent capability
+to false, without changing prior settings.
 
 ## Unassign Or Remove
 
@@ -131,11 +159,17 @@ schema upgrades. `scripts/vps/smoke-plan-node-aliases.py` exercises browser
 creation/editing, stale edits, toggle/clear, subscriber downloads, actual Xray
 forwarding and unchanged runtime PID with both transports at 1440/390/320px.
 
+`backend/tests/test_plan_speed_rules.py` and Agent/native tests cover validation,
+rule ordering, credential isolation, capability rejection, persistence, old
+payloads, catalog roundtrips and schema upgrades. The VPS
+`scripts/vps/smoke-plan-speed-rules.py` checks browser create/edit/reorder/clear,
+native-UI preservation, real sustained/burst caps, expiry, an independent
+subscriber and runtime restart through both transports at 1440/390/320px.
+
 ## Migration Boundaries
 
 This implements the lifecycle of existing Open Node plan fields, not every
-original package feature. Per-plan automatic speed-rule
-binding and custom Clash/Surge template selection still need migration and
+original package feature. Custom Clash/Surge template selection still needs migration and
 real-client verification. [User profile editing and removal](user-management.md)
 and [node editing/removal](node-management.md) are implemented separately.
 These are not license-gated features.

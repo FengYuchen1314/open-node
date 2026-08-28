@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from open_node_agent.runtime import MAX_CONFIG_BYTES, RuntimeFailure, run_command
 
@@ -26,6 +33,14 @@ class LimitUser(LimitModel):
     speed_limit: int = Field(default=0, ge=0, le=MAX_RATE)
     device_limit: int = Field(default=0, ge=0, le=1_000_000)
     conn_group: str = Field(default="", max_length=255)
+    auto_speed_rules: list["SpeedRule"] = Field(default_factory=list, max_length=100)
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        value = handler(self)
+        if not self.auto_speed_rules:
+            value.pop("auto_speed_rules", None)
+        return value
 
     @field_validator("email", "conn_group")
     @classmethod
@@ -200,16 +215,40 @@ class NativeLimiter:
             value = (
                 isinstance(data, dict) and type(data.get("limiter")) is int and data["limiter"] == 1
             )
-            self._capability = (identity, value)
+            self._capability = (
+                identity,
+                value,
+                value
+                and type(data.get("user_auto_speed_rules")) is int
+                and data["user_auto_speed_rules"] == 1,
+            )
             return value
         except (OSError, ValueError, TimeoutError):
             return False
 
     async def require_binary(self, binary: Path | None = None):
-        if self.document()["inbounds"] and not await self.supported(binary):
+        document = self.document()
+        if document["inbounds"] and not await self.supported(binary):
             raise RuntimeFailure(
                 "Stored limiter policies require the free Open Node limiter runtime; "
                 "the selected binary cannot enforce them"
+            )
+        if any(
+            user.get("auto_speed_rules")
+            for policy in document["inbounds"]
+            for user in policy["users"]
+        ):
+            await self.require_user_rules(binary)
+
+    async def require_user_rules(self, binary: Path | None = None):
+        if (
+            not await self.supported(binary)
+            or not self._capability
+            or len(self._capability) < 3
+            or not self._capability[2]
+        ):
+            raise RuntimeFailure(
+                "Upgrade the free Open Node runtime for per-user automatic speed rules"
             )
 
     def require_config(self, config):
@@ -313,6 +352,8 @@ class NativeLimiter:
         if action != "sync":
             raise RuntimeFailure("Unsupported limiter action")
         policy = LimitPolicy.model_validate(value)
+        if any(user.auto_speed_rules for user in policy.users):
+            await self.require_user_rules()
         await self.runtime.binding()
         validate_credentials(self.runtime.read(), policy)
         return await self.request("POST", body=policy.model_dump(), expected=expected)
@@ -321,6 +362,8 @@ class NativeLimiter:
         if not isinstance(entries, list) or len(entries) > 1000:
             raise RuntimeFailure("Invalid batch limiter bindings")
         bindings = [LimitBinding.model_validate(item) for item in entries]
+        if any(item.user.auto_speed_rules for item in bindings):
+            await self.require_user_rules()
         keys = [(item.inbound_tag, item.user.email) for item in bindings]
         if len(set(keys)) != len(keys):
             raise RuntimeFailure("Duplicate batch limiter user")
@@ -333,7 +376,10 @@ class NativeLimiter:
             )
         if not bindings or (
             not self.document()["inbounds"]
-            and not any(item.user.speed_limit or item.user.device_limit for item in bindings)
+            and not any(
+                item.user.speed_limit or item.user.device_limit or item.user.auto_speed_rules
+                for item in bindings
+            )
         ):
             return None
         ok, output = await self.runtime.validate(config)

@@ -78,6 +78,9 @@ Revision guards protect concurrent edits, and the dialog tracks remote access
 confirmation, including pending withdrawal from an offline Agent.
 Per-plan node aliases apply across all five subscription formats, with saved
 enable switches, catalog import/export and no runtime changes for alias-only edits.
+Plans also support ordered sustained/burst speed rules, isolated by subscriber
+credential with native enforcement, expiry and old-runtime rejection. Both the
+current Agent and free runtime are required; see [native limits](docs/native-limits.md).
 
 Server [editing and removal](docs/server-management.md) now include guarded
 profile updates, selective node-address synchronization and an impact preview.

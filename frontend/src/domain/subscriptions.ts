@@ -110,6 +110,7 @@ export interface SubscriptionPlanCreateRequest {
   node_multipliers?: Record<string, number>;
   node_name_overrides?: Record<string, string>;
   node_name_override_enabled?: boolean;
+  auto_speed_rules?: import("./auto-speed").AutoSpeedRule[];
   node_speed_limits?: Record<string, number>;
   node_device_limits?: Record<string, number>;
   speed_limit_mbps?: number;
@@ -127,6 +128,7 @@ export interface SubscriptionPlan extends SubscriptionPlanCreateRequest {
   node_multipliers: Record<string, number>;
   node_name_overrides: Record<string, string>;
   node_name_override_enabled: boolean;
+  auto_speed_rules: import("./auto-speed").AutoSpeedRule[];
   node_speed_limits: Record<string, number>;
   node_device_limits: Record<string, number>;
   speed_limit_mbps: number;
@@ -334,6 +336,7 @@ export interface SubscriptionCatalogPlanEntry {
   node_multipliers: Record<string, number>;
   node_name_overrides?: Record<string, string>;
   node_name_override_enabled?: boolean;
+  auto_speed_rules?: import("./auto-speed").AutoSpeedRule[];
   node_speed_limits: Record<string, number>;
   node_device_limits: Record<string, number>;
   speed_limit_mbps: number;

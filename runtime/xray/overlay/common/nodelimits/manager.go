@@ -30,6 +30,7 @@ type userState struct {
 	until           time.Time
 	autoRate        int64
 	rules           []ruleState
+	configuration   []Rule
 	active          int
 }
 
@@ -77,7 +78,6 @@ func FromEnvironment() *Manager    { return New(os.Getenv("OPEN_NODE_LIMITER_DIR
 func key(tag, email string) string { return tag + "\x00" + email }
 
 func (m *Manager) install(document Document, raw []byte) []func() {
-	previous := m.policies
 	m.document, m.raw = document, raw
 	m.policies, m.users, m.caps = map[string]Policy{}, map[string]User{}, map[string]int64{}
 	for _, p := range document.Inbounds {
@@ -89,8 +89,10 @@ func (m *Manager) install(document Document, raw []byte) []func() {
 		}
 	}
 	for _, state := range m.states {
-		if !reflect.DeepEqual(previous[state.tag].AutoSpeedRules, m.policies[state.tag].AutoSpeedRules) {
-			state.rules = make([]ruleState, len(m.policies[state.tag].AutoSpeedRules))
+		configuration := m.rulesFor(state.tag, state.email)
+		if !reflect.DeepEqual(state.configuration, configuration) {
+			state.configuration = configuration
+			state.rules = make([]ruleState, len(configuration))
 			state.until, state.autoRate = time.Time{}, 0
 		}
 		m.refreshRate(state)
@@ -114,6 +116,16 @@ func (m *Manager) refreshRate(state *userState) {
 	state.bucket.set(minimum(value, state.autoRate))
 }
 
+func (m *Manager) rulesFor(tag, email string) []Rule {
+	inbound := m.policies[tag].AutoSpeedRules
+	user := m.users[key(tag, email)].AutoSpeedRules
+	if len(user) == 0 {
+		return inbound
+	}
+	rules := make([]Rule, 0, len(inbound)+len(user))
+	return append(append(rules, inbound...), user...)
+}
+
 func (m *Manager) acquire(ctx context.Context, interrupt func()) (*flow, error) {
 	if m == nil {
 		return nil, nil
@@ -133,8 +145,9 @@ func (m *Manager) acquire(ctx context.Context, interrupt func()) (*flow, error) 
 	}
 	state := m.states[key(tag, email)]
 	if state == nil {
+		configuration := m.rulesFor(tag, email)
 		state = &userState{tag: tag, email: email, bucket: newBucket(),
-			rules: make([]ruleState, len(m.policies[tag].AutoSpeedRules)), lastSeen: time.Now()}
+			rules: make([]ruleState, len(configuration)), configuration: configuration, lastSeen: time.Now()}
 		m.states[key(tag, email)] = state
 		m.refreshRate(state)
 	}
@@ -192,7 +205,7 @@ func (m *Manager) evaluate(now time.Time) {
 		if now.Before(state.until) {
 			continue
 		}
-		for i, rule := range m.policies[state.tag].AutoSpeedRules {
+		for i, rule := range state.configuration {
 			rs := &state.rules[i]
 			exceeds := float64(state.speed) > rule.ThresholdMbps*125000
 			if exceeds && rs.since.IsZero() {
