@@ -150,6 +150,9 @@ class ProductUserSubscriptionTokenRead(BaseModel):
     username: str
     token: str
     short_code: str
+    generated_short_code: str
+    custom_short_code: str | None
+    revision: str
     subscription_url: str
     short_url: str
     created_at: datetime

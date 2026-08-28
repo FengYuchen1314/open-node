@@ -51,6 +51,11 @@ Remaining migration gates still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
 
+[Custom subscription short codes](docs/subscription-links.md) can be edited
+by administrators and subscribers, with collision/revision protection, original
+key preservation and complete link reset. Subscriber edits require password
+and second-factor proof; no Agent restart is needed.
+
 [Subscriber limits](docs/user-limits.md) add per-user traffic quotas, bandwidth
 and connection overrides, including per-node and parent inheritance. The
 editor, subscription quotas and native provisioning share the same rules.

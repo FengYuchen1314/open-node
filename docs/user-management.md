@@ -113,6 +113,6 @@ All tests, formatting, builds and browser execution run on the configured VPS.
 
 The existing subscriber profile/lifecycle surface now also includes
 [limit overrides](user-limits.md), [login/password/session/TOTP workflows](subscriber-accounts.md)
-and [managed-node editing/removal](node-management.md). Custom short-code
-editing, privately owned routed-node cleanup and the remaining plan
+and [managed-node editing/removal](node-management.md). [Custom short-code editing](subscription-links.md)
+is also available. Privately owned routed-node cleanup and the remaining plan
 template/policy features still need migration. See [migration-map.md](migration-map.md).

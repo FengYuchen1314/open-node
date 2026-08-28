@@ -26,17 +26,20 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     create_engine,
+    func,
     inspect,
     select,
     text,
     update,
 )
 from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from open_node.domain.changes import (
@@ -126,6 +129,7 @@ from open_node.domain.probe import (
     ProbeTaskReturnRouteTarget,
     ProbeTaskUpdate,
 )
+from open_node.domain.subscription_links import SubscriptionShortCodeUpdate
 from open_node.domain.subscriptions import (
     ManagedNodeCreate,
     ManagedNodeRead,
@@ -708,6 +712,9 @@ class SubscriptionTokenRecord:
     username: str
     token: str
     short_code: str
+    generated_short_code: str
+    custom_short_code: str | None
+    revision: str
     created_at: datetime
     updated_at: datetime
 
@@ -1172,8 +1179,12 @@ class ProductUserSubscriptionTokenModel(Base):
     )
     token: Mapped[str] = mapped_column(String(96), unique=True, index=True)
     short_code: Mapped[str] = mapped_column(String(24), unique=True, index=True)
+    custom_short_code: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        Index("uq_subscription_custom_short_code", func.lower(custom_short_code), unique=True),
+    )
 
 
 class SubscriptionCredentialModel(Base):
@@ -1346,6 +1357,24 @@ class InventoryStore:
             return
         inspector = inspect(self._engine)
         table_names = set(inspector.get_table_names())
+        if "product_user_subscription_tokens" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector, "product_user_subscription_tokens", {"custom_short_code": "VARCHAR(16)"}
+            )
+            with self._engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_subscription_custom_short_code "
+                        "ON product_user_subscription_tokens (lower(custom_short_code))"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS "
+                        "ix_product_user_subscription_tokens_custom_short_code "
+                        "ON product_user_subscription_tokens (custom_short_code)"
+                    )
+                )
         if "agents" in table_names:
             self._sqlite_add_missing_columns(
                 inspector,
@@ -3416,6 +3445,41 @@ class InventoryStore:
             session.commit()
             return token
 
+    def set_subscription_short_code(
+        self, username: str, payload: SubscriptionShortCodeUpdate
+    ) -> SubscriptionTokenRecord:
+        with self._coordinated_session() as session:
+            token = self._set_subscription_short_code(session, username, payload)
+            session.commit()
+            return token
+
+    def _set_subscription_short_code(self, session, username, payload):
+        current = self._issue_subscription_token(session, username)
+        if current.revision != payload.expected_revision:
+            raise ProductUserConflict("Subscription links changed; reload before saving")
+        code = payload.custom_short_code or None
+        if code:
+            other_user = session.scalar(
+                select(ProductUserModel.username).where(
+                    func.lower(ProductUserModel.username) == code.lower(),
+                    ProductUserModel.username != current.username,
+                )
+            )
+            if other_user or self._subscription_key_in_use(
+                session, code, except_user=current.username
+            ):
+                raise ProductUserConflict("This short code is unavailable")
+        token = session.get(ProductUserSubscriptionTokenModel, current.username)
+        if token.custom_short_code != code:
+            token.custom_short_code = code
+            token.updated_at = datetime.now(UTC)
+            try:
+                session.flush()
+            except IntegrityError as exc:
+                raise ProductUserConflict("This short code is unavailable") from exc
+        session.refresh(token)
+        return self._subscription_token_record(token)
+
     def _issue_subscription_token(self, session, username, *, reset=False):
         username = username.strip()
         if not username:
@@ -3438,6 +3502,7 @@ class InventoryStore:
         elif reset:
             token.token = self._unique_subscription_token(session)
             token.short_code = self._unique_subscription_short_code(session)
+            token.custom_short_code = None
             token.updated_at = now
         session.flush()
         session.refresh(token)
@@ -3473,6 +3538,7 @@ class InventoryStore:
                 select(ProductUserSubscriptionTokenModel).where(
                     (ProductUserSubscriptionTokenModel.token == key)
                     | (ProductUserSubscriptionTokenModel.short_code == key)
+                    | (ProductUserSubscriptionTokenModel.custom_short_code == key)
                 )
             )
             if not token:
@@ -6374,10 +6440,20 @@ class InventoryStore:
     def _subscription_token_record(
         token: ProductUserSubscriptionTokenModel,
     ) -> SubscriptionTokenRecord:
+        values = [
+            token.username,
+            token.token,
+            token.short_code,
+            token.custom_short_code,
+            InventoryStore._aware_datetime(token.updated_at).isoformat(),
+        ]
         return SubscriptionTokenRecord(
             username=token.username,
             token=token.token,
-            short_code=token.short_code,
+            short_code=token.custom_short_code or token.short_code,
+            generated_short_code=token.short_code,
+            custom_short_code=token.custom_short_code,
+            revision=hashlib.sha256(json.dumps(values, separators=(",", ":")).encode()).hexdigest(),
             created_at=token.created_at,
             updated_at=token.updated_at,
         )
@@ -6417,27 +6493,29 @@ class InventoryStore:
         )
 
     @staticmethod
+    def _subscription_key_in_use(session, key, *, except_user=None):
+        model = ProductUserSubscriptionTokenModel
+        statement = select(model.username).where(
+            (func.lower(model.token) == key.lower())
+            | (func.lower(model.short_code) == key.lower())
+            | (func.lower(model.custom_short_code) == key.lower())
+        )
+        if except_user is not None:
+            statement = statement.where(model.username != except_user)
+        return session.scalar(statement.limit(1)) is not None
+
+    @staticmethod
     def _unique_subscription_token(session: Session) -> str:
         while True:
             token = token_urlsafe(32)
-            exists = session.scalar(
-                select(ProductUserSubscriptionTokenModel).where(
-                    ProductUserSubscriptionTokenModel.token == token
-                )
-            )
-            if not exists:
+            if not InventoryStore._subscription_key_in_use(session, token):
                 return token
 
     @staticmethod
     def _unique_subscription_short_code(session: Session) -> str:
         while True:
             short_code = uuid4().hex[:8]
-            exists = session.scalar(
-                select(ProductUserSubscriptionTokenModel).where(
-                    ProductUserSubscriptionTokenModel.short_code == short_code
-                )
-            )
-            if not exists:
+            if not InventoryStore._subscription_key_in_use(session, short_code):
                 return short_code
 
     @staticmethod

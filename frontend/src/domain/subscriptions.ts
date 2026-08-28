@@ -61,6 +61,9 @@ export interface ProductUserSubscriptionToken {
   username: string;
   token: string;
   short_code: string;
+  generated_short_code: string;
+  custom_short_code: string | null;
+  revision: string;
   subscription_url: string;
   short_url: string;
   created_at: string;

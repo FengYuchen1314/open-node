@@ -276,8 +276,10 @@ These passing command and snapshot checks do not prove a complete replacement:
   Same-name recreation uses fresh traffic labels. [User limit overrides](user-limits.md)
   now cover quota, default/per-node bandwidth and connections, explicit unlimited,
   direct-parent inheritance and shared credentials. Catalog remapping, node/server
-  removal and subscriber displays use these settings. Custom short codes and
-  privately owned routed-node cleanup still require migration.
+  removal and subscriber displays use these settings. [Custom user short codes](subscription-links.md)
+  now support operator/self-service editing, clearing and complete reset with
+  collision and revision guards. Legacy combined-URL migration and privately
+  owned routed-node cleanup still require migration.
 - [Subscriber accounts](subscriber-accounts.md) now have a separate login and
   session realm, password provisioning/recovery, own-plan usage and downloads,
   device revocation, encrypted TOTP enrollment and one-use recovery codes.

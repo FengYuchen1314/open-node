@@ -153,5 +153,5 @@ unlimited override completed the same transfer in under one second. Actual
 second-connection denial, quota withdrawal/restoration and restart persistence
 were checked independently of displayed status.
 
-This does not implement custom short codes, private routed-node ownership or
-plan-bound automatic-speed rules. Those remain separate migration work.
+[Custom short codes](subscription-links.md) are handled separately. Private
+routed-node ownership and plan-bound automatic-speed rules remain migration work.

@@ -114,8 +114,15 @@ export const beginSubscriberTotp = (password: string) => accountRequest<Subscrib
 export const confirmSubscriberTotp = (code: string) => accountRequest<{ recovery_codes: string[] }>("totp/confirm", { method: "POST", body: JSON.stringify({ code }) });
 export const updateSubscriberTotp = (proof: SubscriberProof, disable = false) => accountRequest<{ recovery_codes: string[] } | undefined>(disable ? "totp/disable" : "totp/recovery-codes", { method: "POST", body: JSON.stringify(proof) });
 
-export function subscriberFormatUrl(subscription: ProductUserSubscriptionToken, format: SubscriptionClientFormat) {
-  const url = new URL(subscription.subscription_url);
+export async function subscriberShortCode(code: string, revision: string, proof: SubscriberProof, fetcher = fetch) {
+  const result = await accountRequest<{ subscription: ProductUserSubscriptionToken }>("subscription-short-code", {
+    method: "PUT", body: JSON.stringify({ ...proof, custom_short_code: code, expected_revision: revision }),
+  }, fetcher);
+  return result.subscription;
+}
+
+export function subscriberFormatUrl(subscription: ProductUserSubscriptionToken, format: SubscriptionClientFormat, short = false) {
+  const url = new URL(short ? subscription.short_url : subscription.subscription_url);
   url.searchParams.set("format", format);
   return url.toString();
 }

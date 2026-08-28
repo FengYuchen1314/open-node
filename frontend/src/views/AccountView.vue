@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import SubscriberSecurityPanel from "../components/SubscriberSecurityPanel.vue";
+import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog.vue";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat } from "../domain/subscriptions";
 import {
   loadSubscriberSession, subscriberFormatUrl, subscriberProfile, subscriberSignIn, subscriberSignOut,
@@ -20,12 +21,14 @@ const profile = ref<SubscriberProfile | null>(null);
 const subscription = ref<ProductUserSubscriptionToken | null>(null);
 const format = ref<SubscriptionClientFormat>("clash");
 const copied = ref(false);
+const shortCodeOpen = ref(false);
+const linkType = ref("full");
 const formats = [
   { title: "Clash / Mihomo", value: "clash" }, { title: "sing-box", value: "sing-box" },
   { title: "Xray", value: "xray" }, { title: "URI list", value: "uri-list" }, { title: "Base64", value: "base64" },
 ];
 let version = 0;
-const url = computed(() => subscription.value ? subscriberFormatUrl(subscription.value, format.value) : "");
+const url = computed(() => subscription.value ? subscriberFormatUrl(subscription.value, format.value, linkType.value === "short") : "");
 const quota = computed(() => profile.value?.quota);
 const status = computed(() => !quota.value?.has_plan ? "No plan" : quota.value.expired ? "Expired" : quota.value.over_quota ? "Quota reached" : "Active");
 const date = (value?: string | null) => value ? new Date(value).toLocaleDateString() : "None";
@@ -65,6 +68,7 @@ async function copyLink() {
 }
 watch(url, () => { copied.value = false; });
 watch(() => subscriberState.ready && subscriberState.session?.authenticated, (authenticated) => {
+  shortCodeOpen.value = false; linkType.value = "full";
   ++version; profile.value = null; subscription.value = null; error.value = "";
   if (authenticated) { tab.value = "subscription"; void load(); }
   else restartSignIn();
@@ -104,7 +108,9 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
           <dl class="account-facts"><div><dt>Expires</dt><dd>{{ date(quota.plan_expires_at) }}</dd></div><div><dt>Next reset</dt><dd>{{ date(quota.next_reset_at) }}</dd></div><div><dt>Default speed</dt><dd>{{ profile.speed_limit_mbps ? `${profile.speed_limit_mbps} Mbps` : 'Unlimited' }}</dd></div><div><dt>Connection limit</dt><dd>{{ profile.device_limit || 'Unlimited' }}</dd></div><div><dt>Uploaded</dt><dd>{{ bytes(quota.upload) }}</dd></div><div><dt>Downloaded</dt><dd>{{ bytes(quota.download) }}</dd></div></dl>
         </section>
         <section class="account-links" aria-label="Subscription links">
-          <h3>Subscription</h3><div class="account-link-controls"><v-select v-model="format" :items="formats" label="Client format" variant="outlined" density="compact" hide-details /><div class="account-link-actions"><v-tooltip :text="copied ? 'Copied' : 'Copy subscription link'"><template #activator="{ props: tip }"><v-btn v-bind="tip" :icon="copied ? 'mdi-check' : 'mdi-content-copy'" aria-label="Copy subscription link" variant="text" :disabled="!url" @click="copyLink" /></template></v-tooltip><v-tooltip text="Download subscription"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-download" aria-label="Download subscription" variant="text" :href="url" :disabled="!url || !quota.available" rel="noreferrer" download /></template></v-tooltip></div></div>
+          <h3>Subscription</h3>
+          <div class="account-link-mode"><v-btn-toggle v-model="linkType" mandatory density="compact" color="primary" variant="outlined" aria-label="Subscription link type"><v-btn value="full">Full</v-btn><v-btn value="short">Short</v-btn></v-btn-toggle><v-tooltip text="Edit subscription short code"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-link-edit" aria-label="Edit subscription short code" variant="text" :disabled="loading || !subscription" @click="shortCodeOpen = true" /></template></v-tooltip></div>
+          <div class="account-link-controls"><v-select v-model="format" :items="formats" label="Client format" variant="outlined" density="compact" hide-details /><div class="account-link-actions"><v-tooltip :text="copied ? 'Copied' : 'Copy subscription link'"><template #activator="{ props: tip }"><v-btn v-bind="tip" :icon="copied ? 'mdi-check' : 'mdi-content-copy'" aria-label="Copy subscription link" variant="text" :disabled="!url" @click="copyLink" /></template></v-tooltip><v-tooltip text="Download subscription"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-download" aria-label="Download subscription" variant="text" :href="url" :disabled="!url || !quota.available" rel="noreferrer" download /></template></v-tooltip></div></div>
           <v-text-field :model-value="url" label="Subscription URL" variant="outlined" density="compact" readonly hide-details />
           <v-alert v-if="!quota.available" type="warning" variant="tonal" class="mt-4">{{ !quota.has_plan ? 'No subscription plan assigned' : quota.expired ? 'Your plan has expired' : 'Your traffic quota has been reached' }}</v-alert>
         </section>
@@ -117,6 +123,7 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
       </template>
       <SubscriberSecurityPanel v-else-if="tab === 'security'" class="account-security-panel" @changed="load" />
     </main>
+    <SubscriptionShortCodeDialog v-model:open="shortCodeOpen" :username="subscriberState.session?.username ?? ''" subscriber @saved="subscription = $event" />
   </div>
 </template>
 
@@ -145,6 +152,7 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
 .account-links h3 { font-size: 18px; margin-bottom: 20px; }
 .account-link-controls { display: grid; grid-template-columns: minmax(0, 300px) auto; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
 .account-link-actions { display: flex; }
+.account-link-mode { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
 .account-nodes { border-top: 1px solid #dbe5e0; padding: 28px 0; }
 .account-nodes h3 { font-size: 18px; margin-bottom: 20px; }
 .account-node-limit { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding-block: 14px; border-bottom: 1px solid #e9eeeb; font-size: 14px; overflow-wrap: anywhere; }

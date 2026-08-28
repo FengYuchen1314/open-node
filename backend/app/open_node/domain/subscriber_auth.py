@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, SecretStr
 
+from open_node.domain.subscription_links import SubscriptionShortCodeUpdate
 from open_node.domain.subscriptions import SubscriptionQuotaStatusRead
 from open_node.domain.user_limits import UserNodeLimitsRead
 
@@ -20,6 +21,10 @@ class SubscriberProof(BaseModel):
 
 class SubscriberPasswordChange(SubscriberProof):
     new_password: SecretStr = Field(min_length=12, max_length=1024)
+
+
+class SubscriberShortCodeUpdate(SubscriptionShortCodeUpdate, SubscriberProof):
+    pass
 
 
 class SubscriberSecondFactor(BaseModel):

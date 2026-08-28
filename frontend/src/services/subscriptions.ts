@@ -46,6 +46,14 @@ const jsonHeaders = {
   "Content-Type": "application/json",
 };
 
+export async function updateProductUserShortCode(username: string, code: string, revision: string, fetcher = authenticatedFetch): Promise<ProductUserSubscriptionTokenResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "subscription-short-code")}`, {
+    method: "PUT", headers: jsonHeaders, body: JSON.stringify({ custom_short_code: code, expected_revision: revision }),
+  });
+  if (!response.ok) throw await apiError(response, "Short code update failed");
+  return response.json() as Promise<ProductUserSubscriptionTokenResponse>;
+}
+
 export async function getSubscriptionAccess(
   username: string,
   fetcher = authenticatedFetch,

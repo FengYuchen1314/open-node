@@ -20,6 +20,7 @@ from open_node.domain.subscriber_auth import (
     SubscriberSecondFactor,
     SubscriberSecurityRead,
     SubscriberSessionRead,
+    SubscriberShortCodeUpdate,
 )
 from open_node.domain.subscriptions import ProductUserSubscriptionTokenResponse
 from open_node.services.inventory import ProductUserConflict, ProductUserNotFoundError
@@ -182,6 +183,15 @@ def reset_subscription_token(payload: SubscriberProof, request: Request, identit
 @router.get("/sessions", response_model=list[SubscriberDeviceRead])
 def sessions(request: Request, identity: Identity):
     return invoke(request.app.state.subscriber_auth.devices, identity)
+
+
+@router.put("/subscription-short-code", response_model=ProductUserSubscriptionTokenResponse)
+def update_subscription_short_code(
+    payload: SubscriberShortCodeUpdate, request: Request, identity: Identity
+):
+    limit(request, identity.username)
+    token = invoke(request.app.state.subscriber_auth.set_short_code, identity, payload)
+    return _subscription_token_response(request, token)
 
 
 @router.delete("/sessions", status_code=204)

@@ -79,6 +79,26 @@ credentials and charged usage, and unrelated-user forwarding. Browser checks
 cover stale forms, numeric validation, user overrides and subscriber visibility
 at 1440px, 390px and 320px widths. See [user-limits.md](user-limits.md).
 
+## Custom Subscription Link Smoke
+
+Use the same VPS prerequisites, built frontend, Agent wheel and free Xray
+binary as the subscriber-limit fixture:
+
+```bash
+python scripts/vps/smoke-subscription-links.py \
+  --xray /absolute/path/to/xray \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /absolute/path/to/nginx \
+  --output /tmp/open-node-subscription-link-screenshots \
+  --transport websocket
+```
+
+Repeat with `--transport http`. Operator/subscriber browser edits, password
+and second-factor proof, stale/colliding values, clearing, custom-URL downloads
+and complete link reset are checked against real forwarding and an unchanged
+runtime PID. The temporary Agent installation is removed after the run.
+See [subscription-links.md](subscription-links.md) for identity and security rules.
+
 ## Subscription Client Smoke
 
 Build the frontend and [patched runtime](fork-runtime.md) on the VPS. Use the
@@ -982,6 +1002,27 @@ lease races, overlapping reservations, draining earlier sequences, late
 rollback rejection, restart persistence and missing-column SQLite migration.
 
 ## Latest Verification
+
+Custom subscription short-code verification on the designated VPS:
+
+- Full regression: backend 765 tests, Agent 522 tests, frontend 177 tests and
+  production build passed. After the final additive lookup-index change,
+  84 focused backend tests passed, including a new query-plan check and both
+  new-database and old-schema upgrade coverage.
+- The final schema uses indexed lookups for long, generated and custom keys;
+  the preceding table-scan query plan was reproduced and eliminated.
+- The final WebSocket and HTTP runs passed operator/subscriber edits, stale
+  revisions, case collisions, password/TOTP proof and actual browser downloads
+  through the custom short URL. The downloaded Xray configuration forwarded
+  real traffic. Clearing and resetting links preserved the runtime PID and
+  node credentials; another subscriber kept forwarding.
+- Desktop/mobile/narrow screenshots were inspected. Ruff passed for changed
+  Python sources. Temporary Agent installations and private state were removed.
+
+The existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+These results do not close the remaining [migration gates](migration-map.md).
+
+## Earlier Subscriber Limit Verification
 
 The subscriber-limit worktree passed on the designated VPS:
 

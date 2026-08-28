@@ -408,6 +408,14 @@ class SubscriberAuthStore:
             session.commit()
             return token
 
+    def set_short_code(self, identity, payload):
+        version = self._verified_version(identity.username, payload.password.get_secret_value())
+        with self.inventory._coordinated_session() as session:
+            self._check_proof(session, identity, payload, version)
+            token = self.inventory._set_subscription_short_code(session, identity.username, payload)
+            session.commit()
+            return token
+
     def devices(self, identity):
         now = time.time()
         with self.inventory._coordinated_session() as session:

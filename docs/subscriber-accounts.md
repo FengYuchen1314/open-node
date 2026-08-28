@@ -127,6 +127,7 @@ All paths below are relative to `/api/v1/account`:
   limits, including administrator [user overrides](user-limits.md).
 - `POST /subscription-token`: get/create own public subscription links.
 - `POST /subscription-token/reset`: credential-confirmed link rotation.
+- `PUT /subscription-short-code`: credential-confirmed [custom short-code editing](subscription-links.md).
 - `GET /sessions`, `DELETE /sessions`: list devices or revoke other devices.
 - `DELETE /sessions/{id}`: revoke one own session, including the current one.
 - `GET /security`: enrollment availability, TOTP status and recovery-code count.

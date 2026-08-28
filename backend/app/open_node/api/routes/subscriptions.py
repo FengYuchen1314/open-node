@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
+from open_node.domain.subscription_links import SubscriptionShortCodeUpdate
 from open_node.domain.subscriptions import (
     ManagedNodeCreate,
     ManagedNodeResponse,
@@ -179,6 +180,25 @@ def reset_subscription_token(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductUserConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _subscription_token_response(request, token)
+
+
+@router.put("/user-subscription-short-code", response_model=ProductUserSubscriptionTokenResponse)
+@router.put(
+    "/users/{username}/subscription-short-code", response_model=ProductUserSubscriptionTokenResponse
+)
+def update_subscription_short_code(
+    username: str,
+    payload: SubscriptionShortCodeUpdate,
+    request: Request,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+):
+    try:
+        token = store.set_subscription_short_code(username, payload)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ProductUserConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
     return _subscription_token_response(request, token)
 
 
@@ -440,6 +460,9 @@ def _subscription_token_response(
             username=token.username,
             token=token.token,
             short_code=token.short_code,
+            generated_short_code=token.generated_short_code,
+            custom_short_code=token.custom_short_code,
+            revision=token.revision,
             subscription_url=subscription_url,
             short_url=short_url,
             created_at=token.created_at,
