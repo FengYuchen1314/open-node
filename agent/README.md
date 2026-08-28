@@ -121,8 +121,11 @@ durable cleanup and expiry. Account and issuance keys remain on the control
 plane. See [remote validation setup](../docs/certificates.md#remote-validation-node).
 No Agent-local ACME runtime is required.
 Unsupported operations return 501 rather than reporting success. Public WARP
-provider verification, fork-only protocols and
-further migration workflows remain release gates.
+provider verification and further migration workflows remain release gates.
+Native [fork protocol user management](../docs/fork-runtime.md) now edits
+AnyTLS/Snell/Mieru user containers. Its optional MPL-2.0 runtime patch retains
+empty listeners while rejecting traffic, so last-user revocation can persist.
+Mieru UDP targets and stock-client subscription filtering remain unfinished.
 
 ## Verification
 

@@ -576,6 +576,11 @@ YAML, and callers can request alternate formats with
 - `base64`: base64-encoded URI list for clients that expect legacy
   subscription bodies.
 
+Fork protocol extensions are not a guarantee of stock-client compatibility:
+stock Mihomo does not accept Snell v6 and stock sing-box does not implement
+Snell. Per-client filtering and a native free-client v6 export remain unfinished.
+See [fork-runtime.md](fork-runtime.md) for actual traffic coverage and limits.
+
 Open Node records subscription traffic in a durable ledger when agent telemetry
 contains `stats.user` counters for known credential emails. The first observed
 counter value is counted, later telemetry only adds positive deltas, and

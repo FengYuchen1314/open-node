@@ -253,10 +253,13 @@ These passing command and snapshot checks do not prove a complete replacement:
   configurable listeners, actual static/proxy/fallback traffic, two-service
   rollback, and restart recovery verified over WebSocket and HTTP. This does
   not prove every fork-only protocol or arbitrary existing-config migration.
-- Verify the fork-specific runtime protocols and migration from fork-only
-  configurations. Actual VLESS traffic is verified using official Xray with
-  the independent agent; the reference-agent smoke still uses external mode
-  without a running Xray. Neither proves full fork protocol compatibility.
+- Native [fork protocol migration](fork-runtime.md) covers user containers,
+  Snell first-user transport settings and an optional MPL-2.0 empty-user patch.
+  The real-client smoke covers original configs, runtime-node import, assigned
+  subscription credentials, statistics, rotation, last-user revocation,
+  restart persistence and reactivation. Mieru UDP target forwarding, stock-client
+  capability filtering and a native free-client Snell v6 export remain open.
+  Single-proxy tests do not prove mixed subscriptions load in stock clients.
 - External [systemd runtime mode](external-systemd.md) now verifies a dedicated
   non-root service's binary/config binding and uses scoped host-installed
   polkit authorization. Both transports have real forwarding, provisioning,

@@ -7354,6 +7354,18 @@ class InventoryStore:
         if runtime.port is None:
             create_available = False
             warnings.append("missing_port")
+        if managed_protocol == "snell":
+            options = cls._snell_runtime_options(settings)
+            if options.get("v6Mode") == "unsafe-raw":
+                create_available = False
+                warnings.append("snell_unauthenticated_mode")
+            users = cls._list_value(settings.get("users"))
+            if any(
+                cls._snell_runtime_options({"users": [user]}) != options
+                for user in users
+            ):
+                create_available = False
+                warnings.append("snell_mixed_transport_options")
 
         protocol = managed_protocol or "unsupported"
         node_name = cls._runtime_node_name(server, runtime, payload.name if payload else None)
@@ -7490,16 +7502,25 @@ class InventoryStore:
             if flow:
                 template["flow"] = flow
         if protocol == "snell":
-            version = cls._int_value(settings.get("version"))
-            if version:
-                template["version"] = version
-            obfs_mode = cls._text_value(settings.get("obfsMode") or settings.get("obfs_mode"))
-            if obfs_mode:
-                template["obfsMode"] = obfs_mode
-            obfs_host = cls._text_value(settings.get("obfsHost") or settings.get("obfs_host"))
-            if obfs_host:
-                template["obfsHost"] = obfs_host
+            template.update(cls._snell_runtime_options(settings))
         return template
+
+    @classmethod
+    def _snell_runtime_options(cls, settings: dict[str, Any]) -> dict[str, Any]:
+        users = cls._list_value(settings.get("users"))
+        # This core takes shared transport settings from its first user.
+        source = cls._record_value(users[0]) if users else settings
+        version = cls._int_value(source.get("version")) or 4
+        if version == 6:
+            return {
+                "version": version,
+                "v6Mode": cls._text_value(source.get("v6Mode")) or "default",
+            }
+        return {
+            "version": version,
+            "obfsMode": cls._text_value(source.get("obfsMode")) or "none",
+            "obfsHost": cls._text_value(source.get("obfsHost")) or "",
+        }
 
     @classmethod
     def _add_protocol_runtime_options(
@@ -7514,25 +7535,20 @@ class InventoryStore:
                 config["cipher"] = cipher
             return
         if protocol == "snell":
-            version = cls._int_value(settings.get("version"))
-            if version:
-                config["version"] = version
-            mode = cls._text_value(settings.get("mode"))
-            if mode:
-                config["mode"] = mode
-            obfs_mode = cls._text_value(settings.get("obfsMode") or settings.get("obfs_mode"))
-            obfs_host = cls._text_value(settings.get("obfsHost") or settings.get("obfs_host"))
-            if obfs_mode or obfs_host:
-                config["obfs-opts"] = {}
-                if obfs_mode:
-                    config["obfs-opts"]["mode"] = obfs_mode
-                if obfs_host:
-                    config["obfs-opts"]["host"] = obfs_host
+            options = cls._snell_runtime_options(settings)
+            config["version"] = options["version"]
+            config["udp"] = True
+            if options["version"] == 6:
+                config["mode"] = options["v6Mode"]
+            elif options["obfsMode"] != "none":
+                config["obfs-opts"] = {"mode": options["obfsMode"]}
+                if options["obfsHost"]:
+                    config["obfs-opts"]["host"] = options["obfsHost"]
             return
         if protocol == "mieru":
             transport = cls._text_value(settings.get("transport"))
-            if transport:
-                config["transport"] = transport
+            config["transport"] = (transport or "TCP").upper()
+            config["udp"] = False
             return
         if protocol in {"anytls", "hysteria2"}:
             config.setdefault("udp", True)

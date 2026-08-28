@@ -62,15 +62,82 @@ def find_tag(entries: list[dict], tag: str) -> dict:
     return matches[0]
 
 
+def snell_options(settings: dict) -> dict:
+    users = settings.get("users") or []
+    source = users[0] if users else settings
+    version = source.get("version") or 4
+    if type(version) is not int or version not in {4, 5, 6}:
+        raise RuntimeFailure("Snell user management supports versions 4, 5 and 6")
+    if version == 6:
+        mode = source.get("v6Mode") or "default"
+        if not isinstance(mode, str) or mode not in {"default", "unshaped"}:
+            raise RuntimeFailure("Snell user management requires an authenticated v6 mode")
+        return {"version": version, "v6Mode": mode}
+    mode = source.get("obfsMode") or "none"
+    host = source.get("obfsHost") or ""
+    if not isinstance(mode, str) or mode not in {"none", "http", "tls"}:
+        raise RuntimeFailure("Unsupported Snell obfuscation mode")
+    if not isinstance(host, str):
+        raise RuntimeFailure("Snell obfuscation host must be text")
+    return {
+        "version": version,
+        "obfsMode": mode,
+        "obfsHost": host,
+    }
+
+
 def edit_client(inbound: dict, client: dict, *, remove: bool = False) -> None:
-    if inbound.get("protocol") not in {"vless", "vmess", "trojan", "shadowsocks"}:
+    protocol = str(inbound.get("protocol", "")).lower()
+    container = {
+        "vless": "clients",
+        "vmess": "clients",
+        "trojan": "clients",
+        "shadowsocks": "clients",
+        "hysteria": "clients",
+        "anytls": "users",
+        "snell": "users",
+        "mieru": "users",
+    }.get(protocol)
+    if container is None:
         raise RuntimeFailure("Client editing for this protocol is not implemented")
-    if not isinstance(client, dict) or not client.get("email"):
+    if (
+        not isinstance(client, dict)
+        or not isinstance(client.get("email"), str)
+        or not client["email"]
+    ):
         raise RuntimeFailure("Client email is required")
-    clients = inbound.setdefault("settings", {}).setdefault("clients", [])
-    clients[:] = [item for item in clients if item.get("email") != client["email"]]
+    settings = inbound.get("settings", {})
+    if not isinstance(settings, dict):
+        raise RuntimeFailure("Inbound settings must be an object")
+    clients = settings.get(container, [])
+    if not isinstance(clients, list) or any(not isinstance(item, dict) for item in clients):
+        raise RuntimeFailure(f"settings.{container} must be an array of user objects")
+    if container == "users" and settings.get("clients"):
+        raise RuntimeFailure("This protocol uses settings.users, not settings.clients")
+    remaining = [item for item in clients if item.get("email") != client["email"]]
+    options = snell_options(settings) if protocol == "snell" else None
+    if options and any(snell_options({"users": [item]}) != options for item in clients):
+        raise RuntimeFailure("Snell users must share the inbound's version and transport options")
+    replacement = copy.deepcopy(client)
     if not remove:
-        clients.append(copy.deepcopy(client))
+        if options:
+            replacement = {**options, **replacement}
+            candidate_options = snell_options({"users": [replacement]})
+            if remaining and candidate_options != options:
+                raise RuntimeFailure(
+                    "Changing one user's Snell options would change the whole inbound"
+                )
+            options = candidate_options
+        index = next(
+            (i for i, item in enumerate(clients) if item.get("email") == client["email"]),
+            len(remaining),
+        )
+        remaining.insert(min(index, len(remaining)), replacement)
+    if options:
+        # The fork derives transport options from its first user; retain them when empty.
+        settings.update(options)
+    settings[container] = remaining
+    inbound["settings"] = settings
 
 
 def edit_entries(config: dict, key: str, payload: dict) -> None:

@@ -58,6 +58,59 @@ cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
 
+## Fork Protocol Smoke
+
+Build the optional [compatibility runtime](fork-runtime.md), its unmodified
+reference executable, and the current Agent wheel on the VPS. Obtain Mihomo
+v1.19.30's `mihomo-linux-amd64-compatible-v1.19.30.gz` from its official release.
+Verify the gzip SHA-256 before extraction:
+`db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9`.
+The tested Go 1.26.7 Linux amd64 tarball has SHA-256
+`ffb5f8de10c62550dfddab66b36b57030721e0a44a3218e9e1181d7b59f121ca`.
+
+```bash
+python scripts/vps/smoke-protocol-runtime.py \
+  --xray /tmp/open-node-runtime-build/xray \
+  --reference /tmp/open-node-runtime-build/xray-reference \
+  --mihomo /absolute/path/to/mihomo \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /absolute/path/to/nginx
+```
+
+Use the backend development environment. The fixture requires root/systemd
+only to install disposable dedicated non-root Agents and remove their units
+and accounts afterward. All listeners are loopback-only; there is no public
+provider registration. Both HTTPS lease and WSS paths use a trusted fixture CA.
+The source runtime is first exercised unchanged, followed by the installed
+Agent's patched runtime using the same configuration. The tests then import
+nodes, assign a plan, consume actual subscribed credentials, check per-user
+statistics, rotate passwords, revoke original and final users, restart the
+service with empty listeners and reactivate the same catalog credentials.
+They also check invalid-write preservation and refusal of an official Xray
+switch without changing the fork PID. The unpatched core's refusal of the
+same empty configuration is checked explicitly.
+
+AnyTLS and Snell cover TCP and UDP target bytes. Mieru covers TCP target bytes
+over both TCP/UDP underlays; UDP target forwarding is absent in the pinned
+source and is not claimed. Snell v6 uses the free fork client. The smoke
+consumes per-node proxies, not unsupported mixed stock-client configurations.
+Other architectures, multi-file takeover and public-provider staging are not
+established by these tests.
+
+Verified on 2026-08-28 (UTC), Debian 12 x86-64 on the designated VPS:
+
+- Backend: 401 tests; Agent: 397 tests; frontend: 98 tests and production build.
+- Go tests for all three protocol packages and module verification passed.
+- Ruff and probe Worker TypeScript checks passed.
+- Both complete protocol smokes passed using non-root installed Agents,
+  trusted HTTPS/WSS and real Mihomo/fork clients, including empty-user restart,
+  exact catalog credential reactivation and unchanged PID after a rejected
+  official-runtime switch.
+- The optional runtime binary SHA-256 is
+  `2810093e9715a9ac4fcd9c864fafa0e0100097f511e3ad0e19be7d3e42bc2f42`.
+  Source revision, patch and matching-source digests are in its `build.json`.
+- Existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+
 ## Host Policy Smoke
 
 Build the current Agent wheel on the VPS. Keep a trusted pre-policy bootstrap

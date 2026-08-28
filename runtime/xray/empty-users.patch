@@ -1,0 +1,48 @@
+SPDX-License-Identifier: MPL-2.0
+Open Node compatibility changes for the pinned Xray-core-mmwx source.
+Empty Snell/Mieru inbounds remain configured and reject every connection.
+
+diff --git a/proxy/snell/server.go b/proxy/snell/server.go
+--- a/proxy/snell/server.go
++++ b/proxy/snell/server.go
+@@ -53,7 +53,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
+ 		s.users = append(s.users, mu)
+ 	}
+ 	if len(s.users) == 0 {
+-		return nil, errors.New("snell: no users configured")
++		return s, nil
+ 	}
+ 	acc0 := s.users[0].Account.(*MemoryAccount)
+ 	s.version = acc0.Version
+@@ -118,6 +118,9 @@ func (s *Server) handshake(conn xnet.Conn) (*recordReader, *protocol.MemoryUser, err
+ }
+ 
+ func (s *Server) Process(ctx context.Context, network xnet.Network, conn stat.Connection, dispatcher routing.Dispatcher) error {
++	if len(s.users) == 0 {
++		return errors.New("snell: no users configured")
++	}
+ 	sessPolicy := s.policyManager.ForLevel(0)
+ 	_ = conn.SetReadDeadline(time.Now().Add(sessPolicy.Timeouts.Handshake))
+ 
+diff --git a/proxy/mieru/server.go b/proxy/mieru/server.go
+--- a/proxy/mieru/server.go
++++ b/proxy/mieru/server.go
+@@ -46,8 +46,5 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
+ 		s.users = append(s.users, mu)
+ 	}
+-	if len(s.users) == 0 {
+-		return nil, errors.New("mieru: no users configured")
+-	}
+ 	return s, nil
+ }
+ 
+@@ -107,6 +104,9 @@ func (s *Server) resolveUser(br *bufio.Reader) (*protocol.MemoryUser, cipher.AEAD,
+ }
+ 
+ func (s *Server) Process(ctx context.Context, network xnet.Network, conn stat.Connection, dispatcher routing.Dispatcher) error {
++	if len(s.users) == 0 {
++		return errors.New("mieru: no users configured")
++	}
+ 	if network == xnet.Network_UDP {
+ 		return s.processUDP(ctx, conn, dispatcher)
+ 	}

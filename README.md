@@ -70,8 +70,10 @@ tunnel deployment with configurable listeners and failure recovery.
 [Remote Agent lifecycle](docs/agent-lifecycle.md) adds host-approved package
 upgrades, rollback and data-preserving removal through a separate privileged
 helper, with verified release pins and durable final results.
-WARP and fork-specific runtime workflows are still incomplete; control-plane wrappers
-for those operations do not imply the independent agent implements them.
+Native [fork protocol user management](docs/fork-runtime.md) now supports
+AnyTLS, Snell and Mieru through an optional source-pinned compatibility runtime,
+including empty-user revocation. Client-format filtering, Mieru UDP targets,
+public WARP verification and further migration workflows remain incomplete.
 
 [Central certificate management](docs/certificates.md) now provides DNS
 credentials, PEM import/export, DNS-01 and HTTP-01 issuance and renewal through pinned
