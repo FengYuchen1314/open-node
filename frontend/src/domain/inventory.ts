@@ -69,7 +69,9 @@ export type AgentOperationKind =
   | "agent_probe_master_url"
   | "agent_update_master_url"
   | "agent_upgrade"
-  | "agent_uninstall";
+  | "agent_uninstall"
+  | "agent_rollback"
+  | "agent_lifecycle";
 
 export interface ServerCreateRequest {
   name: string;
@@ -559,6 +561,15 @@ export interface AgentDomainLatencyProbeRequest {
   command_timeout_ms?: number;
 }
 
+export interface AgentUpgradeOperationRequest {
+  version: string;
+  sha256: string;
+}
+
+export interface AgentLifecycleConfirmationRequest {
+  confirm: true;
+}
+
 export interface AgentXrayInstallOperationRequest {
   version?: string;
   sha256?: string;
@@ -765,6 +776,8 @@ export interface AgentUpdateMasterURLOperationRequest {
 }
 
 export type AgentOperationPayload =
+  | AgentUpgradeOperationRequest
+  | AgentLifecycleConfirmationRequest
   | AgentXrayInstallOperationRequest
   | AgentDomainLatencyProbeRequest
   | AgentNginxInstallOperationRequest

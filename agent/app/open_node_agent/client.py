@@ -6,6 +6,7 @@ import os
 import socket
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
@@ -15,6 +16,8 @@ from websockets.exceptions import WebSocketException
 from open_node_agent import __version__
 from open_node_agent.config import AgentConfig
 from open_node_agent.journal import CommandJournal
+from open_node_agent.lifecycle import DeferredCommand
+from open_node_agent.lifecycle_protocol import is_lifecycle_command
 from open_node_agent.operations import Operations, telemetry
 from open_node_agent.runtime import XrayRuntime, atomic_write
 
@@ -92,17 +95,28 @@ class Agent:
             "capabilities": {"rpc": True, "stream": True, "return_route_test": False},
         }
 
-    async def execute(self, payload: dict) -> dict:
+    async def execute(self, payload: dict) -> dict | None:
         command = RPCCommand.model_validate(payload).model_dump()
         async with self.execution_lock:
-            if cached := self.journal.begin(command):
+            lifecycle = is_lifecycle_command(command)
+            if cached := self.journal.begin(
+                command, resume=lifecycle and self.config.lifecycle_socket is not None
+            ):
                 return cached
             result = {"request_id": command["request_id"], "status": 200}
             if command["id"]:
                 result["command_id"] = command["id"]
             try:
-                async with asyncio.timeout(command["timeout_ms"] / 1000):
-                    result["body"] = await self.operations.handle(command)
+                if lifecycle:
+                    # Submission has its own bounded handshake; a lease is not a host-job deadline.
+                    result = await self.operations.lifecycle.submit(command)
+                    if command["id"]:
+                        result["command_id"] = command["id"]
+                else:
+                    async with asyncio.timeout(command["timeout_ms"] / 1000):
+                        result["body"] = await self.operations.handle(command)
+            except DeferredCommand:
+                return None
             except TimeoutError:
                 result.update(status=504, error="Agent command timed out")
             except NotImplementedError as exc:
@@ -133,6 +147,8 @@ class Agent:
             command = await self.queue.get()
             try:
                 result = await self.execute(command)
+                if result is None:
+                    continue
                 if command.get("stream"):
                     await self.send(
                         "rpc_stream_data",
@@ -157,6 +173,8 @@ class Agent:
         next_telemetry = 0.0
         while True:
             await self.send("heartbeat", {})
+            for result in self.journal.pending_results():
+                await self.send("rpc_reply", result)
             if time.monotonic() >= next_telemetry:
                 await self.send("telemetry", await self.collect_telemetry())
                 await self.send("scan_result", await self.operations.scan())
@@ -245,19 +263,28 @@ class Agent:
                     if reporter.done():
                         await reporter
                     for result in self.journal.pending_results():
-                        if result.get("command_id"):
-                            response = await client.post(
-                                base + f"/commands/{result['command_id']}/result",
-                                json={"token": token, **result},
+                        target = (
+                            f"/commands/{result['command_id']}/result"
+                            if result.get("command_id")
+                            else (
+                                "/commands/by-request/"
+                                + quote(result["request_id"], safe="")
+                                + "/result"
                             )
-                            if response.status_code != 404:
-                                response.raise_for_status()
-                            self.journal.acknowledge(result["request_id"])
+                        )
+                        response = await client.post(
+                            base + target, json={"token": token, **result}
+                        )
+                        if response.status_code != 404 or not result.get("command_id"):
+                            response.raise_for_status()
+                        self.journal.acknowledge(result["request_id"])
                     response = await self._post(
                         client, base + "/commands/lease", {"token": token, "max_commands": 1}
                     )
                     for command in response.json()["commands"]:
                         result = await self.execute(command)
+                        if result is None:
+                            continue
                         await self._post(
                             client,
                             base + f"/commands/{command['id']}/result",

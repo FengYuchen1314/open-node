@@ -63,9 +63,11 @@ They preserve the root-owned bootstrap binary and recover the prior runtime
 after a failed start, command timeout or interrupted switch.
 Optional [Nginx and certificate management](docs/nginx-management.md) supports
 owned HTTP/TLS sites, supplied certificate rotation, and atomic Nginx/Xray
-tunnel deployment with configurable listeners and failure recovery. Remote Agent
-upgrade/uninstall handlers, WARP, and fork-specific runtime workflows are
-still incomplete; control-plane wrappers
+tunnel deployment with configurable listeners and failure recovery.
+[Remote Agent lifecycle](docs/agent-lifecycle.md) adds host-approved package
+upgrades, rollback and data-preserving removal through a separate privileged
+helper, with verified release pins and durable final results.
+WARP and fork-specific runtime workflows are still incomplete; control-plane wrappers
 for those operations do not imply the independent agent implements them.
 
 [Central certificate management](docs/certificates.md) now provides DNS

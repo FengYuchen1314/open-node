@@ -8469,6 +8469,14 @@ class InventoryStore:
             return
         server.last_heartbeat = now
         server.updated_at = now
+        if (
+            command.status == AgentCommandStatus.SUCCEEDED.value
+            and command.path in {
+                "/api/child/agent/uninstall", "/api/child/agent/uninstall-stream"
+            }
+            and body.get("installation_status") == "removed"
+        ):
+            server.status = ServerStatus.OFFLINE.value
         self._advance_command_dependents(session, command, now)
         if command.status != AgentCommandStatus.FAILED.value:
             self._upsert_return_route_results(session, server, command, payload, now)

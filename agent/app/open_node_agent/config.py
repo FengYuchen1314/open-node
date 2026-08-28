@@ -17,6 +17,7 @@ class AgentConfig(BaseModel):
     connection_mode: Literal["auto", "websocket", "http"] = "auto"
     allow_insecure_http: bool = False
     ca_file: Path | None = None
+    lifecycle_socket: Path | None = None
     hostname: str | None = Field(default=None, min_length=1, max_length=255)
     state_dir: Path = Path("/var/lib/open-node-agent")
     xray_binary: Path = Path("/usr/local/bin/xray")
@@ -42,7 +43,9 @@ class AgentConfig(BaseModel):
     def listen_address(cls, value: str) -> str:
         return str(ip_address(value))
 
-    @field_validator("state_dir", "xray_binary", "xray_config", "ca_file", "nginx_binary")
+    @field_validator(
+        "state_dir", "xray_binary", "xray_config", "ca_file", "nginx_binary", "lifecycle_socket"
+    )
     @classmethod
     def absolute_path(cls, value: Path | None) -> Path | None:
         if value is not None and not value.is_absolute():

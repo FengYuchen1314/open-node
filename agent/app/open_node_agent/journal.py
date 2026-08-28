@@ -30,7 +30,7 @@ class CommandJournal:
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
 
-    def begin(self, command: dict) -> dict | None:
+    def begin(self, command: dict, *, resume: bool = False) -> dict | None:
         request_id = command["request_id"]
         payload = {key: command.get(key) for key in ("method", "path", "query", "body", "stream")}
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
@@ -46,6 +46,8 @@ class CommandJournal:
                 }
             if row[1] is not None:
                 return json.loads(row[1])
+            if resume:
+                return None
             return {
                 "request_id": request_id,
                 "status": 409,

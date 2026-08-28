@@ -174,6 +174,55 @@ any cleanup that needs attention. Stopped-Agent upgrades and path/ownership
 guards have additional focused unit tests. External `runtime_mode: systemd`
 and arbitrary future schema rollback are not covered by this smoke.
 
+## Remote Agent Lifecycle
+
+Build the Agent wheel and production Vue assets first. On the designated VPS,
+with the browser/cryptography dependencies and a trusted Nginx binary:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-agent-lifecycle.py \
+  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --nginx /path/to/extracted/usr/sbin/nginx \
+  --output /tmp/open-node-agent-lifecycle-shots
+```
+
+The fixture uses separate HTTPS release and controller endpoints with explicit
+local CA trust. Both native transports perform version/digest-pinned upgrades,
+rollback, wrong-digest rejection, failed-preflight/start recovery, and actual
+VLESS forwarding after changes. Mismatched wheel metadata and redirects outside
+the host-approved source are rejected. Unix socket ownership and a foreign-UID request
+test cover both filesystem permissions and the peer-credential boundary.
+
+One-shot candidate-wheel pauses allow the test to kill the maintenance cgroup
+during package staging and service switching. It checks persisted recovery,
+unchanged configuration, old-version traffic, explicit interrupted results,
+request deduplication, expired-lease redelivery, skipped dependent commands, and
+a new explicit retry after staging recovery. A paused shutdown verifies recovery
+from a crash during removal, before the Agent service finishes stopping.
+Final uninstall reports are temporarily rejected by the fixture proxy, proving
+the controller cannot claim completion before acknowledgment. Worker restart,
+eventual reporting, worker shutdown and data-preserving reinstall are checked.
+
+The browser checks explicit version/SHA input, confirmation, actual command
+completion and resumed progress at 1440, 390 and 320 pixel widths. It also reopens
+the uninstall dialog while the Agent is gone but its callback is still blocked,
+and waits for the actual acknowledgment before displaying completion. Chromium
+trusts only the fixture SPKI; the Agent and host downloader use normal TLS
+verification. Screenshots remain in `--output` without fixture credentials.
+
+After publishing the matching wheel, verify the actual default GitHub release
+source separately, using that exact release artifact on the designated VPS:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-agent-release.py \
+  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --nginx /path/to/extracted/usr/sbin/nginx
+```
+
+This performs real public release downloads without a test mirror, checks the
+wheel pin and running release identity, sends VLESS traffic and rolls back on
+both transports. Its controller remains a private trusted HTTPS fixture.
+
 ## Nginx And Certificate Smoke
 
 On the root-accessible systemd VPS, supply a trusted Nginx binary and matching

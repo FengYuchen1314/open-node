@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
 import CommandInspector from "../components/CommandInspector.vue";
+import AgentLifecycleDialog from "../components/AgentLifecycleDialog.vue";
 import {
   defaultServerCreateRequest,
   type AgentCommand,
@@ -90,6 +91,9 @@ const nginxToolsForm = reactive({
   stream_port: 443,
 });
 const xrayInstallOpen = ref(false);
+const agentLifecycleOpen = ref(false);
+const agentLifecycleTarget = ref("");
+const agentLifecycleAction = ref<"agent_upgrade" | "agent_rollback" | "agent_uninstall">("agent_upgrade");
 const xrayAction = ref<"xray_remove" | "xray_rollback" | "">("");
 const xrayTarget = ref("");
 const xrayConfirmed = ref(false);
@@ -195,6 +199,7 @@ const maintenanceOperations: Array<{
   { title: "WARP status", icon: "mdi-cloud-check-outline", kind: "warp_status", color: "info" },
   { title: "Remove WARP", icon: "mdi-cloud-remove-outline", kind: "warp_remove", color: "error" },
   { title: "Upgrade Agent", icon: "mdi-update", kind: "agent_upgrade", color: "warning" },
+  { title: "Roll back Agent", icon: "mdi-restore", kind: "agent_rollback", color: "warning" },
   {
     title: "Uninstall Agent",
     icon: "mdi-power-plug-off-outline",
@@ -519,6 +524,12 @@ async function queueQuickOperation(kind: SimpleAgentOperation) {
     xrayInstallOpen.value = true;
     return;
   }
+  if (kind === "agent_upgrade" || kind === "agent_rollback" || kind === "agent_uninstall") {
+    agentLifecycleTarget.value = commandForm.server_id;
+    agentLifecycleAction.value = kind;
+    agentLifecycleOpen.value = true;
+    return;
+  }
   if (kind === "xray_remove" || kind === "xray_rollback") {
     xrayTarget.value = commandForm.server_id;
     xrayConfirmed.value = false;
@@ -572,6 +583,37 @@ async function installXrayRelease() {
   }, xrayTarget.value);
   if (queued) xrayInstallOpen.value = false;
 }
+
+async function refreshLifecycleCommands() {
+  try {
+    await refreshCommands(servers.value);
+    servers.value = await listServers();
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "Command status is unavailable.";
+  }
+}
+
+let lifecycleRefresh: ReturnType<typeof setTimeout> | undefined;
+let disposed = false;
+const pendingLifecycle = computed(() => Object.values(commandsByServer.value).flat().some(command =>
+  ["pending", "leased", "waiting"].includes(command.status)
+  && /^\/api\/child\/agent\/(upgrade(?:-stream)?|uninstall(?:-stream)?|rollback)$/.test(command.path)));
+
+function scheduleLifecycleRefresh() {
+  clearTimeout(lifecycleRefresh);
+  if (!disposed && pendingLifecycle.value) {
+    lifecycleRefresh = setTimeout(async () => {
+      await refreshLifecycleCommands();
+      scheduleLifecycleRefresh();
+    }, 2000);
+  }
+}
+
+watch(pendingLifecycle, scheduleLifecycleRefresh);
+onUnmounted(() => {
+  disposed = true;
+  clearTimeout(lifecycleRefresh);
+});
 
 async function confirmXrayAction() {
   if (!xrayAction.value || !xrayConfirmed.value || savingOperation.value) return;
@@ -1678,6 +1720,9 @@ function truncateText(value: string, maxLength: number) {
         />
       </v-sheet>
     </section>
+    <AgentLifecycleDialog v-model="agentLifecycleOpen" :server-id="agentLifecycleTarget"
+      :server-name="servers.find(server => server.id === agentLifecycleTarget)?.name ?? ''"
+      :action="agentLifecycleAction" @updated="refreshLifecycleCommands" />
     <v-dialog v-model="xrayInstallOpen" max-width="560" :persistent="Boolean(savingOperation)">
       <v-card title="Install / Upgrade Xray" class="xray-release-dialog">
         <v-form @submit.prevent="installXrayRelease">

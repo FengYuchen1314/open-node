@@ -72,6 +72,12 @@ before persisting its result, it refuses to repeat the operation automatically;
 inspect the runtime and issue a new command after reconciliation. This is not
 an exactly-once claim. Unacknowledged results are retried on reconnect.
 
+[Remote Agent lifecycle](../docs/agent-lifecycle.md) is a deliberate exception
+for host-approved package operations: its separate root-owned job journal
+permits redelivery of the same deferred request without repeating deployment.
+The host owner must opt in with a fixed HTTPS release source. The Agent remains
+non-root, and queued work is not reported as completed before its final outcome.
+
 Xray validates candidate JSON before any configuration write, even if a legacy
 request carries `force=true`. Full config writes require an explicit runtime
 restart. Inbound, outbound, routing, and batch changes restart a running runtime
@@ -101,7 +107,7 @@ ACME DNS-01 issuance and renewal are handled by the
 [control plane](../docs/certificates.md), which sends certificate deployment
 commands to this Agent. No Agent-local ACME runtime is required.
 Unsupported operations return 501 rather than reporting success. WARP,
-remote upgrade/removal handlers, fork-only protocols, and
+fork-only protocols and
 further migration workflows remain release gates.
 
 ## Verification

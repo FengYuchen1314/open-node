@@ -98,6 +98,8 @@ const operationPaths: Record<AgentOperationKind, string> = {
   agent_update_master_url: "agent/update-master-url",
   agent_upgrade: "agent/upgrade",
   agent_uninstall: "agent/uninstall",
+  agent_rollback: "agent/rollback",
+  agent_lifecycle: "agent/lifecycle",
 };
 
 export async function getAgentIdentity(fetcher = authenticatedFetch): Promise<AgentIdentityInfo> {

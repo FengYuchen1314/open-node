@@ -122,10 +122,10 @@ sudo journalctl -u open-node-agent.service -n 100 --no-pager
 
 Recovery restores the pre-switch release and running state. If rollback cannot
 start either, the pending transaction remains available for another recovery
-attempt after the underlying fault is corrected. An interruption during package
-staging can leave an incomplete staging directory; the installer refuses to
-reuse it and reports the condition for inspection. It does not guess that
-partially installed packages are healthy.
+attempt after the underlying fault is corrected. Package staging has a durable
+marker too: recovery removes an incomplete owned staging directory, while a
+fully recorded release is retained. Partially installed packages are never
+treated as healthy. Interrupted removal resumes data-preserving cleanup.
 
 On a failed *first* installation, the owned service is stopped and diagnostic
 files remain. Correct the input and retry `install` with all three source
@@ -157,6 +157,14 @@ sudo python3 agent/app/open_node_agent/service.py uninstall --purge
 Original input files and the original Xray binary outside the installation root
 are never removed. Purge does not call `userdel -r` or remove other home directories.
 
+## Remote Management
+
+The host owner can explicitly enable [remote Agent lifecycle](agent-lifecycle.md)
+with `enable-remote`. It uses a root-owned Unix-socket helper and a fixed HTTPS
+release source while the Agent itself remains non-root. Remote operations are
+checksum-pinned and report completion only after the actual deployment outcome.
+Uninstall retains that helper until its final result is acknowledged.
+
 ## Coverage Limits
 
 The VPS lifecycle smoke exercises initial failure/retry, real non-root systemd
@@ -166,8 +174,8 @@ data-preserving uninstall/reinstall, and explicit purge. Unit tests additionally
 cover path/ownership guards, stale health reports, and stopped-service behavior.
 
 This installer uses `runtime_mode: managed` only. Control of an independently
-managed external Xray systemd unit, broader OS/architecture coverage, remote
-Agent-upgrade/uninstall command handlers and WARP remain separate work.
+managed external Xray systemd unit, broader OS/architecture coverage and WARP
+remain separate work. Remote lifecycle has its own opt-in and VPS smoke.
 Managed Xray package installation, rollback and data-preserving removal now
 have their own [release workflow](xray-releases.md) and real runtime smoke.
 See [the migration map](migration-map.md) for the remaining scope.

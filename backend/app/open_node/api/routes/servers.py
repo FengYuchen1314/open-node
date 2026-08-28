@@ -15,6 +15,7 @@ from open_node.domain.inventory import (
     AgentCommandStreamFramesResponse,
     AgentDomainLatencyProbeRequest,
     AgentInboundsManageOperationRequest,
+    AgentLifecycleConfirmationRequest,
     AgentLimiterOperationRequest,
     AgentLogFilesDeleteOperationRequest,
     AgentLogsOperationRequest,
@@ -33,6 +34,7 @@ from open_node.domain.inventory import (
     AgentSwitchListenPortOperationRequest,
     AgentSwitchXrayModeOperationRequest,
     AgentUpdateMasterURLOperationRequest,
+    AgentUpgradeOperationRequest,
     AgentValidateSiteOperationRequest,
     AgentWarpLicenseOperationRequest,
     AgentXrayConfigFileReadOperationRequest,
@@ -1879,10 +1881,14 @@ async def queue_agent_upgrade_operation(
     server_id: UUID,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+    payload: AgentUpgradeOperationRequest | None = None,
 ) -> AgentCommandCreateResponse:
-    return await _queue_maintenance_command(
+    return await _queue_server_command(
         server_id,
-        "/api/child/agent/upgrade-stream",
+        AgentCommandCreate(
+            method="POST", path="/api/child/agent/upgrade-stream", stream=True,
+            timeout_ms=300_000, body=payload.model_dump() if payload else None,
+        ),
         store,
         connections,
     )
@@ -1897,12 +1903,53 @@ async def queue_agent_uninstall_operation(
     server_id: UUID,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+    payload: AgentLifecycleConfirmationRequest | None = None,
 ) -> AgentCommandCreateResponse:
-    return await _queue_maintenance_command(
+    return await _queue_server_command(
         server_id,
-        "/api/child/agent/uninstall-stream",
+        AgentCommandCreate(
+            method="POST", path="/api/child/agent/uninstall-stream", stream=True,
+            timeout_ms=300_000, body=payload.model_dump() if payload else None,
+        ),
         store,
         connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/agent/rollback",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_agent_rollback_operation(
+    server_id: UUID,
+    payload: AgentLifecycleConfirmationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST", path="/api/child/agent/rollback", timeout_ms=300_000,
+            body=payload.model_dump(),
+        ),
+        store, connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/agent/lifecycle",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_agent_lifecycle_status(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id, AgentCommandCreate(method="GET", path="/api/child/agent/lifecycle"),
+        store, connections,
     )
 
 

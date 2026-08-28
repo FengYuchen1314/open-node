@@ -117,8 +117,18 @@ process/package identity and fresh Agent health, and persists release-switch
 transactions before stopping the current service. Failed activation restores
 the previous release; interrupted switches can be recovered explicitly.
 Uninstall preserves configuration/state unless purge is explicitly selected.
-See [Agent deployment](agent-deployment.md). External systemd runtime mode and
-remote lifecycle handlers remain separate release gates.
+See [Agent deployment](agent-deployment.md). External systemd runtime mode remains
+a separate release gate.
+
+Optional [remote Agent lifecycle](agent-lifecycle.md) uses a root-owned helper
+with a host-approved HTTPS release source and a permission-restricted Unix
+socket. The Agent remains non-root. Version/checksum-pinned jobs are journaled
+by request identity and return deferred acceptance, not an early RPC success.
+Only these host jobs allow pending-request redelivery through the Agent journal;
+the generic interrupted-command conflict contract remains unchanged. The helper
+recovers package staging, switching and removal after crashes and reports its
+actual outcome using an unprivileged reporter. It remains after uninstall until
+the controller acknowledges that result, then stops its socket/service.
 
 The control-plane operation wrappers cover more endpoints than this agent
 currently implements. See [the agent contract](../agent/README.md) for its

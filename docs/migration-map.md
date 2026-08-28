@@ -210,9 +210,10 @@ This document records the starting source map for the Open Node refactor.
 
 These passing command and snapshot checks do not prove a complete replacement:
 
-- Complete remote Agent upgrade/uninstall command handlers. The host CLI's
-  managed systemd install/upgrade/rollback/removal path is implemented; it is
-  not a remote lifecycle handler. Independent managed Xray package installation,
+- Remote Agent upgrade, rollback and uninstall now have an explicit host-opt-in
+  [lifecycle helper](agent-lifecycle.md), fixed HTTPS release source, wheel pins,
+  durable jobs and delayed final callbacks. This is separate from the host CLI
+  and requires compatible native Agents. Independent managed Xray package installation,
   version switching, explicit rollback, durable failure recovery and
   data-preserving removal are implemented separately in
   [xray-releases.md](xray-releases.md), without changing root-owned bootstrap files.

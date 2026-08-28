@@ -6,6 +6,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Path,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -133,6 +134,25 @@ async def complete_agent_command(
 ) -> AgentCommandResultResponse:
     try:
         command = await run_in_threadpool(store.complete_command, command_id, payload)
+    except InvalidAgentTokenError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except CommandNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except CommandNotReadyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await connections.dispatch_ready_commands(store)
+    return AgentCommandResultResponse(command=command)
+
+
+@router.post("/commands/by-request/{request_id}/result", response_model=AgentCommandResultResponse)
+async def complete_agent_command_by_request(
+    request_id: Annotated[str, Path(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}$")],
+    payload: AgentCommandResultRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandResultResponse:
+    try:
+        command = await run_in_threadpool(store.complete_command_by_request_id, request_id, payload)
     except InvalidAgentTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     except CommandNotFoundError as exc:

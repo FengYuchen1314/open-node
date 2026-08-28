@@ -24,6 +24,24 @@ import {
 } from "./inventory";
 
 describe("inventory API client", () => {
+  it.each(["agent_upgrade", "agent_rollback", "agent_uninstall", "agent_lifecycle"] as const)(
+    "queues the %s lifecycle operation", async (operation) => {
+      const payload = operation === "agent_upgrade"
+        ? { version: "0.2.0", sha256: "a".repeat(64) }
+        : operation === "agent_lifecycle" ? undefined : { confirm: true as const };
+      const fetcher: typeof fetch = async (input, init) => {
+        expect(input.toString()).toBe(
+          "/api/v1/servers/srv_1/operations/agent/" + operation.slice(6),
+        );
+        expect(init?.method).toBe("POST");
+        expect(init?.body ? JSON.parse(init.body.toString()) : undefined).toEqual(payload);
+        return new Response(JSON.stringify({ command: { id: "lifecycle-command" } }), { status: 201 });
+      };
+      expect((await queueAgentOperation("srv_1", operation, payload, fetcher)).command.id)
+        .toBe("lifecycle-command");
+    },
+  );
+
   it.each(["xray_install", "xray_release", "xray_rollback"] as const)("queues %s with version pins", async (operation) => {
     const payload = operation === "xray_install" ? { version: "v26.2.6", sha256: "a".repeat(64), start: false } : undefined;
     const fetcher: typeof fetch = async (input, init) => {

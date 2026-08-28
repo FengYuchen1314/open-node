@@ -9,6 +9,7 @@ import psutil
 
 from open_node_agent import __version__
 from open_node_agent.journal import CommandJournal
+from open_node_agent.lifecycle import HostLifecycle
 from open_node_agent.nginx import NginxRuntime
 from open_node_agent.runtime import RuntimeFailure, XrayRuntime
 from open_node_agent.xray_releases import XrayReleases
@@ -170,6 +171,7 @@ class Operations:
         self.journal = journal
         self.nginx = NginxRuntime(runtime, journal)
         self.releases = XrayReleases(runtime, journal)
+        self.lifecycle = HostLifecycle(runtime.config)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
 
@@ -204,6 +206,8 @@ class Operations:
             raise RuntimeFailure("Command body must be an object")
         query = parse_qs(command.get("query") or "")
         async with self.runtime.lock:
+            if path == "/api/child/agent/lifecycle" and method == "GET":
+                return await self.lifecycle.status()
             if (
                 path in {"/api/child/xray/install", "/api/child/xray/install-stream"}
                 and method == "POST"

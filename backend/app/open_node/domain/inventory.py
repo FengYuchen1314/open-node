@@ -219,6 +219,8 @@ class AgentOperationKind(StrEnum):
     AGENT_UPDATE_MASTER_URL = "agent_update_master_url"
     AGENT_UPGRADE = "agent_upgrade"
     AGENT_UNINSTALL = "agent_uninstall"
+    AGENT_ROLLBACK = "agent_rollback"
+    AGENT_LIFECYCLE = "agent_lifecycle"
 
 
 class AgentCapabilities(BaseModel):
@@ -1023,6 +1025,26 @@ class AgentDomainLatencyProbeRequest(BaseModel):
         value = value.strip()
         if value.startswith("[") and value.endswith("]"):
             value = value[1:-1]
+        return value
+
+
+class AgentUpgradeOperationRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    version: str = Field(
+        max_length=64, pattern=r"^[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$"
+    )
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AgentLifecycleConfirmationRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    confirm: Literal[True]
+
+    @field_validator("confirm", mode="before")
+    @classmethod
+    def require_explicit_confirmation(cls, value: Any) -> Any:
+        if value is not True:
+            raise ValueError("Explicit confirmation is required")
         return value
 
 

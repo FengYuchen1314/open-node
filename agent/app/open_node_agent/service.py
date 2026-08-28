@@ -6,6 +6,7 @@ import argparse
 import email.parser
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import pwd
@@ -23,6 +24,15 @@ from uuid import uuid4
 UNIT_PATTERN = r"open-node-agent(?:-[a-z0-9][a-z0-9-]{0,15})?\.service"
 RELEASE_PATTERN = r"[a-zA-Z0-9_.+-]+-[a-f0-9]{16}"
 MANIFEST_NAME = "installation.json"
+
+
+def lifecycle_helper():
+    spec = importlib.util.spec_from_file_location(
+        "open_node_lifecycle_host", Path(__file__).with_name("lifecycle_host.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class DeploymentError(RuntimeError):
@@ -167,6 +177,8 @@ class Deployment:
             raise DeploymentError("Installation identity does not match")
         for release in self.record.get("releases", {}):
             self.release_path(release)
+        if self.record.get("staging"):
+            self.release_path(self.record["staging"])
         for name in ("config", "state", "runtime", "releases"):
             path = self.root / name
             if path.is_symlink():
@@ -261,6 +273,8 @@ WantedBy=multi-user.target
         return self.record["uid"], self.record["gid"]
 
     def stage(self, wheel: Path):
+        if self.record.get("staging"):
+            raise DeploymentError("Interrupted package staging exists; run recover first")
         info = wheel_info(wheel)
         release = self.release_path(info["id"])
         if info["id"] in self.record["releases"]:
@@ -275,8 +289,14 @@ WantedBy=multi-user.target
             raise DeploymentError(
                 f"Incomplete staging directory: {release}; inspect before retrying"
             )
-        release.mkdir(mode=0o755)
+        self.record["staging"] = info["id"]
+        self.save()
+        created = False
+        # The private host helper uses 0077; installed code must remain readable by the Agent.
+        previous_umask = os.umask(0o022)
         try:
+            release.mkdir(mode=0o755)
+            created = True
             archived_wheel = release / wheel.name
             shutil.copyfile(wheel, archived_wheel)
             archived_wheel.chmod(0o600)
@@ -298,11 +318,18 @@ WantedBy=multi-user.target
             if actual != info["version"]:
                 raise DeploymentError("Wheel runtime version does not match its metadata")
             self.record["releases"][info["id"]] = info
+            self.record["staging"] = None
             self.save()
             return info["id"]
         except BaseException:
-            self.remove_owned(release)
+            if created:
+                self.remove_owned(release)
+            self.record["releases"].pop(info["id"], None)
+            self.record["staging"] = None
+            self.save()
             raise
+        finally:
+            os.umask(previous_umask)
 
     def remove_owned(self, path: Path):
         validate_root(self.root)
@@ -515,7 +542,11 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
         )
 
     def activate(self, release):
-        if self.record.get("pending"):
+        if (
+            self.record.get("pending")
+            or self.record.get("staging")
+            or self.record["status"] == "removing"
+        ):
             raise DeploymentError("An interrupted transaction exists; run recover first")
         self.verify_unit()
         self.preflight(release)
@@ -554,6 +585,15 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
             ) from error
 
     def recover(self):
+        if self.record["status"] == "removing":
+            self.uninstall(keep_lifecycle=True)
+            return
+        staging = self.record.get("staging")
+        if staging:
+            if staging not in self.record["releases"]:
+                self.remove_owned(self.release_path(staging))
+            self.record["staging"] = None
+            self.save()
         pending = self.record.get("pending")
         if not pending:
             return
@@ -581,7 +621,7 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
             self.initialize()
         else:
             self.load()
-            if self.record.get("pending"):
+            if self.record.get("pending") or self.record.get("staging"):
                 raise DeploymentError("An interrupted transaction exists; run recover first")
             if self.record["status"] not in {"removed", "failed", "preparing"}:
                 raise DeploymentError("Already installed; use upgrade")
@@ -608,12 +648,20 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
                 raise DeploymentError("Service name was claimed by another definition")
             write_file(self.unit_file, self.unit_text().encode(), mode=0o644)
         command("systemctl", "daemon-reload")
+        if self.record.get("lifecycle"):
+            self.record["status"] = "preparing"
+            self.save()
+            lifecycle_helper().start_helper(self)
         self.activate(release)
 
     def upgrade(self, wheel):
         self.load()
         self.verify_unit()
-        if self.record["status"] != "installed" or self.record.get("pending"):
+        if (
+            self.record["status"] != "installed"
+            or self.record.get("pending")
+            or self.record.get("staging")
+        ):
             raise DeploymentError("Upgrade requires an installed, recovered deployment")
         release = self.stage(wheel)
         if release != self.record["current"]:
@@ -626,20 +674,32 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
             raise DeploymentError("No previous release is available")
         self.activate(previous)
 
-    def uninstall(self, *, purge=False):
+    def uninstall(self, *, purge=False, keep_lifecycle=False):
         self.load()
+        if self.record["status"] == "removing":
+            # Removal may have stopped between unlinking the unit and reloading systemd.
+            command("systemctl", "daemon-reload")
         self.verify_unit(missing_ok=True)
+        if not self.unit_file.exists() and self.properties().get("FragmentPath"):
+            raise DeploymentError("Service name now belongs to another definition")
+        if self.record.get("lifecycle") and not keep_lifecycle:
+            lifecycle_helper().stop_helper(self, remove_units=purge)
+        self.record["status"] = "removing"
+        self.save()
         if self.unit_file.exists():
             command("systemctl", "disable", "--now", self.unit)
             self.unit_file.unlink()
+            fsync_directory(self.unit_file.parent)
             command("systemctl", "daemon-reload")
             command("systemctl", "reset-failed", self.unit, check=False)
-        elif self.properties().get("FragmentPath"):
-            raise DeploymentError("Service name now belongs to another definition")
         self.set_current(None)
         for release in self.record["releases"]:
             self.remove_owned(self.release_path(release))
-        self.record.update(status="removed", current=None, previous=None, pending=None, releases={})
+        if self.record.get("staging"):
+            self.remove_owned(self.release_path(self.record["staging"]))
+        self.record.update(
+            status="removed", current=None, previous=None, pending=None, staging=None, releases={}
+        )
         self.save()
         if purge:
             # userdel intentionally omits -r: it must never remove an unrelated home.
@@ -668,6 +728,12 @@ def main():
     actions.add_parser("status")
     uninstall = actions.add_parser("uninstall")
     uninstall.add_argument("--purge", action="store_true")
+    remote = actions.add_parser("enable-remote")
+    remote.add_argument(
+        "--release-base-url",
+        default="https://github.com/FengYuchen1314/open-node/releases/download",
+    )
+    remote.add_argument("--release-ca", type=Path)
     args = parser.parse_args()
     os.umask(0o022)
     try:
@@ -685,6 +751,9 @@ def main():
                 deployment.rollback()
             elif args.action == "uninstall":
                 deployment.uninstall(purge=args.purge)
+            elif args.action == "enable-remote":
+                deployment.load()
+                lifecycle_helper().enable_helper(deployment, args.release_base_url, args.release_ca)
             else:
                 deployment.load()
                 if args.action == "recover":
