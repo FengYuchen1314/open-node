@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 
 import type { ServerSummary } from "../domain/inventory";
 import type {
@@ -15,6 +15,7 @@ import type {
   SubscriptionCatalogBundle,
   SubscriptionCatalogImportResponse,
   SubscriptionClientFormat,
+  SubscriptionFormatPreview,
   SubscriptionDueTrafficResetResponse,
   SubscriptionPlan,
   SubscriptionPlanAssignRequest,
@@ -35,6 +36,7 @@ import {
   exportSubscriptionCatalog,
   getProductUserQuota,
   getProductUserTraffic,
+  getSubscriptionFormatPreview,
   importSubscriptionCatalog,
   listProductUserCredentials,
   listManagedNodes,
@@ -127,6 +129,12 @@ const assignForm = reactive({
   command_timeout_ms: 60_000,
 });
 const subscriptionFormat = ref<SubscriptionClientFormat>("clash");
+const formatPreview = ref<SubscriptionFormatPreview | null>(null);
+const formatPreviewLoading = ref(false);
+const formatPreviewError = ref("");
+const formatNode = ref<string | null>(null);
+let formatRequest = 0;
+let selectedUserVersion = 0;
 const catalogForm = reactive({
   includeCredentials: false,
   importCredentials: false,
@@ -149,6 +157,7 @@ const trafficModeOptions: Array<{ title: string; value: SubscriptionTrafficMode 
 const subscriptionFormatOptions: Array<{ title: string; value: SubscriptionClientFormat }> = [
   { title: "Clash YAML", value: "clash" },
   { title: "sing-box JSON", value: "sing-box" },
+  { title: "Xray JSON", value: "xray" },
   { title: "URI list", value: "uri-list" },
   { title: "Base64 URI", value: "base64" },
 ];
@@ -172,10 +181,43 @@ const assignmentJson = computed(() =>
   lastAssignment.value ? JSON.stringify(lastAssignment.value.provisioning_batches, null, 2) : "",
 );
 const selectedFormatUrl = computed(() =>
-  subscriptionToken.value
-    ? subscriptionUrlForFormat(subscriptionToken.value.subscription_url, subscriptionFormat.value)
+  subscriptionToken.value && formatPreview.value?.nodes.some((node) => node.available)
+    ? subscriptionUrlForFormat(subscriptionToken.value.subscription_url, subscriptionFormat.value, formatNode.value)
     : "",
 );
+const formatNodeOptions = computed(() =>
+  (formatPreview.value?.nodes ?? []).filter((node) => node.available)
+    .map((node) => ({ title: node.name, value: node.node_id })),
+);
+
+watch(() => assignForm.username, () => {
+  selectedUserVersion += 1;
+  subscriptionToken.value = null;
+  subscriptionCredentials.value = [];
+  subscriptionTraffic.value = null;
+  subscriptionQuota.value = null;
+});
+
+watch([subscriptionToken, subscriptionFormat, lastAssignment], async () => {
+  const request = ++formatRequest;
+  const token = subscriptionToken.value;
+  formatPreview.value = null;
+  formatPreviewError.value = "";
+  formatNode.value = null;
+  formatPreviewLoading.value = false;
+  if (!token) return;
+  formatPreviewLoading.value = true;
+  try {
+    const preview = await getSubscriptionFormatPreview(token.username, subscriptionFormat.value);
+    if (request !== formatRequest) return;
+    formatPreview.value = preview;
+    formatNode.value = preview.nodes.find((node) => node.available)?.node_id ?? null;
+  } catch (error) {
+    if (request === formatRequest) formatPreviewError.value = readableError(error);
+  } finally {
+    if (request === formatRequest) formatPreviewLoading.value = false;
+  }
+});
 
 onMounted(() => {
   void refresh();
@@ -406,11 +448,13 @@ async function createToken() {
     return;
   }
 
+  const userVersion = selectedUserVersion;
   savingAction.value = "token";
   errorMessage.value = "";
   successMessage.value = "";
   try {
     const response = await createProductUserSubscriptionToken(assignForm.username);
+    if (userVersion !== selectedUserVersion) return;
     subscriptionToken.value = response.subscription;
     successMessage.value = `Subscription link ready for ${response.subscription.username}.`;
   } catch (error) {
@@ -426,11 +470,13 @@ async function resetToken() {
     return;
   }
 
+  const userVersion = selectedUserVersion;
   savingAction.value = "token";
   errorMessage.value = "";
   successMessage.value = "";
   try {
     const response = await resetProductUserSubscriptionToken(assignForm.username);
+    if (userVersion !== selectedUserVersion) return;
     subscriptionToken.value = response.subscription;
     successMessage.value = `Subscription link reset for ${response.subscription.username}.`;
   } catch (error) {
@@ -758,12 +804,11 @@ function presetConfig(preset: SubscriptionTemplatePreset) {
   return config;
 }
 
-function subscriptionUrlForFormat(url: string, format: SubscriptionClientFormat) {
-  if (format === "clash") {
-    return url;
-  }
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}format=${encodeURIComponent(format)}`;
+function subscriptionUrlForFormat(url: string, format: SubscriptionClientFormat, nodeId: string | null) {
+  const result = new URL(url, window.location.origin);
+  if (format !== "clash") result.searchParams.set("format", format);
+  if (format === "xray" && nodeId) result.searchParams.set("node_id", nodeId);
+  return result.toString();
 }
 
 function formatBytes(value: number) {
@@ -782,7 +827,7 @@ function formatBytes(value: number) {
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell subscription-page">
     <section class="page-heading">
       <div>
         <div class="eyebrow">Subscriptions</div>
@@ -1350,6 +1395,7 @@ function formatBytes(value: number) {
               <v-select
                 v-model="subscriptionFormat"
                 :items="subscriptionFormatOptions"
+                :loading="formatPreviewLoading"
                 density="comfortable"
                 label="Client format"
                 prepend-inner-icon="mdi-file-cog-outline"
@@ -1363,6 +1409,30 @@ function formatBytes(value: number) {
                 readonly
                 variant="outlined"
               />
+            </div>
+            <v-select
+              v-if="subscriptionFormat === 'xray'"
+              v-model="formatNode"
+              :items="formatNodeOptions"
+              :disabled="formatPreviewLoading || !formatNodeOptions.length"
+              density="comfortable"
+              label="Xray node"
+              clearable
+              prepend-inner-icon="mdi-server-network"
+              variant="outlined"
+            />
+            <v-alert v-if="formatPreviewError" type="error" variant="tonal" density="compact">
+              {{ formatPreviewError }}
+            </v-alert>
+            <div v-if="formatPreview" class="format-compatibility">
+              <v-alert v-if="formatPreview.warnings.length" type="warning" variant="tonal" density="compact">
+                {{ formatPreview.warnings.join("; ") }}
+              </v-alert>
+              <div class="server-subline">{{ formatNodeOptions.length }} available / {{ formatPreview.nodes.length - formatNodeOptions.length }} excluded</div>
+              <div v-for="node in formatPreview.nodes.filter((item) => !item.available)" :key="node.node_id" class="format-exclusion">
+                <v-icon icon="mdi-alert-circle-outline" size="small" color="warning" />
+                <div><strong>{{ node.name }}</strong><div class="server-subline">{{ node.reason }}</div></div>
+              </div>
             </div>
           </template>
           <div v-if="subscriptionQuota" class="assignment-summary">

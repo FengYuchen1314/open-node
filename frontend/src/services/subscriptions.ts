@@ -12,6 +12,8 @@ import type {
   SubscriptionCatalogExportResponse,
   SubscriptionCatalogImportRequest,
   SubscriptionCatalogImportResponse,
+  SubscriptionClientFormat,
+  SubscriptionFormatPreview,
   SubscriptionDueTrafficResetRequest,
   SubscriptionDueTrafficResetResponse,
   SubscriptionPlanAssignRequest,
@@ -41,6 +43,20 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const jsonHeaders = {
   "Content-Type": "application/json",
 };
+
+export async function getSubscriptionFormatPreview(
+  username: string,
+  format: SubscriptionClientFormat,
+  fetcher = authenticatedFetch,
+): Promise<SubscriptionFormatPreview> {
+  const response = await fetcher(
+    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-preview?format=${encodeURIComponent(format)}`,
+  );
+  if (!response.ok) {
+    throw await apiError(response, "Subscription compatibility request failed");
+  }
+  return response.json() as Promise<SubscriptionFormatPreview>;
+}
 
 export async function listProductUsers(fetcher = authenticatedFetch): Promise<ProductUsersResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/users`);

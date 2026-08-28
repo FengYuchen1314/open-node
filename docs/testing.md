@@ -58,6 +58,60 @@ cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
 
+## Subscription Client Smoke
+
+Build the frontend and [patched runtime](fork-runtime.md) on the VPS. Use the
+backend development environment with Playwright Chromium, the current Agent
+wheel, Nginx, Mihomo v1.19.30 (digest below) and official sing-box v1.13.19.
+The `sing-box-1.13.19-linux-amd64.tar.gz` SHA-256 is
+`ef88a9e577d474210867bd708933d042e9b70106529df2656182c9db90106aa1`.
+
+```bash
+python scripts/vps/smoke-subscription-clients.py \
+  --xray /tmp/open-node-runtime-build/xray \
+  --mihomo /absolute/path/to/mihomo \
+  --sing-box /absolute/path/to/sing-box \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /absolute/path/to/nginx \
+  --output /tmp/open-node-subscription-screenshots
+```
+
+This disposable root/systemd fixture installs a non-root Agent and provisions
+18 inbound variants. It validates complete native exports, switches selectors,
+tests each selected Xray node, and feeds unchanged URI/Base64 payloads to the
+pinned Mihomo parser. Every compatible non-Mieru entry must forward TCP and UDP;
+Mieru's verified target support remains TCP only. Explicit expected node sets
+prevent a broken converter from passing by excluding everything.
+
+It also verifies that the Shadowsocks 2022 shared key stays out of imported
+node metadata and compatibility reports. Browser checks cover the format report,
+Xray selection, selected URLs, desktop/mobile/narrow layout, and delayed
+responses during format/user changes. Consult [subscriptions.md](subscriptions.md)
+for the exact version-specific boundaries; this fixture is not an assertion
+that arbitrary protocol extension fields are portable.
+
+Verified on 2026-08-28 (UTC), Debian 12 x86-64 on the designated VPS:
+
+- Backend: 451 tests; Agent: 397 tests; frontend: 99 tests and production build.
+- Ruff and probe Worker TypeScript checks passed.
+- All 18 inbound variants passed their supported native client formats and
+  unchanged URI/Base64 imports, including VLESS Vision and real TCP/UDP target
+  traffic. Mieru target coverage remains TCP only.
+- The HTTPS/WSS fork-protocol lifecycle regression passed again, including
+  password rotation, final-user revocation, empty restart and reactivation.
+- Desktop 1440x900, mobile 390x844 and narrow 320x740 browser checks passed.
+  Screenshots were inspected; node labels wrap without clipping, action buttons
+  fit, and delayed format/user responses cannot replace the current selection.
+- The patched runtime binary SHA-256 is
+  `ccdaed47d4ee77f7aa37d342df91d05f2e947478f8ac863a085d176ac9558691`.
+  Matching-source SHA-256 is
+  `18a4410c09e0142948c6987a4f21d3a480561f482150f4cfffc2b71dbdbbf5da`.
+  Its `build.json` records both MPL-2.0 patch digests. The build also passed
+  all three protocol-package Go tests and module verification.
+- Existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+
+These results do not close the other [migration gates](migration-map.md).
+
 ## Fork Protocol Smoke
 
 Build the optional [compatibility runtime](fork-runtime.md), its unmodified
@@ -93,7 +147,8 @@ same empty configuration is checked explicitly.
 AnyTLS and Snell cover TCP and UDP target bytes. Mieru covers TCP target bytes
 over both TCP/UDP underlays; UDP target forwarding is absent in the pinned
 source and is not claimed. Snell v6 uses the free fork client. The smoke
-consumes per-node proxies, not unsupported mixed stock-client configurations.
+consumes per-node proxies and native Snell v6 outbounds. Complete mixed exports
+are covered separately by the subscription-client smoke above.
 Other architectures, multi-file takeover and public-provider staging are not
 established by these tests.
 

@@ -22,6 +22,7 @@ import {
   getProductUserQuota,
   getProductUserSubscriptionToken,
   getProductUserTraffic,
+  getSubscriptionFormatPreview,
   getXrayRuntimeNodeReconciliation,
   importSubscriptionCatalog,
   importManagedNodesFromRuntimeInbounds,
@@ -39,6 +40,17 @@ import {
 } from "./subscriptions";
 
 const timestamp = "2026-08-27T00:00:00Z";
+
+it("requests a credential-free subscription compatibility preview", async () => {
+  const requests: string[] = [];
+  const preview = { username: "alice@example.com", client_format: "xray", nodes: [], warnings: [], license_required: false };
+  const fetcher = async (input: RequestInfo | URL) => {
+    requests.push(String(input));
+    return new Response(JSON.stringify(preview), { status: 200 });
+  };
+  expect(await getSubscriptionFormatPreview("alice@example.com", "xray", fetcher)).toEqual(preview);
+  expect(requests).toEqual(["/api/v1/users/alice%40example.com/subscription-preview?format=xray"]);
+});
 
 const productUser: ProductUser = {
   username: "alice@example.com",

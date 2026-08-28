@@ -47,8 +47,25 @@ class SubscriptionTrafficMode(StrEnum):
 class SubscriptionClientFormat(StrEnum):
     CLASH = "clash"
     SING_BOX = "sing-box"
+    XRAY = "xray"
     URI_LIST = "uri-list"
     BASE64 = "base64"
+
+
+class SubscriptionFormatNode(BaseModel):
+    node_id: UUID
+    name: str
+    protocol: str
+    available: bool
+    reason: str | None = None
+
+
+class SubscriptionFormatPreview(BaseModel):
+    username: str
+    client_format: SubscriptionClientFormat
+    nodes: list[SubscriptionFormatNode]
+    warnings: list[str] = Field(default_factory=list)
+    license_required: Literal[False] = False
 
 
 class ProductUserCreate(BaseModel):

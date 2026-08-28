@@ -9,12 +9,15 @@ separate MPL-2.0 component, not code relicensed under the Agent's MIT license.
 
 The build helper pins
 [`FengYuchen1314/Xray-core-mmwx`](https://github.com/FengYuchen1314/Xray-core-mmwx)
-to commit `d3fdae5833a92070414db588ee9893264147b789`. The only applied change is
+to commit `d3fdae5833a92070414db588ee9893264147b789`. The runtime applies
 [`empty-users.patch`](../runtime/xray/empty-users.patch): empty Snell and Mieru
 inbounds can start, but reject every connection before protocol processing.
 Without this change, removing the last user fails runtime validation/startup
 and the Agent correctly retains the previous, still-authorized configuration.
-AnyTLS already supports empty user lists.
+AnyTLS already supports empty user lists. A second
+[`anytls-udp-address.patch`](../runtime/xray/anytls-udp-address.patch) preserves
+IP/domain address families in native AnyTLS UDP requests. The original client
+puts IP strings into a domain-only field, which its serializer rejects.
 
 Run all builds and tests on the designated VPS. With Git and a verified Go
 1.26.7 toolchain available, from this checkout:
@@ -35,10 +38,10 @@ running service. Outputs include:
 - `xray`: the patched runtime; `xray-reference`: the optional original runtime.
 - `build.json`: source revision, Go/platform identity and SHA-256 digests.
 - `matching-source.tar.gz`: the tracked source with the applied changes.
-- `LICENSE-Xray-MPL-2.0` and `empty-users.patch`: runtime license and changes.
+- `LICENSE-Xray-MPL-2.0` and both patch files: runtime license and changes.
 
 Keep these files together when distributing a runtime build, including the
-matching source and notices required by its license. The patch is explicitly
+matching source and notices required by its license. Both patches are explicitly
 [MPL-2.0](../runtime/xray/LICENSE). No runtime binary is bundled in the Agent
 wheel or silently downloaded by this helper's consumers.
 
@@ -90,14 +93,14 @@ The pinned Mieru implementation ignores SOCKS UDP-associate requests. UDP
 **underlay** support does not imply UDP **target** forwarding; imported Mieru
 nodes therefore set `udp: false`. UDP target support remains unfinished.
 
-Mihomo v1.19.30 does not support Snell v6. The existing subscription renderer can
-emit extension fields for clients that support them, but a mixed subscription
-containing Snell v6 must not be imported wholesale into stock Mihomo. Current
-sing-box output also contains a Snell extension that stock sing-box does not
-implement. Client capability filtering and a native free-client Snell v6 export
-remain release gates. The smoke consumes each real subscribed proxy separately
-and maps the v6 endpoint/PSK into the pinned fork's outbound schema; it does not
-claim that every rendered subscription is a working stock-client configuration.
+The [subscription exporters](subscriptions.md) now filter incompatible entries
+for their pinned client versions. Snell v6 is available through native
+`format=xray` export, with an optional plan-scoped node selection. A separate
+full-export smoke starts real Mihomo v1.19.30, sing-box v1.13.19 and the patched
+Xray client, checks every included node and imports the URI/Base64 payloads.
+The lifecycle smoke also consumes native Snell v6 outbounds when testing
+assigned subscriptions. Version-specific limitations and unverified
+combinations remain explicit; this is not universal client compatibility.
 
 See [testing.md](testing.md#fork-protocol-smoke) for exact reproduction commands
 and [migration-map.md](migration-map.md) for the remaining replacement gates.

@@ -1,6 +1,7 @@
 import base64
 from datetime import datetime
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
@@ -23,6 +24,7 @@ from open_node.domain.subscriptions import (
     SubscriptionClientFormat,
     SubscriptionDueTrafficResetRequest,
     SubscriptionDueTrafficResetResponse,
+    SubscriptionFormatPreview,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanAssignResponse,
     SubscriptionPlanCreate,
@@ -272,6 +274,20 @@ def create_subscription_plan(
     return SubscriptionPlanResponse(plan=plan)
 
 
+@router.get("/users/{username}/subscription-preview", response_model=SubscriptionFormatPreview)
+def preview_subscription_format(
+    username: str,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    client_format: Annotated[
+        SubscriptionClientFormat, Query(alias="format")
+    ] = SubscriptionClientFormat.CLASH,
+) -> SubscriptionFormatPreview:
+    try:
+        return store.subscription_format_preview(username, client_format)
+    except (ProductUserNotFoundError, SubscriptionUnavailableError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 @public_router.get("/subscribe/{subscription_key}", name="render_user_subscription")
 def render_user_subscription(
     subscription_key: str,
@@ -280,15 +296,19 @@ def render_user_subscription(
         SubscriptionClientFormat,
         Query(alias="format"),
     ] = SubscriptionClientFormat.CLASH,
+    node_id: UUID | None = None,
 ) -> Response:
     try:
-        rendered = store.render_subscription(subscription_key, client_format)
+        rendered = store.render_subscription(subscription_key, client_format, node_id)
     except SubscriptionTokenNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SubscriptionUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     headers = {
+        "Cache-Control": "no-store",
+        "X-Open-Node-Included-Nodes": str(rendered.included_nodes),
+        "X-Open-Node-Excluded-Nodes": str(rendered.excluded_nodes),
         "Content-Disposition": InventoryStore.subscription_content_disposition(rendered.filename),
         "profile-title": "base64:"
         + base64.b64encode(rendered.plan_name.encode("utf-8")).decode("ascii"),

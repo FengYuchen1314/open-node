@@ -98,7 +98,17 @@ def proxy_client(work, args, proxy, ca):
     socks = runtime.free_port()
     config = directory / "client.json"
     if proxy["type"] == "snell" and proxy.get("version") == 6:
-        # Mihomo has no Snell v6; consume the same subscribed endpoint and PSK.
+        # Original fixtures have no export; catalog clients use the native outbound.
+        outbound = copy.deepcopy(proxy.get("xray-outbound")) or {
+            "protocol": "snell",
+            "settings": {
+                "address": proxy["server"],
+                "port": proxy["port"],
+                "version": 6,
+                "v6Mode": proxy["mode"],
+            },
+        }
+        outbound["settings"]["psk"] = proxy["psk"]
         runtime.write_private(
             config,
             {
@@ -111,18 +121,7 @@ def proxy_client(work, args, proxy, ca):
                         "settings": {"auth": "noauth", "udp": True},
                     }
                 ],
-                "outbounds": [
-                    {
-                        "protocol": "snell",
-                        "settings": {
-                            "address": proxy["server"],
-                            "port": proxy["port"],
-                            "psk": proxy["psk"],
-                            "version": 6,
-                            "v6Mode": proxy["mode"],
-                        },
-                    }
-                ],
+                "outbounds": [outbound],
             },
         )
         command = [str(args.reference), "run", "-config", str(config)]
@@ -418,6 +417,28 @@ def exercise_mode(
         client.get(f"/api/v1/subscribe/{token}").raise_for_status().text
     )
     subscribed = {by_name[proxy["name"]]: proxy for proxy in subscription["proxies"]}
+    assert set(subscribed) == set(proxies) - {"snell6", "snell6-unshaped"}
+    for node in nodes:
+        if node["inbound_tag"] not in {"snell6", "snell6-unshaped"}:
+            continue
+        exported = (
+            client.get(f"/api/v1/subscribe/{token}?format=xray&node_id={node['id']}")
+            .raise_for_status()
+            .json()
+        )
+        outbound = exported["outbounds"][0]
+        settings = outbound["settings"]
+        subscribed[node["inbound_tag"]] = {
+            "type": "snell",
+            "version": 6,
+            "mode": settings["v6Mode"],
+            "name": outbound["tag"],
+            "server": settings["address"],
+            "port": settings["port"],
+            "psk": settings["psk"],
+            "udp": True,
+            "xray-outbound": outbound,
+        }
     assert set(subscribed) == set(proxies)
     for tag, proxy in subscribed.items():
         check_traffic(

@@ -1,0 +1,19 @@
+SPDX-License-Identifier: MPL-2.0
+Open Node compatibility changes for the pinned Xray-core-mmwx source.
+Preserve the destination address family in native AnyTLS UDP requests.
+
+diff --git a/proxy/anytls/session_client.go b/proxy/anytls/session_client.go
+--- a/proxy/anytls/session_client.go
++++ b/proxy/anytls/session_client.go
+@@ -224,10 +224,7 @@ func (s *session) openStream(ctx context.Context, target net.Destination, link *tran
+ 	if target.Network == net.Network_UDP {
+ 		reqBuf := buf.New()
+ 		err := uot.WriteRequest(reqBuf, uot.Request{
+-			Destination: M.Socksaddr{
+-				Fqdn: target.Address.String(),
+-				Port: target.Port.Value(),
+-			},
++			Destination: singbridge.ToSocksaddr(target),
+ 		})
+ 		if err != nil {
+ 			reqBuf.Release()

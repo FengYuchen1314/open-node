@@ -12,7 +12,10 @@ from pathlib import Path
 REPOSITORY = "https://github.com/FengYuchen1314/Xray-core-mmwx.git"
 REVISION = "d3fdae5833a92070414db588ee9893264147b789"
 ROOT = Path(__file__).resolve().parents[2]
-PATCH = ROOT / "runtime/xray/empty-users.patch"
+PATCHES = [
+    ROOT / "runtime/xray/empty-users.patch",
+    ROOT / "runtime/xray/anytls-udp-address.patch",
+]
 
 
 def command(*args, cwd, env=None, capture=False):
@@ -73,8 +76,9 @@ def build(work: Path, go: Path, jobs: int, reference: bool):
     ]
     if reference:
         command(go, *flags, work / "xray-reference", "./main", cwd=source, env=env)
-    command("git", "apply", "--check", PATCH, cwd=source)
-    command("git", "apply", PATCH, cwd=source)
+    for patch in PATCHES:
+        command("git", "apply", "--check", patch, cwd=source)
+        command("git", "apply", patch, cwd=source)
     command(
         go,
         "test",
@@ -90,7 +94,8 @@ def build(work: Path, go: Path, jobs: int, reference: bool):
     command(go, *flags, binary, "./main", cwd=source, env=env)
     command(go, "mod", "verify", cwd=source, env=env)
     shutil.copyfile(source / "LICENSE", work / "LICENSE-Xray-MPL-2.0")
-    shutil.copyfile(PATCH, work / "empty-users.patch")
+    for patch in PATCHES:
+        shutil.copyfile(patch, work / patch.name)
     names = command("git", "ls-files", "-z", cwd=source, capture=True).split("\0")
     with tarfile.open(work / "matching-source.tar.gz", "w:gz") as archive:
         for name in filter(None, names):
@@ -98,7 +103,10 @@ def build(work: Path, go: Path, jobs: int, reference: bool):
     manifest = {
         "repository": REPOSITORY,
         "revision": REVISION,
-        "patch_sha256": hashlib.sha256(PATCH.read_bytes()).hexdigest(),
+        "patches": {
+            patch.name: hashlib.sha256(patch.read_bytes()).hexdigest()
+            for patch in PATCHES
+        },
         "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
         "source_sha256": hashlib.sha256(
             (work / "matching-source.tar.gz").read_bytes()

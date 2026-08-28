@@ -3,7 +3,15 @@ import type { AgentCommand } from "./inventory";
 export type ProductUserRole = "admin" | "user";
 export type ManagedNodeType = "physical" | "routed";
 export type SubscriptionTrafficMode = "oneway" | "twoway";
-export type SubscriptionClientFormat = "clash" | "sing-box" | "uri-list" | "base64";
+export type SubscriptionClientFormat = "clash" | "sing-box" | "xray" | "uri-list" | "base64";
+
+export interface SubscriptionFormatPreview {
+  username: string;
+  client_format: SubscriptionClientFormat;
+  nodes: Array<{ node_id: string; name: string; protocol: string; available: boolean; reason: string | null }>;
+  warnings: string[];
+  license_required: false;
+}
 
 export interface ProductUserCreateRequest {
   username: string;

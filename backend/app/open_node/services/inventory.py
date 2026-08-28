@@ -146,6 +146,8 @@ from open_node.domain.subscriptions import (
     SubscriptionDueTrafficResetRequest,
     SubscriptionDueTrafficResetResponse,
     SubscriptionDueTrafficResetSummary,
+    SubscriptionFormatNode,
+    SubscriptionFormatPreview,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanCreate,
     SubscriptionPlanRead,
@@ -177,6 +179,7 @@ from open_node.domain.subscriptions import (
     XrayRuntimeNodeSyncRequest,
     XrayRuntimeNodeSyncResponse,
 )
+from open_node.services import subscription_clients
 from open_node.services.tunnel_config import managed_tunnel_bundle
 
 
@@ -686,6 +689,8 @@ class RenderedSubscription:
     filename: str
     subscription_userinfo: str | None
     warnings: list[str]
+    included_nodes: int
+    excluded_nodes: int
 
 
 @dataclass(frozen=True)
@@ -3220,6 +3225,7 @@ class InventoryStore:
         self,
         subscription_key: str,
         client_format: SubscriptionClientFormat = SubscriptionClientFormat.CLASH,
+        node_id: UUID | None = None,
     ) -> RenderedSubscription:
         key = subscription_key.strip()
         if not key:
@@ -3235,29 +3241,19 @@ class InventoryStore:
             if not token:
                 raise SubscriptionTokenNotFoundError("subscription not found")
             user = session.get(ProductUserModel, token.username)
-            if not user or not user.is_active:
-                raise SubscriptionUnavailableError("subscription user is not active")
-            if not user.current_plan_id:
-                raise SubscriptionUnavailableError("user has no active subscription plan")
-            if user.plan_expires_at and datetime.now(tz=UTC) > self._aware_datetime(
-                user.plan_expires_at
-            ):
-                raise SubscriptionUnavailableError("subscription plan has expired")
-            plan = session.get(SubscriptionPlanModel, user.current_plan_id)
-            if not plan:
-                raise SubscriptionUnavailableError("subscription plan is missing")
-            quota = self._subscription_quota_status(
-                session,
-                user,
-                plan,
-                datetime.now(tz=UTC),
-            )
-            if quota.over_quota:
-                raise SubscriptionUnavailableError("subscription traffic quota exceeded")
-
-            proxies, warnings = self._subscription_proxy_configs(session, user, plan)
+            plan = self._available_subscription_plan(session, user)
+            proxies, report = self._prepare_subscription_format(session, user, plan, client_format)
+            if node_id is not None:
+                allowed_ids = [node.node_id for node in report.nodes if node.available]
+                proxies = [
+                    proxy
+                    for proxy, identifier in zip(proxies, allowed_ids, strict=True)
+                    if identifier == node_id
+                ]
             if not proxies:
-                raise SubscriptionUnavailableError("subscription has no renderable nodes")
+                raise SubscriptionUnavailableError(
+                    "subscription has no compatible nodes for this format and selection"
+                )
 
             content, media_type, extension = self._render_subscription_content(
                 proxies,
@@ -3271,8 +3267,89 @@ class InventoryStore:
                 media_type=media_type,
                 filename=filename,
                 subscription_userinfo=self._subscription_userinfo_header(session, user, plan),
-                warnings=warnings,
+                warnings=report.warnings,
+                included_nodes=len(proxies),
+                excluded_nodes=sum(not node.available for node in report.nodes),
             )
+
+    def subscription_format_preview(
+        self, username: str, client_format: SubscriptionClientFormat
+    ) -> SubscriptionFormatPreview:
+        with self._session() as session:
+            user = session.get(ProductUserModel, username)
+            if user is None:
+                raise ProductUserNotFoundError("user not found")
+            plan = self._available_subscription_plan(session, user)
+            _, report = self._prepare_subscription_format(session, user, plan, client_format)
+            return report
+
+    def _available_subscription_plan(
+        self, session: Session, user: ProductUserModel | None
+    ) -> SubscriptionPlanModel:
+        if not user or not user.is_active:
+            raise SubscriptionUnavailableError("subscription user is not active")
+        if not user.current_plan_id:
+            raise SubscriptionUnavailableError("user has no active subscription plan")
+        now = datetime.now(tz=UTC)
+        if user.plan_expires_at and now > self._aware_datetime(user.plan_expires_at):
+            raise SubscriptionUnavailableError("subscription plan has expired")
+        plan = session.get(SubscriptionPlanModel, user.current_plan_id)
+        if not plan:
+            raise SubscriptionUnavailableError("subscription plan is missing")
+        if self._subscription_quota_status(session, user, plan, now).over_quota:
+            raise SubscriptionUnavailableError("subscription traffic quota exceeded")
+        return plan
+
+    def _prepare_subscription_format(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        client_format: SubscriptionClientFormat,
+    ) -> tuple[list[dict[str, Any]], SubscriptionFormatPreview]:
+        candidates, warnings = self._subscription_proxy_configs(session, user, plan)
+        proxies, nodes = [], []
+        used_names = {
+            "Proxy",
+            "direct",
+            "DIRECT",
+            "REJECT",
+            "REJECT-DROP",
+            "PASS",
+            "GLOBAL",
+            "COMPATIBLE",
+        }
+        for identifier, proxy in candidates:
+            name = str(proxy.get("name") or "Node")
+            unique, suffix = name, 2
+            while unique in used_names:
+                unique = f"{name} ({suffix})"
+                suffix += 1
+            used_names.add(unique)
+            proxy["name"] = unique
+            reason = subscription_clients.unsupported_reason(proxy, client_format.value)
+            if (
+                reason is None
+                and client_format
+                in {SubscriptionClientFormat.URI_LIST, SubscriptionClientFormat.BASE64}
+                and self._proxy_uri(proxy) is None
+            ):
+                reason = "Node cannot be represented as a proxy URI"
+            nodes.append(
+                SubscriptionFormatNode(
+                    node_id=UUID(identifier),
+                    name=unique,
+                    protocol=subscription_clients.protocol(proxy),
+                    available=reason is None,
+                    reason=reason,
+                )
+            )
+            if reason is None:
+                proxy["port"] = int(proxy["port"])
+                proxies.append(proxy)
+        return proxies, SubscriptionFormatPreview(
+            username=user.username, client_format=client_format, nodes=nodes, warnings=warnings
+        )
 
     def subscription_user_traffic(self, username: str) -> ProductUserTrafficResponse:
         with self._session() as session:
@@ -5122,7 +5199,7 @@ class InventoryStore:
         session: Session,
         user: ProductUserModel,
         plan: SubscriptionPlanModel,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
         warnings: list[str] = []
         if not plan.node_ids:
             return [], warnings
@@ -5131,7 +5208,7 @@ class InventoryStore:
             select(ManagedNodeModel).where(ManagedNodeModel.id.in_(plan.node_ids))
         ).all()
         nodes_by_id = {node.id: node for node in nodes}
-        proxies: list[dict[str, Any]] = []
+        proxies: list[tuple[str, dict[str, Any]]] = []
 
         for node_id in plan.node_ids:
             node = nodes_by_id.get(node_id)
@@ -5158,12 +5235,50 @@ class InventoryStore:
             proxy = dict(rendered)
             proxy.setdefault("name", node.name)
             proxy.setdefault("type", self._proxy_type_for_protocol(node.protocol))
-            self._apply_credential_to_proxy(proxy, node.protocol, credential.credential)
+            runtime_key_required = proxy.pop("server-key-source", None) == "runtime"
+            server_key = None
+            if runtime_key_required:
+                scan = session.get(AgentScanResultModel, server.id)
+                server_key = self._runtime_shadowsocks_server_key(scan, node)
+                if server_key:
+                    proxy["password"] = server_key
+                else:
+                    warnings.append(
+                        f"node {node.name} needs a current matching Shadowsocks server key"
+                    )
+            provisioned_client = self._provisioning_client_from_credential(
+                user, plan, node, server, credential
+            )
+            self._apply_credential_to_proxy(proxy, node.protocol, provisioned_client)
+            if runtime_key_required and not server_key:
+                proxy["password"] = None
             proxy["name"] = self._subscription_proxy_name(plan, node, str(proxy["name"]))
-            proxies.append(proxy)
+            proxies.append((node.id, proxy))
 
         session.flush()
         return proxies, warnings
+
+    @classmethod
+    def _runtime_shadowsocks_server_key(
+        cls,
+        scan: AgentScanResultModel | None,
+        node: ManagedNodeModel,
+    ) -> str | None:
+        if scan is None or not node.inbound_tag:
+            return None
+        matches = [
+            inbound
+            for inbound in scan.inbounds or []
+            if isinstance(inbound, dict)
+            and inbound.get("tag") == node.inbound_tag
+            and inbound.get("protocol") == "shadowsocks"
+        ]
+        if len(matches) != 1:
+            return None
+        settings = cls._record_value(matches[0].get("settings"))
+        if settings.get("method") != (node.config or {}).get("cipher"):
+            return None
+        return cls._text_value(settings.get("password"))
 
     def _provisioning_client_from_credential(
         self,
@@ -5182,6 +5297,14 @@ class InventoryStore:
             if isinstance(rendered, dict):
                 client.update(rendered)
         client.update(credential.credential or {})
+        if node.protocol == "vless" and (node.config or {}).get("flow"):
+            client.setdefault("flow", node.config["flow"])
+        if node.protocol in {"ss", "shadowsocks"}:
+            method = str(
+                (node.config or {}).get("cipher") or (node.config or {}).get("method") or ""
+            )
+            if method and not method.startswith("2022-"):
+                client.setdefault("method", method)
         client["email"] = credential.email
         return client
 
@@ -5278,6 +5401,8 @@ class InventoryStore:
             case "vless" | "vmess":
                 if credential.get("id"):
                     proxy["uuid"] = credential["id"]
+                if normalized == "vless" and credential.get("flow"):
+                    proxy["flow"] = credential["flow"]
             case "trojan" | "anytls":
                 if credential.get("password"):
                     proxy["password"] = credential["password"]
@@ -5336,6 +5461,25 @@ class InventoryStore:
                     "application/json; charset=utf-8",
                     "json",
                 )
+            case SubscriptionClientFormat.XRAY:
+                payload = {
+                    "log": {"loglevel": "warning"},
+                    "inbounds": [
+                        {
+                            "tag": "socks-in",
+                            "listen": "127.0.0.1",
+                            "port": 1080,
+                            "protocol": "socks",
+                            "settings": {"auth": "noauth", "udp": True},
+                        }
+                    ],
+                    "outbounds": [subscription_clients.xray_outbound(proxy) for proxy in proxies],
+                }
+                return (
+                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                    "application/json; charset=utf-8",
+                    "json",
+                )
             case SubscriptionClientFormat.URI_LIST:
                 return (
                     cls._render_uri_list_subscription(proxies),
@@ -5349,6 +5493,7 @@ class InventoryStore:
 
     @staticmethod
     def _render_clash_subscription(proxies: list[dict[str, Any]]) -> str:
+        proxies = [subscription_clients.clash_proxy(proxy) for proxy in proxies]
         proxy_names = [str(proxy.get("name") or "proxy") for proxy in proxies]
         payload = {
             "mixed-port": 7890,
@@ -5373,6 +5518,9 @@ class InventoryStore:
         tags = [str(outbound["tag"]) for outbound in outbounds]
         payload = {
             "log": {"level": "info"},
+            "inbounds": [
+                {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 7890}
+            ],
             "outbounds": [
                 {
                     "type": "selector",
@@ -5389,6 +5537,8 @@ class InventoryStore:
 
     @classmethod
     def _sing_box_outbound(cls, proxy: dict[str, Any]) -> dict[str, Any] | None:
+        if subscription_clients.unsupported_reason(proxy, "sing-box"):
+            return None
         proxy_type = cls._normalized_proxy_type(proxy)
         server = proxy.get("server")
         port = cls._proxy_int(proxy.get("port"))
@@ -5411,6 +5561,8 @@ class InventoryStore:
                 outbound["flow"] = str(proxy["flow"])
         elif proxy_type in {"trojan", "hysteria2"}:
             outbound["password"] = str(proxy.get("password") or proxy.get("auth") or "")
+            if proxy_type == "hysteria2":
+                outbound.update(subscription_clients.sing_box_hysteria_options(proxy))
         elif proxy_type == "anytls":
             outbound["password"] = str(proxy.get("password") or "")
             for source_keys, target_key in (
@@ -5442,34 +5594,6 @@ class InventoryStore:
             )
             if client_metadata is not None:
                 outbound["client_metadata"] = str(client_metadata)
-        elif proxy_type == "snell":
-            raw_version = cls._proxy_int(proxy.get("version")) or 4
-            version = 6 if raw_version == 6 else 4
-            outbound["version"] = version
-            outbound["psk"] = str(proxy.get("psk") or "")
-            outbound["network"] = str(proxy.get("network") or "tcp")
-            if reuse := cls._proxy_value(proxy, "reuse"):
-                outbound["reuse"] = cls._proxy_bool(reuse)
-            userkey = cls._proxy_value(proxy, "userkey", "userKey", "client_id", "clientId")
-            if userkey:
-                outbound["userkey"] = str(userkey)
-            if version == 6:
-                mode = cls._proxy_value(proxy, "mode", "v6_mode", "v6Mode")
-                if mode:
-                    outbound["mode"] = str(mode)
-            else:
-                obfs_options = proxy.get("obfs-opts")
-                obfs_options = obfs_options if isinstance(obfs_options, dict) else {}
-                obfs_mode = cls._proxy_value(proxy, "obfs_mode", "obfsMode") or obfs_options.get(
-                    "mode"
-                )
-                obfs_host = cls._proxy_value(proxy, "obfs_host", "obfsHost") or obfs_options.get(
-                    "host"
-                )
-                if obfs_mode and str(obfs_mode).lower() != "none":
-                    outbound["obfs_mode"] = str(obfs_mode)
-                if obfs_host:
-                    outbound["obfs_host"] = str(obfs_host)
         elif proxy_type == "shadowsocks":
             outbound["method"] = str(proxy.get("cipher") or proxy.get("method") or "aes-128-gcm")
             outbound["password"] = str(proxy.get("password") or "")
@@ -5478,32 +5602,17 @@ class InventoryStore:
                 outbound["username"] = str(proxy["username"])
             if proxy.get("password"):
                 outbound["password"] = str(proxy["password"])
-        elif proxy_type == "mieru":
-            return None
-
         tls = cls._sing_box_tls(proxy)
-        if proxy_type == "anytls" and tls is None and proxy.get("tls") is not False:
-            tls = {"enabled": True}
-            server_name = proxy.get("servername") or proxy.get("sni")
-            if isinstance(server_name, str) and server_name:
-                tls["server_name"] = server_name
         if tls:
             outbound["tls"] = tls
+        transport = subscription_clients.sing_box_transport(proxy)
+        if transport:
+            outbound["transport"] = transport
         return outbound
 
     @staticmethod
     def _sing_box_tls(proxy: dict[str, Any]) -> dict[str, Any] | None:
-        tls_value = proxy.get("tls")
-        if tls_value is False or tls_value is None:
-            return None
-        tls: dict[str, Any] = {"enabled": True}
-        server_name = proxy.get("servername") or proxy.get("sni")
-        if isinstance(server_name, str) and server_name:
-            tls["server_name"] = server_name
-        if isinstance(tls_value, dict):
-            tls.update(tls_value)
-            tls["enabled"] = bool(tls.get("enabled", True))
-        return tls
+        return subscription_clients.sing_box_tls(proxy)
 
     @classmethod
     def _render_uri_list_subscription(cls, proxies: list[dict[str, Any]]) -> str:
@@ -5537,15 +5646,13 @@ class InventoryStore:
             return None
         query = cls._uri_query(
             {
-                "type": proxy.get("network") or "tcp",
-                "security": "tls" if cls._proxy_bool(proxy.get("tls")) else None,
-                "sni": proxy.get("servername") or proxy.get("sni"),
+                **subscription_clients.uri_options(proxy),
                 "flow": proxy.get("flow"),
                 "encryption": proxy.get("encryption") or "none",
             }
         )
         return (
-            f"vless://{quote(str(uuid), safe='')}@{server}:{port}"
+            f"vless://{quote(str(uuid), safe='')}@{subscription_clients.uri_server(server)}:{port}"
             f"{query}{cls._uri_fragment(proxy)}"
         )
 
@@ -5556,10 +5663,7 @@ class InventoryStore:
         uuid = proxy.get("uuid") or proxy.get("id")
         if not isinstance(server, str) or not server or not port or not uuid:
             return None
-        ws_options = proxy.get("ws-opts")
-        ws_options = ws_options if isinstance(ws_options, dict) else {}
-        ws_headers = ws_options.get("headers")
-        ws_headers = ws_headers if isinstance(ws_headers, dict) else {}
+        options = subscription_clients.uri_options(proxy)
         payload = {
             "v": "2",
             "ps": str(proxy.get("name") or server),
@@ -5568,16 +5672,23 @@ class InventoryStore:
             "id": str(uuid),
             "aid": str(cls._proxy_int(proxy.get("alterId")) or 0),
             "scy": str(proxy.get("cipher") or proxy.get("security") or "auto"),
-            "net": str(proxy.get("network") or "tcp"),
+            "net": str(options["type"]),
             "type": str(proxy.get("headerType") or "none"),
-            "host": str(ws_headers.get("Host") or ""),
-            "path": str(ws_options.get("path") or ""),
-            "tls": "tls" if cls._proxy_bool(proxy.get("tls")) else "",
-            "sni": str(proxy.get("servername") or proxy.get("sni") or ""),
+            "host": str(options.get("host") or ""),
+            "path": str(options.get("serviceName") or options.get("path") or ""),
+            "tls": "tls" if options["security"] == "tls" else "",
+            "sni": str(options.get("sni") or ""),
+            "alpn": str(options.get("alpn") or ""),
+            "fp": str(options.get("fp") or ""),
+            "allowInsecure": options.get("allowInsecure") or "0",
         }
-        encoded = base64.urlsafe_b64encode(
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        ).decode("ascii").rstrip("=")
+        encoded = (
+            base64.urlsafe_b64encode(
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            )
+            .decode("ascii")
+            .rstrip("=")
+        )
         return f"vmess://{encoded}"
 
     @classmethod
@@ -5587,14 +5698,10 @@ class InventoryStore:
         password = proxy.get("password")
         if not isinstance(server, str) or not server or not port or not password:
             return None
-        query = cls._uri_query(
-            {
-                "security": "tls" if cls._proxy_bool(proxy.get("tls")) else None,
-                "sni": proxy.get("servername") or proxy.get("sni"),
-            }
-        )
+        query = cls._uri_query(subscription_clients.uri_options(proxy))
         return (
-            f"trojan://{quote(str(password), safe='')}@{server}:{port}"
+            f"trojan://{quote(str(password), safe='')}@"
+            f"{subscription_clients.uri_server(server)}:{port}"
             f"{query}{cls._uri_fragment(proxy)}"
         )
 
@@ -5606,10 +5713,10 @@ class InventoryStore:
         password = proxy.get("password")
         if not isinstance(server, str) or not server or not port or not method or not password:
             return None
-        userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode("ascii").rstrip(
-            "="
+        userinfo = (
+            base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode("ascii").rstrip("=")
         )
-        return f"ss://{userinfo}@{server}:{port}{cls._uri_fragment(proxy)}"
+        return f"ss://{userinfo}@{subscription_clients.uri_server(server)}:{port}{cls._uri_fragment(proxy)}"
 
     @classmethod
     def _hysteria2_uri(cls, proxy: dict[str, Any]) -> str | None:
@@ -5618,9 +5725,20 @@ class InventoryStore:
         password = proxy.get("password") or proxy.get("auth")
         if not isinstance(server, str) or not server or not port or not password:
             return None
-        query = cls._uri_query({"sni": proxy.get("servername") or proxy.get("sni")})
+        tls = subscription_clients.sing_box_tls(proxy) or {}
+        query = cls._uri_query(
+            {
+                "sni": tls.get("server_name"),
+                "alpn": ",".join(tls.get("alpn") or []),
+                "insecure": "1" if tls.get("insecure") else None,
+                "obfs": proxy.get("obfs"),
+                "obfs-password": proxy.get("obfs-password"),
+                "mport": proxy.get("ports"),
+            }
+        )
         return (
-            f"hysteria2://{quote(str(password), safe='')}@{server}:{port}"
+            f"hysteria2://{quote(str(password), safe='')}@"
+            f"{subscription_clients.uri_server(server)}:{port}"
             f"{query}{cls._uri_fragment(proxy)}"
         )
 
@@ -5633,7 +5751,7 @@ class InventoryStore:
         username = quote(str(proxy.get("username") or ""), safe="")
         password = quote(str(proxy.get("password") or ""), safe="")
         auth = f"{username}:{password}@" if username or password else ""
-        return f"{scheme}://{auth}{server}:{port}{cls._uri_fragment(proxy)}"
+        return f"{scheme}://{auth}{subscription_clients.uri_server(server)}:{port}{cls._uri_fragment(proxy)}"
 
     @staticmethod
     def _normalized_proxy_type(proxy: dict[str, Any]) -> str:
@@ -7464,7 +7582,7 @@ class InventoryStore:
         if runtime.port is not None:
             config["port"] = runtime.port
         network = cls._runtime_subscription_network(runtime.network)
-        if network:
+        if network and not (protocol == "hysteria2" and network == "hysteria"):
             config["network"] = network
         security = (runtime.security or "").lower()
         if security in {"tls", "reality"}:
@@ -7530,9 +7648,16 @@ class InventoryStore:
         protocol: str,
     ) -> None:
         if protocol == "shadowsocks":
-            cipher = cls._text_value(settings.get("method") or settings.get("security"))
+            clients = [
+                item for item in cls._list_value(settings.get("clients")) if isinstance(item, dict)
+            ]
+            cipher = cls._text_value(
+                settings.get("method") or settings.get("security")
+            ) or cls._first_text_client_value(clients, "method")
             if cipher:
                 config["cipher"] = cipher
+                if cipher.startswith("2022-"):
+                    config["server-key-source"] = "runtime"
             return
         if protocol == "snell":
             options = cls._snell_runtime_options(settings)
@@ -7567,10 +7692,14 @@ class InventoryStore:
             path = cls._text_value(ws_settings.get("path"))
             if path:
                 ws_options["path"] = path
-            headers = cls._record_value(ws_settings.get("headers"))
-            host = cls._text_value(headers.get("Host") or headers.get("host"))
+            headers = dict(cls._record_value(ws_settings.get("headers")))
+            host = cls._text_value(
+                ws_settings.get("host") or headers.get("Host") or headers.get("host")
+            )
             if host:
-                ws_options["headers"] = {"Host": host}
+                headers["Host"] = host
+            if headers:
+                ws_options["headers"] = headers
             if ws_options:
                 config["ws-opts"] = ws_options
 
@@ -7579,17 +7708,20 @@ class InventoryStore:
         if service_name:
             config["grpc-opts"] = {"grpc-service-name": service_name}
 
-        http_settings = cls._record_value(
-            stream_settings.get("httpSettings") or stream_settings.get("httpupgradeSettings")
-        )
+        http_settings = cls._record_value(stream_settings.get("httpSettings"))
         hosts = cls._text_list_value(http_settings.get("host"))
         path = cls._text_value(http_settings.get("path"))
         if hosts or path:
-            config["http-opts"] = {}
+            config["h2-opts"] = {}
             if hosts:
-                config["http-opts"]["headers"] = {"Host": hosts}
+                config["h2-opts"]["host"] = hosts
             if path:
-                config["http-opts"]["path"] = path
+                config["h2-opts"]["path"] = path
+        upgrade = cls._record_value(stream_settings.get("httpupgradeSettings"))
+        if upgrade:
+            config["http-upgrade-opts"] = {
+                key: value for key, value in upgrade.items() if key in {"host", "path", "headers"}
+            }
 
     @classmethod
     def _runtime_reality_options(cls, stream_settings: dict[str, Any]) -> dict[str, Any]:
@@ -7647,6 +7779,8 @@ class InventoryStore:
             return "ws"
         if normalized == "httpupgrade":
             return "httpupgrade"
+        if normalized == "http":
+            return "h2"
         return normalized
 
     @staticmethod

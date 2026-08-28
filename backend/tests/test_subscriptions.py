@@ -616,8 +616,8 @@ def test_xray_fork_protocols_provision_and_render_subscriptions(tmp_path: Path) 
     assert clash_proxies["AnyTLS Edge"]["idle-session-timeout"] == 45
     assert clash_proxies["Snell Edge"]["psk"] == snell_client["psk"]
     assert clash_proxies["Snell Edge"]["obfs-opts"] == {"mode": "http", "host": "example.org"}
-    assert clash_proxies["Snell v6 Edge"]["psk"] == snell_v6_client["psk"]
-    assert clash_proxies["Snell v6 Edge"]["mode"] == "default"
+    assert "Snell v6 Edge" not in clash_proxies
+    assert clash_response.headers["x-open-node-excluded-nodes"] == "1"
     assert clash_proxies["Mieru Edge"]["username"] == "bob"
     assert clash_proxies["Mieru Edge"]["password"] == mieru_client["password"]
     assert clash_proxies["Mieru Edge"]["transport"] == "TCP"
@@ -626,8 +626,6 @@ def test_xray_fork_protocols_provision_and_render_subscriptions(tmp_path: Path) 
     sing_box = json.loads(sing_box_response.text)
     assert sing_box["outbounds"][0]["outbounds"] == [
         "AnyTLS Edge",
-        "Snell Edge",
-        "Snell v6 Edge",
     ]
     sing_box_outbounds = {outbound["tag"]: outbound for outbound in sing_box["outbounds"][2:]}
     anytls_outbound = sing_box_outbounds["AnyTLS Edge"]
@@ -637,20 +635,22 @@ def test_xray_fork_protocols_provision_and_render_subscriptions(tmp_path: Path) 
     assert anytls_outbound["idle_session_timeout"] == "45s"
     assert anytls_outbound["min_idle_session"] == 0
     assert anytls_outbound["tls"] == {"enabled": True, "server_name": "fork.example.com"}
-    snell_outbound = sing_box_outbounds["Snell Edge"]
-    assert snell_outbound["type"] == "snell"
-    assert snell_outbound["version"] == 4
-    assert snell_outbound["psk"] == snell_client["psk"]
-    assert snell_outbound["reuse"] is True
-    assert snell_outbound["network"] == "tcp"
-    assert snell_outbound["obfs_mode"] == "http"
-    assert snell_outbound["obfs_host"] == "example.org"
-    snell_v6_outbound = sing_box_outbounds["Snell v6 Edge"]
-    assert snell_v6_outbound["version"] == 6
-    assert snell_v6_outbound["psk"] == snell_v6_client["psk"]
-    assert snell_v6_outbound["mode"] == "default"
-    assert "userkey" not in snell_v6_outbound
+    assert "Snell Edge" not in sing_box_outbounds
+    assert "Snell v6 Edge" not in sing_box_outbounds
     assert "Mieru Edge" not in sing_box_outbounds
+    xray_response = client.get(f"/api/v1/subscribe/{token}?format=xray")
+    assert xray_response.status_code == 200
+    xray = {outbound["tag"]: outbound for outbound in xray_response.json()["outbounds"]}
+    assert xray["Snell v6 Edge"]["settings"] == {
+        "address": "fork.example.com",
+        "port": 443,
+        "version": 6,
+        "v6Mode": "default",
+        "psk": snell_v6_client["psk"],
+    }
+    assert xray["Snell Edge"]["settings"]["obfsMode"] == "http"
+    assert xray["Snell Edge"]["settings"]["obfsHost"] == "example.org"
+    assert "Mieru Edge" not in xray
 
 
 def test_subscription_catalog_export_import_round_trips_by_names(tmp_path: Path) -> None:

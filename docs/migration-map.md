@@ -257,9 +257,12 @@ These passing command and snapshot checks do not prove a complete replacement:
   Snell first-user transport settings and an optional MPL-2.0 empty-user patch.
   The real-client smoke covers original configs, runtime-node import, assigned
   subscription credentials, statistics, rotation, last-user revocation,
-  restart persistence and reactivation. Mieru UDP target forwarding, stock-client
-  capability filtering and a native free-client Snell v6 export remain open.
-  Single-proxy tests do not prove mixed subscriptions load in stock clients.
+  restart persistence and reactivation. [Client-format filtering](subscriptions.md)
+  and native free-client Snell v6 export now have full-configuration tests in
+  pinned Mihomo, sing-box and the patched Xray client, including real target
+  traffic and URI/Base64 imports. The AnyTLS native-client UDP address bug is
+  patched separately. Mieru UDP target forwarding and wider combinations
+  remain open; pinned-client results do not prove universal compatibility.
 - External [systemd runtime mode](external-systemd.md) now verifies a dedicated
   non-root service's binary/config binding and uses scoped host-installed
   polkit authorization. Both transports have real forwarding, provisioning,

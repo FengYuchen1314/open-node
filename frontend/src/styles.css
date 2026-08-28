@@ -190,6 +190,23 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(340px, 440px);
 }
 
+.subscription-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.subscription-layout > *,
+.subscription-page .catalog-list,
+.subscription-page .v-field__input,
+.subscription-page .catalog-item > :first-child {
+  min-width: 0;
+}
+
+.subscription-page .v-select .v-select__selection-text,
+.subscription-page .catalog-item > :first-child {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .change-layout {
   display: grid;
   gap: 16px;
@@ -1480,6 +1497,20 @@ body {
   margin-top: 18px;
 }
 
+.format-compatibility {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.format-exclusion {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
 .credential-list,
 .catalog-import-grid,
 .catalog-sync-row,
@@ -1494,7 +1525,11 @@ body {
 }
 
 .subscription-action-row {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.subscription-action-row .v-btn {
+  letter-spacing: 0;
 }
 
 .preset-action-row {
@@ -1536,6 +1571,14 @@ body {
 
   .config-layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .subscription-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .subscription-page {
+    padding: 20px;
   }
 
   .config-page {

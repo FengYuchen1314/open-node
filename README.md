@@ -72,8 +72,10 @@ upgrades, rollback and data-preserving removal through a separate privileged
 helper, with verified release pins and durable final results.
 Native [fork protocol user management](docs/fork-runtime.md) now supports
 AnyTLS, Snell and Mieru through an optional source-pinned compatibility runtime,
-including empty-user revocation. Client-format filtering, Mieru UDP targets,
-public WARP verification and further migration workflows remain incomplete.
+including empty-user revocation. [Subscription exports](docs/subscriptions.md)
+now filter incompatible nodes and provide native free-client Xray/Snell v6
+configurations. Mieru UDP targets, public WARP verification and further
+migration workflows remain incomplete.
 
 [Central certificate management](docs/certificates.md) now provides DNS
 credentials, PEM import/export, DNS-01 and HTTP-01 issuance and renewal through pinned
@@ -93,7 +95,7 @@ agent operation, maintenance, diagnostic, and config-preparation wrappers, and
 Xray/nginx config plus agent setting wrappers, high-level runtime/site
 operation wrappers, a subscription catalog with user-plan binding, optional
 agent `batch-apply` provisioning, public subscription links with generated
-per-user credentials, Clash/sing-box/URI subscription rendering, durable
+per-user credentials, Clash/sing-box/Xray/URI subscription rendering, durable
 per-user traffic ledgering, [coordinated multi-server change sets](docs/change-sets.md) plus a
 routed-outbound change-set planner, and subscription template presets including
 Xray fork AnyTLS/Snell/Mieru coverage,
