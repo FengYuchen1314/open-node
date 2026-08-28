@@ -56,6 +56,7 @@ const operationPaths: Record<AgentOperationKind, string> = {
   return_route_test: "network/return-route-test",
   validate_site: "validate-site",
   limiter: "limiter",
+  limiter_status: "limiter/status",
   services_status: "services/status",
   service_control: "services/control",
   system_nics: "system/nics",

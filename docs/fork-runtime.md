@@ -18,6 +18,10 @@ AnyTLS already supports empty user lists. A second
 [`anytls-udp-address.patch`](../runtime/xray/anytls-udp-address.patch) preserves
 IP/domain address families in native AnyTLS UDP requests. The original client
 puts IP strings into a domain-only field, which its serializer rejects.
+The third [limiter patch](../runtime/xray/limiter.patch) installs the independent
+[native limiter overlay](../runtime/xray/overlay), providing per-user bandwidth,
+concurrent-connection and automatic speed policies through a private Unix
+socket. See [native limits](native-limits.md) for setup and enforcement semantics.
 
 Run all builds and tests on the designated VPS. With Git and a verified Go
 1.26.7 toolchain available, from this checkout:
@@ -31,17 +35,17 @@ python3 scripts/vps/build-protocol-runtime.py \
 
 The work directory must not exist. The helper fetches the exact revision,
 builds the optional unmodified reference executable, applies the patch, runs
-the three protocol package tests, builds the compatibility executable and
+the three protocol package tests plus limiter and dispatcher tests, builds the compatibility executable and
 verifies the Go modules. It does not change the system Go installation or a
 running service. Outputs include:
 
 - `xray`: the patched runtime; `xray-reference`: the optional original runtime.
 - `build.json`: source revision, Go/platform identity and SHA-256 digests.
-- `matching-source.tar.gz`: the tracked source with the applied changes.
-- `LICENSE-Xray-MPL-2.0` and both patch files: runtime license and changes.
+- `matching-source.tar.gz`: the upstream source, patches and added overlay source.
+- `LICENSE-Xray-MPL-2.0` and all three patch files: runtime license and changes.
 
 Keep these files together when distributing a runtime build, including the
-matching source and notices required by its license. Both patches are explicitly
+matching source and notices required by its license. The patches and overlay are explicitly
 [MPL-2.0](../runtime/xray/LICENSE). No runtime binary is bundled in the Agent
 wheel or silently downloaded by this helper's consumers.
 

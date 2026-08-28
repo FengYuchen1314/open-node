@@ -1152,7 +1152,7 @@ function formatBytes(value: number) {
                 <v-text-field
                   v-model.number="planForm.device_limit"
                   density="comfortable"
-                  label="Devices"
+                  label="Concurrent connections"
                   min="0"
                   type="number"
                   variant="outlined"

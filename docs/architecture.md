@@ -450,7 +450,7 @@ An independently modified file blocks recovery; interrupted RPCs retain their
 
 High-level workflow wrappers cover active agent inbound, outbound, routing,
 batch apply, certificate deployment, nginx SSL setup, nginx website inventory
-and deletion, return-route testing, website validation, and embedded limiter
+and deletion, return-route testing, website validation, and native limiter
 configuration. Successful return-route test command results are parsed into a
 local latest-result table keyed by server and carrier; public probe output only
 exposes the carrier, region, route type, and timestamp, leaving hop evidence
@@ -459,6 +459,11 @@ camel-case `burstObservatory` field while keeping the Open Node API typed and
 explicit. The nginx stream-port cleanup wrapper queues
 `/api/child/nginx/clear-stream-port` with an explicit port for removing stale
 stream server configs after migration or proxy mode changes.
+
+The independent Agent's [native limiter](native-limits.md) persists per-user
+policies in the free runtime before enabling newly provisioned credentials.
+Capability and result-confirmation checks prevent legacy Agents from silently
+discarding plan limits.
 
 The frontend exposes these wrappers in a dedicated `/config` workspace. It can
 queue Xray and nginx read/write operations, load completed read results back

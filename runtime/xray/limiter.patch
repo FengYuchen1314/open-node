@@ -1,0 +1,76 @@
+diff --git a/app/dispatcher/default.go b/app/dispatcher/default.go
+--- a/app/dispatcher/default.go
++++ b/app/dispatcher/default.go
+@@ -11,7 +11,8 @@
+ 	"github.com/xtls/xray-core/common/buf"
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/common/log"
+-	"github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/nodelimits"
+ 	"github.com/xtls/xray-core/common/protocol"
+ 	"github.com/xtls/xray-core/common/session"
+ 	"github.com/xtls/xray-core/core"
+@@ -98,7 +99,8 @@
+ 	router routing.Router
+ 	policy policy.Manager
+ 	stats  stats.Manager
+-	fdns   dns.FakeDNSEngine
++	fdns   dns.FakeDNSEngine
++	limits *nodelimits.Manager
+ }
+ 
+ func init() {
+@@ -121,7 +123,8 @@
+ 	d.ohm = om
+ 	d.router = router
+ 	d.policy = pm
+-	d.stats = sm
++	d.stats = sm
++	d.limits = nodelimits.FromEnvironment()
+ 	return nil
+ }
+ 
+@@ -131,12 +134,12 @@
+ }
+ 
+ // Start implements common.Runnable.
+-func (*DefaultDispatcher) Start() error {
+-	return nil
+-}
+-
+-// Close implements common.Closable.
+-func (*DefaultDispatcher) Close() error { return nil }
++func (d *DefaultDispatcher) Start() error {
++	return d.limits.Start()
++}
++
++// Close implements common.Closable.
++func (d *DefaultDispatcher) Close() error { return d.limits.Close() }
+ 
+ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *transport.Link) {
+ 	opt := pipe.OptionsFromContext(ctx)
+@@ -297,7 +300,10 @@
+ 	}
+ 
+ 	sniffingRequest := content.SniffingRequest
+-	inbound, outbound := d.getLink(ctx)
++	inbound, outbound := d.getLink(ctx)
++	if err := d.limits.Bind(ctx, inbound, outbound); err != nil {
++		return nil, err
++	}
+ 	if !sniffingRequest.Enabled {
+ 		go d.routedDispatch(ctx, outbound, destination)
+ 	} else {
+@@ -352,7 +358,10 @@
+ 		content = new(session.Content)
+ 		ctx = session.ContextWithContent(ctx, content)
+ 	}
+-	outbound = WrapLink(ctx, d.policy, d.stats, outbound)
++	if err := d.limits.BindLink(ctx, outbound); err != nil {
++		return err
++	}
++	outbound = WrapLink(ctx, d.policy, d.stats, outbound)
+ 	sniffingRequest := content.SniffingRequest
+ 	if !sniffingRequest.Enabled {
+ 		d.routedDispatch(ctx, outbound, destination)

@@ -1507,6 +1507,90 @@ body {
   font-size: 20px;
 }
 
+.limiter-panel {
+  padding: 16px 0;
+  min-width: 0;
+}
+
+.limiter-toolbar,
+.limiter-actions,
+.limiter-user-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.limiter-toolbar {
+  min-height: 48px;
+  margin: 8px 0;
+}
+
+.limiter-panel .v-btn,
+.limiter-panel .v-label {
+  letter-spacing: 0;
+}
+
+.limiter-fields,
+.limiter-rule-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.limiter-user {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px 0;
+  border-bottom: 1px solid #dce3df;
+}
+
+.limiter-email,
+.limiter-group,
+.limiter-user-stats {
+  grid-column: 1 / -1;
+}
+
+.limiter-user-stats,
+.limiter-state,
+.limiter-empty {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #526159;
+}
+
+.limiter-rule {
+  padding: 8px 0 16px;
+  border-bottom: 1px solid #dce3df;
+}
+
+.limiter-actions {
+  margin-top: 24px;
+}
+
+.limiter-tag,
+.limiter-panel .v-alert__content {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .limiter-fields,
+  .limiter-rule-fields,
+  .limiter-user {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .limiter-toolbar {
+    gap: 8px;
+  }
+
+  .limiter-state {
+    flex-basis: 100%;
+    order: 1;
+  }
+}
+
 .takeover-dialog {
   max-height: calc(100dvh - 48px);
 }

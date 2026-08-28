@@ -305,6 +305,11 @@ class Operations:
             if method == "DELETE":
                 return self.logs.delete(query)
         async with self.runtime.lock:
+            if path == "/api/child/limiter":
+                if method == "GET":
+                    return await self.runtime.limiter.status()
+                if method == "POST":
+                    return await self.runtime.limiter.apply(body)
             if path == TAKEOVER_ENDPOINT and method in {"GET", "POST"}:
                 return await self.takeover.handle({"preview": True} if method == "GET" else body)
             if path.startswith("/api/child/warp/"):
@@ -416,7 +421,23 @@ class Operations:
                     )
                 for item in body.get("routing_user_additions", []):
                     edit_routing(config, {**item, "action": "add_user_to_rule"})
-                return await self.runtime.write(config, restart=not body.get("no_restart", False))
+                limits = await self.runtime.limiter.provision(body.get("limiter_users", []), config)
+                try:
+                    result = await self.runtime.write(
+                        config, restart=not body.get("no_restart", False)
+                    )
+                except (OSError, ValueError) as exc:
+                    if limits is not None:
+                        raise RuntimeFailure(
+                            "Limiter policies were persisted but the Xray config update failed; "
+                            "inspect the runtime before retrying"
+                        ) from exc
+                    raise
+                if limits is not None:
+                    result["limiter"] = {"applied": True, "revision": limits["revision"]}
+                elif body.get("limiter_users"):
+                    result["limiter"] = {"applied": True, "unlimited": True, "revision": None}
+                return result
             if path == "/api/child/system/info" and method == "GET":
                 return {
                     "success": True,

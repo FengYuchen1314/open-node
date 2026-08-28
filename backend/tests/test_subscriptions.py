@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -123,6 +124,23 @@ def test_subscription_catalog_assigns_plan_without_license_gate(tmp_path: Path) 
             }
         ],
         "no_restart": True,
+        "limiter_users": [
+            {
+                "inbound_tag": "vless-443",
+                "user": {
+                    "uid": 0,
+                    "email": "alice__vless-443",
+                    "speed_limit": 12500000,
+                    "device_limit": 3,
+                    "conn_group": "account-"
+                    + hashlib.sha256(
+                        json.dumps(
+                            ["alice", _server_id, "vless-443"], separators=(",", ":")
+                        ).encode()
+                    ).hexdigest(),
+                },
+            }
+        ],
     }
     users = client.get("/api/v1/users").json()
     nodes = client.get("/api/v1/nodes").json()
@@ -186,8 +204,7 @@ def test_subscription_token_renders_clash_yaml_and_traffic_header(tmp_path: Path
     assert response.headers["profile-title"].startswith("base64:")
     expire = int(datetime(2026, 9, 30, tzinfo=UTC).timestamp())
     assert response.headers["subscription-userinfo"] == (
-        f"upload=1024; download=2048; total={128 * 1024 * 1024 * 1024}; "
-        f"expire={expire}"
+        f"upload=1024; download=2048; total={128 * 1024 * 1024 * 1024}; expire={expire}"
     )
     doc = yaml.safe_load(response.text)
     proxy = doc["proxies"][0]
@@ -716,7 +733,7 @@ def test_plan_assignment_dispatches_agent_batch_apply(tmp_path: Path) -> None:
                 "payload": {
                     "token": agent_token,
                     "hostname": "edge-sub-host",
-                    "capabilities": {"rpc": True},
+                    "capabilities": {"rpc": True, "native_limiter": True},
                 },
             }
         )

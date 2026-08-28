@@ -24,6 +24,19 @@ import {
 } from "./inventory";
 
 describe("inventory API client", () => {
+  it.each(["limiter", "limiter_status"] as const)("queues %s with its native policy contract", async (operation) => {
+    const payload = operation === "limiter"
+      ? { inbound_tag: "edge", action: "remove" as const, expected_revision: "a".repeat(64) }
+      : undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      expect(input.toString()).toBe("/api/v1/servers/edge/operations/limiter" + (operation === "limiter_status" ? "/status" : ""));
+      expect(init?.method).toBe("POST");
+      expect(init?.body ? JSON.parse(init.body.toString()) : undefined).toEqual(payload);
+      return new Response(JSON.stringify({ command: { id: "limiter-command" } }), { status: 201 });
+    };
+    expect((await queueAgentOperation("edge", operation, payload, fetcher)).command.id).toBe("limiter-command");
+  });
+
   it.each(["agent_upgrade", "agent_rollback", "agent_uninstall", "agent_lifecycle"] as const)(
     "queues the %s lifecycle operation", async (operation) => {
       const payload = operation === "agent_upgrade"

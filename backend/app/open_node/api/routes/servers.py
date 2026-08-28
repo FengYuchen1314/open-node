@@ -226,7 +226,10 @@ async def create_xray_runtime_tunnel_chain(
         scan_commands = []
         for server_id, command_payloads in by_server.items():
             queued = await _queue_server_command_sequence(
-                server_id, command_payloads, store, connections,
+                server_id,
+                command_payloads,
+                store,
+                connections,
             )
             if queue_scan:
                 commands.extend(queued[:-1])
@@ -278,14 +281,15 @@ async def plan_xray_runtime_tunnel_deploy(
                 ),
             )
         queued = await _queue_server_command_sequence(
-            server_id, command_payloads, store, connections,
+            server_id,
+            command_payloads,
+            store,
+            connections,
         )
         scan_command = queued[-1] if response.scan_command_preview else None
         commands = queued[:-1] if scan_command else queued
 
-        response = response.model_copy(
-            update={"commands": commands, "scan_command": scan_command}
-        )
+        response = response.model_copy(update={"commands": commands, "scan_command": scan_command})
     return response
 
 
@@ -326,7 +330,10 @@ async def delete_xray_runtime_tunnel(
                 ),
             )
         queued = await _queue_server_command_sequence(
-            server_id, command_payloads, store, connections,
+            server_id,
+            command_payloads,
+            store,
+            connections,
         )
         scan_command = queued[-1] if queue_scan else None
         commands = queued[:-1] if queue_scan else queued
@@ -469,7 +476,10 @@ async def repair_missing_xray_runtime_credentials(
                 ),
             )
         queued = await _queue_server_command_sequence(
-            server_id, command_payloads, store, connections,
+            server_id,
+            command_payloads,
+            store,
+            connections,
         )
         scan_command = queued[-1] if queue_scan else None
         commands = queued[:-1] if queue_scan else queued
@@ -514,7 +524,10 @@ async def cleanup_extra_xray_runtime_credentials(
                 ),
             )
         queued = await _queue_server_command_sequence(
-            server_id, command_payloads, store, connections,
+            server_id,
+            command_payloads,
+            store,
+            connections,
         )
         scan_command = queued[-1] if queue_scan else None
         commands = queued[:-1] if queue_scan else queued
@@ -1168,14 +1181,39 @@ async def queue_limiter_operation(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentCommandCreateResponse:
+    body = payload.model_dump(mode="json", exclude={"command_timeout_ms"}, exclude_none=True)
+    if payload.action == "remove":
+        body = {
+            key: value
+            for key, value in body.items()
+            if key in {"action", "inbound_tag", "expected_revision"}
+        }
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(
             method="POST",
             path="/api/child/limiter",
-            body=payload.model_dump(mode="json", exclude={"command_timeout_ms"}),
+            body=body,
             timeout_ms=payload.command_timeout_ms,
         ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/limiter/status",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_limiter_status_operation(
+    server_id: UUID,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/limiter"),
         store,
         connections,
     )
@@ -1528,9 +1566,7 @@ async def queue_xray_takeover_external_operation(
             path="/api/child/external-xray/takeover",
             body=None
             if payload.preview
-            else payload.model_dump(
-                exclude={"preview", "command_timeout_ms"}, exclude_none=True
-            ),
+            else payload.model_dump(exclude={"preview", "command_timeout_ms"}, exclude_none=True),
             timeout_ms=payload.command_timeout_ms,
         ),
         store,
@@ -1552,8 +1588,11 @@ async def queue_xray_install_operation(
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(
-            method="POST", path="/api/child/xray/install-stream", stream=True,
-            timeout_ms=300_000, body=payload.model_dump(exclude_none=True) if payload else None,
+            method="POST",
+            path="/api/child/xray/install-stream",
+            stream=True,
+            timeout_ms=300_000,
+            body=payload.model_dump(exclude_none=True) if payload else None,
         ),
         store,
         connections,
@@ -1571,8 +1610,10 @@ async def queue_xray_release_operation(
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentCommandCreateResponse:
     return await _queue_server_command(
-        server_id, AgentCommandCreate(method="GET", path="/api/child/xray/release"),
-        store, connections,
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/xray/release"),
+        store,
+        connections,
     )
 
 
@@ -1891,8 +1932,11 @@ async def queue_agent_upgrade_operation(
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(
-            method="POST", path="/api/child/agent/upgrade-stream", stream=True,
-            timeout_ms=300_000, body=payload.model_dump() if payload else None,
+            method="POST",
+            path="/api/child/agent/upgrade-stream",
+            stream=True,
+            timeout_ms=300_000,
+            body=payload.model_dump() if payload else None,
         ),
         store,
         connections,
@@ -1913,8 +1957,11 @@ async def queue_agent_uninstall_operation(
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(
-            method="POST", path="/api/child/agent/uninstall-stream", stream=True,
-            timeout_ms=300_000, body=payload.model_dump() if payload else None,
+            method="POST",
+            path="/api/child/agent/uninstall-stream",
+            stream=True,
+            timeout_ms=300_000,
+            body=payload.model_dump() if payload else None,
         ),
         store,
         connections,
@@ -1935,10 +1982,13 @@ async def queue_agent_rollback_operation(
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(
-            method="POST", path="/api/child/agent/rollback", timeout_ms=300_000,
+            method="POST",
+            path="/api/child/agent/rollback",
+            timeout_ms=300_000,
             body=payload.model_dump(),
         ),
-        store, connections,
+        store,
+        connections,
     )
 
 
@@ -1953,8 +2003,10 @@ async def queue_agent_lifecycle_status(
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentCommandCreateResponse:
     return await _queue_server_command(
-        server_id, AgentCommandCreate(method="GET", path="/api/child/agent/lifecycle"),
-        store, connections,
+        server_id,
+        AgentCommandCreate(method="GET", path="/api/child/agent/lifecycle"),
+        store,
+        connections,
     )
 
 
@@ -1972,7 +2024,9 @@ async def queue_warp_install_operation(
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(
-            method="POST", path="/api/child/warp/install", timeout_ms=60_000,
+            method="POST",
+            path="/api/child/warp/install",
+            timeout_ms=60_000,
             body={"accept_terms": payload.accept_terms if payload else False},
         ),
         store,
@@ -2036,7 +2090,9 @@ async def queue_warp_remove_operation(
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(
-            method="POST", path="/api/child/warp/remove", timeout_ms=60_000,
+            method="POST",
+            path="/api/child/warp/remove",
+            timeout_ms=60_000,
             body={"confirm": payload.confirm},
         ),
         store,

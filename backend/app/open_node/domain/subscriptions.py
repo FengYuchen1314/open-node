@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from enum import StrEnum
+from math import isfinite
 from typing import Any, Literal
 from uuid import UUID
 
@@ -619,14 +620,38 @@ class SubscriptionCatalogPlanEntry(BaseModel):
     node_multipliers: dict[str, float] = Field(default_factory=dict)
     node_speed_limits: dict[str, float] = Field(default_factory=dict)
     node_device_limits: dict[str, int] = Field(default_factory=dict)
-    speed_limit_mbps: float = Field(default=0, ge=0)
-    device_limit: int = Field(default=0, ge=0)
+    speed_limit_mbps: float = Field(default=0, ge=0, le=(1 << 50) / 125000, allow_inf_nan=False)
+    device_limit: int = Field(default=0, ge=0, le=1_000_000)
     traffic_mode: SubscriptionTrafficMode = SubscriptionTrafficMode.ONEWAY
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
         return _strip_required_text(value, "plan name")
+
+    @field_validator("node_speed_limits")
+    @classmethod
+    def valid_speed_map(cls, value):
+        if any(
+            not isfinite(rate) or rate < 0 or 0 < rate * 125000 < 1 or rate * 125000 > 1 << 50
+            for rate in value.values()
+        ):
+            raise ValueError("Node speed limits must be finite nonnegative rates")
+        return value
+
+    @field_validator("speed_limit_mbps")
+    @classmethod
+    def valid_speed(cls, value):
+        if 0 < value * 125000 < 1:
+            raise ValueError("A positive speed limit must be at least one byte per second")
+        return value
+
+    @field_validator("node_device_limits")
+    @classmethod
+    def valid_connection_map(cls, value):
+        if any(not 0 <= limit <= 1_000_000 for limit in value.values()):
+            raise ValueError("Node connection limits must be between 0 and 1000000")
+        return value
 
 
 class SubscriptionCatalogCredentialEntry(BaseModel):
@@ -686,8 +711,8 @@ class SubscriptionPlanCreate(BaseModel):
     node_multipliers: dict[UUID, float] = Field(default_factory=dict)
     node_speed_limits: dict[UUID, float] = Field(default_factory=dict)
     node_device_limits: dict[UUID, int] = Field(default_factory=dict)
-    speed_limit_mbps: float = Field(default=0, ge=0)
-    device_limit: int = Field(default=0, ge=0)
+    speed_limit_mbps: float = Field(default=0, ge=0, le=(1 << 50) / 125000, allow_inf_nan=False)
+    device_limit: int = Field(default=0, ge=0, le=1_000_000)
     traffic_mode: SubscriptionTrafficMode = SubscriptionTrafficMode.ONEWAY
 
     @field_validator("name")
@@ -699,6 +724,21 @@ class SubscriptionPlanCreate(BaseModel):
     @classmethod
     def validate_description(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("node_speed_limits")
+    @classmethod
+    def valid_speed_map(cls, value):
+        return SubscriptionCatalogPlanEntry.valid_speed_map(value)
+
+    @field_validator("speed_limit_mbps")
+    @classmethod
+    def valid_speed(cls, value):
+        return SubscriptionCatalogPlanEntry.valid_speed(value)
+
+    @field_validator("node_device_limits")
+    @classmethod
+    def valid_connection_map(cls, value):
+        return SubscriptionCatalogPlanEntry.valid_connection_map(value)
 
 
 class SubscriptionPlanRead(SubscriptionPlanCreate):

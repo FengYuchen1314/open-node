@@ -234,6 +234,11 @@ These passing command and snapshot checks do not prove a complete replacement:
   recoverable removal. Public Cloudflare registration/forwarding and the
   remaining host operations still require verification.
   Unimplemented operations return 501.
+- Independent [native limits](native-limits.md) add persisted per-user bandwidth,
+  shared concurrent-connection admission, automatic speed policies and a
+  Vue/Vuetify control surface. Plan provisioning sends enforced caps before
+  enabling credentials and rejects incapable Agents. External service opt-in
+  and the failure/reconciliation contract remain explicit.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both

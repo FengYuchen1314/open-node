@@ -94,6 +94,9 @@ class XrayRuntime:
         self.lock = asyncio.Lock()
         self.binding_error: str | None = None
         self.systemd = None
+        from open_node_agent.limiter import NativeLimiter
+
+        self.limiter = NativeLimiter(self)
         if config.runtime_mode == "systemd":
             from open_node_agent.systemd_runtime import SystemdRuntime
 
@@ -124,6 +127,8 @@ class XrayRuntime:
         self, content: str | dict, *, binary: Path | None = None
     ) -> tuple[bool, str]:
         config = decode_config(content)
+        await self.limiter.require_binary(binary)
+        self.limiter.require_config(config)
         binding = await self.binding()
         if binding and binary is not None and binary != self.binary:
             raise RuntimeFailure("An external Xray executable is managed on its host")
@@ -134,7 +139,11 @@ class XrayRuntime:
         try:
             with os.fdopen(fd, "w") as stream:
                 json.dump(config, stream)
-            options = {"env": binding.environment, "cwd": binding.directory} if binding else {}
+            options = (
+                {"env": binding.environment, "cwd": binding.directory}
+                if binding
+                else {"env": self.limiter.environment()}
+            )
             code, output = await run_command(
                 str(binary or self.binary), "run", "-test", "-config", path, **options
             )
@@ -169,6 +178,7 @@ class XrayRuntime:
                 str(self.config.xray_config),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                env=self.limiter.environment(),
             )
             self.log_task = asyncio.create_task(self._capture_logs(self.process))
         await asyncio.sleep(0.25)

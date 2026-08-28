@@ -6,6 +6,12 @@ its previous token; plan expiry, disabled users and exhausted quotas also
 prevent export. Client compatibility does not prove that a remote node is
 currently reachable or provisioned.
 
+Queued provisioning enforces plan bandwidth and concurrent-connection caps
+through the [native limiter](native-limits.md), including per-node overrides.
+The compatibility `device_limit` field counts connections, not physical
+devices. Limited batches require a capable Agent and compatible free runtime;
+unsupported Agents do not receive credentials without the requested limits.
+
 ## Formats And Selection
 
 The public endpoint is `/api/v1/subscribe/{token}?format=...`:

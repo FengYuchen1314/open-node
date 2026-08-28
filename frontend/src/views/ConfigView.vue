@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
 import CommandInspector from "../components/CommandInspector.vue";
+import LimiterPanel from "../components/LimiterPanel.vue";
 import type {
   AgentCommand,
   AgentCommandStreamFrame,
@@ -1690,6 +1691,7 @@ function formatDateTime(value: string) {
           <v-tab prepend-icon="mdi-alpha-x-circle-outline" value="xray">Xray</v-tab>
           <v-tab prepend-icon="mdi-tune-variant" value="system">System</v-tab>
           <v-tab prepend-icon="mdi-routes" value="runtime">Runtime</v-tab>
+          <v-tab prepend-icon="mdi-speedometer" value="limits">Limits</v-tab>
           <v-tab prepend-icon="mdi-alpha-n-circle-outline" value="nginx">Nginx</v-tab>
           <v-tab prepend-icon="mdi-web" value="sites">Sites</v-tab>
           <v-tab prepend-icon="mdi-folder-cog-outline" value="files">Files</v-tab>
@@ -2843,6 +2845,11 @@ function formatDateTime(value: string) {
             </v-form>
           </v-window-item>
 
+          <v-window-item value="limits">
+            <LimiterPanel v-if="activeTab === 'limits'" :server-id="selectedServerId"
+              :inbounds="xrayRuntimeInventory?.inbounds ?? []"
+              @commands="(serverId, commands) => commandsByServer[serverId] = commands" />
+          </v-window-item>
           <v-window-item value="nginx">
             <v-form class="config-form" @submit.prevent="writeNginxConfig">
               <div class="config-action-row">

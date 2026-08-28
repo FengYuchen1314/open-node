@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 from calendar import monthrange
 from collections.abc import Iterable
 from contextlib import contextmanager
@@ -783,6 +784,7 @@ class AgentModel(Base):
     capability_rpc: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_stream: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_return_route_test: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_native_limiter: Mapped[bool] = mapped_column(Boolean, default=False)
     warp_installed: Mapped[bool] = mapped_column(Boolean, default=False)
     same_host_as_master: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -875,7 +877,10 @@ class CommandModel(Base):
     stream: Mapped[bool] = mapped_column(Boolean)
     status: Mapped[str] = mapped_column(String(24), index=True)
     depends_on_command_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("agent_commands.id", ondelete="CASCADE"), nullable=True, index=True,
+        String(36),
+        ForeignKey("agent_commands.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     result_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -943,10 +948,14 @@ class ChangeSetServerLockModel(Base):
     __tablename__ = "change_set_server_locks"
 
     server_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True,
+        String(36),
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        primary_key=True,
     )
     change_set_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("agent_change_sets.id", ondelete="CASCADE"), index=True,
+        String(36),
+        ForeignKey("agent_change_sets.id", ondelete="CASCADE"),
+        index=True,
     )
 
 
@@ -1220,14 +1229,26 @@ class InventoryStore:
             return
         inspector = inspect(self._engine)
         table_names = set(inspector.get_table_names())
+        if "agents" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector, "agents", {"capability_native_limiter": "BOOLEAN NOT NULL DEFAULT 0"}
+            )
         if "agent_change_sets" in table_names:
-            self._sqlite_add_missing_columns(inspector, "agent_change_sets", {
-                "resolution_reason": "TEXT NOT NULL DEFAULT ''",
-                "coordination_version": "INTEGER NOT NULL DEFAULT 0",
-            })
-            self._sqlite_add_missing_columns(inspector, "agent_change_set_steps", {
-                "rollback_history_ids": "JSON NOT NULL DEFAULT '[]'",
-            })
+            self._sqlite_add_missing_columns(
+                inspector,
+                "agent_change_sets",
+                {
+                    "resolution_reason": "TEXT NOT NULL DEFAULT ''",
+                    "coordination_version": "INTEGER NOT NULL DEFAULT 0",
+                },
+            )
+            self._sqlite_add_missing_columns(
+                inspector,
+                "agent_change_set_steps",
+                {
+                    "rollback_history_ids": "JSON NOT NULL DEFAULT '[]'",
+                },
+            )
         if "agent_scan_results" in table_names:
             self._sqlite_add_missing_columns(
                 inspector, "agent_scan_results", {"nginx": "JSON", "http01": "JSON"}
@@ -1237,15 +1258,18 @@ class InventoryStore:
                 inspector,
                 "agent_commands",
                 {
-                    "depends_on_command_id":
-                    "VARCHAR(36) REFERENCES agent_commands(id) ON DELETE CASCADE"
+                    "depends_on_command_id": (
+                        "VARCHAR(36) REFERENCES agent_commands(id) ON DELETE CASCADE"
+                    )
                 },
             )
             with self._engine.begin() as connection:
-                connection.execute(text(
-                    "CREATE INDEX IF NOT EXISTS ix_agent_commands_depends_on_command_id "
-                    "ON agent_commands (depends_on_command_id)"
-                ))
+                connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_agent_commands_depends_on_command_id "
+                        "ON agent_commands (depends_on_command_id)"
+                    )
+                )
         if "product_users" in table_names:
             self._sqlite_add_missing_columns(
                 inspector,
@@ -1417,6 +1441,7 @@ class InventoryStore:
             agent.capability_rpc = payload.capabilities.rpc
             agent.capability_stream = payload.capabilities.stream
             agent.capability_return_route_test = payload.capabilities.return_route_test
+            agent.capability_native_limiter = payload.capabilities.native_limiter
             agent.warp_installed = payload.warp_installed
             agent.same_host_as_master = payload.same_host_as_master
             agent.last_seen_at = now
@@ -1638,9 +1663,7 @@ class InventoryStore:
             previews: list[XrayRuntimeTunnelChainCreateCommand] = []
             for index, server in enumerate(servers):
                 target_address = (
-                    hosts[index + 1]
-                    if index < len(servers) - 1
-                    else payload.target_address
+                    hosts[index + 1] if index < len(servers) - 1 else payload.target_address
                 )
                 target_port = ports[index + 1] if index < len(servers) - 1 else payload.target_port
                 tag = f"tunnel-{payload.label}-h{index}"
@@ -2034,9 +2057,7 @@ class InventoryStore:
                 self._runtime_reconciliation_entry(draft, nodes_by_id) for draft in drafts
             ]
             drafts_by_node_id = {
-                str(draft.existing_node_id): draft
-                for draft in drafts
-                if draft.existing_node_id
+                str(draft.existing_node_id): draft for draft in drafts if draft.existing_node_id
             }
             managed_entries = [
                 self._managed_node_reconciliation_entry(node, drafts_by_node_id.get(node.id))
@@ -2048,9 +2069,7 @@ class InventoryStore:
             has_scan=scan is not None,
             runtime_count=len(runtime_entries),
             managed_node_count=len(managed_entries),
-            managed_runtime_count=sum(
-                1 for entry in runtime_entries if entry.status == "managed"
-            ),
+            managed_runtime_count=sum(1 for entry in runtime_entries if entry.status == "managed"),
             unmanaged_runtime_count=sum(
                 1 for entry in runtime_entries if entry.status == "unmanaged"
             ),
@@ -2163,9 +2182,7 @@ class InventoryStore:
             expected_credential_count=sum(len(entry.expected_emails) for entry in entries),
             matched_runtime_client_count=sum(len(entry.runtime_emails) for entry in entries),
             in_sync_count=sum(1 for entry in entries if entry.status == "in_sync"),
-            missing_runtime_count=sum(
-                1 for entry in entries if entry.status == "missing_runtime"
-            ),
+            missing_runtime_count=sum(1 for entry in entries if entry.status == "missing_runtime"),
             out_of_sync_count=sum(1 for entry in entries if entry.status != "in_sync"),
             missing_runtime_client_count=sum(
                 len(entry.missing_runtime_emails) for entry in entries
@@ -2761,8 +2778,7 @@ class InventoryStore:
                     )
 
             targets = [
-                self._probe_target_comparison(key, rows)
-                for key, rows in sorted(by_target.items())
+                self._probe_target_comparison(key, rows) for key, rows in sorted(by_target.items())
             ]
             return ProbeTargetComparisonResponse(
                 success=True,
@@ -2940,10 +2956,7 @@ class InventoryStore:
                     )
                     for node in nodes
                 ],
-                plans=[
-                    self._subscription_catalog_plan_entry(plan, node_names)
-                    for plan in plans
-                ],
+                plans=[self._subscription_catalog_plan_entry(plan, node_names) for plan in plans],
                 credentials=credentials,
             )
 
@@ -3712,7 +3725,9 @@ class InventoryStore:
         return self._change_sets().rollback(change_set_id, payload)
 
     def accept_change_set(
-        self, change_set_id: UUID, payload: AgentChangeSetAcceptRequest,
+        self,
+        change_set_id: UUID,
+        payload: AgentChangeSetAcceptRequest,
     ) -> AgentChangeSetRead:
         return self._change_sets().accept(change_set_id, payload)
 
@@ -3728,7 +3743,9 @@ class InventoryStore:
             return self._command_read(command)
 
     def create_command_sequence(
-        self, server_id: UUID, payloads: Iterable[AgentCommandCreate],
+        self,
+        server_id: UUID,
+        payloads: Iterable[AgentCommandCreate],
     ) -> list[AgentCommandRead]:
         with self._session() as session:
             server = session.get(ServerModel, str(server_id))
@@ -4358,8 +4375,7 @@ class InventoryStore:
                         state["current_ms"] = -1
 
         return {
-            key: self._probe_ping_series_from_state(key, state)
-            for key, state in series.items()
+            key: self._probe_ping_series_from_state(key, state) for key, state in series.items()
         }
 
     @staticmethod
@@ -4644,13 +4660,9 @@ class InventoryStore:
             ):
                 continue
 
-            ledger.upload += (
-                uplink - ledger.last_uplink if uplink >= ledger.last_uplink else uplink
-            )
+            ledger.upload += uplink - ledger.last_uplink if uplink >= ledger.last_uplink else uplink
             ledger.download += (
-                downlink - ledger.last_downlink
-                if downlink >= ledger.last_downlink
-                else downlink
+                downlink - ledger.last_downlink if downlink >= ledger.last_downlink else downlink
             )
             ledger.last_uplink = uplink
             ledger.last_downlink = downlink
@@ -5129,6 +5141,7 @@ class InventoryStore:
         server_names: dict[str, str] = {}
         seen_inbound: set[tuple[str, str, str]] = set()
         seen_route: set[tuple[str, str, str, str]] = set()
+        limiter_bindings: dict[tuple[str, str, str], dict[str, Any]] = {}
 
         for node_id in plan.node_ids:
             node = nodes_by_id.get(node_id)
@@ -5164,6 +5177,42 @@ class InventoryStore:
                     body["inbound_clients"].append({"tag": node.inbound_tag, "client": client})
                     seen_inbound.add(inbound_key)
                     email = client_email
+
+                speed = int(
+                    (plan.node_speed_limits or {}).get(node.id, plan.speed_limit_mbps) * 125000
+                )
+                connections = (plan.node_device_limits or {}).get(node.id, plan.device_limit)
+                agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
+                native = agent is not None and agent.capability_native_limiter
+                if speed or connections or native:
+                    group_data = json.dumps(
+                        [user.username, server.id, node.inbound_tag], separators=(",", ":")
+                    ).encode()
+                    binding = {
+                        "inbound_tag": node.inbound_tag,
+                        "user": {
+                            "uid": 0,
+                            "email": client_email,
+                            "speed_limit": speed,
+                            "device_limit": connections,
+                            "conn_group": "account-" + hashlib.sha256(group_data).hexdigest(),
+                        },
+                    }
+                    previous = limiter_bindings.get(inbound_key)
+                    if previous:
+                        for field in ("speed_limit", "device_limit"):
+                            values = [previous["user"][field], binding["user"][field]]
+                            previous["user"][field] = min(
+                                (value for value in values if value), default=0
+                            )
+                    else:
+                        limiter_bindings[inbound_key] = binding
+                        body.setdefault("limiter_users", []).append(binding)
+                    if not native and (speed or connections):
+                        warnings.append(
+                            f"node {node.name}: limits require a native-limiter Open Node Agent; "
+                            "unsupported agents will not receive this provisioning batch"
+                        )
 
             if node.routed_rule_marktag or node.routed_outbound_tag:
                 route_key = (
@@ -5862,13 +5911,9 @@ class InventoryStore:
         traffic_mode = SubscriptionTrafficMode(plan.traffic_mode) if plan else None
         traffic_limit_bytes = plan.traffic_limit_bytes if plan else 0
         charged_usage_bytes = (
-            download
-            if traffic_mode == SubscriptionTrafficMode.ONEWAY
-            else upload + download
+            download if traffic_mode == SubscriptionTrafficMode.ONEWAY else upload + download
         )
-        expired = bool(
-            user.plan_expires_at and now > self._aware_datetime(user.plan_expires_at)
-        )
+        expired = bool(user.plan_expires_at and now > self._aware_datetime(user.plan_expires_at))
         over_quota = bool(
             plan and traffic_limit_bytes > 0 and charged_usage_bytes >= traffic_limit_bytes
         )
@@ -6027,9 +6072,7 @@ class InventoryStore:
         if reset_due_at <= active_since:
             return False
         last_reset = (
-            cls._aware_datetime(user.last_traffic_reset_at)
-            if user.last_traffic_reset_at
-            else None
+            cls._aware_datetime(user.last_traffic_reset_at) if user.last_traffic_reset_at else None
         )
         return last_reset is None or last_reset < reset_due_at
 
@@ -6180,14 +6223,10 @@ class InventoryStore:
     @staticmethod
     def _default_client_email(user: ProductUserModel, node: ManagedNodeModel) -> str:
         label = (
-            node.inbound_tag
-            or node.routed_rule_marktag
-            or node.routed_outbound_tag
-            or node.name
+            node.inbound_tag or node.routed_rule_marktag or node.routed_outbound_tag or node.name
         )
         suffix = "".join(
-            char if char.isalnum() or char in {"-", "_", "."} else "_"
-            for char in label.strip()
+            char if char.isalnum() or char in {"-", "_", "."} else "_" for char in label.strip()
         ).strip("_")
         return f"{user.username}__{suffix or node.protocol}"
 
@@ -6286,7 +6325,9 @@ class InventoryStore:
             if self._engine.dialect.name == "sqlite":
                 session.execute(text("BEGIN IMMEDIATE"))
             else:
-                session.execute(select(ServerModel.id).order_by(ServerModel.id).with_for_update()).all()
+                session.execute(
+                    select(ServerModel.id).order_by(ServerModel.id).with_for_update()
+                ).all()
             yield session
 
     def _change_sets(self):
@@ -6357,6 +6398,7 @@ class InventoryStore:
                 rpc=agent.capability_rpc,
                 stream=agent.capability_stream,
                 return_route_test=agent.capability_return_route_test,
+                native_limiter=agent.capability_native_limiter,
             ),
             warp_installed=agent.warp_installed,
             same_host_as_master=agent.same_host_as_master,
@@ -6643,8 +6685,7 @@ class InventoryStore:
         pending_snapshots = session.scalars(
             select(XrayConfigSnapshotModel).where(
                 XrayConfigSnapshotModel.server_id == server_id,
-                XrayConfigSnapshotModel.status
-                == XrayConfigSnapshotStatus.PENDING_RECOVERY.value,
+                XrayConfigSnapshotModel.status == XrayConfigSnapshotStatus.PENDING_RECOVERY.value,
             )
         ).all()
         for snapshot in pending_snapshots:
@@ -6786,9 +6827,7 @@ class InventoryStore:
                 if command.query == _XRAY_SNAPSHOT_REFRESH_QUERY
                 else XrayConfigSnapshotSource.AGENT_REPORT
             )
-            return InventoryStore._xray_config_text(body.get("config")), (
-                source
-            )
+            return InventoryStore._xray_config_text(body.get("config")), (source)
 
         body = command.body if isinstance(command.body, dict) else {}
         return InventoryStore._xray_config_text(body.get("config")), (
@@ -6990,9 +7029,7 @@ class InventoryStore:
             outbound = outbound_by_tag.get(outbound_tag)
             if outbound is not None:
                 settings = cls._record_value(outbound.get("settings"))
-                target_address, target_port = cls._xray_redirect_target(
-                    settings.get("redirect")
-                )
+                target_address, target_port = cls._xray_redirect_target(settings.get("redirect"))
             tunnels.append(
                 XrayRuntimeTunnelRead(
                     kind="routed",
@@ -7153,9 +7190,7 @@ class InventoryStore:
         cert_name: str,
     ) -> str:
         template = (
-            _TUNNEL_DOMAIN_PROXY_CONFIG
-            if site_type == "proxy"
-            else _TUNNEL_DOMAIN_STATIC_CONFIG
+            _TUNNEL_DOMAIN_PROXY_CONFIG if site_type == "proxy" else _TUNNEL_DOMAIN_STATIC_CONFIG
         )
         return (
             template.replace("{domain}", domain)
@@ -7478,10 +7513,7 @@ class InventoryStore:
                 create_available = False
                 warnings.append("snell_unauthenticated_mode")
             users = cls._list_value(settings.get("users"))
-            if any(
-                cls._snell_runtime_options({"users": [user]}) != options
-                for user in users
-            ):
+            if any(cls._snell_runtime_options({"users": [user]}) != options for user in users):
                 create_available = False
                 warnings.append("snell_mixed_transport_options")
 
@@ -7813,8 +7845,7 @@ class InventoryStore:
     @staticmethod
     def _safe_runtime_suffix(value: str) -> str:
         suffix = "".join(
-            char if char.isalnum() or char in {"-", "_", "."} else "_"
-            for char in value
+            char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value
         )
         return suffix.strip("_")[:80] or "runtime"
 
@@ -8433,7 +8464,8 @@ class InventoryStore:
             stream=command.stream,
             status=AgentCommandStatus(command.status),
             depends_on_command_id=UUID(command.depends_on_command_id)
-            if command.depends_on_command_id else None,
+            if command.depends_on_command_id
+            else None,
             attempts=command.attempts,
             result_status=command.result_status,
             result_body=command.result_body,
@@ -8535,6 +8567,27 @@ class InventoryStore:
             return False
         if not self._change_sets().can_lease(session, command):
             return False
+        needs_limiter = command.path == "/api/child/limiter" or (
+            command.path == "/api/child/batch-apply"
+            and isinstance(command.body, dict)
+            and command.body.get("limiter_users")
+        )
+        if needs_limiter:
+            agent = session.scalar(
+                select(AgentModel).where(AgentModel.server_id == command.server_id)
+            )
+            if not agent or not agent.capability_native_limiter:
+                command.result_error = (
+                    "Not sent: this command requires an Open Node Agent with native limiter support"
+                )
+                command.updated_at = now
+                if command.attempts == 0:
+                    command.status = AgentCommandStatus.SKIPPED.value
+                    command.result_status = 501
+                    command.completed_at = now
+                    self._advance_command_dependents(session, command, now)
+                    self._change_sets().advance_after_result(session, command, now)
+                return False
         try:
             AgentCommandCreate(
                 method=command.method,
@@ -8594,6 +8647,31 @@ class InventoryStore:
             result_error = "Agent reported an unsuccessful result"
         if (
             not result_error
+            and payload.status < 400
+            and command.path == "/api/child/batch-apply"
+            and isinstance(command.body, dict)
+            and command.body.get("limiter_users")
+        ):
+            confirmation = body.get("limiter")
+            requested_limits = any(
+                not isinstance(item, dict)
+                or not isinstance(item.get("user"), dict)
+                or item["user"].get("speed_limit", 0) != 0
+                or item["user"].get("device_limit", 0) != 0
+                for item in command.body["limiter_users"]
+            )
+            revision = confirmation.get("revision") if isinstance(confirmation, dict) else None
+            if (
+                not isinstance(confirmation, dict)
+                or confirmation.get("applied") is not True
+                or (
+                    not (isinstance(revision, str) and re.fullmatch(r"[0-9a-f]{64}", revision))
+                    and (requested_limits or confirmation.get("unlimited") is not True)
+                )
+            ):
+                result_error = "Agent did not confirm native limiter enforcement"
+        if (
+            not result_error
             and command.path == "/api/child/xray/test-config"
             and body.get("ok") is not True
         ):
@@ -8627,9 +8705,7 @@ class InventoryStore:
         server.updated_at = now
         if (
             command.status == AgentCommandStatus.SUCCEEDED.value
-            and command.path in {
-                "/api/child/agent/uninstall", "/api/child/agent/uninstall-stream"
-            }
+            and command.path in {"/api/child/agent/uninstall", "/api/child/agent/uninstall-stream"}
             and body.get("installation_status") == "removed"
         ):
             server.status = ServerStatus.OFFLINE.value

@@ -25,6 +25,7 @@ class Binding:
     directory: str
     layout: "ConfigLayout | None" = None
     identity: str = ""
+    pid: int = 0
 
 
 @dataclass(frozen=True)
@@ -364,7 +365,7 @@ class SystemdRuntime:
         self.layout = layout
         if config.allow_xray_takeover and not allow_multifile:
             self.require_consolidated()
-        return Binding(running, environment, directory, layout, identity)
+        return Binding(running, environment, directory, layout, identity, service["MainPID"])
 
     async def control(self, action: str, *, allow_multifile: bool = False) -> None:
         if action not in {"start", "stop", "restart"}:

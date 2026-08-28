@@ -60,12 +60,7 @@ def _validate_xray_config_file(value: str) -> str:
 
 def _validate_log_file_name(value: str) -> str:
     normalized = _strip_required_text(value, "name")
-    if (
-        "/" in normalized
-        or "\\" in normalized
-        or ".." in normalized
-        or normalized in {".", ".."}
-    ):
+    if "/" in normalized or "\\" in normalized or ".." in normalized or normalized in {".", ".."}:
         raise ValueError("name must be a log filename, not a path")
     return normalized
 
@@ -178,6 +173,7 @@ class AgentOperationKind(StrEnum):
     RETURN_ROUTE_TEST = "return_route_test"
     VALIDATE_SITE = "validate_site"
     LIMITER = "limiter"
+    LIMITER_STATUS = "limiter_status"
     SERVICES_STATUS = "services_status"
     SERVICE_CONTROL = "service_control"
     SYSTEM_NICS = "system_nics"
@@ -228,6 +224,7 @@ class AgentCapabilities(BaseModel):
     rpc: bool = False
     stream: bool = False
     return_route_test: bool = False
+    native_limiter: bool = False
 
 
 class ServerCreate(BaseModel):
@@ -1049,9 +1046,7 @@ class AgentDomainLatencyProbeRequest(BaseModel):
 
 class AgentUpgradeOperationRequest(BaseModel):
     model_config = {"extra": "forbid"}
-    version: str = Field(
-        max_length=64, pattern=r"^[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$"
-    )
+    version: str = Field(max_length=64, pattern=r"^[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$")
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -1272,6 +1267,7 @@ class AgentBatchApplyOperationRequest(BaseModel):
         max_length=500,
     )
     no_restart: bool = False
+    limiter_users: list["AgentLimiterBinding"] = Field(default_factory=list, max_length=1000)
     command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
 
 
@@ -1385,8 +1381,9 @@ class AgentValidateSiteOperationRequest(BaseModel):
 class AgentLimiterUser(BaseModel):
     uid: int = Field(ge=0)
     email: str = Field(min_length=1, max_length=255)
-    speed_limit: int = Field(default=0, ge=0)
-    device_limit: int = Field(default=0, ge=0)
+    speed_limit: int = Field(default=0, ge=0, le=1 << 50)
+    device_limit: int = Field(default=0, ge=0, le=1_000_000)
+    conn_group: str = Field(default="", max_length=255)
 
     @field_validator("email")
     @classmethod
@@ -1396,9 +1393,11 @@ class AgentLimiterUser(BaseModel):
 
 class AgentLimiterOperationRequest(BaseModel):
     inbound_tag: str = Field(min_length=1, max_length=255)
-    node_limit: int = Field(default=0, ge=0)
+    node_limit: int = Field(default=0, ge=0, le=1 << 50)
     users: list[AgentLimiterUser] = Field(default_factory=list, max_length=1000)
     auto_speed_rules: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    action: Literal["sync", "remove"] = "sync"
+    expected_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
 
     @field_validator("inbound_tag")
@@ -1410,6 +1409,11 @@ class AgentLimiterOperationRequest(BaseModel):
     @classmethod
     def validate_auto_speed_rules(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return _ensure_json_serializable_config(value, "auto_speed_rules")
+
+
+class AgentLimiterBinding(BaseModel):
+    inbound_tag: str = Field(min_length=1, max_length=255)
+    user: AgentLimiterUser
 
 
 class AgentXrayTestConfigOperationRequest(BaseModel):

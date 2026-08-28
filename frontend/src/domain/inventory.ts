@@ -28,6 +28,7 @@ export type AgentOperationKind =
   | "return_route_test"
   | "validate_site"
   | "limiter"
+  | "limiter_status"
   | "services_status"
   | "service_control"
   | "system_nics"
@@ -641,6 +642,7 @@ export interface AgentBatchApplyOperationRequest {
     user_email: string;
   }>;
   no_restart?: boolean;
+  limiter_users?: Array<{ inbound_tag: string; user: AgentLimiterUser }>;
   command_timeout_ms?: number;
 }
 
@@ -691,15 +693,20 @@ export interface AgentValidateSiteOperationRequest {
   command_timeout_ms?: number;
 }
 
+export interface AgentLimiterUser {
+  uid: number;
+  email: string;
+  speed_limit?: number;
+  device_limit?: number;
+  conn_group?: string;
+}
+
 export interface AgentLimiterOperationRequest {
+  action?: "sync" | "remove";
+  expected_revision?: string;
   inbound_tag: string;
   node_limit?: number;
-  users?: Array<{
-    uid: number;
-    email: string;
-    speed_limit?: number;
-    device_limit?: number;
-  }>;
+  users?: AgentLimiterUser[];
   auto_speed_rules?: Record<string, unknown>[];
   command_timeout_ms?: number;
 }

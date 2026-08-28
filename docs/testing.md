@@ -381,6 +381,45 @@ restart deduplication. Owned process groups are terminated on exit.
 This proves the managed official-Xray VLESS path, not every protocol, encrypted
 legacy-agent migration, systemd mode, or host install/upgrade/uninstall lifecycle.
 
+## Native Limiter Smoke
+
+Build the [free runtime](fork-runtime.md), Agent wheel and frontend on the VPS.
+With the backend development environment, Chromium and a verified Mihomo binary:
+
+```bash
+backend/.venv/bin/python scripts/vps/smoke-native-limiter.py \
+  --xray /absolute/path/to/free-runtime/xray \
+  --mihomo /absolute/path/to/mihomo \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /absolute/path/to/nginx \
+  --output /tmp/open-node-native-limits
+```
+
+The fixture installs a dedicated non-root Agent over trusted HTTPS/WSS, imports
+18 protocol variants and provisions their plan caps. It measures actual
+combined upload/download rates and UDP target forwarding where supported,
+checks real Vision TLS traffic, live cap changes on existing connections,
+shared parallel buckets and admission quotas, automatic rules and persistence.
+Its browser portion exercises desktop/mobile/narrow limit editing, stale
+revisions and confirmed removal. It does not reuse existing host services.
+Mieru's two underlays have TCP-target coverage, not UDP-target support.
+
+Core unit tests cover policy persistence, private files, stale revisions,
+concurrent admission, live bucket updates and automatic rule timing. Run
+`go test -race ./common/nodelimits` inside the matching source tree with an
+isolated C compiler on the VPS. Do not run tests or builds on the local workstation.
+
+The native-limiter milestone passed on the designated Linux amd64 VPS:
+471 backend, 458 Agent and 101 frontend tests (1030 total), frontend production
+build, probe Worker typecheck, protocol/core unit tests and the limiter race
+detector. The real smoke measured 18 TCP variants and 16 UDP-target variants,
+plus Vision TLS bulk, shared credential aliases, sustained/burst rules,
+restart persistence and desktop/mobile/narrow editing.
+The runtime binary SHA-256 is
+`275e144b09dd58bf6c9bbe8177fa024f3f49c46a706970dd9eca5629c9886305`.
+These results do not establish arbitrary OS, external-service or public-provider
+compatibility.
+
 ## Agent Service Lifecycle
 
 After building the Agent wheel, run the following on the designated VPS as root:

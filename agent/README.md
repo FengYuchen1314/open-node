@@ -124,6 +124,10 @@ public challenges through a standalone listener or owned Nginx webroot, with
 durable cleanup and expiry. Account and issuance keys remain on the control
 plane. See [remote validation setup](../docs/certificates.md#remote-validation-node).
 No Agent-local ACME runtime is required.
+Optional [native limits](../docs/native-limits.md) enforce user rates, shared
+concurrent-connection quotas and automatic caps inside the free runtime.
+Limited plan batches persist their policies before enabling credentials;
+unsupported binaries and old Agents cannot silently discard those limits.
 Unsupported operations return 501 rather than reporting success. Public WARP
 provider verification and further migration workflows remain release gates.
 Native [fork protocol user management](../docs/fork-runtime.md) now edits

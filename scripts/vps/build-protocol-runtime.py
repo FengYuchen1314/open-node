@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[2]
 PATCHES = [
     ROOT / "runtime/xray/empty-users.patch",
     ROOT / "runtime/xray/anytls-udp-address.patch",
+    ROOT / "runtime/xray/limiter.patch",
 ]
+OVERLAY = ROOT / "runtime/xray/overlay"
 
 
 def command(*args, cwd, env=None, capture=False):
@@ -79,6 +81,20 @@ def build(work: Path, go: Path, jobs: int, reference: bool):
     for patch in PATCHES:
         command("git", "apply", "--check", patch, cwd=source)
         command("git", "apply", patch, cwd=source)
+    overlays = sorted(OVERLAY.rglob("*.go"))
+    for path in overlays:
+        target = source / path.relative_to(OVERLAY)
+        if target.exists():
+            raise ValueError(f"Overlay collides with pinned upstream source: {target}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, target)
+    command(
+        go.parent / "gofmt",
+        "-w",
+        source / "app/dispatcher/default.go",
+        *(source / path.relative_to(OVERLAY) for path in overlays),
+        cwd=source,
+    )
     command(
         go,
         "test",
@@ -87,6 +103,8 @@ def build(work: Path, go: Path, jobs: int, reference: bool):
         "./proxy/anytls",
         "./proxy/snell",
         "./proxy/mieru",
+        "./common/nodelimits",
+        "./app/dispatcher",
         cwd=source,
         env=env,
     )
@@ -96,7 +114,16 @@ def build(work: Path, go: Path, jobs: int, reference: bool):
     shutil.copyfile(source / "LICENSE", work / "LICENSE-Xray-MPL-2.0")
     for patch in PATCHES:
         shutil.copyfile(patch, work / patch.name)
-    names = command("git", "ls-files", "-z", cwd=source, capture=True).split("\0")
+    names = command(
+        "git",
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        cwd=source,
+        capture=True,
+    ).split("\0")
     with tarfile.open(work / "matching-source.tar.gz", "w:gz") as archive:
         for name in filter(None, names):
             archive.add(source / name, arcname="xray-source/" + name, recursive=False)
@@ -108,6 +135,12 @@ def build(work: Path, go: Path, jobs: int, reference: bool):
             for patch in PATCHES
         },
         "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        "overlay": {
+            path.relative_to(OVERLAY).as_posix(): hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            for path in overlays
+        },
         "source_sha256": hashlib.sha256(
             (work / "matching-source.tar.gz").read_bytes()
         ).hexdigest(),

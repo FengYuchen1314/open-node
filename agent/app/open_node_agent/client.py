@@ -101,6 +101,7 @@ class Agent:
                 "rpc": True,
                 "stream": True,
                 "return_route_test": self.operations.diagnostics.route_available(),
+                "native_limiter": True,
             },
         }
 
@@ -178,6 +179,10 @@ class Agent:
             report["stats"] = await self.runtime.stats()
         except (ValueError, OSError, TimeoutError):
             report["stats"] = None
+        limiter = await self.runtime.limiter.status()
+        if limiter.get("available"):
+            for key in ("user_speeds", "conn_counts"):
+                report[key] = limiter.get(key, {})
         return report
 
     async def websocket_reports(self) -> None:
