@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { userPath } from "./user-path";
 import type { AgentCommand } from "../domain/inventory";
 import type { SubscriptionPlan, SubscriptionPlanCreateRequest } from "../domain/subscriptions";
 
@@ -29,8 +30,8 @@ export function planSettings(plan: SubscriptionPlan): PlanSettings {
   };
 }
 const base = import.meta.env.VITE_API_BASE_URL ?? "";
-function path(id: string, mode: PlanOperation) {
-  return mode === "unassign" ? `/users/${encodeURIComponent(id)}/plan` : `/plans/${encodeURIComponent(id)}`;
+function path(id: string, mode: PlanOperation, action: string) {
+  return mode === "unassign" ? userPath(id, "plan/" + action) : `/plans/${encodeURIComponent(id)}/${action}`;
 }
 async function request<T>(url: string, init?: RequestInit, fetcher = authenticatedFetch): Promise<T> {
   const response = await fetcher(`${base}/api/v1${url}`, init);
@@ -44,16 +45,16 @@ async function request<T>(url: string, init?: RequestInit, fetcher = authenticat
   return response.json() as Promise<T>;
 }
 export function getPlanManagement(id: string, mode: PlanOperation, fetcher = authenticatedFetch) {
-  return request<PlanManagementRead>(path(id, mode) + (mode === "unassign" ? "/removal" : "/settings"), undefined, fetcher);
+  return request<PlanManagementRead>(path(id, mode, mode === "unassign" ? "removal" : "settings"), undefined, fetcher);
 }
 export function savePlan(id: string, settings: PlanSettings, revision: string, fetcher = authenticatedFetch) {
-  return request<PlanManagementResult>(path(id, "edit") + "/settings", {
+  return request<PlanManagementResult>(path(id, "edit", "settings"), {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...settings, expected_revision: revision, acknowledge_runtime_restart: true }),
   }, fetcher);
 }
 export function removePlan(id: string, mode: "remove" | "unassign", revision: string, name: string, fetcher = authenticatedFetch) {
-  return request<PlanManagementResult>(path(id, mode) + "/remove", {
+  return request<PlanManagementResult>(path(id, mode, "remove"), {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expected_revision: revision, confirm_name: name, acknowledge_runtime_restart: true }),
   }, fetcher);

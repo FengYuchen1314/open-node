@@ -31,6 +31,7 @@ from open_node.services.inventory import (
 from open_node.services.node_cleanup import ENDPOINT
 from open_node.services.subscription_access import ENDPOINT as ACCESS
 from open_node.services.subscription_access import TERMINAL, protocol, revision
+from open_node.services.user_limits import prune_node_overrides
 from open_node.services.user_management import UserManagement, fingerprint, matches
 
 
@@ -479,6 +480,9 @@ class NodeManagement:
                         },
                     )
                 plan.updated_at = now
+            for user in session.scalars(select(ProductUserModel)):
+                if prune_node_overrides(user, ids):
+                    user.updated_at = now
             commands = self.store._subscription_access().reconcile(session, now)
             commands.extend(self.advance(session, now, identifier=job.id))
             result = self._job_read(job, commands)

@@ -51,6 +51,12 @@ Remaining migration gates still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
 
+[Subscriber limits](docs/user-limits.md) add per-user traffic quotas, bandwidth
+and connection overrides, including per-node and parent inheritance. The
+editor, subscription quotas and native provisioning share the same rules.
+Explicit unlimited is distinct from inherited settings; edits retain usage,
+credentials and assignment dates.
+
 [Subscriber self-service](docs/subscriber-accounts.md) adds isolated login,
 current-plan usage and downloads, password changes, session revocation and
 TOTP with one-use recovery codes. Account disablement and removal invalidate

@@ -58,6 +58,27 @@ cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
 
+## Subscriber Limit Smoke
+
+On the designated VPS, with the frontend built and the independent Agent wheel
+and free native-limiter Xray binary available:
+
+```bash
+python scripts/vps/smoke-user-limits.py \
+  --xray /absolute/path/to/xray \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nginx /absolute/path/to/nginx \
+  --output /tmp/open-node-user-limits-screenshots \
+  --transport websocket
+```
+
+Repeat with `--transport http`. The isolated root/systemd fixture installs a
+non-root Agent and verifies real speed/connection caps, explicit unlimited,
+inheritance, Agent restart persistence, offline quota withdrawal, unchanged
+credentials and charged usage, and unrelated-user forwarding. Browser checks
+cover stale forms, numeric validation, user overrides and subscriber visibility
+at 1440px, 390px and 320px widths. See [user-limits.md](user-limits.md).
+
 ## Subscription Client Smoke
 
 Build the frontend and [patched runtime](fork-runtime.md) on the VPS. Use the
@@ -961,6 +982,26 @@ lease races, overlapping reservations, draining earlier sequences, late
 rollback rejection, restart persistence and missing-column SQLite migration.
 
 ## Latest Verification
+
+The subscriber-limit worktree passed on the designated VPS:
+
+- Backend: 725 tests; Agent: 522 tests; frontend: 153 tests and production build.
+- Ruff passed for the changed Python sources and the new smoke fixture.
+- Real non-root installed Agents applied user/default/node speed and connection
+  caps over trusted WebSocket and HTTP polling, including explicit unlimited,
+  restored plan inheritance and persisted limits after an Agent restart.
+- A paused Agent left existing forwarding available while quota withdrawal was
+  pending. Reconnection denied the old credentials; raising the quota restored
+  those same identities without resetting charged usage. Another subscriber
+  kept forwarding throughout the quota changes.
+- Browser checks covered stale saves, invalid values, subscriber visibility and
+  1440px, 390px and 320px layouts. Screenshots were inspected. Fixture services
+  and private state were removed after both transport runs.
+
+The existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+These results do not close the remaining [migration gates](migration-map.md).
+
+## Earlier Release Verification
 
 The managed Xray release worktree passed on the designated VPS:
 

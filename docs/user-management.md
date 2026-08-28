@@ -8,6 +8,8 @@ There is no activation, license check or paid feature gate.
 ## Edit And Disable
 
 Editing changes the display name, contact email, remark and active state.
+The Limits tab adds [per-user quota, bandwidth and connection overrides](user-limits.md),
+including per-node settings and parent inheritance.
 The username and product role are immutable in this editor. Administrator-role
 product users cannot be disabled or removed. Editing their other metadata does
 not change the controller administrator or its login credentials.
@@ -109,9 +111,8 @@ with a paused Agent, progress reopening and same-name recreation at 1440, 390
 and 320px widths. Run separately over WebSocket and HTTP polling with trusted TLS.
 All tests, formatting, builds and browser execution run on the configured VPS.
 
-This completes the existing subscriber profile/lifecycle surface, not every
-original account feature. Per-user quota/speed/node overrides, custom short-code
-editing, subscriber login/password/session/TOTP workflows and privately owned
-routed-node cleanup still require migration or dedicated parity verification.
-Node editing/removal and the remaining plan template/policy features remain
-separate work. See [migration-map.md](migration-map.md).
+The existing subscriber profile/lifecycle surface now also includes
+[limit overrides](user-limits.md), [login/password/session/TOTP workflows](subscriber-accounts.md)
+and [managed-node editing/removal](node-management.md). Custom short-code
+editing, privately owned routed-node cleanup and the remaining plan
+template/policy features still need migration. See [migration-map.md](migration-map.md).

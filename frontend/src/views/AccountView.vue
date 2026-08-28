@@ -101,12 +101,18 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
           <div class="account-plan-title"><div><p class="account-label">Current plan</p><h3>{{ quota.plan_name || 'No plan assigned' }}</h3></div><v-chip :color="quota.available ? 'success' : 'warning'" size="small" variant="tonal">{{ status }}</v-chip></div>
           <div class="account-usage"><strong>{{ bytes(quota.charged_usage_bytes) }}</strong><span>/ {{ quota.traffic_limit_bytes ? bytes(quota.traffic_limit_bytes) : quota.has_plan ? 'Unlimited' : '0 B' }}</span></div>
           <v-progress-linear :model-value="Math.min(quota.percent_used, 100)" :color="quota.over_quota ? 'error' : 'primary'" height="6" class="my-4" aria-label="Traffic quota used" />
-          <dl class="account-facts"><div><dt>Expires</dt><dd>{{ date(quota.plan_expires_at) }}</dd></div><div><dt>Next reset</dt><dd>{{ date(quota.next_reset_at) }}</dd></div><div><dt>Speed limit</dt><dd>{{ profile.speed_limit_mbps ? `${profile.speed_limit_mbps} Mbps` : 'Unlimited' }}</dd></div><div><dt>Device limit</dt><dd>{{ profile.device_limit || 'Unlimited' }}</dd></div><div><dt>Uploaded</dt><dd>{{ bytes(quota.upload) }}</dd></div><div><dt>Downloaded</dt><dd>{{ bytes(quota.download) }}</dd></div></dl>
+          <dl class="account-facts"><div><dt>Expires</dt><dd>{{ date(quota.plan_expires_at) }}</dd></div><div><dt>Next reset</dt><dd>{{ date(quota.next_reset_at) }}</dd></div><div><dt>Default speed</dt><dd>{{ profile.speed_limit_mbps ? `${profile.speed_limit_mbps} Mbps` : 'Unlimited' }}</dd></div><div><dt>Connection limit</dt><dd>{{ profile.device_limit || 'Unlimited' }}</dd></div><div><dt>Uploaded</dt><dd>{{ bytes(quota.upload) }}</dd></div><div><dt>Downloaded</dt><dd>{{ bytes(quota.download) }}</dd></div></dl>
         </section>
         <section class="account-links" aria-label="Subscription links">
           <h3>Subscription</h3><div class="account-link-controls"><v-select v-model="format" :items="formats" label="Client format" variant="outlined" density="compact" hide-details /><div class="account-link-actions"><v-tooltip :text="copied ? 'Copied' : 'Copy subscription link'"><template #activator="{ props: tip }"><v-btn v-bind="tip" :icon="copied ? 'mdi-check' : 'mdi-content-copy'" aria-label="Copy subscription link" variant="text" :disabled="!url" @click="copyLink" /></template></v-tooltip><v-tooltip text="Download subscription"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-download" aria-label="Download subscription" variant="text" :href="url" :disabled="!url || !quota.available" rel="noreferrer" download /></template></v-tooltip></div></div>
           <v-text-field :model-value="url" label="Subscription URL" variant="outlined" density="compact" readonly hide-details />
           <v-alert v-if="!quota.available" type="warning" variant="tonal" class="mt-4">{{ !quota.has_plan ? 'No subscription plan assigned' : quota.expired ? 'Your plan has expired' : 'Your traffic quota has been reached' }}</v-alert>
+        </section>
+        <section v-if="profile.node_limits?.length" class="account-nodes" aria-label="Node limits">
+          <h3>Node limits</h3>
+          <div v-for="node in profile.node_limits" :key="node.node_id" class="account-node-limit">
+            <strong>{{ node.name }}</strong><span>{{ node.speed_limit_mbps ? `${node.speed_limit_mbps} Mbps` : 'Unlimited speed' }}</span><span>{{ node.device_limit ? `${node.device_limit} connections` : 'Unlimited connections' }}</span>
+          </div>
         </section>
       </template>
       <SubscriberSecurityPanel v-else-if="tab === 'security'" class="account-security-panel" @changed="load" />
@@ -139,6 +145,9 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
 .account-links h3 { font-size: 18px; margin-bottom: 20px; }
 .account-link-controls { display: grid; grid-template-columns: minmax(0, 300px) auto; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
 .account-link-actions { display: flex; }
+.account-nodes { border-top: 1px solid #dbe5e0; padding: 28px 0; }
+.account-nodes h3 { font-size: 18px; margin-bottom: 20px; }
+.account-node-limit { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding-block: 14px; border-bottom: 1px solid #e9eeeb; font-size: 14px; overflow-wrap: anywhere; }
 .account-security-panel { padding-top: 24px; }
 .account-admin-link { font-size: 13px; color: #176b5b; justify-self: start; }
 @media (max-width: 600px) {
@@ -147,5 +156,6 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
   .account-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
   .account-heading h2 { font-size: 22px; }
   .account-link-controls { gap: 8px; }
+  .account-node-limit { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 }
 </style>

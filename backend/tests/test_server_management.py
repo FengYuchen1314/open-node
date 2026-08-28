@@ -220,6 +220,38 @@ def test_removal_prunes_plans_preserves_user_usage_and_revokes_agent(env, tmp_pa
         assert session.execute(text("PRAGMA foreign_key_check")).all() == []
 
 
+def test_removal_prunes_user_limit_overrides_on_removed_nodes(env):
+    first = node(env)
+    other = env[0].post("/api/v1/servers", json={"name": "other"}).json()
+    remaining = node(env, "other-node", "other.example", other["server"]["id"])
+    subscriber(env, [first, remaining])
+    view = env[0].get("/api/v1/users/user/settings").raise_for_status().json()
+    values = {key: view["user"][key] for key in ("display_name", "email", "remark", "is_active")}
+    env[0].put(
+        "/api/v1/users/user/settings",
+        json={
+            **values,
+            "expected_revision": view["revision"],
+            "acknowledge_runtime_restart": True,
+            "limit_overrides": {
+                "traffic_limit_gb": 3,
+                "node_speed_limits": {first["id"]: 2, remaining["id"]: 0},
+                "node_device_limits": {first["id"]: 1},
+            },
+        },
+    ).raise_for_status()
+    remove(env)
+    limits = (
+        env[0]
+        .get("/api/v1/users/user/settings")
+        .raise_for_status()
+        .json()["user"]["limit_overrides"]
+    )
+    assert limits["traffic_limit_gb"] == 3
+    assert limits["node_speed_limits"] == {remaining["id"]: 0}
+    assert limits["node_device_limits"] == {}
+
+
 def test_removal_preserves_legacy_usage_without_ledgers(env):
     _, credentials = subscriber(env, [node(env)])
     report(env, email=credentials[0]["email"])

@@ -1747,7 +1747,7 @@ function formatBytes(value: number) {
       </v-sheet>
     </section>
     <PlanManagementDialog v-model:open="planManagement.open" :id="planManagement.id" :mode="planManagement.mode" :nodes="nodes" @changed="refresh" />
-    <UserManagementDialog v-model:open="userManagement.open" :username="userManagement.username" :mode="userManagement.mode" :removal-id="userManagement.removalId" @changed="refresh" />
+    <UserManagementDialog v-model:open="userManagement.open" :username="userManagement.username" :mode="userManagement.mode" :removal-id="userManagement.removalId" :nodes="nodes" @changed="refresh" />
     <UserLoginDialog v-model:open="userLogin.open" :username="userLogin.username" />
     <NodeManagementDialog v-model:open="nodeManagement.open" :id="nodeManagement.id" :mode="nodeManagement.mode" :nodes="nodes" @changed="refresh" />
   </div>

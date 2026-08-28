@@ -66,11 +66,13 @@ async def remove(identifier: UUID, payload: PlanRemoval, store: Store, connectio
     return await apply(store._plan_management().remove, store, connections, identifier, payload)
 
 
+@router.get("/user-plan/removal", response_model=PlanManagementRead)
 @router.get("/users/{username}/plan/removal", response_model=PlanManagementRead)
 def assignment(username: str, store: Store):
     return call(store._plan_management().assignment, username)
 
 
+@router.post("/user-plan/remove", response_model=PlanManagementResult)
 @router.post("/users/{username}/plan/remove", response_model=PlanManagementResult)
 async def unassign(username: str, payload: PlanRemoval, store: Store, connections: Connections):
     return await apply(store._plan_management().unassign, store, connections, username, payload)

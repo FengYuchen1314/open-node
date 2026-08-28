@@ -5,7 +5,8 @@ import { getUserManagement, getUserRemoval, removeUser, retryUserRemoval, saveUs
 describe("user management", () => {
   const user = { username: "alice", display_name: "Alice", is_active: false, role: "user", removal_id: "old" } as ProductUser;
   it("sends only editable fields and preserves disabled state", () => {
-    expect(userSettings(user)).toEqual({ display_name: "Alice", email: null, remark: "", is_active: false });
+    expect(userSettings(user)).toEqual({ display_name: "Alice", email: null, remark: "", is_active: false,
+      limit_overrides: { traffic_limit_gb: null, speed_limit_mbps: null, device_limit: null, node_speed_limits: {}, node_device_limits: {} } });
   });
   it("encodes usernames and requires revision and explicit cleanup acknowledgment", async () => {
     const calls: Array<[string, RequestInit | undefined]> = [];

@@ -83,8 +83,9 @@ confirmation; an ordinary `success: true` is insufficient.
 
 ## Plans And Failure Recovery
 
-Queued plan provisioning sends per-user caps alongside credentials. Node
-overrides take precedence over the plan defaults. Aliases of the same account
+Queued plan provisioning sends per-user caps alongside credentials.
+[Subscriber overrides](user-limits.md) take precedence over plan values,
+including direct-parent and explicit-unlimited handling. Aliases of the same account
 and parent inbound share a connection group. Conflicting limits for the same
 credential use their smallest positive values.
 

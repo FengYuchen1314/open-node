@@ -23,11 +23,14 @@ from open_node.domain.subscriber_auth import (
 from open_node.services.auth import dummy_hash, password_hash
 from open_node.services.inventory import (
     Base,
+    ManagedNodeModel,
     ProductUserConflict,
     ProductUserModel,
     ProductUserNotFoundError,
+    SubscriptionCredentialModel,
     SubscriptionPlanModel,
 )
+from open_node.services.user_limits import effective_limits, node_limits
 
 
 class SubscriberAccount(Base):
@@ -359,6 +362,14 @@ class SubscriberAuthStore:
                 if user.current_plan_id
                 else None
             )
+            limits = effective_limits(user, plan)
+            nodes = session.scalars(
+                select(ManagedNodeModel).where(
+                    ManagedNodeModel.id.in_(plan.node_ids if plan else []),
+                    ManagedNodeModel.enabled.is_(True),
+                    ManagedNodeModel.removal_id.is_(None),
+                )
+            ).all()
             return SubscriberProfile(
                 username=user.username,
                 display_name=user.display_name,
@@ -366,8 +377,18 @@ class SubscriberAuthStore:
                 quota=self.inventory._subscription_quota_status(
                     session, user, plan, datetime.now(UTC)
                 ),
-                speed_limit_mbps=plan.speed_limit_mbps if plan else 0,
-                device_limit=plan.device_limit if plan else 0,
+                speed_limit_mbps=limits.speed_limit_mbps,
+                device_limit=limits.device_limit,
+                node_limits=node_limits(
+                    user,
+                    plan,
+                    nodes,
+                    session.scalars(
+                        select(SubscriptionCredentialModel).where(
+                            SubscriptionCredentialModel.username == user.username
+                        )
+                    ).all(),
+                ),
             )
 
     def subscription_token(self, identity, proof=None):

@@ -19,6 +19,7 @@ from open_node.services.inventory import (
     CommandModel,
     DuplicateServerNameError,
     ManagedNodeModel,
+    ProductUserModel,
     ProductUserRemovalModel,
     ServerModel,
     ServerNotFoundError,
@@ -28,6 +29,7 @@ from open_node.services.inventory import (
     SubscriptionTrafficLedgerModel,
     TelemetrySnapshotModel,
 )
+from open_node.services.user_limits import prune_node_overrides
 
 PROFILE_FIELDS = ("name", "ip_address", "ip_address_v6", "domain", "domain_v6", "ipv6_enabled")
 SETTLED_CHANGES = {"succeeded", "rolled_back", "cancelled", "accepted"}
@@ -302,6 +304,9 @@ class ServerManagement:
                         },
                     )
                 plan.updated_at = now
+            for user in session.scalars(select(ProductUserModel)):
+                if prune_node_overrides(user, node_ids):
+                    user.updated_at = now
             for change in changes:
                 archived = self.store._change_set_read(session, change).steps
                 for step in archived:

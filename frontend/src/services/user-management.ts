@@ -1,6 +1,8 @@
 import { authenticatedFetch } from "./auth";
+import { userPath } from "./user-path";
 import type { AgentCommand } from "../domain/inventory";
 import type { ProductUser, SubscriptionAccessResponse } from "../domain/subscriptions";
+import { copyUserLimits, type UserLimitOverrides, type UserLimitsRead } from "../domain/user-limits";
 
 export type UserOperation = "edit" | "remove";
 export interface UserSettings {
@@ -8,6 +10,7 @@ export interface UserSettings {
   email: string | null;
   remark: string;
   is_active: boolean;
+  limit_overrides: UserLimitOverrides;
 }
 export interface UserManagementRead {
   user: ProductUser;
@@ -16,6 +19,7 @@ export interface UserManagementRead {
   blockers: string[];
   warnings: string[];
   access: SubscriptionAccessResponse;
+  limits: UserLimitsRead;
 }
 export interface UserManagementResult extends UserManagementRead {
   commands: AgentCommand[];
@@ -32,7 +36,7 @@ export interface UserRemoval {
 }
 
 export function userSettings(user: ProductUser): UserSettings {
-  return { display_name: user.display_name, email: user.email ?? null, remark: user.remark ?? "", is_active: user.is_active };
+  return { display_name: user.display_name, email: user.email ?? null, remark: user.remark ?? "", is_active: user.is_active, limit_overrides: copyUserLimits(user.limit_overrides) };
 }
 const base = import.meta.env.VITE_API_BASE_URL ?? "";
 async function request<T>(url: string, init?: RequestInit, fetcher = authenticatedFetch): Promise<T> {
@@ -47,16 +51,16 @@ async function request<T>(url: string, init?: RequestInit, fetcher = authenticat
   return response.json() as Promise<T>;
 }
 export function getUserManagement(username: string, fetcher = authenticatedFetch) {
-  return request<UserManagementRead>(`/users/${encodeURIComponent(username)}/settings`, undefined, fetcher);
+  return request<UserManagementRead>(userPath(username, "settings"), undefined, fetcher);
 }
 export function saveUser(username: string, settings: UserSettings, revision: string, fetcher = authenticatedFetch) {
-  return request<UserManagementResult>(`/users/${encodeURIComponent(username)}/settings`, {
+  return request<UserManagementResult>(userPath(username, "settings"), {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...settings, expected_revision: revision, acknowledge_runtime_restart: true }),
   }, fetcher);
 }
 export function removeUser(username: string, revision: string, name: string, unmanaged: boolean, fetcher = authenticatedFetch) {
-  return request<UserRemoval>(`/users/${encodeURIComponent(username)}/remove`, {
+  return request<UserRemoval>(userPath(username, "remove"), {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expected_revision: revision, confirm_name: name, acknowledge_runtime_restart: true, acknowledge_unmanaged_credentials: unmanaged }),
   }, fetcher);

@@ -1048,6 +1048,11 @@ class ProductUserModel(Base):
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str] = mapped_column(String(120))
     remark: Mapped[str] = mapped_column(Text, default="")
+    traffic_limit_override_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    speed_limit_override_mbps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    device_limit_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    node_speed_limit_overrides: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
+    node_device_limit_overrides: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
     removal_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("product_user_removals.id"), nullable=True
     )
@@ -1397,6 +1402,11 @@ class InventoryStore:
                     "last_traffic_reset_at": "DATETIME",
                     "remark": "TEXT NOT NULL DEFAULT ''",
                     "removal_id": "VARCHAR(36) REFERENCES product_user_removals(id)",
+                    "traffic_limit_override_bytes": "BIGINT",
+                    "speed_limit_override_mbps": "FLOAT",
+                    "device_limit_override": "INTEGER",
+                    "node_speed_limit_overrides": "JSON NOT NULL DEFAULT '{}'",
+                    "node_device_limit_overrides": "JSON NOT NULL DEFAULT '{}'",
                 },
             )
         if "managed_nodes" in table_names:
@@ -3031,6 +3041,8 @@ class InventoryStore:
         self,
         include_credentials: bool = False,
     ) -> SubscriptionCatalogBundle:
+        from open_node.services.user_limits import catalog_overrides
+
         with self._session() as session:
             plans = session.scalars(
                 select(SubscriptionPlanModel).order_by(SubscriptionPlanModel.created_at)
@@ -3084,6 +3096,7 @@ class InventoryStore:
                         email=user.email,
                         display_name=user.display_name,
                         remark=user.remark,
+                        limit_overrides=catalog_overrides(user, node_names),
                         role=ProductUserRole(user.role),
                         is_active=user.is_active,
                         current_plan_name=plan_names.get(user.current_plan_id or ""),
@@ -3122,6 +3135,10 @@ class InventoryStore:
         self,
         payload: SubscriptionCatalogImportRequest,
     ) -> SubscriptionCatalogImportResponse:
+        from collections import Counter
+
+        from open_node.services.user_limits import apply_overrides, import_overrides
+
         now = datetime.now(tz=UTC)
         summary = SubscriptionCatalogImportSummary()
         with self._coordinated_session() as session:
@@ -3227,6 +3244,11 @@ class InventoryStore:
             plan_ids_by_name = dict(
                 session.execute(select(SubscriptionPlanModel.name, SubscriptionPlanModel.id)).all()
             )
+            ambiguous = {
+                name
+                for name, count in Counter(entry.name for entry in payload.catalog.nodes).items()
+                if count > 1
+            }
             for user_entry in payload.catalog.users:
                 user = session.get(ProductUserModel, user_entry.username)
                 if not user:
@@ -3240,6 +3262,15 @@ class InventoryStore:
                 user.plan_expires_at = user_entry.plan_expires_at
                 user.last_traffic_reset_at = user_entry.last_traffic_reset_at
                 user.updated_at = now
+                if user_entry.limit_overrides is not None:
+                    values = import_overrides(
+                        user_entry.limit_overrides, node_ids_by_name, ambiguous
+                    )
+                    self._ensure_managed_nodes_exist(
+                        session,
+                        list(set(values.node_speed_limits) | set(values.node_device_limits)),
+                    )
+                    apply_overrides(user, values)
 
             if payload.import_credentials:
                 summary.imported_credentials = self._import_subscription_credentials(
@@ -3250,6 +3281,19 @@ class InventoryStore:
                     now,
                     summary.warnings,
                 )
+
+            for entry in payload.catalog.users:
+                if entry.limit_overrides is None:
+                    continue
+                user = session.get(ProductUserModel, entry.username)
+                plan = (
+                    session.get(SubscriptionPlanModel, user.current_plan_id)
+                    if user.current_plan_id
+                    else None
+                )
+                if self._subscription_quota_status(session, user, plan, now).over_quota:
+                    self._plan_management()._track_revocations(session, user, plan, now)
+                self._subscription_access().reconcile(session, now, username=user.username)
 
             session.commit()
         return SubscriptionCatalogImportResponse(summary=summary)
@@ -4838,11 +4882,14 @@ class InventoryStore:
 
     @staticmethod
     def _product_user_read(user: ProductUserModel) -> ProductUserRead:
+        from open_node.services.user_limits import overrides
+
         return ProductUserRead(
             username=user.username,
             email=user.email,
             display_name=user.display_name or user.username,
             remark=user.remark,
+            limit_overrides=overrides(user),
             removal_id=user.removal_id,
             role=user.role,
             is_active=user.is_active,
@@ -5234,6 +5281,8 @@ class InventoryStore:
         plan: SubscriptionPlanModel,
         no_restart: bool,
     ) -> tuple[list[SubscriptionProvisionBatch], list[str]]:
+        from open_node.services.user_limits import effective_limits
+
         warnings: list[str] = []
         if not plan.node_ids:
             return [], warnings
@@ -5283,10 +5332,9 @@ class InventoryStore:
                     seen_inbound.add(inbound_key)
                     email = client_email
 
-                speed = int(
-                    (plan.node_speed_limits or {}).get(node.id, plan.speed_limit_mbps) * 125000
-                )
-                connections = (plan.node_device_limits or {}).get(node.id, plan.device_limit)
+                limits = effective_limits(user, plan, node)
+                speed = int(limits.speed_limit_mbps * 125000)
+                connections = limits.device_limit
                 agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
                 native = agent is not None and agent.capability_native_limiter
                 if speed or connections or native:
@@ -6035,7 +6083,10 @@ class InventoryStore:
         user: ProductUserModel,
         plan: SubscriptionPlanModel,
     ) -> str | None:
-        if plan.traffic_limit_bytes <= 0:
+        from open_node.services.user_limits import traffic_limit
+
+        total = traffic_limit(user, plan)
+        if total <= 0:
             return None
         upload, download = self._subscription_user_traffic(session, user.username)
         if plan.traffic_mode == "oneway":
@@ -6045,10 +6096,7 @@ class InventoryStore:
             if user.plan_expires_at
             else 4_102_444_800
         )
-        return (
-            f"upload={upload}; download={download}; total={plan.traffic_limit_bytes}; "
-            f"expire={expire}"
-        )
+        return f"upload={upload}; download={download}; total={total}; expire={expire}"
 
     def _subscription_quota_status(
         self,
@@ -6057,9 +6105,11 @@ class InventoryStore:
         plan: SubscriptionPlanModel | None,
         now: datetime,
     ) -> SubscriptionQuotaStatusRead:
+        from open_node.services.user_limits import traffic_limit
+
         upload, download = self._subscription_user_traffic(session, user.username)
         traffic_mode = SubscriptionTrafficMode(plan.traffic_mode) if plan else None
-        traffic_limit_bytes = plan.traffic_limit_bytes if plan else 0
+        traffic_limit_bytes = traffic_limit(user, plan)
         charged_usage_bytes = (
             download if traffic_mode == SubscriptionTrafficMode.ONEWAY else upload + download
         )

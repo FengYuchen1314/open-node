@@ -10,6 +10,9 @@ Editing changes the plan name, description, quota, counted traffic directions,
 default duration/reset preferences, node membership, display multipliers and
 native speed/concurrent-connection limits. Per-node limits override plan
 defaults; a blank override inherits, and an explicit zero means unlimited.
+Direct-parent inheritance and [user overrides](user-limits.md) participate in
+the same resolver. User overrides survive edits and take precedence over plan
+values; changing a plan quota does not replace a user's explicit quota.
 Display multipliers affect the subscription label, not charged traffic.
 Quotas must fit the database's byte counter and represent at least one byte.
 

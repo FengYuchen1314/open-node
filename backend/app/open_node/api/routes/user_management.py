@@ -15,6 +15,8 @@ from open_node.domain.user_management import (
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
     InventoryStore,
+    ManagedNodeConflict,
+    ManagedNodeNotFoundError,
     ProductUserConflict,
     ProductUserNotFoundError,
 )
@@ -29,9 +31,9 @@ Connections = Annotated[AgentConnectionManager, Depends(get_agent_connection_man
 def call(operation, *args):
     try:
         return operation(*args)
-    except (ProductUserNotFoundError, UserRemovalNotFoundError) as exc:
+    except (ProductUserNotFoundError, UserRemovalNotFoundError, ManagedNodeNotFoundError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (ProductUserConflict, SubscriptionAccessConflict) as exc:
+    except (ProductUserConflict, SubscriptionAccessConflict, ManagedNodeConflict) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -42,17 +44,20 @@ async def apply(operation, store, connections, *args):
     return result
 
 
+@router.get("/user-settings", response_model=UserManagementRead)
 @router.get("/users/{username}/settings", response_model=UserManagementRead)
 @router.get("/users/{username}/removal", response_model=UserManagementRead)
 def settings(username: str, store: Store):
     return call(store._user_management().read, username)
 
 
+@router.put("/user-settings", response_model=UserManagementResult)
 @router.put("/users/{username}/settings", response_model=UserManagementResult)
 async def update(username: str, payload: UserUpdate, store: Store, connections: Connections):
     return await apply(store._user_management().update, store, connections, username, payload)
 
 
+@router.post("/user-remove", response_model=UserRemovalRead, status_code=202)
 @router.post("/users/{username}/remove", response_model=UserRemovalRead, status_code=202)
 async def remove(username: str, payload: UserRemoval, store: Store, connections: Connections):
     return await apply(store._user_management().remove, store, connections, username, payload)

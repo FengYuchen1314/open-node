@@ -56,6 +56,7 @@ router = APIRouter(tags=["subscriptions"])
 public_router = APIRouter(tags=["subscriptions"])
 
 
+@router.get("/user-access", response_model=SubscriptionAccessResponse)
 @router.get("/users/{username}/access", response_model=SubscriptionAccessResponse)
 def subscription_access(
     username: str,
@@ -67,6 +68,7 @@ def subscription_access(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.post("/user-access/sync", response_model=SubscriptionAccessResponse)
 @router.post("/users/{username}/access/sync", response_model=SubscriptionAccessResponse)
 async def sync_subscription_access(
     username: str,
@@ -82,6 +84,7 @@ async def sync_subscription_access(
     return store._subscription_access().read(username)
 
 
+@router.patch("/user-active", response_model=ProductUserResponse)
 @router.patch("/users/{username}/active", response_model=ProductUserResponse)
 async def update_product_user_active(
     username: str,
@@ -119,6 +122,7 @@ def create_product_user(
     return ProductUserResponse(user=user)
 
 
+@router.get("/user-subscription-token", response_model=ProductUserSubscriptionTokenResponse)
 @router.get(
     "/users/{username}/subscription-token",
     response_model=ProductUserSubscriptionTokenResponse,
@@ -138,6 +142,9 @@ def get_subscription_token(
 
 
 @router.post(
+    "/user-subscription-token", response_model=ProductUserSubscriptionTokenResponse, status_code=201
+)
+@router.post(
     "/users/{username}/subscription-token",
     response_model=ProductUserSubscriptionTokenResponse,
     status_code=status.HTTP_201_CREATED,
@@ -156,6 +163,7 @@ def create_subscription_token(
     return _subscription_token_response(request, token)
 
 
+@router.post("/user-subscription-token/reset", response_model=ProductUserSubscriptionTokenResponse)
 @router.post(
     "/users/{username}/subscription-token/reset",
     response_model=ProductUserSubscriptionTokenResponse,
@@ -174,6 +182,7 @@ def reset_subscription_token(
     return _subscription_token_response(request, token)
 
 
+@router.get("/user-credentials", response_model=ProductUserCredentialsResponse)
 @router.get(
     "/users/{username}/credentials",
     response_model=ProductUserCredentialsResponse,
@@ -189,6 +198,7 @@ def list_subscription_credentials(
     return ProductUserCredentialsResponse(username=username, credentials=credentials)
 
 
+@router.get("/user-traffic", response_model=ProductUserTrafficResponse)
 @router.get(
     "/users/{username}/traffic",
     response_model=ProductUserTrafficResponse,
@@ -203,6 +213,7 @@ def get_subscription_traffic(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
+@router.get("/user-quota", response_model=SubscriptionQuotaStatusResponse)
 @router.get(
     "/users/{username}/quota",
     response_model=SubscriptionQuotaStatusResponse,
@@ -219,6 +230,7 @@ def get_subscription_quota(
     return SubscriptionQuotaStatusResponse(quota=quota)
 
 
+@router.post("/user-traffic/reset", response_model=SubscriptionQuotaStatusResponse)
 @router.post(
     "/users/{username}/traffic/reset",
     response_model=SubscriptionQuotaStatusResponse,
@@ -274,9 +286,12 @@ def export_subscription_catalog(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     include_credentials: bool = False,
 ) -> SubscriptionCatalogExportResponse:
-    return SubscriptionCatalogExportResponse(
-        catalog=store.export_subscription_catalog(include_credentials=include_credentials)
-    )
+    try:
+        return SubscriptionCatalogExportResponse(
+            catalog=store.export_subscription_catalog(include_credentials=include_credentials)
+        )
+    except ProductUserConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/catalog/import", response_model=SubscriptionCatalogImportResponse)
@@ -330,6 +345,7 @@ def create_subscription_plan(
     return SubscriptionPlanResponse(plan=plan)
 
 
+@router.get("/user-subscription-preview", response_model=SubscriptionFormatPreview)
 @router.get("/users/{username}/subscription-preview", response_model=SubscriptionFormatPreview)
 def preview_subscription_format(
     username: str,
@@ -378,6 +394,7 @@ def render_user_subscription(
     )
 
 
+@router.post("/user-plan", response_model=SubscriptionPlanAssignResponse)
 @router.post("/users/{username}/plan", response_model=SubscriptionPlanAssignResponse)
 async def assign_subscription_plan(
     username: str,

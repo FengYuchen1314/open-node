@@ -23,6 +23,7 @@ from open_node.services.inventory import (
     SubscriptionCredentialModel,
     SubscriptionPlanModel,
 )
+from open_node.services.user_limits import effective_limits
 
 ENDPOINT = "/api/child/subscription-access"
 TERMINAL = {"succeeded", "failed", "skipped"}
@@ -282,23 +283,17 @@ class SubscriptionAccessCoordinator:
             entry.update(enabled=enabled, routing_user_additions=[], limiter=None)
             reasons.append(reason if reason != "available" or enabled else "node_not_in_plan")
             if enabled:
+                limits = [effective_limits(user, plan, node) for node in nodes]
                 speed = min(
                     (
-                        int(
-                            (plan.node_speed_limits or {}).get(node.id, plan.speed_limit_mbps)
-                            * 125000
-                        )
-                        for node in nodes
-                        if (plan.node_speed_limits or {}).get(node.id, plan.speed_limit_mbps)
+                        int(limit.speed_limit_mbps * 125000)
+                        for limit in limits
+                        if limit.speed_limit_mbps
                     ),
                     default=0,
                 )
                 devices = min(
-                    (
-                        (plan.node_device_limits or {}).get(node.id, plan.device_limit)
-                        for node in nodes
-                        if (plan.node_device_limits or {}).get(node.id, plan.device_limit)
-                    ),
+                    (limit.device_limit for limit in limits if limit.device_limit),
                     default=0,
                 )
                 if speed or devices or native:
@@ -391,12 +386,16 @@ class SubscriptionAccessCoordinator:
         if legacy and not command.attempts:
             self.adopt_command(session, command, now)
             disabled = set()
+            desired = {}
             for row in session.scalars(
                 select(SubscriptionAccessModel).where(
                     SubscriptionAccessModel.server_id == command.server_id
                 )
             ):
                 body, _ = self.desired(session, row, now)
+                desired.update(
+                    {(entry["tag"], entry["client"]["email"]): entry for entry in body["entries"]}
+                )
                 disabled.update(
                     (entry["tag"], entry["client"]["email"])
                     for entry in body["entries"]
@@ -410,6 +409,32 @@ class SubscriptionAccessCoordinator:
                     "Not sent: legacy batch would restore unavailable subscription access",
                 )
                 return False
+            requested = {
+                (item.get("inbound_tag"), item.get("user", {}).get("email")): item.get("user", {})
+                for item in command.body.get("limiter_users", [])
+                if isinstance(item, dict) and isinstance(item.get("user"), dict)
+            }
+            for item in legacy:
+                key = (item["tag"], item["client"]["email"])
+                entry = desired.get(key)
+                if entry is None:
+                    continue
+                expected = (entry.get("limiter") or {}).get("user", {})
+                actual = requested.get(key, {})
+                if any(
+                    actual.get(field, 0) != expected.get(field, 0)
+                    for field in ("speed_limit", "device_limit")
+                ) or (
+                    expected.get("device_limit")
+                    and actual.get("conn_group") != expected.get("conn_group")
+                ):
+                    self.skip(
+                        session,
+                        command,
+                        now,
+                        "Not sent: legacy batch has outdated subscriber limits",
+                    )
+                    return False
         if command.path != ENDPOINT:
             return True
         agent = session.scalar(select(AgentModel).where(AgentModel.server_id == command.server_id))

@@ -1,6 +1,7 @@
 import { reactive } from "vue";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat, SubscriptionQuotaStatus } from "../domain/subscriptions";
 import { authenticatedFetch } from "./auth";
+import type { UserNodeLimits } from "../domain/user-limits";
 
 export interface SubscriberSession {
   authenticated: boolean;
@@ -16,6 +17,7 @@ export interface SubscriberProfile {
   quota: SubscriptionQuotaStatus;
   speed_limit_mbps: number;
   device_limit: number;
+  node_limits: UserNodeLimits[];
 }
 export interface SubscriberDevice {
   id: string;

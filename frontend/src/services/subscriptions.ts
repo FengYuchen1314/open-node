@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { userPath } from "./user-path";
 import type {
   ManagedNodeCreateRequest,
   ManagedNodeResponse,
@@ -49,7 +50,7 @@ export async function getSubscriptionAccess(
   username: string,
   fetcher = authenticatedFetch,
 ): Promise<SubscriptionAccessResponse> {
-  const response = await fetcher(`${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/access`);
+  const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "access")}`);
   if (!response.ok) throw await apiError(response, "Subscription access request failed");
   return response.json() as Promise<SubscriptionAccessResponse>;
 }
@@ -58,7 +59,7 @@ export async function syncSubscriptionAccess(
   username: string,
   fetcher = authenticatedFetch,
 ): Promise<SubscriptionAccessResponse> {
-  const response = await fetcher(`${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/access/sync`, { method: "POST" });
+  const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "access/sync")}`, { method: "POST" });
   if (!response.ok) throw await apiError(response, "Subscription access sync failed");
   return response.json() as Promise<SubscriptionAccessResponse>;
 }
@@ -68,7 +69,7 @@ export async function setProductUserActive(
   isActive: boolean,
   fetcher = authenticatedFetch,
 ): Promise<ProductUserResponse> {
-  const response = await fetcher(`${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/active`, {
+  const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "active")}`, {
     method: "PATCH", headers: jsonHeaders, body: JSON.stringify({ is_active: isActive }),
   });
   if (!response.ok) throw await apiError(response, "User status update failed");
@@ -81,7 +82,7 @@ export async function getSubscriptionFormatPreview(
   fetcher = authenticatedFetch,
 ): Promise<SubscriptionFormatPreview> {
   const response = await fetcher(
-    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-preview?format=${encodeURIComponent(format)}`,
+    `${apiBaseUrl}/api/v1${userPath(username, "subscription-preview", { format })}`,
   );
   if (!response.ok) {
     throw await apiError(response, "Subscription compatibility request failed");
@@ -117,7 +118,7 @@ export async function getProductUserSubscriptionToken(
   fetcher = authenticatedFetch,
 ): Promise<ProductUserSubscriptionTokenResponse> {
   const response = await fetcher(
-    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-token`,
+    `${apiBaseUrl}/api/v1${userPath(username, "subscription-token")}`,
   );
   if (!response.ok) {
     throw await apiError(response, "Product user subscription token request failed");
@@ -130,7 +131,7 @@ export async function createProductUserSubscriptionToken(
   fetcher = authenticatedFetch,
 ): Promise<ProductUserSubscriptionTokenResponse> {
   const response = await fetcher(
-    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-token`,
+    `${apiBaseUrl}/api/v1${userPath(username, "subscription-token")}`,
     {
       method: "POST",
     },
@@ -146,7 +147,7 @@ export async function resetProductUserSubscriptionToken(
   fetcher = authenticatedFetch,
 ): Promise<ProductUserSubscriptionTokenResponse> {
   const response = await fetcher(
-    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/subscription-token/reset`,
+    `${apiBaseUrl}/api/v1${userPath(username, "subscription-token/reset")}`,
     {
       method: "POST",
     },
@@ -162,7 +163,7 @@ export async function listProductUserCredentials(
   fetcher = authenticatedFetch,
 ): Promise<ProductUserCredentialsResponse> {
   const response = await fetcher(
-    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/credentials`,
+    `${apiBaseUrl}/api/v1${userPath(username, "credentials")}`,
   );
   if (!response.ok) {
     throw await apiError(response, "Product user credentials request failed");
@@ -175,7 +176,7 @@ export async function getProductUserTraffic(
   fetcher = authenticatedFetch,
 ): Promise<ProductUserTrafficResponse> {
   const response = await fetcher(
-    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/traffic`,
+    `${apiBaseUrl}/api/v1${userPath(username, "traffic")}`,
   );
   if (!response.ok) {
     throw await apiError(response, "Product user traffic request failed");
@@ -188,9 +189,8 @@ export async function getProductUserQuota(
   now?: string | null,
   fetcher = authenticatedFetch,
 ): Promise<SubscriptionQuotaStatusResponse> {
-  const query = now ? `?now=${encodeURIComponent(now)}` : "";
   const response = await fetcher(
-    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/quota${query}`,
+    `${apiBaseUrl}/api/v1${userPath(username, "quota", now ? { now } : undefined)}`,
   );
   if (!response.ok) {
     throw await apiError(response, "Product user quota request failed");
@@ -203,9 +203,8 @@ export async function resetProductUserTraffic(
   now?: string | null,
   fetcher = authenticatedFetch,
 ): Promise<SubscriptionQuotaStatusResponse> {
-  const query = now ? `?now=${encodeURIComponent(now)}` : "";
   const response = await fetcher(
-    `${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/traffic/reset${query}`,
+    `${apiBaseUrl}/api/v1${userPath(username, "traffic/reset", now ? { now } : undefined)}`,
     {
       method: "POST",
     },
@@ -473,7 +472,7 @@ export async function assignSubscriptionPlan(
   payload: SubscriptionPlanAssignRequest,
   fetcher = authenticatedFetch,
 ): Promise<SubscriptionPlanAssignResponse> {
-  const response = await fetcher(`${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/plan`, {
+  const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "plan")}`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify(payload),

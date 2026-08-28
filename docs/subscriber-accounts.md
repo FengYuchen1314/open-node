@@ -123,7 +123,8 @@ All paths below are relative to `/api/v1/account`:
 
 - `GET /session`, `POST /login`, `POST /login/verify`: session discovery and login.
 - `POST /logout`, `POST /password`: logout and password changes.
-- `GET /me`: own display name, contact, current quota and plan limits.
+- `GET /me`: own display name, contact, current quota and resolved account/node
+  limits, including administrator [user overrides](user-limits.md).
 - `POST /subscription-token`: get/create own public subscription links.
 - `POST /subscription-token/reset`: credential-confirmed link rotation.
 - `GET /sessions`, `DELETE /sessions`: list devices or revoke other devices.

@@ -7,6 +7,7 @@ from uuid import uuid4
 from sqlalchemy import delete, select
 
 from open_node.domain.subscriptions import SubscriptionAccessResponse
+from open_node.domain.user_limits import UserLimitsRead
 from open_node.domain.user_management import (
     UserManagementRead,
     UserManagementResult,
@@ -14,6 +15,7 @@ from open_node.domain.user_management import (
 )
 from open_node.services.inventory import (
     CommandModel,
+    ManagedNodeModel,
     ProductUserConflict,
     ProductUserModel,
     ProductUserNotFoundError,
@@ -26,6 +28,12 @@ from open_node.services.inventory import (
     SubscriptionTrafficLedgerModel,
 )
 from open_node.services.subscription_access import ENDPOINT, TERMINAL, revision
+from open_node.services.user_limits import (
+    apply_overrides,
+    effective_limits,
+    node_limits,
+    traffic_limit,
+)
 
 AUTH_FIELDS = {"id", "password", "psk", "auth", "user", "pass", "username"}
 
@@ -92,6 +100,30 @@ class UserManagement:
         credentials = self.credentials(session, user.username)
         rows = self.store._subscription_access().rows(session, user.username)
         public = self.store._product_user_read(user)
+        plan = (
+            session.get(SubscriptionPlanModel, user.current_plan_id)
+            if user.current_plan_id
+            else None
+        )
+        identifiers = set(plan.node_ids if plan else [])
+        identifiers.update(user.node_speed_limit_overrides or {})
+        identifiers.update(user.node_device_limit_overrides or {})
+        nodes = session.scalars(
+            select(ManagedNodeModel)
+            .where(ManagedNodeModel.id.in_(identifiers))
+            .order_by(ManagedNodeModel.id)
+        ).all()
+        limits = UserLimitsRead(
+            traffic_limit_bytes=traffic_limit(user, plan),
+            nodes=node_limits(user, plan, nodes, credentials),
+            **effective_limits(user, plan).model_dump(),
+            warnings=[
+                "Preview-only credentials receive speed and connection limits "
+                "after managed provisioning"
+            ]
+            if credentials and not rows
+            else [],
+        )
         values = public.model_dump(mode="json")
         for key, value in public:
             if isinstance(value, datetime):
@@ -124,6 +156,14 @@ class UserManagement:
             revision=revision(
                 {
                     "user": values,
+                    "plan_updated_at": self.store._aware_datetime(plan.updated_at).isoformat()
+                    if plan
+                    else None,
+                    "limits": limits.model_dump(mode="json"),
+                    "nodes": [
+                        (node.id, node.parent_id, node.server_id, node.inbound_tag, node.removal_id)
+                        for node in nodes
+                    ],
                     "credentials": [
                         (row.id, self.store._aware_datetime(row.updated_at).isoformat())
                         for row in credentials
@@ -136,6 +176,7 @@ class UserManagement:
             blockers=list(dict.fromkeys(blockers)),
             warnings=warnings,
             access=self.store._subscription_access().read_in_session(session, user.username),
+            limits=limits,
         )
 
     def read(self, username):
@@ -153,14 +194,35 @@ class UserManagement:
                 raise ProductUserConflict("User or credentials changed; reload before saving")
             if before.blockers and user.is_active != payload.is_active:
                 raise ProductUserConflict("; ".join(before.blockers))
+            plan = (
+                session.get(SubscriptionPlanModel, user.current_plan_id)
+                if user.current_plan_id
+                else None
+            )
+            limits_changed = (
+                payload.limit_overrides is not None
+                and payload.limit_overrides != before.user.limit_overrides
+            )
+            if payload.limit_overrides is not None:
+                if limits_changed and any(
+                    "shared with another subscriber" in item for item in before.blockers
+                ):
+                    raise ProductUserConflict(
+                        "Resolve shared credential ownership before changing limits"
+                    )
+                self.store._ensure_managed_nodes_exist(
+                    session,
+                    list(
+                        set(payload.limit_overrides.node_speed_limits)
+                        | set(payload.limit_overrides.node_device_limits)
+                    ),
+                )
+                apply_overrides(user, payload.limit_overrides)
+            quota = self.store._subscription_quota_status(session, user, plan, now)
+            if not payload.is_active or (limits_changed and quota.over_quota):
+                self.store._plan_management()._track_revocations(session, user, plan, now)
             if not payload.is_active:
                 self.revoke_login(session, username)
-                plan = (
-                    session.get(SubscriptionPlanModel, user.current_plan_id)
-                    if user.current_plan_id
-                    else None
-                )
-                self.store._plan_management()._track_revocations(session, user, plan, now)
             for field in ("display_name", "email", "remark", "is_active"):
                 setattr(user, field, getattr(payload, field))
             user.updated_at = now

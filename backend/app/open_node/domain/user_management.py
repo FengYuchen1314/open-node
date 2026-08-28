@@ -11,6 +11,7 @@ from open_node.domain.subscriptions import (
     SubscriptionAccessServerRead,
     _strip_required_text,
 )
+from open_node.domain.user_limits import UserLimitOverrides, UserLimitsRead
 
 
 class UserUpdate(BaseModel):
@@ -20,6 +21,7 @@ class UserUpdate(BaseModel):
     email: str | None = Field(default=None, max_length=255)
     remark: str = Field(default="", max_length=1000)
     is_active: bool = Field(strict=True)
+    limit_overrides: UserLimitOverrides | None = None
     expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     acknowledge_runtime_restart: Literal[True]
 
@@ -50,6 +52,7 @@ class UserManagementRead(BaseModel):
     blockers: list[str]
     warnings: list[str]
     access: SubscriptionAccessResponse
+    limits: UserLimitsRead
     license_required: Literal[False] = False
 
 

@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from open_node.domain.inventory import AgentCommandRead
+from open_node.domain.user_limits import CatalogUserLimitOverrides, UserLimitOverrides
 
 
 def _strip_required_text(value: str, field_name: str) -> str:
@@ -93,6 +94,7 @@ class ProductUserRead(BaseModel):
     email: str | None = None
     display_name: str
     remark: str = ""
+    limit_overrides: UserLimitOverrides = Field(default_factory=UserLimitOverrides)
     removal_id: UUID | None = None
     role: ProductUserRole
     is_active: bool
@@ -611,6 +613,7 @@ class SubscriptionCatalogUserEntry(BaseModel):
     email: str | None = None
     display_name: str | None = None
     remark: str = Field(default="", max_length=1000)
+    limit_overrides: CatalogUserLimitOverrides | None = None
     role: ProductUserRole = ProductUserRole.USER
     is_active: bool = True
     current_plan_name: str | None = None

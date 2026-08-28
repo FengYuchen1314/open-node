@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import type { SubscriptionAccessResponse } from "../domain/subscriptions";
+import type { ManagedNode, SubscriptionAccessResponse } from "../domain/subscriptions";
+import { validUserLimits } from "../domain/user-limits";
+import UserLimitEditor from "./UserLimitEditor.vue";
 import { getSubscriptionAccess, syncSubscriptionAccess } from "../services/subscriptions";
 import { getUserManagement, getUserRemoval, removeUser, retryUserRemoval, saveUser, userSettings, type UserManagementRead, type UserOperation, type UserRemoval, type UserSettings } from "../services/user-management";
 
-const props = defineProps<{ username: string; mode: UserOperation; removalId: string | null; open: boolean }>();
+const props = defineProps<{ username: string; mode: UserOperation; removalId: string | null; open: boolean; nodes: ManagedNode[] }>();
 const emit = defineEmits<{ "update:open": [value: boolean]; changed: [] }>();
 const detail = ref<UserManagementRead | null>(null);
 const form = ref<UserSettings | null>(null);
@@ -22,11 +24,12 @@ let version = 0;
 let pollVersion = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 const completed = ref(false);
+const tab = ref("profile");
 const title = computed(() => removal.value ? "User removal" : props.mode === "edit" ? "Edit user" : "Remove user");
 const servers = computed(() => removal.value?.servers ?? access.value?.servers ?? []);
 const warnings = computed(() => removal.value?.warnings ?? detail.value?.warnings ?? []);
 const canSubmit = computed(() => !busy.value && !!detail.value && !!form.value && !removal.value && acknowledgment.value
-  && (props.mode === "edit" ? !!form.value.display_name.trim()
+  && (props.mode === "edit" ? !!form.value.display_name.trim() && validUserLimits(form.value.limit_overrides)
     : !detail.value.blockers.length && confirmName.value === props.username && (!warnings.value.length || unmanaged.value)));
 
 function stopPolling() { clearTimeout(timer); ++pollVersion; syncing.value = false; }
@@ -64,6 +67,7 @@ async function load() {
   detail.value = null; form.value = null; removal.value = null; access.value = null;
   saved.value = false; error.value = ""; statusError.value = "";
   confirmName.value = ""; acknowledgment.value = false; unmanaged.value = false; completed.value = false;
+  tab.value = "profile";
   busy.value = false;
   if (!props.open || !props.username) return;
   busy.value = true;
@@ -127,13 +131,15 @@ onBeforeUnmount(() => { ++version; stopPolling(); });
         <v-alert v-if="saved" type="success" variant="tonal" class="my-4">User saved</v-alert>
         <v-alert v-if="removal" :type="removal.status === 'completed' ? 'success' : removal.status === 'failed' ? 'error' : 'info'" variant="tonal" class="my-4">{{ removal.status === 'completed' ? 'User removed' : removal.status === 'failed' ? 'Removal needs attention' : 'Removal pending Agent confirmation' }}</v-alert>
         <template v-if="detail && form && !removal">
-          <div v-if="mode === 'edit'" class="user-form">
+          <v-tabs v-if="mode === 'edit'" v-model="tab" density="compact" color="primary" class="mb-6"><v-tab value="profile">Profile</v-tab><v-tab value="limits">Limits</v-tab></v-tabs>
+          <div v-if="mode === 'edit' && tab === 'profile'" class="user-form">
             <v-text-field v-model="form.display_name" label="Display name" maxlength="120" variant="outlined" density="compact" hide-details :disabled="busy" />
             <v-text-field v-model="form.email" label="Email" maxlength="255" variant="outlined" density="compact" hide-details :disabled="busy" />
             <v-textarea v-model="form.remark" label="Remark" maxlength="1000" rows="3" variant="outlined" density="compact" hide-details :disabled="busy" />
             <v-switch v-model="form.is_active" label="Active" color="primary" hide-details :disabled="busy || (detail.user.role === 'admin' && form.is_active)" />
           </div>
-          <template v-else>
+          <UserLimitEditor v-if="mode === 'edit' && tab === 'limits'" :key="detail.revision" v-model="form.limit_overrides" :nodes="nodes" :current="detail.limits" :disabled="busy" />
+          <template v-if="mode === 'remove'">
             <div class="user-impact">{{ detail.credential_count }} stored credentials</div>
             <v-alert v-for="blocker in detail.blockers" :key="blocker" type="error" variant="tonal" class="my-4">{{ blocker }}</v-alert>
             <v-alert type="warning" variant="tonal" class="my-4">Subscription links stop working immediately. The profile and user traffic ledger are removed after Agent confirmation. Command history, revocation fingerprints, plans and shared nodes remain. Removal cannot be cancelled after confirmation.</v-alert>

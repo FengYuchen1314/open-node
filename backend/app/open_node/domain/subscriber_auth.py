@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, SecretStr
 
 from open_node.domain.subscriptions import SubscriptionQuotaStatusRead
+from open_node.domain.user_limits import UserNodeLimitsRead
 
 
 class SubscriberLogin(BaseModel):
@@ -71,6 +72,7 @@ class SubscriberProfile(BaseModel):
     quota: SubscriptionQuotaStatusRead
     speed_limit_mbps: float
     device_limit: int
+    node_limits: list[UserNodeLimitsRead] = Field(default_factory=list)
     license_required: Literal[False] = False
 
 

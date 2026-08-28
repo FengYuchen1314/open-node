@@ -1,4 +1,5 @@
 import type { AgentCommand } from "./inventory";
+import type { UserLimitOverrides } from "./user-limits";
 
 export type ProductUserRole = "admin" | "user";
 export type ManagedNodeType = "physical" | "routed";
@@ -42,6 +43,7 @@ export interface ProductUser {
   email?: string | null;
   display_name: string;
   remark?: string;
+  limit_overrides?: UserLimitOverrides;
   removal_id?: string | null;
   role: ProductUserRole;
   is_active: boolean;
@@ -285,6 +287,7 @@ export interface SubscriptionTemplatePresetApplyRequest {
 }
 
 export interface SubscriptionCatalogUserEntry {
+  limit_overrides?: UserLimitOverrides | null;
   username: string;
   email?: string | null;
   display_name?: string | null;
