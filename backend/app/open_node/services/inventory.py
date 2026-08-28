@@ -1329,7 +1329,9 @@ class InventoryStore:
         self._session_factory = sessionmaker(self._engine, expire_on_commit=False)
 
     def create_schema(self) -> None:
-        Base.metadata.create_all(self._engine)
+        from open_node.services.subscriber_auth import SubscriberAccount
+
+        SubscriberAccount.metadata.create_all(self._engine)
         self._migrate_schema()
         self._change_sets().migrate_legacy()
         self._server_traffic().backfill()
@@ -3131,6 +3133,8 @@ class InventoryStore:
                     existing.display_name = user_entry.display_name or user_entry.username
                     existing.remark = user_entry.remark
                     existing.role = user_entry.role.value
+                    if not user_entry.is_active:
+                        self._user_management().revoke_login(session, existing.username)
                     existing.is_active = user_entry.is_active
                     existing.is_reset = user_entry.is_reset
                     existing.reset_day = user_entry.reset_day
@@ -3357,56 +3361,43 @@ class InventoryStore:
             )
 
     def get_or_create_subscription_token(self, username: str) -> SubscriptionTokenRecord:
-        username = username.strip()
-        if not username:
-            raise ProductUserNotFoundError("username is required")
-        now = datetime.now(tz=UTC)
-        with self._session() as session:
-            user = session.get(ProductUserModel, username)
-            if not user:
-                raise ProductUserNotFoundError(f"user not found: {username}")
-            token = session.get(ProductUserSubscriptionTokenModel, username)
-            self._user_management().require_editable(user)
-            if not token:
-                token = ProductUserSubscriptionTokenModel(
-                    username=username,
-                    token=self._unique_subscription_token(session),
-                    short_code=self._unique_subscription_short_code(session),
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(token)
-                session.commit()
-                session.refresh(token)
-            return self._subscription_token_record(token)
+        with self._coordinated_session() as session:
+            token = self._issue_subscription_token(session, username)
+            session.commit()
+            return token
 
     def reset_subscription_token(self, username: str) -> SubscriptionTokenRecord:
+        with self._coordinated_session() as session:
+            token = self._issue_subscription_token(session, username, reset=True)
+            session.commit()
+            return token
+
+    def _issue_subscription_token(self, session, username, *, reset=False):
         username = username.strip()
         if not username:
             raise ProductUserNotFoundError("username is required")
         now = datetime.now(tz=UTC)
-        with self._session() as session:
-            user = session.get(ProductUserModel, username)
-            if not user:
-                raise ProductUserNotFoundError(f"user not found: {username}")
-            token = session.get(ProductUserSubscriptionTokenModel, username)
-            self._user_management().require_editable(user)
-            if not token:
-                token = ProductUserSubscriptionTokenModel(
-                    username=username,
-                    token=self._unique_subscription_token(session),
-                    short_code=self._unique_subscription_short_code(session),
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(token)
-            else:
-                token.token = self._unique_subscription_token(session)
-                token.short_code = self._unique_subscription_short_code(session)
-                token.updated_at = now
-            session.commit()
-            session.refresh(token)
-            return self._subscription_token_record(token)
+        user = session.get(ProductUserModel, username)
+        if not user:
+            raise ProductUserNotFoundError(f"user not found: {username}")
+        self._user_management().require_editable(user)
+        token = session.get(ProductUserSubscriptionTokenModel, username)
+        if not token:
+            token = ProductUserSubscriptionTokenModel(
+                username=username,
+                token=self._unique_subscription_token(session),
+                short_code=self._unique_subscription_short_code(session),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(token)
+        elif reset:
+            token.token = self._unique_subscription_token(session)
+            token.short_code = self._unique_subscription_short_code(session)
+            token.updated_at = now
+        session.flush()
+        session.refresh(token)
+        return self._subscription_token_record(token)
 
     def list_subscription_credentials(self, username: str) -> list[SubscriptionCredentialRead]:
         username = username.strip()

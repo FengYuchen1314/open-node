@@ -72,7 +72,7 @@ class AuthStore:
             else:
                 db.add(Administrator(id=1, username=username, password_hash=hashed))
 
-    def allow_login_attempt(self, peer: str) -> bool:
+    def allow_login_attempt(self, peer: str, *, max_attempts: int = 10) -> bool:
         key = sha256(peer.encode()).hexdigest()
         now = time()
         # A conditional increment enforces the same limit across workers and restarts.
@@ -85,7 +85,7 @@ class AuthStore:
                 db.rollback()
             result = db.execute(
                 update(LoginWindow)
-                .where(LoginWindow.key == key, LoginWindow.attempts < 10)
+                .where(LoginWindow.key == key, LoginWindow.attempts < max_attempts)
                 .values(attempts=LoginWindow.attempts + 1)
             )
             db.commit()

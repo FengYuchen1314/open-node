@@ -68,6 +68,14 @@ class UserManagement:
             raise ProductUserConflict("User removal is in progress")
 
     @staticmethod
+    def revoke_login(session, username, *, purge=False):
+        from open_node.services.subscriber_auth import SubscriberAccount, revoke_subscriber_sessions
+
+        revoke_subscriber_sessions(session, username)
+        if purge:
+            session.execute(delete(SubscriberAccount).where(SubscriberAccount.username == username))
+
+    @staticmethod
     def check_active(user, active):
         if user.role == "admin" and not active:
             raise ProductUserConflict("Administrator product users cannot be disabled")
@@ -146,6 +154,7 @@ class UserManagement:
             if before.blockers and user.is_active != payload.is_active:
                 raise ProductUserConflict("; ".join(before.blockers))
             if not payload.is_active:
+                self.revoke_login(session, username)
                 plan = (
                     session.get(SubscriptionPlanModel, user.current_plan_id)
                     if user.current_plan_id
@@ -241,6 +250,7 @@ class UserManagement:
             session.add(job)
             session.flush()
             user.removal_id, user.is_active, user.updated_at = job.id, False, now
+            self.revoke_login(session, username)
             user.current_plan_id = user.plan_started_at = user.plan_expires_at = None
             user.is_reset, user.reset_day = False, 0
             session.execute(
@@ -313,6 +323,7 @@ class UserManagement:
                 username=job.username, managed=bool(states), servers=states
             ).model_dump(mode="json")["servers"]
             job.completed_at = now
+            self.revoke_login(session, user.username, purge=True)
             for model in (
                 ProductUserSubscriptionTokenModel,
                 SubscriptionCredentialModel,

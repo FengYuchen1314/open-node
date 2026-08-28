@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { useDisplay } from "vuetify";
 import { authState, loadSession, signOut } from "./services/auth";
 import SignInView from "./views/SignInView.vue";
@@ -7,7 +8,9 @@ import SignInView from "./views/SignInView.vue";
 const { mobile } = useDisplay();
 const drawer = ref(!mobile.value);
 const logoutError = ref("");
-onMounted(() => loadSession());
+const route = useRoute();
+const subscriber = computed(() => route.meta.subscriber === true);
+watch(subscriber, (value) => { if (!value && !authState.ready) void loadSession(); }, { immediate: true });
 watch(mobile, (value) => { drawer.value = !value; });
 
 async function logout() {
@@ -23,7 +26,7 @@ async function logout() {
 
 <template>
   <v-app>
-    <v-navigation-drawer v-if="authState.session?.authenticated" v-model="drawer" width="248" :permanent="!mobile" :temporary="mobile">
+    <v-navigation-drawer v-if="!subscriber && authState.session?.authenticated" v-model="drawer" width="248" :permanent="!mobile" :temporary="mobile">
       <div class="brand-block">
         <div class="brand-mark">ON</div>
         <div>
@@ -60,7 +63,7 @@ async function logout() {
       </v-list>
     </v-navigation-drawer>
 
-    <v-app-bar v-if="authState.session?.authenticated" flat border>
+    <v-app-bar v-if="!subscriber && authState.session?.authenticated" flat border>
       <v-app-bar-nav-icon v-if="mobile" aria-label="Toggle navigation" @click="drawer = !drawer" />
       <v-app-bar-title>Open Node</v-app-bar-title>
       <template #append>
@@ -73,7 +76,8 @@ async function logout() {
     </v-app-bar>
 
     <v-main>
-      <div v-if="!authState.ready" class="auth-page" role="status" aria-label="Loading session">
+      <router-view v-if="subscriber" />
+      <div v-else-if="!authState.ready" class="auth-page" role="status" aria-label="Loading session">
         <v-progress-circular indeterminate color="primary" />
       </div>
       <template v-else-if="authState.session?.authenticated">

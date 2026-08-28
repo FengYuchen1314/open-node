@@ -49,6 +49,13 @@ administrator. For recovery, use the same command with `reset-password`;
 all existing sessions are revoked. `--password-stdin` is available for
 secret-manager integration. Never place passwords in command arguments.
 
+Subscriber login is provisioned separately in Subscriptions and is available
+at `/account`. To offer authenticator enrollment, set a private
+`OPEN_NODE_SUBSCRIBER_TOTP_KEY` in `deploy/.env`; retain that key with the
+private configuration backup, not in Git or a database export. See
+[subscriber accounts](subscriber-accounts.md) for key generation and recovery.
+An empty value disables new authenticator enrollment, not password login.
+
 The port is bound to host loopback only. The service runs as UID/GID 10001,
 with no capabilities, no privilege escalation, a read-only image filesystem,
 a temporary `/tmp`, and a private named volume at `/var/lib/open-node`.

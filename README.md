@@ -34,6 +34,11 @@ using the same database configuration as the backend, then sign in through
 the Vue interface. [Administrator setup and recovery](docs/administrator-access.md)
 also covers HTTPS cookies, local previews, session expiry, and API clients.
 
+Subscribers use the separate `/account` portal. Administrators provision their
+login passwords from Subscriptions; product-user roles never grant controller
+access. [Subscriber accounts](docs/subscriber-accounts.md) covers subscription
+downloads, usage, device sessions, password recovery and optional TOTP.
+
 ## Deployment
 
 The root Dockerfile and [Compose deployment](docs/deployment.md) build a
@@ -45,6 +50,11 @@ on the VPS with HTTPS desktop/mobile browser workflows and volume recovery.
 Remaining migration gates still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
+
+[Subscriber self-service](docs/subscriber-accounts.md) adds isolated login,
+current-plan usage and downloads, password changes, session revocation and
+TOTP with one-use recovery codes. Account disablement and removal invalidate
+sessions; password recovery preserves existing subscriptions and traffic.
 
 User [editing and removal](docs/user-management.md) now preserve runtime identity
 during profile edits and support confirmed disable/reactivation. Removal tracks

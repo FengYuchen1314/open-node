@@ -52,6 +52,9 @@ def test_every_management_route_requires_an_operator(tmp_path: Path):
     public_http = {
         ("get", "/api/v1/auth/session"),
         ("post", "/api/v1/auth/login"),
+        ("get", "/api/v1/account/session"),
+        ("post", "/api/v1/account/login"),
+        ("post", "/api/v1/account/login/verify"),
         ("get", "/api/v1/subscribe/{subscription_key}"),
         ("get", "/api/v1/license/status"),
         ("get", "/api/v1/healthz"),

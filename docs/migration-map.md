@@ -274,9 +274,15 @@ These passing command and snapshot checks do not prove a complete replacement:
   through catalog import. Runtime work drains before confirmed withdrawal and
   local cleanup; retired identity fingerprints reject structured command replay.
   Same-name recreation uses fresh traffic labels. Per-user quota/speed/node
-  overrides, custom short codes, subscriber login/password/session/TOTP
-  workflows and privately owned routed-node cleanup still require migration
-  or dedicated parity verification.
+  overrides, custom short codes and privately owned routed-node cleanup still
+  require migration or dedicated parity verification.
+- [Subscriber accounts](subscriber-accounts.md) now have a separate login and
+  session realm, password provisioning/recovery, own-plan usage and downloads,
+  device revocation, encrypted TOTP enrollment and one-use recovery codes.
+  Product-user roles do not grant controller access. Disablement, removal and
+  password reset revoke old sessions; reactivation cannot revive them. The
+  subscriber UI is available at `/account`. Legacy password/seed import,
+  public registration and third-party identity providers are not implemented.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both

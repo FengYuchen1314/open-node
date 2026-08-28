@@ -550,6 +550,8 @@ class SubscriptionAccessCoordinator:
                 )
                 self.store._plan_management()._track_revocations(session, user, plan, now)
             user.is_active, user.updated_at = active, now
+            if not active:
+                self.store._user_management().revoke_login(session, username)
             commands = self.reconcile(session, now, username=username)
             session.commit()
             return self.store._product_user_read(user), [

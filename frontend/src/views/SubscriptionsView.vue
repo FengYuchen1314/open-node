@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import SubscriptionAccessPanel from "../components/SubscriptionAccessPanel.vue";
 import PlanManagementDialog from "../components/PlanManagementDialog.vue";
 import UserManagementDialog from "../components/UserManagementDialog.vue";
+import UserLoginDialog from "../components/UserLoginDialog.vue";
 import NodeManagementDialog from "../components/NodeManagementDialog.vue";
 import type { NodeOperation } from "../services/node-management";
 import type { UserOperation } from "../services/user-management";
@@ -61,6 +62,7 @@ const nodes = ref<ManagedNode[]>([]);
 const plans = ref<SubscriptionPlan[]>([]);
 const planManagement = reactive({ id: "", mode: "edit" as PlanOperation, open: false });
 const userManagement = reactive({ username: "", mode: "edit" as UserOperation, removalId: null as string | null, open: false });
+const userLogin = reactive({ username: "", open: false });
 const nodeManagement = reactive({ id: "", mode: "edit" as NodeOperation, open: false });
 function manageNode(id: string, mode: NodeOperation) {
   Object.assign(nodeManagement, { id, mode, open: true });
@@ -1660,6 +1662,7 @@ function formatBytes(value: number) {
             </div>
             <div class="catalog-controls">
               <template v-if="!user.removal_id">
+                <v-tooltip text="User login settings"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Login settings for ${user.username}`" icon="mdi-account-key-outline" variant="text" size="32" @click="Object.assign(userLogin, { username: user.username, open: true })" /></template></v-tooltip>
                 <v-tooltip text="Edit user"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit user ${user.username}`" icon="mdi-pencil-outline" variant="text" size="32" @click="manageUser(user, 'edit')" /></template></v-tooltip>
                 <v-tooltip text="Remove user"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Remove user ${user.username}`" icon="mdi-delete-outline" variant="text" size="32" :disabled="user.role === 'admin'" @click="manageUser(user, 'remove')" /></template></v-tooltip>
               </template>
@@ -1745,6 +1748,7 @@ function formatBytes(value: number) {
     </section>
     <PlanManagementDialog v-model:open="planManagement.open" :id="planManagement.id" :mode="planManagement.mode" :nodes="nodes" @changed="refresh" />
     <UserManagementDialog v-model:open="userManagement.open" :username="userManagement.username" :mode="userManagement.mode" :removal-id="userManagement.removalId" @changed="refresh" />
+    <UserLoginDialog v-model:open="userLogin.open" :username="userLogin.username" />
     <NodeManagementDialog v-model:open="nodeManagement.open" :id="nodeManagement.id" :mode="nodeManagement.mode" :nodes="nodes" @changed="refresh" />
   </div>
 </template>

@@ -3,6 +3,8 @@ import contextlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -20,6 +22,7 @@ from open_node.services.inventory import InventoryStore, ManagedNodeConflict
 from open_node.services.probe_stream import PublicProbeStreamManager
 from open_node.services.secure_channel import AgentIdentity
 from open_node.services.server_traffic import ServerTrafficWorker
+from open_node.services.subscriber_auth import SubscriberAuthStore
 from open_node.services.subscription_access import SubscriptionAccessWorker
 from open_node.web import FrontendFiles
 
@@ -68,6 +71,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    def subscriber_request(request):
+        path = request.url.path
+        return path == active_settings.api_prefix + "/subscriber-accounts" or path.startswith(
+            active_settings.api_prefix + "/account/"
+        )
+
+    @app.middleware("http")
+    async def private_subscriber_responses(request, call_next):
+        response = await call_next(request)
+        if subscriber_request(request):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc):
+        if subscriber_request(request):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": [
+                        {key: error[key] for key in ("loc", "msg", "type")}
+                        for error in exc.errors()
+                    ]
+                },
+            )
+        return await request_validation_exception_handler(request, exc)
+
     @app.exception_handler(AgentCommandPayloadError)
     async def invalid_agent_command(_request, exc):
         return JSONResponse(
@@ -93,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.auth = AuthStore(active_settings.database_url)
     app.state.inventory = InventoryStore(active_settings.database_url)
     app.state.inventory.create_schema()
+    app.state.subscriber_auth = SubscriberAuthStore(app.state.inventory, active_settings)
     app.state.certificates = CertificateStore(active_settings, app.state.inventory)
     app.state.agent_connections = AgentConnectionManager()
     app.state.public_probe_streams = PublicProbeStreamManager()

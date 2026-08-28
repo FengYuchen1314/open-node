@@ -3,7 +3,7 @@ from functools import lru_cache
 from ipaddress import ip_address
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = True
     session_lifetime_seconds: int = Field(default=43200, ge=60, le=604800)
     session_idle_seconds: int = Field(default=1800, ge=60, le=86400)
+    subscriber_totp_key: SecretStr | None = None
     certificate_state_dir: Path = Path("./data/certificates")
     certificate_lego_binary: Path | None = None
     certificate_ca_file: Path | None = None
@@ -48,6 +49,20 @@ class Settings(BaseSettings):
         elif host:
             if ip_address(host).version != 4:
                 raise ValueError("IPv6 HTTP challenge addresses require brackets")
+        return value
+
+    @field_validator("subscriber_totp_key")
+    @classmethod
+    def totp_key(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not value.get_secret_value():
+            return None
+        if value is not None:
+            from cryptography.fernet import Fernet
+
+            try:
+                Fernet(value.get_secret_value())
+            except (ValueError, TypeError):
+                raise ValueError("Subscriber TOTP key must be a Fernet key") from None
         return value
 
     @field_validator("certificate_webroots")

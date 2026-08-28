@@ -41,6 +41,11 @@ async function submit() {
         <v-text-field v-model="password" label="Password" type="password" autocomplete="current-password" required maxlength="1024" :disabled="busy" />
         <v-btn type="submit" color="primary" prepend-icon="mdi-login" :loading="busy" :disabled="!username || !password">Sign In</v-btn>
       </form>
+      <router-link to="/account" class="subscriber-link">Subscriber sign-in</router-link>
     </div>
   </section>
 </template>
+
+<style scoped>
+.subscriber-link { font-size: 13px; color: #176b5b; justify-self: start; }
+</style>

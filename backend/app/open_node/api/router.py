@@ -13,6 +13,7 @@ from open_node.api.routes import (
     public,
     server_management,
     servers,
+    subscriber_auth,
     subscriptions,
     system,
     user_management,
@@ -29,8 +30,10 @@ private_router.include_router(subscriptions.router)
 private_router.include_router(plan_management.router)
 private_router.include_router(user_management.router)
 private_router.include_router(node_management.router)
+private_router.include_router(subscriber_auth.management_router)
 api_router.include_router(private_router)
 api_router.include_router(auth.router)
+api_router.include_router(subscriber_auth.router)
 api_router.include_router(system.router)
 api_router.include_router(license.router)
 api_router.include_router(agents.router)
