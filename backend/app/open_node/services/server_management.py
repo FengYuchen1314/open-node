@@ -199,6 +199,8 @@ class ServerManagement:
         ]
         if pending_user_removals:
             blockers.append("Complete pending user removals before removing this server")
+        if self.store._node_management().pending_for_server(session, server.id):
+            blockers.append("Complete pending node removals before removing this server")
         if session.get(ChangeSetServerLockModel, server.id):
             blockers.append("A change set still holds this server")
         blockers += [

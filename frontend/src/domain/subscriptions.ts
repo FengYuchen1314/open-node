@@ -70,6 +70,8 @@ export interface ManagedNodeCreateRequest {
   server_id: string;
   protocol: string;
   node_type?: ManagedNodeType;
+  parent_id?: string | null;
+  target_node_id?: string | null;
   inbound_tag?: string | null;
   routed_outbound_tag?: string | null;
   routed_rule_marktag?: string | null;
@@ -82,6 +84,7 @@ export interface ManagedNodeCreateRequest {
 
 export interface ManagedNode extends ManagedNodeCreateRequest {
   id: string;
+  removal_id?: string | null;
   node_type: ManagedNodeType;
   tags: string[];
   enabled: boolean;

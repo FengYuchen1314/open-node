@@ -256,14 +256,18 @@ These passing command and snapshot checks do not prove a complete replacement:
   withdrawal intents, including for offline Agents and stored preview-only
   credentials. Revision guards, transaction rollback and per-user deployment
   status protect concurrent changes. Per-plan node aliases, automatic speed-rule
-  binding and custom Clash/Surge template selection remain to be migrated;
-  ordinary node editing/removal remains an open product workflow.
+  binding and custom Clash/Surge template selection remain to be migrated.
 - Native [node resource cleanup](node-cleanup.md) now supplies revision-guarded
   remote removal, suspended-template and limiter cleanup, local outbound
   dependency closure, shared-rule preservation and recoverable receipts.
-  Catalog node editing/removal, ownership and parent relationships, cross-server
-  dependencies and the Vue workflow remain open; this primitive alone does not
-  establish node-management parity.
+  [Managed-node settings/removal](node-management.md) now adds guarded editing,
+  parent/target relationships, explicit cross-server dependency closure,
+  shared-inbound retention, persistent deletion jobs and the Vue dialog.
+  Credential withdrawal precedes native cleanup and row deletion. Retired
+  resource replay, conflicting imports/sync and server deletion are guarded.
+  Subscriber accounts, links, dates and charged traffic remain intact.
+  Private ownership, historical/unrecorded dependency discovery, external
+  provider/relay-group records and Nginx/tunnel cleanup still require migration.
 - User [editing/removal](user-management.md) adds profile/remark changes,
   protected administrator-role subscribers, revision guards and durable
   two-phase removal. Pending users cannot be re-enabled, reassigned or restored

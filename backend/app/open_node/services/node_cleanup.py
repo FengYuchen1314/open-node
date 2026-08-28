@@ -11,6 +11,23 @@ def confirmation_error(command, body):
     requested = command.body if isinstance(command.body, dict) else {}
     value = body.get("node_cleanup")
     if (
+        requested.get("action") == "status"
+        and isinstance(value, dict)
+        and value.get("exists") is False
+    ):
+        if (
+            command.attempts
+            and body.get("success") is True
+            and body.get("restart_required") is not True
+            and requested.get("operation_id") == value.get("operation_id")
+            and requested.get("operation_id")
+            and value.get("applied") is False
+            and value.get("revision") is None
+            and value.get("impact") == {}
+        ):
+            return None
+        return "Agent did not confirm the absent node cleanup operation"
+    if (
         not command.attempts
         or body.get("success") is not True
         or body.get("restart_required") is True
@@ -19,6 +36,7 @@ def confirmation_error(command, body):
         or not re.fullmatch(r"[0-9a-f]{64}", value["revision"])
         or not isinstance(value.get("impact"), dict)
         or type(value.get("applied")) is not bool
+        or value.get("exists", True) is not True
     ):
         return "Agent did not confirm the native node cleanup operation"
     action = requested.get("action")

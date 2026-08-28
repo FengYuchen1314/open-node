@@ -125,6 +125,8 @@ class ChangeSetCoordinator:
         if legacy:
             raise ChangeSetConflict("A target has a legacy change set awaiting operator review")
         for server_id in sorted(servers):
+            if self.store._node_management().pending_for_server(session, server_id):
+                raise ChangeSetConflict("A target server has a pending node removal")
             if session.get(ServerModel, server_id) is None:
                 raise ServerNotFoundError(f"server not found: {server_id}")
             lock = session.get(ChangeSetServerLockModel, server_id)

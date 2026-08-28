@@ -85,6 +85,7 @@ def test_cleanup_capability_is_required_and_survives_schema_upgrade(tmp_path):
         ({"revision": "b" * 64}, True),
         ({"operation_id": str(uuid4())}, True),
         ({"impact": None}, True),
+        ({"exists": False}, True),
         ({}, False),
     ],
 )

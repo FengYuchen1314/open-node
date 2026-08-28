@@ -248,6 +248,10 @@ class ManagedNodeNotFoundError(ValueError):
     """Raised when a managed node lookup targets an unknown node."""
 
 
+class ManagedNodeConflict(ValueError):
+    """Raised when a node mutation conflicts with managed resources."""
+
+
 class SubscriptionTokenNotFoundError(ValueError):
     """Raised when a public subscription token or short code is unknown."""
 
@@ -1097,6 +1101,15 @@ class ManagedNodeModel(Base):
     )
     protocol: Mapped[str] = mapped_column(String(40))
     node_type: Mapped[str] = mapped_column(String(24), default="physical", index=True)
+    parent_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("managed_nodes.id", ondelete="SET NULL"), nullable=True
+    )
+    target_node_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("managed_nodes.id", ondelete="SET NULL"), nullable=True
+    )
+    removal_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("managed_node_removals.id"), nullable=True
+    )
     inbound_tag: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     routed_outbound_tag: Mapped[str | None] = mapped_column(String(255), nullable=True)
     routed_rule_marktag: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -1107,6 +1120,20 @@ class ManagedNodeModel(Base):
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ManagedNodeRemovalModel(Base):
+    __tablename__ = "managed_node_removals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    node_id: Mapped[str] = mapped_column(String(36), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    node_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    fingerprints: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    servers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
 
 
 class SubscriptionPlanModel(Base):
@@ -1368,6 +1395,16 @@ class InventoryStore:
                     "last_traffic_reset_at": "DATETIME",
                     "remark": "TEXT NOT NULL DEFAULT ''",
                     "removal_id": "VARCHAR(36) REFERENCES product_user_removals(id)",
+                },
+            )
+        if "managed_nodes" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector,
+                "managed_nodes",
+                {
+                    "parent_id": "VARCHAR(36) REFERENCES managed_nodes(id) ON DELETE SET NULL",
+                    "target_node_id": "VARCHAR(36) REFERENCES managed_nodes(id) ON DELETE SET NULL",
+                    "removal_id": "VARCHAR(36) REFERENCES managed_node_removals(id)",
                 },
             )
         if "servers" in table_names:
@@ -2041,6 +2078,7 @@ class InventoryStore:
             if existing:
                 return self._managed_node_read(existing)
             node = self._new_managed_node_model(server, draft.draft, now)
+            self._node_management().validate_node(session, node)
             session.add(node)
             session.commit()
             session.refresh(node)
@@ -2109,6 +2147,7 @@ class InventoryStore:
                     )
                     continue
                 node = self._new_managed_node_model(server, draft.draft, now)
+                self._node_management().validate_node(session, node)
                 session.add(node)
                 session.flush()
                 created_nodes.append(self._managed_node_read(node))
@@ -2196,13 +2235,14 @@ class InventoryStore:
         payload: XrayRuntimeNodeSyncRequest,
     ) -> XrayRuntimeNodeSyncResponse:
         now = datetime.now(tz=UTC)
-        with self._session() as session:
+        with self._coordinated_session() as session:
             server = session.get(ServerModel, str(server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {server_id}")
             node = session.get(ManagedNodeModel, str(node_id))
             if not node or node.server_id != server.id:
                 raise ManagedNodeNotFoundError(f"managed node not found: {node_id}")
+            self._node_management().require_editable(session, node)
             if node.node_type != ManagedNodeType.PHYSICAL.value:
                 raise XrayRuntimeNodeDraftUnavailableError(
                     "runtime sync is only available for physical managed nodes"
@@ -2937,6 +2977,7 @@ class InventoryStore:
             if not server:
                 raise ServerNotFoundError(f"server not found: {payload.server_id}")
             node = self._new_managed_node_model(server, payload, now)
+            self._node_management().validate_node(session, node)
             session.add(node)
             session.commit()
             session.refresh(node)
@@ -2996,6 +3037,7 @@ class InventoryStore:
             nodes = session.scalars(
                 select(ManagedNodeModel).order_by(ManagedNodeModel.created_at)
             ).all()
+            nodes = [node for node in nodes if not node.removal_id]
             node_names = {node.id: node.name for node in nodes}
             servers = session.scalars(select(ServerModel)).all()
             server_names = {server.id: server.name for server in servers}
@@ -3010,7 +3052,8 @@ class InventoryStore:
                 credential_rows = session.scalars(
                     select(SubscriptionCredentialModel)
                     .where(
-                        SubscriptionCredentialModel.username.in_([user.username for user in users])
+                        SubscriptionCredentialModel.username.in_([user.username for user in users]),
+                        SubscriptionCredentialModel.node_id.in_(node_names),
                     )
                     .order_by(
                         SubscriptionCredentialModel.username,
@@ -3056,6 +3099,8 @@ class InventoryStore:
                         server_name=server_names.get(node.server_id, node.server_id),
                         protocol=node.protocol,
                         node_type=ManagedNodeType(node.node_type),
+                        parent_name=node_names.get(node.parent_id),
+                        target_node_name=node_names.get(node.target_node_id),
                         inbound_tag=node.inbound_tag,
                         routed_outbound_tag=node.routed_outbound_tag,
                         routed_rule_marktag=node.routed_rule_marktag,
@@ -3124,6 +3169,8 @@ class InventoryStore:
                     continue
                 node = self._catalog_node_by_name(session, node_entry.name, server.id)
                 if node:
+                    self._node_management().require_editable(session, node)
+                    self._node_management().check_import_update(session, node, node_entry)
                     self._apply_catalog_node(node, node_entry, server.id, now)
                     summary.updated_nodes += 1
                 else:
@@ -3131,8 +3178,22 @@ class InventoryStore:
                     session.add(node)
                     summary.created_nodes += 1
                 node_ids_by_name[node_entry.name] = node.id
+                self._node_management().validate_node(session, node)
 
             session.flush()
+            for entry in payload.catalog.nodes:
+                if entry.name not in node_ids_by_name:
+                    continue
+                node = session.get(ManagedNodeModel, node_ids_by_name[entry.name])
+                for field, source, name in (
+                    ("parent_id", "parent_name", entry.parent_name),
+                    ("target_node_id", "target_node_name", entry.target_node_name),
+                ):
+                    if name and name not in node_ids_by_name:
+                        raise ManagedNodeConflict(f"Linked node not found in catalog: {name}")
+                    if source in entry.model_fields_set:
+                        setattr(node, field, node_ids_by_name.get(name))
+                self._node_management().validate_node(session, node)
             for plan_entry in payload.catalog.plans:
                 plan = session.scalar(
                     select(SubscriptionPlanModel).where(
@@ -4818,6 +4879,8 @@ class InventoryStore:
             server_id=server.id,
             protocol=payload.protocol.lower(),
             node_type=payload.node_type.value,
+            parent_id=str(payload.parent_id) if payload.parent_id else None,
+            target_node_id=str(payload.target_node_id) if payload.target_node_id else None,
             inbound_tag=payload.inbound_tag,
             routed_outbound_tag=payload.routed_outbound_tag,
             routed_rule_marktag=payload.routed_rule_marktag,
@@ -4838,6 +4901,9 @@ class InventoryStore:
             server_id=UUID(node.server_id),
             protocol=node.protocol,
             node_type=node.node_type,
+            parent_id=node.parent_id,
+            target_node_id=node.target_node_id,
+            removal_id=node.removal_id,
             inbound_tag=node.inbound_tag,
             routed_outbound_tag=node.routed_outbound_tag,
             routed_rule_marktag=node.routed_rule_marktag,
@@ -5107,6 +5173,7 @@ class InventoryStore:
                 )
                 continue
             self._user_management().check_imported_credential(session, server.id, entry)
+            self._node_management().check_imported_credential(session, server.id, entry)
             node_id = node_ids_by_name.get(entry.node_name)
             if not node_id:
                 node = self._catalog_node_by_name(session, entry.node_name, server.id)
@@ -5163,8 +5230,11 @@ class InventoryStore:
     @staticmethod
     def _ensure_managed_nodes_exist(session: Session, node_ids: list[UUID]) -> None:
         for node_id in node_ids:
-            if not session.get(ManagedNodeModel, str(node_id)):
+            node = session.get(ManagedNodeModel, str(node_id))
+            if not node:
                 raise ManagedNodeNotFoundError(f"managed node not found: {node_id}")
+            if node.removal_id:
+                raise ManagedNodeConflict("A selected node is being removed")
 
     def _subscription_provision_batches(
         self,
@@ -5192,7 +5262,7 @@ class InventoryStore:
             if not node:
                 warnings.append(f"node {node_id} no longer exists")
                 continue
-            if not node.enabled:
+            if not node.enabled or node.removal_id:
                 continue
             server = session.get(ServerModel, node.server_id)
             if not server:
@@ -5308,7 +5378,7 @@ class InventoryStore:
             if not node:
                 warnings.append(f"node {node_id} no longer exists")
                 continue
-            if not node.enabled:
+            if not node.enabled or node.removal_id:
                 continue
             if not node.config:
                 warnings.append(f"node {node.name} has no subscription proxy config")
@@ -5432,6 +5502,39 @@ class InventoryStore:
         ):
             incarnation = self._aware_datetime(user.created_at).isoformat()
             email += "--" + hashlib.sha256(incarnation.encode()).hexdigest()[:12]
+        shared = session.scalar(
+            select(SubscriptionCredentialModel)
+            .where(
+                SubscriptionCredentialModel.username == user.username,
+                SubscriptionCredentialModel.server_id == server.id,
+                SubscriptionCredentialModel.email == email,
+            )
+            .order_by(SubscriptionCredentialModel.created_at)
+        )
+        source_node = session.get(ManagedNodeModel, shared.node_id) if shared else None
+        can_share = bool(
+            shared
+            and source_node
+            and not source_node.removal_id
+            and all(
+                getattr(source_node, field) == getattr(node, field)
+                for field in (
+                    "protocol",
+                    "node_type",
+                    "inbound_tag",
+                    "routed_outbound_tag",
+                    "routed_rule_marktag",
+                )
+            )
+        )
+        retired_label = any(
+            item["server_id"] == server.id and item["email"] == email
+            for job in self._node_management().jobs(session)
+            for item in job.fingerprints
+        )
+        if (shared and not can_share) or retired_label:
+            email += "--" + node.id.replace("-", "")[:12]
+            can_share = False
         credential = SubscriptionCredentialModel(
             id=str(uuid4()),
             username=user.username,
@@ -5440,7 +5543,9 @@ class InventoryStore:
             inbound_tag=node.inbound_tag,
             protocol=node.protocol,
             email=email,
-            credential=self._generate_subscription_credential(
+            credential=deepcopy(shared.credential)
+            if can_share
+            else self._generate_subscription_credential(
                 protocol=node.protocol,
                 username=user.username,
                 email=email,
@@ -6433,6 +6538,11 @@ class InventoryStore:
         from open_node.services.user_management import UserManagement
 
         return UserManagement(self)
+
+    def _node_management(self):
+        from open_node.services.node_management import NodeManagement
+
+        return NodeManagement(self)
 
     @staticmethod
     def _server_record(server: ServerModel) -> ServerRecord:

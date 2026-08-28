@@ -61,6 +61,30 @@ async def test_preview_is_read_only_and_receipt_idempotent(config):
         await agent.close()
 
 
+async def test_status_distinguishes_unknown_operation_from_prepared_or_completed(config):
+    agent, original, _ = setup(config)
+    try:
+        identifier = str(uuid4())
+        result = await execute(agent, {"action": "status", "operation_id": identifier})
+        assert result["status"] == 200
+        assert result["body"]["node_cleanup"] == {
+            "operation_id": identifier,
+            "exists": False,
+            "applied": False,
+            "revision": None,
+            "impact": {},
+        }
+        assert agent.runtime.read() == original
+        assert agent.operations.node_cleanup.pending() is None
+        payload, _ = await request(agent)
+        await execute(agent, payload)
+        status = await execute(agent, {"action": "status", "operation_id": payload["operation_id"]})
+        assert status["body"]["node_cleanup"]["exists"] is True
+        assert status["body"]["node_cleanup"]["applied"] is True
+    finally:
+        await agent.close()
+
+
 @pytest.mark.parametrize("protocol", ["vless", "snell", "mieru", "shadowsocks"])
 async def test_suspended_listener_cannot_be_restored_after_cleanup(config, protocol):
     agent, _, users = setup(config, protocol, count=1)

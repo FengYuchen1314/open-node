@@ -167,10 +167,23 @@ class NodeCleanup:
             "SELECT phase, result FROM node_cleanup_jobs WHERE id=?", (identifier,)
         ).fetchone()
         if not row:
-            raise RuntimeFailure("Node cleanup operation not found")
+            return {
+                "success": True,
+                "node_cleanup": {
+                    "operation_id": identifier,
+                    "exists": False,
+                    "applied": False,
+                    "revision": None,
+                    "impact": {},
+                },
+            }
         return {
             "success": True,
-            "node_cleanup": {**json.loads(row[1]), "applied": row[0] == "completed"},
+            "node_cleanup": {
+                **json.loads(row[1]),
+                "exists": True,
+                "applied": row[0] == "completed",
+            },
         }
 
     async def recover(self):

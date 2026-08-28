@@ -189,7 +189,7 @@ class PlanManagement:
             session.commit()
             return result
 
-    def _track_revocations(self, session, user, plan, now):
+    def _track_revocations(self, session, user, plan, now, node_ids=None):
         access = self.store._subscription_access()
         rows = {row.server_id: row for row in access.rows(session, user.username)}
         warnings = []
@@ -200,6 +200,8 @@ class PlanManagement:
             )
             .order_by(SubscriptionCredentialModel.id)
         ).all():
+            if node_ids is not None and credential.node_id not in node_ids:
+                continue
             if not credential.inbound_tag:
                 warnings.append(
                     f"{user.username}: credential {credential.id} has no inbound; "
@@ -251,6 +253,8 @@ class PlanManagement:
                     raise SubscriptionAccessConflict(
                         "A tracked credential changed; review its runtime identity first"
                     )
+                if credential.node_id not in previous["node_ids"]:
+                    previous["node_ids"].append(credential.node_id)
             else:
                 bindings.append(
                     {

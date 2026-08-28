@@ -20,7 +20,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 const title = computed(() => props.mode === "edit" ? "Edit plan" : props.mode === "remove" ? "Remove plan" : "Unassign plan");
 const removed = computed(() => !!result.value && props.mode !== "edit");
 const expectedName = computed(() => props.mode === "unassign" ? props.id : detail.value?.plan.name ?? "");
-const options = computed(() => props.nodes.map(node => ({ title: node.name, value: node.id })));
+const options = computed(() => props.nodes.filter(node => !node.removal_id).map(node => ({ title: node.name, value: node.id })));
 const selectedNodes = computed(() => form.value?.node_ids.map(id => ({ id, name: props.nodes.find(node => node.id === id)?.name ?? id })) ?? []);
 const canSubmit = computed(() => !busy.value && !!detail.value && acknowledgment.value && !removed.value && (props.mode === "edit" ? !!form.value?.name.trim() : confirmName.value === expectedName.value));
 

@@ -164,6 +164,8 @@ class ManagedNodeCreate(BaseModel):
     server_id: UUID
     protocol: str = Field(min_length=1, max_length=40)
     node_type: ManagedNodeType = ManagedNodeType.PHYSICAL
+    parent_id: UUID | None = None
+    target_node_id: UUID | None = None
     inbound_tag: str | None = Field(default=None, max_length=255)
     routed_outbound_tag: str | None = Field(default=None, max_length=255)
     routed_rule_marktag: str | None = Field(default=None, max_length=255)
@@ -203,6 +205,7 @@ class ManagedNodeCreate(BaseModel):
 
 class ManagedNodeRead(ManagedNodeCreate):
     id: UUID
+    removal_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -628,6 +631,8 @@ class SubscriptionCatalogNodeEntry(BaseModel):
     server_name: str
     protocol: str
     node_type: ManagedNodeType = ManagedNodeType.PHYSICAL
+    parent_name: str | None = None
+    target_node_name: str | None = None
     inbound_tag: str | None = None
     routed_outbound_tag: str | None = None
     routed_rule_marktag: str | None = None

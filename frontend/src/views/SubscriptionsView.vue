@@ -3,6 +3,8 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import SubscriptionAccessPanel from "../components/SubscriptionAccessPanel.vue";
 import PlanManagementDialog from "../components/PlanManagementDialog.vue";
 import UserManagementDialog from "../components/UserManagementDialog.vue";
+import NodeManagementDialog from "../components/NodeManagementDialog.vue";
+import type { NodeOperation } from "../services/node-management";
 import type { UserOperation } from "../services/user-management";
 import type { PlanOperation } from "../services/plan-management";
 
@@ -59,6 +61,10 @@ const nodes = ref<ManagedNode[]>([]);
 const plans = ref<SubscriptionPlan[]>([]);
 const planManagement = reactive({ id: "", mode: "edit" as PlanOperation, open: false });
 const userManagement = reactive({ username: "", mode: "edit" as UserOperation, removalId: null as string | null, open: false });
+const nodeManagement = reactive({ id: "", mode: "edit" as NodeOperation, open: false });
+function manageNode(id: string, mode: NodeOperation) {
+  Object.assign(nodeManagement, { id, mode, open: true });
+}
 function manageUser(user: ProductUser, mode: UserOperation) {
   Object.assign(userManagement, { username: user.username, mode, removalId: user.removal_id ?? null, open: true });
 }
@@ -106,6 +112,8 @@ const nodeForm = reactive({
   server_id: "",
   protocol: "vless",
   node_type: "physical" as ManagedNodeType,
+  parent_id: null as string | null,
+  target_node_id: null as string | null,
   inbound_tag: "",
   routed_outbound_tag: "",
   routed_rule_marktag: "",
@@ -185,7 +193,7 @@ const userOptions = computed(() =>
   users.value.filter(user => !user.removal_id).map((user) => ({ title: user.display_name || user.username, value: user.username })),
 );
 const nodeOptions = computed(() =>
-  nodes.value.map((node) => ({ title: `${node.name} (${node.protocol})`, value: node.id })),
+  nodes.value.filter(node => !node.removal_id).map((node) => ({ title: `${node.name} (${node.protocol})`, value: node.id })),
 );
 const planOptions = computed(() =>
   plans.value.map((plan) => ({ title: plan.name, value: plan.id })),
@@ -310,6 +318,8 @@ async function submitNode() {
       server_id: nodeForm.server_id,
       protocol: nodeForm.protocol.trim(),
       node_type: nodeForm.node_type,
+      parent_id: nodeForm.node_type === "routed" ? nodeForm.parent_id : null,
+      target_node_id: nodeForm.node_type === "routed" ? nodeForm.target_node_id : null,
       inbound_tag: blankToNull(nodeForm.inbound_tag),
       routed_outbound_tag: blankToNull(nodeForm.routed_outbound_tag),
       routed_rule_marktag: blankToNull(nodeForm.routed_rule_marktag),
@@ -680,6 +690,8 @@ function resetNodeForm(serverId: string) {
     server_id: serverId,
     protocol: "vless",
     node_type: "physical" as ManagedNodeType,
+    parent_id: null,
+    target_node_id: null,
     inbound_tag: "",
     routed_outbound_tag: "",
     routed_rule_marktag: "",
@@ -1072,6 +1084,10 @@ function formatBytes(value: number) {
                   prepend-inner-icon="mdi-label-multiple-outline"
                   variant="outlined"
                 />
+              </div>
+              <div v-if="nodeForm.node_type === 'routed'" class="form-row">
+                <v-select v-model="nodeForm.parent_id" :items="nodes.filter(node => !node.removal_id && node.server_id === nodeForm.server_id && node.inbound_tag === nodeForm.inbound_tag && node.protocol === nodeForm.protocol)" item-title="name" item-value="id" label="Parent node" clearable variant="outlined" />
+                <v-select v-model="nodeForm.target_node_id" :items="nodes.filter(node => !node.removal_id)" item-title="name" item-value="id" label="Target node" clearable variant="outlined" />
               </div>
               <v-textarea
                 v-model="nodeForm.clientTemplateText"
@@ -1690,9 +1706,14 @@ function formatBytes(value: number) {
               <div class="server-name">{{ node.name }}</div>
               <div class="server-subline">{{ serverName(node.server_id) }}</div>
             </div>
-            <v-chip :color="node.enabled ? 'success' : 'warning'" size="small" variant="tonal">
-              {{ node.node_type }}
-            </v-chip>
+            <div class="catalog-controls">
+              <template v-if="!node.removal_id">
+                <v-tooltip text="Edit node"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit node ${node.name}`" icon="mdi-pencil-outline" variant="text" size="small" @click="manageNode(node.id, 'edit')" /></template></v-tooltip>
+                <v-tooltip text="Remove node"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Remove node ${node.name}`" icon="mdi-delete-outline" variant="text" size="small" @click="manageNode(node.id, 'remove')" /></template></v-tooltip>
+              </template>
+              <v-tooltip v-else text="Node removal status"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Node removal status ${node.name}`" icon="mdi-progress-clock" variant="text" size="small" @click="manageNode(node.id, 'remove')" /></template></v-tooltip>
+              <v-chip :color="node.enabled && !node.removal_id ? 'success' : 'warning'" size="small" variant="tonal">{{ node.removal_id ? 'Removing' : node.node_type }}</v-chip>
+            </div>
           </div>
         </div>
 
@@ -1724,6 +1745,7 @@ function formatBytes(value: number) {
     </section>
     <PlanManagementDialog v-model:open="planManagement.open" :id="planManagement.id" :mode="planManagement.mode" :nodes="nodes" @changed="refresh" />
     <UserManagementDialog v-model:open="userManagement.open" :username="userManagement.username" :mode="userManagement.mode" :removal-id="userManagement.removalId" @changed="refresh" />
+    <NodeManagementDialog v-model:open="nodeManagement.open" :id="nodeManagement.id" :mode="nodeManagement.mode" :nodes="nodes" @changed="refresh" />
   </div>
 </template>
 

@@ -1,8 +1,8 @@
 # Native Node Resource Cleanup
 
 The independent Agent advertises `node_cleanup` for revision-guarded Xray
-resource removal. This is the remote operation needed by the managed-node
-lifecycle, not a completed catalog deletion workflow. It has no license gate.
+resource removal. The [managed-node lifecycle](node-management.md) uses this
+operation for catalog removal jobs. Neither requires a license gate.
 
 ## Contract
 
@@ -13,7 +13,9 @@ queue, with `method: POST`, `path: /api/child/node-cleanup` and a JSON body:
   opaque revision and a secret-free impact summary without changing the host.
 - `action: apply` requires the same targets, `expected_revision`, a canonical
   UUID `operation_id`, and `acknowledge_runtime_restart: true`.
-- `action: status` requires `operation_id` and returns the durable receipt.
+- `action: status` requires `operation_id` and returns the durable receipt with
+  `exists: true`. An unknown operation returns `exists: false`,
+  `applied: false`, `revision: null` and an empty impact without changing state.
 
 The revision covers the entire current Xray configuration, privately suspended
 inbounds, limiter policy document and selected targets. Changes after preview
@@ -70,7 +72,8 @@ after the runtime update, separately over WebSocket and HTTP polling. A forced
 restart failure also verifies that the restored client still forwards with its
 previous bandwidth cap before recovery resumes.
 
-Managed-node profile editing, catalog removal jobs, parent/owner relationships,
-shared-inbound ownership checks, cross-server target discovery, Nginx/tunnel
-cleanup and the Vue node-management dialog remain to be connected and verified.
-These must not be represented as completed by the low-level operation above.
+Managed-node editing, persistent catalog removal, parent/target relationships,
+shared-inbound retention and the Vue dialog are covered by the separate
+[node-management workflow](node-management.md). Private owner relationships,
+unrecorded cross-server target discovery and Nginx/tunnel cleanup still require
+migration; the low-level operation does not prove those features.

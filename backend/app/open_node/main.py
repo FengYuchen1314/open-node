@@ -16,7 +16,7 @@ from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.auth import AuthStore
 from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
-from open_node.services.inventory import InventoryStore
+from open_node.services.inventory import InventoryStore, ManagedNodeConflict
 from open_node.services.probe_stream import PublicProbeStreamManager
 from open_node.services.secure_channel import AgentIdentity
 from open_node.services.server_traffic import ServerTrafficWorker
@@ -73,6 +73,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(
             status_code=422,
             content={"detail": str(exc), "license_required": False},
+        )
+
+    @app.exception_handler(ManagedNodeConflict)
+    async def conflicting_node_mutation(_request, exc):
+        return JSONResponse(
+            status_code=409, content={"detail": str(exc), "license_required": False}
         )
 
     app.add_middleware(

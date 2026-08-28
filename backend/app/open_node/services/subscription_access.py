@@ -165,7 +165,7 @@ class SubscriptionAccessCoordinator:
         additions = {}
         for node_id in plan.node_ids:
             node = session.get(ManagedNodeModel, node_id)
-            if not node or not node.enabled:
+            if not node or not node.enabled or node.removal_id:
                 continue
             if not node.inbound_tag:
                 raise SubscriptionAccessConflict(
@@ -270,6 +270,7 @@ class SubscriptionAccessCoordinator:
                     if (
                         node
                         and node.enabled
+                        and not node.removal_id
                         and node_id in plan.node_ids
                         and node.server_id == row.server_id
                         and node.inbound_tag == binding["tag"]
@@ -380,6 +381,8 @@ class SubscriptionAccessCoordinator:
         return commands
 
     def can_lease(self, session, command, now):
+        if not self.store._node_management().can_lease(session, command, now):
+            return False
         if not command.attempts and self.store._user_management().retired_restore(session, command):
             self.skip(session, command, now, "Not sent: user removal retired these credentials")
             self.after_result(session, command, now)
@@ -522,6 +525,7 @@ class SubscriptionAccessCoordinator:
             commands = self.reconcile(session, active_now, username=username, force=force)
             if username is None:
                 self.store._user_management().finalize_ready(session, active_now)
+                commands.extend(self.store._node_management().advance(session, active_now))
             session.commit()
             return [self.store._command_read(command) for command in commands]
 
