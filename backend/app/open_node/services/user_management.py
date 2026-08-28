@@ -285,7 +285,9 @@ class UserManagement:
                 select(CommandModel).where(CommandModel.status.not_in(TERMINAL))
             ).all():
                 if not self.restores(command, job.fingerprints):
-                    if self.store._should_refresh_xray_snapshot_after(command.method, command.path):
+                    if self.store._should_refresh_xray_snapshot_after(
+                        command.method, command.path, command.body
+                    ):
                         in_flight |= any(
                             row.server_id == command.server_id
                             and access.affects_credentials(row, command)

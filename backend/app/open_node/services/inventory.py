@@ -813,6 +813,7 @@ class AgentModel(Base):
     capability_return_route_test: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_native_limiter: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_subscription_access: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_node_cleanup: Mapped[bool] = mapped_column(Boolean, default=False)
     warp_installed: Mapped[bool] = mapped_column(Boolean, default=False)
     same_host_as_master: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -1318,6 +1319,7 @@ class InventoryStore:
                 {
                     "capability_native_limiter": "BOOLEAN NOT NULL DEFAULT 0",
                     "capability_subscription_access": "BOOLEAN NOT NULL DEFAULT 0",
+                    "capability_node_cleanup": "BOOLEAN NOT NULL DEFAULT 0",
                 },
             )
         if "agent_change_sets" in table_names:
@@ -1539,6 +1541,7 @@ class InventoryStore:
             agent.capability_return_route_test = payload.capabilities.return_route_test
             agent.capability_native_limiter = payload.capabilities.native_limiter
             agent.capability_subscription_access = payload.capabilities.subscription_access
+            agent.capability_node_cleanup = payload.capabilities.node_cleanup
             agent.warp_installed = payload.warp_installed
             agent.same_host_as_master = payload.same_host_as_master
             agent.last_seen_at = now
@@ -6498,6 +6501,7 @@ class InventoryStore:
                 return_route_test=agent.capability_return_route_test,
                 native_limiter=agent.capability_native_limiter,
                 subscription_access=agent.capability_subscription_access,
+                node_cleanup=agent.capability_node_cleanup,
             ),
             warp_installed=agent.warp_installed,
             same_host_as_master=agent.same_host_as_master,
@@ -6838,7 +6842,7 @@ class InventoryStore:
     ) -> None:
         if payload.error or payload.status >= 400:
             return
-        if not cls._should_refresh_xray_snapshot_after(command.method, command.path):
+        if not cls._should_refresh_xray_snapshot_after(command.method, command.path, command.body):
             return
 
         existing = session.scalar(
@@ -6866,11 +6870,13 @@ class InventoryStore:
         cls._create_command_model(session, server, refresh, now=now)
 
     @staticmethod
-    def _should_refresh_xray_snapshot_after(method: str, path: str) -> bool:
+    def _should_refresh_xray_snapshot_after(method: str, path: str, body=None) -> bool:
         normalized_method = method.upper()
         if normalized_method in {"", "GET", "HEAD", "OPTIONS"}:
             return False
         normalized_path = path.split("?", 1)[0]
+        if normalized_path == "/api/child/node-cleanup":
+            return isinstance(body, dict) and body.get("action") == "apply"
         return any(
             normalized_path == prefix or normalized_path.startswith(f"{prefix}/")
             for prefix in _XRAY_MUTATING_PATH_PREFIXES
@@ -8680,13 +8686,22 @@ class InventoryStore:
             and isinstance(command.body, dict)
             and command.body.get("limiter_users")
         )
-        if needs_limiter:
+        required_capability = (
+            "native_limiter"
+            if needs_limiter
+            else "node_cleanup"
+            if command.path == "/api/child/node-cleanup"
+            else None
+        )
+        if required_capability:
             agent = session.scalar(
                 select(AgentModel).where(AgentModel.server_id == command.server_id)
             )
-            if not agent or not agent.capability_native_limiter:
+            if not agent or not getattr(agent, "capability_" + required_capability):
                 command.result_error = (
-                    "Not sent: this command requires an Open Node Agent with native limiter support"
+                    "Not sent: this command requires an Open Node Agent with "
+                    + required_capability.replace("_", " ")
+                    + " support"
                 )
                 command.updated_at = now
                 if command.attempts == 0:
@@ -8755,6 +8770,10 @@ class InventoryStore:
             result_error = "Agent reported an unsuccessful result"
         if not result_error and payload.status < 400:
             result_error = self._subscription_access().confirmation_error(command, body)
+        if not result_error and payload.status < 400:
+            from open_node.services.node_cleanup import confirmation_error
+
+            result_error = confirmation_error(command, body)
         if (
             not result_error
             and payload.status < 400

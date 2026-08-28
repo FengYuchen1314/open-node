@@ -15,6 +15,8 @@ from open_node_agent.journal import CommandJournal
 from open_node_agent.lifecycle import HostLifecycle
 from open_node_agent.logs import OwnedLogs
 from open_node_agent.nginx import NginxRuntime
+from open_node_agent.node_cleanup import ENDPOINT as CLEANUP_ENDPOINT
+from open_node_agent.node_cleanup import NodeCleanup
 from open_node_agent.runtime import RuntimeFailure, XrayRuntime
 from open_node_agent.subscription_access import ENDPOINT as ACCESS_ENDPOINT
 from open_node_agent.subscription_access import SubscriptionAccess
@@ -254,6 +256,7 @@ class Operations:
         self.http01 = HttpChallenges(runtime.config, journal)
         self.takeover = XrayTakeover(runtime, journal)
         self.subscription_access = SubscriptionAccess(runtime, journal)
+        self.node_cleanup = NodeCleanup(runtime, journal, self.subscription_access)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
 
@@ -308,6 +311,15 @@ class Operations:
             if method == "DELETE":
                 return self.logs.delete(query)
         async with self.runtime.lock:
+            if path == CLEANUP_ENDPOINT and method == "POST":
+                return await self.node_cleanup.handle(body)
+            if method != "GET" or path in {
+                "/api/child/nginx/install",
+                "/api/child/nginx/install-stream",
+                "/api/child/nginx/remove",
+                "/api/child/nginx/remove-stream",
+            }:
+                await self.node_cleanup.recover()
             if path == ACCESS_ENDPOINT and method == "POST":
                 return await self.subscription_access.apply(body)
             if path == "/api/child/limiter":

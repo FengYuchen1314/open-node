@@ -472,7 +472,7 @@ class SubscriptionAccessCoordinator:
                 )
                 row.updated_at = now
         elif command.attempts and self.store._should_refresh_xray_snapshot_after(
-            command.method, command.path
+            command.method, command.path, command.body
         ):
             for row in session.scalars(
                 select(SubscriptionAccessModel).where(
@@ -485,6 +485,12 @@ class SubscriptionAccessCoordinator:
     @staticmethod
     def affects_credentials(row, command):
         keys = {(item["tag"], item["client"]["email"]) for item in row.bindings}
+        if command.path == "/api/child/node-cleanup":
+            body = command.body if isinstance(command.body, dict) else {}
+            return body.get("action") == "apply" and (
+                bool(body.get("outbound_tags"))
+                or any(tag in body.get("inbound_tags", []) for tag, _ in keys)
+            )
         if command.path == "/api/child/batch-apply":
             return any(
                 (item["tag"], item["client"]["email"]) in keys for item in command_clients(command)

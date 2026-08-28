@@ -227,6 +227,7 @@ class AgentCapabilities(BaseModel):
     return_route_test: bool = False
     native_limiter: bool = False
     subscription_access: bool = False
+    node_cleanup: bool = False
 
 
 class ServerCreate(BaseModel):

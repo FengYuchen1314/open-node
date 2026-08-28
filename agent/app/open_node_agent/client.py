@@ -19,6 +19,7 @@ from open_node_agent.http01 import ENDPOINT as HTTP01_ENDPOINT
 from open_node_agent.journal import CommandJournal
 from open_node_agent.lifecycle import DeferredCommand
 from open_node_agent.lifecycle_protocol import is_lifecycle_command
+from open_node_agent.node_cleanup import ENDPOINT as CLEANUP_ENDPOINT
 from open_node_agent.operations import Operations, telemetry
 from open_node_agent.runtime import XrayRuntime, atomic_write
 
@@ -72,7 +73,9 @@ class Agent:
                 and time.monotonic() - self.last_contact
                 <= max(45, self.config.heartbeat_seconds * 3)
             ),
-            "runtime_ready": not self.runtime.binding_error
+            "node_cleanup_pending": self.operations.node_cleanup.pending() is not None,
+            "runtime_ready": self.operations.node_cleanup.pending() is None
+            and not self.runtime.binding_error
             and (not desired or running)
             and (
                 not self.journal.desired_running(False, "nginx")
@@ -103,6 +106,7 @@ class Agent:
                 "return_route_test": self.operations.diagnostics.route_available(),
                 "native_limiter": True,
                 "subscription_access": True,
+                "node_cleanup": True,
             },
         }
 
@@ -113,7 +117,7 @@ class Agent:
             if cached := self.journal.begin(
                 command,
                 resume=(lifecycle and self.config.lifecycle_socket is not None)
-                or command["path"] == HTTP01_ENDPOINT,
+                or command["path"] in {HTTP01_ENDPOINT, CLEANUP_ENDPOINT},
             ):
                 return cached
             result = {"request_id": command["request_id"], "status": 200}
@@ -121,6 +125,8 @@ class Agent:
                 result["command_id"] = command["id"]
             try:
                 if lifecycle:
+                    async with self.runtime.lock:
+                        await self.operations.node_cleanup.recover()
                     # Submission has its own bounded handshake; a lease is not a host-job deadline.
                     result = await self.operations.lifecycle.submit(command)
                     if command["id"]:
@@ -348,6 +354,7 @@ class Agent:
             try:
                 async with self.runtime.lock:
                     await self.operations.takeover.recover()
+                    await self.operations.node_cleanup.recover()
                     if (
                         self.journal.desired_running(self.config.auto_start)
                         and not await self.runtime.running()

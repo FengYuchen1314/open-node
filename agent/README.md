@@ -10,6 +10,10 @@ credential changes and private empty-inbound recovery records. It advertises
 the `subscription_access` capability and confirms each applied revision;
 account changes are not treated as enforced until the controller receives it.
 
+[Native node cleanup](../docs/node-cleanup.md) adds guarded resource previews,
+exact operation receipts and interruption recovery, including suspended inbound
+templates. Catalog ownership and node-deletion orchestration remain separate work.
+
 This agent is under active development. The implemented runtime path uses an
 operator-provided Xray binary, either as an owned subprocess or a configured
 systemd service. It is not yet a full replacement for every MMWX host operation.
