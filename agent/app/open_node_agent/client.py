@@ -92,7 +92,11 @@ class Agent:
             "connection_mode": self.config.connection_mode,
             "xray_mode": "external",
             "listen_port": 0,
-            "capabilities": {"rpc": True, "stream": True, "return_route_test": False},
+            "capabilities": {
+                "rpc": True,
+                "stream": True,
+                "return_route_test": self.operations.diagnostics.route_available(),
+            },
         }
 
     async def execute(self, payload: dict) -> dict | None:

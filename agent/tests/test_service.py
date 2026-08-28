@@ -15,6 +15,20 @@ OLD = "0.1.0-" + "a" * 16
 NEW = "0.2.0-" + "b" * 16
 
 
+def test_raw_network_capability_requires_host_opt_in(tmp_path):
+    instance = Deployment(tmp_path / "agent", "open-node-agent-diag.service")
+    instance.record = {"installation_id": "test"}
+    assert "CAP_NET_RAW" not in instance.unit_text()
+    instance.record["network_diagnostics"] = True
+    unit = instance.unit_text()
+    assert "AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW" in unit
+    assert "NoNewPrivileges=true" in unit
+    assert "CAP_SYS_ADMIN" not in unit
+    instance.record["unit_text"] = unit
+    instance.record["network_diagnostics"] = False
+    assert instance.unit_text() == unit
+
+
 @pytest.fixture
 def deployment(tmp_path, monkeypatch):
     root = tmp_path / "owned"

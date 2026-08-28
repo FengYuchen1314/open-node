@@ -223,8 +223,11 @@ These passing command and snapshot checks do not prove a complete replacement:
   [legacy-agent-migration.md](legacy-agent-migration.md).
 - Owned Nginx HTTP/TLS/configuration/sites, reverse proxy, stream cleanup,
   supplied certificate deployment/rotation, and crash/transaction recovery are
-  implemented in the independent agent. Complete WARP,
-  diagnostics, and remaining host operations. Unimplemented operations return 501.
+  implemented in the independent agent. Native [diagnostics](agent-diagnostics.md)
+  now include TCP/ICMP latency, structured NextTrace routes and scoped log
+  maintenance. In-place host permission changes and broader tracing-tool/OS
+  coverage remain outstanding. Complete WARP and the remaining host operations.
+  Unimplemented operations return 501.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both

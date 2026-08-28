@@ -58,6 +58,47 @@ cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
 
+## Native Diagnostics Smoke
+
+Build the current Agent wheel and frontend on the VPS first. Use the backend
+test environment with Playwright/Chromium installed, a trusted Debian Nginx
+binary, and the pinned NextTrace Tiny executable documented in
+[agent-diagnostics.md](agent-diagnostics.md):
+
+```bash
+python scripts/vps/smoke-diagnostics.py \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --nexttrace /path/to/verified/nexttrace \
+  --nginx /path/to/nginx \
+  --output /tmp/open-node-diagnostic-shots
+```
+
+The root-only fixture installs disposable non-root services, uses its own
+trusted HTTPS/WSS gateway, and removes owned units/accounts on exit. It checks
+real TCP and ICMP fallback, DNS failure, IPv4/IPv6 TCP trace hops, public
+ASN/geolocation evidence, history ingestion, log ownership/clearing, persistent
+VLESS traffic, and a default service without raw socket privileges. The public
+GeoIP check needs upstream connectivity; it is not substituted with fixture
+metadata. Browser checks cover 1440px, 390px and 320px layouts, real queued
+probes, confirmed log clearing and scheduled return-route creation.
+
+Verified on 2026-08-28 (UTC), on the designated Debian 12 x86-64 VPS:
+
+- Backend: 267 tests; Agent: 182 tests; frontend: 95 tests and production build.
+- Ruff passed for the Agent and diagnostic smoke. Existing backend deprecation
+  and frontend bundle-size warnings remain.
+- The installed non-root Agent passed the complete diagnostic smoke over both
+  transports, including default-denied raw-socket behavior, public NextTrace
+  ASN evidence, real scheduled-task dispatch, VLESS forwarding after log
+  clearing, and inspected desktop/mobile/narrow screenshots.
+- The separate real systemd install/upgrade/rollback/failure/recovery/uninstall
+  smoke passed again. Fixture cleanup reported no remaining owned resources.
+
+These checks do not establish broader OS/tool support, automatic in-place
+permission changes, cross-version public-release upgrades, or completion of
+the remaining [migration gates](migration-map.md). Agent 0.2.0 is a source
+build here, not a replacement for the immutable published 0.1.0 assets.
+
 ## Control Plane Deployment Smoke
 
 On the designated VPS, with Docker Compose and a trusted Nginx binary:
@@ -67,7 +108,7 @@ backend/.venv/bin/pip install -e 'backend[dev,browser]'
 backend/.venv/bin/playwright install --with-deps chromium
 AGENT_ENV="$(mktemp -d /tmp/open-node-package-agent.XXXXXX)"
 python3 -m venv "$AGENT_ENV"
-"$AGENT_ENV/bin/pip" install agent/dist/open_node_agent-0.1.0-py3-none-any.whl
+"$AGENT_ENV/bin/pip" install agent/dist/open_node_agent-0.2.0-py3-none-any.whl
 OPEN_NODE_IMAGE_TAG=local OPEN_NODE_REVISION="$(git rev-parse HEAD)" \
   docker compose --env-file /dev/null -f deploy/compose.yaml build
 backend/.venv/bin/python scripts/vps/smoke-control-plane.py \
@@ -115,7 +156,7 @@ and run the real-runtime smoke on the VPS (Linux x86-64, Python 3.11+, and curl)
 ```bash
 AGENT_ENV="$(mktemp -d /tmp/open-node-agent-wheel.XXXXXX)"
 python3 -m venv "$AGENT_ENV"
-"$AGENT_ENV/bin/pip" install agent/dist/open_node_agent-0.1.0-py3-none-any.whl
+"$AGENT_ENV/bin/pip" install agent/dist/open_node_agent-0.2.0-py3-none-any.whl
 backend/.venv/bin/python scripts/vps/smoke-open-node-agent.py --agent-python "$AGENT_ENV/bin/python"
 ```
 
@@ -149,7 +190,7 @@ After building the Agent wheel, run the following on the designated VPS as root:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-agent-service.py \
-  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl
 ```
 
 This requires a running systemd manager plus `useradd`, `runuser`, and curl.
@@ -181,7 +222,7 @@ with the browser/cryptography dependencies and a trusted Nginx binary:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-agent-lifecycle.py \
-  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
   --nginx /path/to/extracted/usr/sbin/nginx \
   --output /tmp/open-node-agent-lifecycle-shots
 ```
@@ -215,7 +256,7 @@ source separately, using that exact release artifact on the designated VPS:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-agent-release.py \
-  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --wheel /path/to/published/open_node_agent-0.1.0-py3-none-any.whl \
   --nginx /path/to/extracted/usr/sbin/nginx
 ```
 
@@ -233,7 +274,7 @@ service. Install `cryptography` in the smoke runner environment, then run:
 ```bash
 backend/.venv/bin/pip install cryptography
 backend/.venv/bin/python scripts/vps/smoke-nginx.py \
-  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
   --nginx /path/to/extracted/usr/sbin/nginx \
   --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so
 ```
@@ -254,7 +295,7 @@ Use the same binary/module fixtures and built Agent wheel as the Nginx smoke:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-tunnel.py \
-  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
   --nginx /path/to/extracted/usr/sbin/nginx \
   --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so
 ```
@@ -293,7 +334,7 @@ Verify before extraction; the Pebble binary needs executable permission.
 backend/.venv/bin/python scripts/vps/smoke-certificates.py \
   --lego /path/to/lego-4.35.2/lego \
   --pebble /path/to/pebble-linux-amd64/linux/amd64/pebble \
-  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
   --nginx /path/to/extracted/usr/sbin/nginx \
   --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so
 ```
@@ -388,7 +429,7 @@ With the backend's browser extra/Chromium and a built Agent wheel on the VPS:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-xray-releases.py \
-  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
   --output /tmp/open-node-xray-release-shots < /dev/null
 ```
 

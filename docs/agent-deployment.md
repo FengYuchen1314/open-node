@@ -17,7 +17,7 @@ existing Nginx service. Its desired running state participates in readiness.
 ## Prepare
 
 Use a trusted wheel built from this repository. The VPS test runner builds
-`agent/dist/open_node_agent-0.1.0-py3-none-any.whl`. The bootstrap deployment
+`agent/dist/open_node_agent-0.2.0-py3-none-any.whl`. The bootstrap deployment
 script uses only Python's standard library; package dependencies are installed
 into a separate virtual environment for each release, never the system Python.
 
@@ -51,7 +51,7 @@ Run from the repository checkout:
 
 ```bash
 sudo python3 agent/app/open_node_agent/service.py install \
-  --wheel agent/dist/open_node_agent-0.1.0-py3-none-any.whl \
+  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
   --config /root/open-node-agent.yaml \
   --xray-config /root/xray.json \
   --xray /usr/local/bin/xray
@@ -65,13 +65,16 @@ separate instance, supply both global options before `install`:
 ```bash
 sudo python3 agent/app/open_node_agent/service.py \
   --root /opt/open-node-agent-edge --unit open-node-agent-edge.service \
-  install --wheel /path/to/open_node_agent-0.1.0-py3-none-any.whl \
+  install --wheel /path/to/open_node_agent-0.2.0-py3-none-any.whl \
   --config /root/edge.yaml --xray-config /root/edge-xray.json --xray /usr/local/bin/xray
 ```
 
 The installer creates a matching non-login service account. It restricts
 writes to the Agent's configuration/state directories and gives the service
-only the capability needed for low-numbered listener ports. `KillMode=control-group`
+only the capability needed for low-numbered listener ports by default.
+The optional initial-install `--network-diagnostics` flag adds `CAP_NET_RAW`
+for [ICMP and return-route diagnostics](agent-diagnostics.md); it does not
+grant root or network administration privileges. `KillMode=control-group`
 contains the owned Xray child if the Agent exits abruptly. Agent program files,
 the bootstrap runtime and installation metadata remain root-owned; tokens,
 config files, and the execution journal remain private. Service definitions or

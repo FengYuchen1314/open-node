@@ -207,6 +207,9 @@ class Deployment:
     def unit_text(self):
         if self.record.get("unit_text"):
             return self.record["unit_text"]
+        capabilities = "CAP_NET_BIND_SERVICE"
+        if self.record.get("network_diagnostics"):
+            capabilities += " CAP_NET_RAW"
         return f"""# Managed by Open Node Agent: {self.record["installation_id"]}
 [Unit]
 Description=Open Node Agent
@@ -234,8 +237,8 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet={capabilities}
+AmbientCapabilities={capabilities}
 ReadWritePaths={self.root}/config {self.state}
 Environment=PYTHONNOUSERSITE=1
 
@@ -350,7 +353,7 @@ WantedBy=multi-user.target
         elif path.exists():
             shutil.rmtree(path)
 
-    def initialize(self):
+    def initialize(self, *, network_diagnostics=False):
         if self.root.exists():
             raise DeploymentError("Installation directory already exists; refusing takeover")
         if self.unit_file.exists() or self.unit_file.is_symlink():
@@ -377,6 +380,7 @@ WantedBy=multi-user.target
             "current": None,
             "previous": None,
             "pending": None,
+            "network_diagnostics": network_diagnostics,
         }
         self.record["unit_text"] = self.unit_text()
         self.save()
@@ -428,6 +432,12 @@ WantedBy=multi-user.target
             target = self.root / "runtime/nginx"
             write_file(target, Path(config["nginx_binary"]).read_bytes(), mode=0o755)
             config["nginx_binary"] = str(target)
+        if config.get("nexttrace_binary"):
+            if not self.record.get("network_diagnostics"):
+                raise DeploymentError("NextTrace requires install --network-diagnostics")
+            target = self.root / "runtime/nexttrace"
+            write_file(target, Path(config["nexttrace_binary"]).read_bytes(), mode=0o755)
+            config["nexttrace_binary"] = str(target)
         modules = []
         for index, source_module in enumerate(config.get("nginx_modules", [])):
             target = self.root / "runtime" / f"nginx-module-{index}.so"
@@ -611,16 +621,29 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
         self.record.update(current=old, pending=None, status="installed" if old else "failed")
         self.save()
 
-    def install(self, wheel, source=None, xray_config=None, xray_binary=None, asset_dir=None):
+    def install(
+        self,
+        wheel,
+        source=None,
+        xray_config=None,
+        xray_binary=None,
+        asset_dir=None,
+        *,
+        network_diagnostics=False,
+    ):
         if not self.root.exists():
             if not all((source, xray_config, xray_binary)):
                 raise DeploymentError(
                     "Fresh installation requires --config, --xray-config, and --xray"
                 )
             wheel_info(wheel)
-            self.initialize()
+            self.initialize(network_diagnostics=network_diagnostics)
         else:
             self.load()
+            if network_diagnostics and not self.record.get("network_diagnostics"):
+                raise DeploymentError(
+                    "Network diagnostics permission is selected at initial installation"
+                )
             if self.record.get("pending") or self.record.get("staging"):
                 raise DeploymentError("An interrupted transaction exists; run recover first")
             if self.record["status"] not in {"removed", "failed", "preparing"}:
@@ -721,6 +744,11 @@ def main():
     install.add_argument("--xray-config", type=Path)
     install.add_argument("--xray", type=Path)
     install.add_argument("--asset-dir", type=Path)
+    install.add_argument(
+        "--network-diagnostics",
+        action="store_true",
+        help="Allow raw ICMP/TCP probes with CAP_NET_RAW (host opt-in)",
+    )
     upgrade = actions.add_parser("upgrade")
     upgrade.add_argument("--wheel", type=Path, required=True)
     actions.add_parser("rollback")
@@ -743,7 +771,12 @@ def main():
         with deployment.locked():
             if args.action == "install":
                 deployment.install(
-                    args.wheel, args.config, args.xray_config, args.xray, args.asset_dir
+                    args.wheel,
+                    args.config,
+                    args.xray_config,
+                    args.xray,
+                    args.asset_dir,
+                    network_diagnostics=args.network_diagnostics,
                 )
             elif args.action == "upgrade":
                 deployment.upgrade(args.wheel)

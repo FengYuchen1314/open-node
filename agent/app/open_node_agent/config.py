@@ -33,6 +33,8 @@ class AgentConfig(BaseModel):
     nginx_http_port: int = Field(default=80, ge=1, le=65535)
     nginx_https_port: int = Field(default=443, ge=1, le=65535)
     nginx_listen_address: str = "0.0.0.0"
+    nexttrace_binary: Path | None = None
+    nexttrace_geoip: bool = True
     stats_address: str | None = None
     heartbeat_seconds: float = Field(default=15, ge=1, le=300)
     telemetry_seconds: float = Field(default=30, ge=1, le=300)
@@ -44,7 +46,13 @@ class AgentConfig(BaseModel):
         return str(ip_address(value))
 
     @field_validator(
-        "state_dir", "xray_binary", "xray_config", "ca_file", "nginx_binary", "lifecycle_socket"
+        "state_dir",
+        "xray_binary",
+        "xray_config",
+        "ca_file",
+        "nginx_binary",
+        "lifecycle_socket",
+        "nexttrace_binary",
     )
     @classmethod
     def absolute_path(cls, value: Path | None) -> Path | None:

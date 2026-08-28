@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import RouteProbeFields from "../components/RouteProbeFields.vue";
+import { latencyCommandTimeout, routeTargets, selectedRouteTargets } from "../domain/diagnostics";
 
 import type {
   ProbeMetricPoint,
@@ -12,6 +14,7 @@ import type {
   ProbeSystemSeries,
   ProbeTargetComparison,
   ProbeTask,
+  ProbeTaskKind,
 } from "../domain/probe";
 import type { ServerSummary } from "../domain/inventory";
 import type {
@@ -118,10 +121,14 @@ const taskDispatching = ref(false);
 const taskMessage = ref("");
 const taskForm = reactive({
   server_id: "",
+  kind: "domain_latency" as ProbeTaskKind,
   domains: "example.com",
   interval_sec: 300,
   domain_timeout_ms: 2_000,
   allow_icmp: false,
+  targets: routeTargets(),
+  ip_version: 4 as 4 | 6,
+  return_route_timeout_seconds: 25,
 });
 let selectedSeriesRequest = 0;
 let targetComparisonRequest = 0;
@@ -610,12 +617,17 @@ async function removeProbeAccessToken() {
 
 async function createScheduledProbeTask() {
   const domains = splitTaskDomains(taskForm.domains);
+  const targets = selectedRouteTargets(taskForm.targets);
   if (!taskForm.server_id) {
     taskMessage.value = "Select a server before creating a probe task.";
     return;
   }
-  if (domains.length === 0) {
+  if (taskForm.kind === "domain_latency" && domains.length === 0) {
     taskMessage.value = "Add at least one domain target.";
+    return;
+  }
+  if (taskForm.kind === "return_route" && targets.length === 0) {
+    taskMessage.value = "Add at least one return-route target.";
     return;
   }
 
@@ -624,11 +636,17 @@ async function createScheduledProbeTask() {
   try {
     await createProbeTask({
       server_id: taskForm.server_id,
-      kind: "domain_latency",
+      kind: taskForm.kind,
       interval_sec: taskForm.interval_sec,
-      domains,
+      domains: taskForm.kind === "domain_latency" ? domains : [],
       domain_timeout_ms: taskForm.domain_timeout_ms,
       allow_icmp: taskForm.allow_icmp,
+      return_route_targets: taskForm.kind === "return_route" ? targets : [],
+      return_route_timeout_seconds: taskForm.return_route_timeout_seconds,
+      ip_version: taskForm.ip_version,
+      command_timeout_ms: taskForm.kind === "return_route"
+        ? targets.length * taskForm.return_route_timeout_seconds * 1000 + 5000
+        : latencyCommandTimeout(domains.length, taskForm.domain_timeout_ms, taskForm.allow_icmp),
     });
     taskForm.domains = domains.join(", ");
     await refreshProbeTasks();
@@ -1549,6 +1567,8 @@ function formatBytes(value: number) {
       </div>
 
       <v-form class="probe-task-form" @submit.prevent="createScheduledProbeTask">
+        <v-select v-model="taskForm.kind" label="Probe type" density="comfortable" variant="outlined"
+          :items="[{ title: 'Domain latency', value: 'domain_latency' }, { title: 'Return route', value: 'return_route' }, { title: 'System', value: 'system' }]" />
         <v-select
           v-model="taskForm.server_id"
           :items="taskServerOptions"
@@ -1558,6 +1578,7 @@ function formatBytes(value: number) {
           variant="outlined"
         />
         <v-text-field
+          v-if="taskForm.kind === 'domain_latency'"
           v-model="taskForm.domains"
           density="comfortable"
           label="Domains"
@@ -1574,6 +1595,7 @@ function formatBytes(value: number) {
           variant="outlined"
         />
         <v-text-field
+          v-if="taskForm.kind === 'domain_latency'"
           v-model.number="taskForm.domain_timeout_ms"
           density="comfortable"
           label="Timeout ms"
@@ -1583,12 +1605,20 @@ function formatBytes(value: number) {
           variant="outlined"
         />
         <v-switch
+          v-if="taskForm.kind === 'domain_latency'"
           v-model="taskForm.allow_icmp"
           color="primary"
           density="comfortable"
           hide-details
           label="ICMP fallback"
         />
+        <template v-if="taskForm.kind === 'return_route'">
+          <RouteProbeFields v-model="taskForm.targets" />
+          <v-select v-model="taskForm.ip_version" label="IP version" density="comfortable" variant="outlined"
+            :items="[{ title: 'IPv4', value: 4 }, { title: 'IPv6', value: 6 }]" />
+          <v-text-field v-model.number="taskForm.return_route_timeout_seconds" label="Route timeout seconds"
+            type="number" min="10" max="45" density="comfortable" variant="outlined" />
+        </template>
         <v-btn
           :disabled="taskServerOptions.length === 0"
           :loading="taskSaving"
@@ -1965,3 +1995,15 @@ function formatBytes(value: number) {
     </v-navigation-drawer>
   </div>
 </template>
+
+<style scoped>
+.page-shell { grid-template-columns: minmax(0, 1fr); }
+.page-shell > *, .probe-title-row { min-width: 0; }
+.probe-task-surface { grid-template-columns: minmax(0, 1fr); }
+.probe-task-form { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+.probe-toggle-grid :deep(.v-selection-control .v-label) { white-space: normal; }
+@media (max-width: 600px) {
+  .section-head, .probe-token-row { flex-direction: column; align-items: stretch; }
+  .probe-task-actions { flex-direction: row; flex-wrap: wrap; }
+}
+</style>

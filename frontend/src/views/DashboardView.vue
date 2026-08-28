@@ -3,6 +3,8 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
 import CommandInspector from "../components/CommandInspector.vue";
 import AgentLifecycleDialog from "../components/AgentLifecycleDialog.vue";
+import RouteProbeFields from "../components/RouteProbeFields.vue";
+import { diagnosticPaths, latencyCommandTimeout, routeTargets, selectedRouteTargets } from "../domain/diagnostics";
 import {
   defaultServerCreateRequest,
   type AgentCommand,
@@ -76,6 +78,7 @@ const domainLatencyForm = reactive({
   timeout_ms: 2_000,
   allow_icmp: false,
 });
+const routeForm = reactive({ targets: routeTargets(), ip_version: 4 as 4 | 6, timeout_seconds: 25 });
 const agentSettingsForm = reactive({
   xray_mode: "external" as XrayMode,
   listen_port: 23889,
@@ -86,6 +89,10 @@ const agentSettingsForm = reactive({
 const logFilesForm = reactive({
   name: "",
   all: false,
+  confirmed: false,
+});
+watch(() => [commandForm.server_id, logFilesForm.name, logFilesForm.all], () => {
+  logFilesForm.confirmed = false;
 });
 const nginxToolsForm = reactive({
   stream_port: 443,
@@ -131,6 +138,7 @@ const paidPeerOptions: Array<{ title: string; value: boolean | null }> = [
 const commandMethods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 type PayloadAgentOperation =
   | "domain_latency"
+  | "return_route_test"
   | "service_control"
   | "logs"
   | "log_files_delete"
@@ -597,7 +605,8 @@ let lifecycleRefresh: ReturnType<typeof setTimeout> | undefined;
 let disposed = false;
 const pendingLifecycle = computed(() => Object.values(commandsByServer.value).flat().some(command =>
   ["pending", "leased", "waiting"].includes(command.status)
-  && /^\/api\/child\/agent\/(upgrade(?:-stream)?|uninstall(?:-stream)?|rollback)$/.test(command.path)));
+  && (diagnosticPaths.has(command.path)
+    || /^\/api\/child\/agent\/(upgrade(?:-stream)?|uninstall(?:-stream)?|rollback)$/.test(command.path))));
 
 function scheduleLifecycleRefresh() {
   clearTimeout(lifecycleRefresh);
@@ -629,6 +638,7 @@ async function queueLogs(service: AgentLogService) {
 }
 
 async function purgeLogFiles() {
+  if (!logFilesForm.confirmed) return;
   const name = logFilesForm.name.trim();
   if (!logFilesForm.all && !name) {
     errorMessage.value = "Log file name is required.";
@@ -642,6 +652,19 @@ async function purgeLogFiles() {
   if (queued && !logFilesForm.all) {
     logFilesForm.name = "";
   }
+  if (queued) logFilesForm.confirmed = false;
+}
+
+async function submitReturnRoute() {
+  const targets = selectedRouteTargets(routeForm.targets);
+  if (!targets.length) {
+    errorMessage.value = "At least one return-route target is required.";
+    return;
+  }
+  await queuePayloadOperation("return_route_test", {
+    targets, ip_version: routeForm.ip_version, timeout_seconds: routeForm.timeout_seconds,
+    command_timeout_ms: targets.length * routeForm.timeout_seconds * 1000 + 5000,
+  });
 }
 
 async function clearNginxStreamPort() {
@@ -717,6 +740,7 @@ async function submitDomainLatency() {
       domains,
       timeout_ms: domainLatencyForm.timeout_ms,
       allow_icmp: domainLatencyForm.allow_icmp,
+      command_timeout_ms: latencyCommandTimeout(domains.length, domainLatencyForm.timeout_ms, domainLatencyForm.allow_icmp),
     });
     domainLatencyForm.domainsText = "";
     await refreshCommands(servers.value);
@@ -1471,7 +1495,7 @@ function truncateText(value: string, maxLength: number) {
             />
           </div>
           <v-btn
-            :disabled="serverOptions.length === 0"
+            :disabled="serverOptions.length === 0 || !logFilesForm.confirmed"
             :loading="savingOperation === 'log_files_delete'"
             color="error"
             prepend-icon="mdi-delete-sweep-outline"
@@ -1480,6 +1504,8 @@ function truncateText(value: string, maxLength: number) {
           >
             Purge logs
           </v-btn>
+          <v-checkbox v-model="logFilesForm.confirmed" label="Confirm log deletion" hide-details
+            density="comfortable" color="error" />
         </v-form>
         <div class="section-subtitle operation-subtitle">Config reads</div>
         <div class="config-command-grid">
@@ -1640,6 +1666,18 @@ function truncateText(value: string, maxLength: number) {
           >
             Queue latency probe
           </v-btn>
+        </v-form>
+        <v-form class="server-form" @submit.prevent="submitReturnRoute">
+          <div class="section-subtitle">Return route</div>
+          <RouteProbeFields v-model="routeForm.targets" />
+          <v-btn-toggle v-model="routeForm.ip_version" mandatory density="comfortable" color="primary">
+            <v-btn :value="4">IPv4</v-btn><v-btn :value="6">IPv6</v-btn>
+          </v-btn-toggle>
+          <v-text-field v-model.number="routeForm.timeout_seconds" label="Route timeout seconds"
+            type="number" min="10" max="45" density="comfortable" variant="outlined" />
+          <v-btn :disabled="serverOptions.length === 0 || savingOperation !== ''"
+            :loading="savingOperation === 'return_route_test'" type="submit" color="primary"
+            prepend-icon="mdi-routes" variant="tonal">Trace return route</v-btn>
         </v-form>
         <v-divider class="command-divider" />
 

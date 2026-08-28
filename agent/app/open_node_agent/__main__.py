@@ -9,6 +9,7 @@ from pathlib import Path
 from open_node_agent import __version__
 from open_node_agent.client import Agent
 from open_node_agent.config import load_config
+from open_node_agent.logs import configure_agent_log
 from open_node_agent.runtime import RuntimeFailure, run_command
 from open_node_agent.xray_releases import read_state, selected_binary
 
@@ -60,7 +61,12 @@ def main():
         if args.check:
             print("Agent configuration is valid")
             return
-        asyncio.run(run(config))
+        handler = configure_agent_log(config)
+        try:
+            asyncio.run(run(config))
+        finally:
+            logging.getLogger("open-node-agent").removeHandler(handler)
+            handler.close()
     except (OSError, ValueError, RuntimeError) as exc:
         parser.exit(1, f"Agent stopped: {exc}\n")
 

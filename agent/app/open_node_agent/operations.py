@@ -8,8 +8,10 @@ from urllib.parse import parse_qs
 import psutil
 
 from open_node_agent import __version__
+from open_node_agent.diagnostics import Diagnostics
 from open_node_agent.journal import CommandJournal
 from open_node_agent.lifecycle import HostLifecycle
+from open_node_agent.logs import OwnedLogs
 from open_node_agent.nginx import NginxRuntime
 from open_node_agent.runtime import RuntimeFailure, XrayRuntime
 from open_node_agent.xray_releases import XrayReleases
@@ -172,6 +174,8 @@ class Operations:
         self.nginx = NginxRuntime(runtime, journal)
         self.releases = XrayReleases(runtime, journal)
         self.lifecycle = HostLifecycle(runtime.config)
+        self.diagnostics = Diagnostics(runtime.config)
+        self.logs = OwnedLogs(runtime.config)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
 
@@ -205,6 +209,17 @@ class Operations:
         if not isinstance(body, dict):
             raise RuntimeFailure("Command body must be an object")
         query = parse_qs(command.get("query") or "")
+        if path == "/api/child/domains/latency" and method == "POST":
+            return await self.diagnostics.latency(body)
+        if path == "/api/child/network/return-route-test" and method == "POST":
+            return await self.diagnostics.return_route(body)
+        if path == "/api/child/logs" and method == "GET":
+            return self.logs.tail(query)
+        if path == "/api/child/logs/files":
+            if method == "GET":
+                return self.logs.list()
+            if method == "DELETE":
+                return self.logs.delete(query)
         async with self.runtime.lock:
             if path == "/api/child/agent/lifecycle" and method == "GET":
                 return await self.lifecycle.status()
@@ -331,13 +346,4 @@ class Operations:
                 return self.network_speed()
             if path == "/api/child/traffic" and method == "GET":
                 return {"success": True, "stats": await self.runtime.stats(), **telemetry()}
-            if path == "/api/child/logs" and method == "GET":
-                service = query.get("service", ["xray"])[0]
-                if service not in {"xray", "nginx"}:
-                    raise RuntimeFailure("This endpoint exposes only owned Xray and Nginx logs")
-                lines = min(2000, max(1, int(query.get("lines", ["200"])[0])))
-                with (self.runtime.config.state_dir / (service + ".log")).open("rb") as log:
-                    log.seek(max(0, log.seek(0, 2) - 128_000))
-                    content = log.read().decode(errors="replace")
-                return {"success": True, "logs": "\n".join(content.splitlines()[-lines:])}
         raise NotImplementedError(f"Operation not implemented: {method} {path}")

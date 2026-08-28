@@ -87,9 +87,13 @@ its runtime is restarted. A requested stop persists across agent restarts.
 Supported operations include config read/write/test, scan, Xray service control,
 inbound/outbound/routing edits, VLESS/VMess/Trojan/Shadowsocks client edits,
 batch client provisioning, host metrics/NICs, network speed, Xray stats, and
-bounded Xray logs. Network speed is bytes per second between successive speed
+bounded Agent/Xray/Nginx logs. Network speed is bytes per second between successive speed
 requests; the first sample returns zero and counter resets never produce
 negative rates.
+Native [diagnostics](../docs/agent-diagnostics.md) include concurrent TCP latency,
+optional ICMP fallback, NextTrace return-route evidence, and ownership-scoped
+log file listing/clearing. Raw network probes require explicit host permissions;
+TCP latency works without them.
 Managed [Xray release operations](../docs/xray-releases.md) install explicit
 official versions using archive SHA-256 pins, validate existing configuration,
 retain a previous selection and recover failed/interrupted switches. Remote

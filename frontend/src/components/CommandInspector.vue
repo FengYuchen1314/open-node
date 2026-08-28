@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { AgentCommand, AgentCommandStreamFrame } from "../domain/inventory";
+import { diagnosticPaths } from "../domain/diagnostics";
+import DiagnosticResult from "./DiagnosticResult.vue";
 
 defineProps<{
   commands: AgentCommand[];
@@ -28,6 +30,14 @@ function commandTarget(command: AgentCommand) {
   return command.query ? `${command.path}?${command.query}` : command.path;
 }
 
+function commandTitle(command: AgentCommand) {
+  if (command.path === "/api/child/domains/latency") return "Domain latency";
+  if (command.path === "/api/child/network/return-route-test") return "Return route";
+  if (command.path === "/api/child/logs") return "Service logs";
+  if (command.path === "/api/child/logs/files") return command.method === "DELETE" ? "Clear log files" : "Log files";
+  return command.method + " " + commandTarget(command);
+}
+
 function formatJson(value: unknown) {
   if (value === undefined || value === null) {
     return "";
@@ -50,7 +60,8 @@ function framesText(frames: AgentCommandStreamFrame[]) {
     density="comfortable"
     variant="accordion"
   >
-    <v-expansion-panel v-for="command in commands" :key="command.id">
+    <v-expansion-panel v-for="command in commands" :key="command.id" :value="command.id"
+      :data-command-id="command.id">
       <v-expansion-panel-title>
         <div class="command-title-row">
           <v-icon
@@ -59,7 +70,7 @@ function framesText(frames: AgentCommandStreamFrame[]) {
             size="22"
           />
           <div class="command-title-text">
-            <div class="command-title">{{ command.method }} {{ commandTarget(command) }}</div>
+            <div class="command-title">{{ commandTitle(command) }}</div>
             <div class="command-subtitle">
               {{ commandSubtitle(command, streamFramesByCommand[command.id] ?? []) }}
             </div>
@@ -75,7 +86,18 @@ function framesText(frames: AgentCommandStreamFrame[]) {
         </div>
       </v-expansion-panel-title>
       <v-expansion-panel-text>
-        <div class="command-detail-grid">
+        <DiagnosticResult
+          v-if="diagnosticPaths.has(command.path) && command.result_body != null"
+          :path="command.path" :body="command.result_body"
+        />
+        <details v-if="diagnosticPaths.has(command.path)" class="diagnostic-request">
+          <summary>Request details</summary>
+          <div class="detail-value">{{ command.method }} {{ commandTarget(command) }}</div>
+          <div class="detail-value">{{ command.request_id }}</div>
+          <div class="detail-value">{{ command.timeout_ms }} ms | {{ command.created_at }}</div>
+          <pre v-if="command.body != null" class="command-json">{{ formatJson(command.body) }}</pre>
+        </details>
+        <div v-else class="command-detail-grid">
           <div>
             <div class="detail-label">Request</div>
             <div class="detail-value">{{ command.request_id }}</div>
@@ -98,7 +120,7 @@ function framesText(frames: AgentCommandStreamFrame[]) {
           </div>
         </div>
 
-        <pre v-if="command.body !== null && command.body !== undefined" class="command-json">{{
+        <pre v-if="!diagnosticPaths.has(command.path) && command.body != null" class="command-json">{{
           formatJson(command.body)
         }}</pre>
 
@@ -113,7 +135,7 @@ function framesText(frames: AgentCommandStreamFrame[]) {
         </v-alert>
 
         <pre
-          v-if="command.result_body !== null && command.result_body !== undefined"
+          v-if="!diagnosticPaths.has(command.path) && command.result_body != null"
           class="command-json"
         >{{ formatJson(command.result_body) }}</pre>
 
@@ -126,3 +148,12 @@ function framesText(frames: AgentCommandStreamFrame[]) {
   </v-expansion-panels>
   <div v-else class="empty-command">{{ emptyText ?? "No commands queued." }}</div>
 </template>
+
+<style scoped>
+.diagnostic-request { margin-top: 16px; font-size: 12px; }
+.diagnostic-request summary { cursor: pointer; margin-bottom: 8px; }
+.command-title-row { grid-template-columns: 22px minmax(0, 1fr); align-items: start; }
+.command-title-row :deep(.v-chip) { grid-column: 2; justify-self: start; }
+.command-title { white-space: normal; overflow-wrap: anywhere; }
+.command-subtitle { overflow-wrap: anywhere; line-height: 1.35; }
+</style>
