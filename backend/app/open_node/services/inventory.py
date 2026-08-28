@@ -445,6 +445,7 @@ _XRAY_MUTATING_PATH_PREFIXES = (
     "/api/child/outbounds",
     "/api/child/routing",
     "/api/child/batch-apply",
+    "/api/child/subscription-access",
     "/api/child/xray/config",
     "/api/child/xray/config-files",
     "/api/child/xray/system-config",
@@ -785,6 +786,7 @@ class AgentModel(Base):
     capability_stream: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_return_route_test: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_native_limiter: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_subscription_access: Mapped[bool] = mapped_column(Boolean, default=False)
     warp_installed: Mapped[bool] = mapped_column(Boolean, default=False)
     same_host_as_master: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -1128,6 +1130,29 @@ class SubscriptionCredentialModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class SubscriptionAccessModel(Base):
+    __tablename__ = "subscription_access"
+    __table_args__ = (
+        UniqueConstraint("username", "server_id", name="uq_subscription_access_server"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    username: Mapped[str] = mapped_column(
+        String(80), ForeignKey("product_users.username", ondelete="CASCADE"), index=True
+    )
+    server_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("servers.id", ondelete="CASCADE"), index=True
+    )
+    bindings: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    applied_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    command_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("agent_commands.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class SubscriptionTrafficLedgerModel(Base):
     __tablename__ = "subscription_traffic_ledger"
     __table_args__ = (
@@ -1231,7 +1256,12 @@ class InventoryStore:
         table_names = set(inspector.get_table_names())
         if "agents" in table_names:
             self._sqlite_add_missing_columns(
-                inspector, "agents", {"capability_native_limiter": "BOOLEAN NOT NULL DEFAULT 0"}
+                inspector,
+                "agents",
+                {
+                    "capability_native_limiter": "BOOLEAN NOT NULL DEFAULT 0",
+                    "capability_subscription_access": "BOOLEAN NOT NULL DEFAULT 0",
+                },
             )
         if "agent_change_sets" in table_names:
             self._sqlite_add_missing_columns(
@@ -1442,6 +1472,7 @@ class InventoryStore:
             agent.capability_stream = payload.capabilities.stream
             agent.capability_return_route_test = payload.capabilities.return_route_test
             agent.capability_native_limiter = payload.capabilities.native_limiter
+            agent.capability_subscription_access = payload.capabilities.subscription_access
             agent.warp_installed = payload.warp_installed
             agent.same_host_as_master = payload.same_host_as_master
             agent.last_seen_at = now
@@ -3120,12 +3151,14 @@ class InventoryStore:
         self,
         username: str,
         payload: SubscriptionPlanAssignRequest,
+        *,
+        queued_commands: list[AgentCommandRead] | None = None,
     ) -> tuple[ProductUserRead, SubscriptionPlanRead, list[SubscriptionProvisionBatch], list[str]]:
         username = username.strip()
         if not username:
             raise ProductUserNotFoundError("username is required")
         now = datetime.now(tz=UTC)
-        with self._session() as session:
+        with self._coordinated_session() as session:
             user = session.get(ProductUserModel, username)
             if not user:
                 raise ProductUserNotFoundError(f"user not found: {username}")
@@ -3159,7 +3192,16 @@ class InventoryStore:
                 plan,
                 no_restart=payload.no_restart,
             )
+            commands = []
+            if payload.queue_agent_commands:
+                access = self._subscription_access()
+                access.authorize(session, user, plan, batches, now)
+                commands = access.reconcile(
+                    session, now, username=username, timeout_ms=payload.command_timeout_ms
+                )
             session.commit()
+            if queued_commands is not None:
+                queued_commands.extend(self._command_read(command) for command in commands)
             session.refresh(user)
             session.refresh(plan)
             return (
@@ -3409,7 +3451,7 @@ class InventoryStore:
         now: datetime | None = None,
     ) -> SubscriptionQuotaStatusRead:
         active_now = self._aware_datetime(now or datetime.now(tz=UTC))
-        with self._session() as session:
+        with self._coordinated_session() as session:
             user = session.get(ProductUserModel, username)
             if not user:
                 raise ProductUserNotFoundError(f"user not found: {username}")
@@ -3429,7 +3471,7 @@ class InventoryStore:
     ) -> SubscriptionDueTrafficResetResponse:
         active_now = self._aware_datetime(payload.now or datetime.now(tz=UTC))
         summary = SubscriptionDueTrafficResetSummary(dry_run=payload.dry_run)
-        with self._session() as session:
+        with self._coordinated_session() as session:
             users = session.scalars(
                 select(ProductUserModel).order_by(ProductUserModel.username)
             ).all()
@@ -6335,6 +6377,11 @@ class InventoryStore:
 
         return ChangeSetCoordinator(self)
 
+    def _subscription_access(self):
+        from open_node.services.subscription_access import SubscriptionAccessCoordinator
+
+        return SubscriptionAccessCoordinator(self)
+
     @staticmethod
     def _server_record(server: ServerModel) -> ServerRecord:
         return ServerRecord(
@@ -6399,6 +6446,7 @@ class InventoryStore:
                 stream=agent.capability_stream,
                 return_route_test=agent.capability_return_route_test,
                 native_limiter=agent.capability_native_limiter,
+                subscription_access=agent.capability_subscription_access,
             ),
             warp_installed=agent.warp_installed,
             same_host_as_master=agent.same_host_as_master,
@@ -8567,6 +8615,8 @@ class InventoryStore:
             return False
         if not self._change_sets().can_lease(session, command):
             return False
+        if not self._subscription_access().can_lease(session, command, now):
+            return False
         needs_limiter = command.path == "/api/child/limiter" or (
             command.path == "/api/child/batch-apply"
             and isinstance(command.body, dict)
@@ -8645,6 +8695,8 @@ class InventoryStore:
         body = payload.body if isinstance(payload.body, dict) else {}
         if not result_error and body.get("success") is False:
             result_error = "Agent reported an unsuccessful result"
+        if not result_error and payload.status < 400:
+            result_error = self._subscription_access().confirmation_error(command, body)
         if (
             not result_error
             and payload.status < 400
@@ -8717,6 +8769,7 @@ class InventoryStore:
             self._record_xray_config_snapshot_from_command(session, server, command, payload, now)
             self._queue_xray_snapshot_refresh_after_mutation(session, server, command, payload, now)
         self._change_sets().advance_after_result(session, command, now)
+        self._subscription_access().after_result(session, command, now)
 
     @staticmethod
     def _advance_command_dependents(session: Session, command: CommandModel, now: datetime) -> None:

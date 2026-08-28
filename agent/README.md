@@ -5,6 +5,11 @@ lives in this monorepo and is distributed under the repository's MIT license.
 It does not include MMWX Agent source, activation checks, paid feature flags,
 license-server calls, or an embedded copy of the MMWX Xray fork.
 
+[Managed subscription access](../docs/subscription-access.md) uses guarded
+credential changes and private empty-inbound recovery records. It advertises
+the `subscription_access` capability and confirms each applied revision;
+account changes are not treated as enforced until the controller receives it.
+
 This agent is under active development. The implemented runtime path uses an
 operator-provided Xray binary, either as an owned subprocess or a configured
 systemd service. It is not yet a full replacement for every MMWX host operation.

@@ -123,7 +123,7 @@ def test_subscription_catalog_assigns_plan_without_license_gate(tmp_path: Path) 
                 "user_email": "alice__vless-443",
             }
         ],
-        "no_restart": True,
+        "no_restart": False,
         "limiter_users": [
             {
                 "inbound_tag": "vless-443",
@@ -733,7 +733,11 @@ def test_plan_assignment_dispatches_agent_batch_apply(tmp_path: Path) -> None:
                 "payload": {
                     "token": agent_token,
                     "hostname": "edge-sub-host",
-                    "capabilities": {"rpc": True, "native_limiter": True},
+                    "capabilities": {
+                        "rpc": True,
+                        "native_limiter": True,
+                        "subscription_access": True,
+                    },
                 },
             }
         )
@@ -753,12 +757,12 @@ def test_plan_assignment_dispatches_agent_batch_apply(tmp_path: Path) -> None:
         assert response.status_code == 200
         payload = response.json()
         assert payload["commands"][0]["status"] == "leased"
-        assert payload["commands"][0]["path"] == "/api/child/batch-apply"
+        assert payload["commands"][0]["path"] == "/api/child/subscription-access"
         assert payload["commands"][0]["server_id"] == server_id
         rpc_call = websocket.receive_json()
         assert rpc_call["type"] == "rpc_call"
-        assert rpc_call["payload"]["path"] == "/api/child/batch-apply"
+        assert rpc_call["payload"]["path"] == "/api/child/subscription-access"
         assert rpc_call["payload"]["method"] == "POST"
         assert rpc_call["payload"]["timeout_ms"] == 75_000
-        assert rpc_call["payload"]["body"]["no_restart"] is False
-        UUID(rpc_call["payload"]["body"]["inbound_clients"][0]["client"]["id"])
+        assert rpc_call["payload"]["body"]["entries"][0]["enabled"] is True
+        UUID(rpc_call["payload"]["body"]["entries"][0]["client"]["id"])

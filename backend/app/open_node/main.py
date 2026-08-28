@@ -19,6 +19,7 @@ from open_node.services.certificates import CertificateStore
 from open_node.services.inventory import InventoryStore
 from open_node.services.probe_stream import PublicProbeStreamManager
 from open_node.services.secure_channel import AgentIdentity
+from open_node.services.subscription_access import SubscriptionAccessWorker
 from open_node.web import FrontendFiles
 
 
@@ -34,12 +35,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app):
         worker = CertificateWorker(app.state.certificates, app.state.agent_connections)
         task = asyncio.create_task(worker.run())
+        access = SubscriptionAccessWorker(
+            app.state.inventory,
+            app.state.agent_connections,
+            active_settings.subscription_access_poll_seconds,
+        )
+        access_task = asyncio.create_task(access.run())
         try:
             yield
         finally:
             task.cancel()
+            access_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            with contextlib.suppress(asyncio.CancelledError):
+                await access_task
 
     app = FastAPI(
         title=active_settings.app_name,

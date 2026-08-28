@@ -80,6 +80,12 @@ now filter incompatible nodes and provide native free-client Xray/Snell v6
 configurations. Mieru UDP targets, public WARP verification and further
 migration workflows remain incomplete.
 
+[Managed subscription access](docs/subscription-access.md) now revokes actual
+credentials on expiry, account disablement and traffic exhaustion, then restores
+the same credentials after renewal or reset. Durable commands expose pending
+and failed nodes and prevent stale unsent provisioning. Plan bandwidth and
+connection caps use the free [native limiter](docs/native-limits.md).
+
 [Central certificate management](docs/certificates.md) now provides DNS
 credentials, PEM import/export, DNS-01 and HTTP-01 issuance and renewal through pinned
 lego v4 and Certbot ACME, EAB, encrypted version history, and automatic Agent deployment.
@@ -97,7 +103,7 @@ persisted server/agent inventory, agent telemetry and command slices, initial
 agent operation, maintenance, diagnostic, and config-preparation wrappers, and
 Xray/nginx config plus agent setting wrappers, high-level runtime/site
 operation wrappers, a subscription catalog with user-plan binding, optional
-agent `batch-apply` provisioning, public subscription links with generated
+guarded Agent provisioning, public subscription links with generated
 per-user credentials, Clash/sing-box/Xray/URI subscription rendering, durable
 per-user traffic ledgering, [coordinated multi-server change sets](docs/change-sets.md) plus a
 routed-outbound change-set planner, and subscription template presets including

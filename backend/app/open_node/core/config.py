@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     certificate_job_timeout: int = Field(default=240, ge=5, le=600)
     frontend_dir: Path | None = None
     agent_identity_file: Path | None = None
+    subscription_access_poll_seconds: float = Field(default=10, ge=1, le=300)
 
     @field_validator("certificate_http_address")
     @classmethod

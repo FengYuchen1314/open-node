@@ -16,6 +16,8 @@ from open_node_agent.lifecycle import HostLifecycle
 from open_node_agent.logs import OwnedLogs
 from open_node_agent.nginx import NginxRuntime
 from open_node_agent.runtime import RuntimeFailure, XrayRuntime
+from open_node_agent.subscription_access import ENDPOINT as ACCESS_ENDPOINT
+from open_node_agent.subscription_access import SubscriptionAccess
 from open_node_agent.warp import Warp
 from open_node_agent.xray_releases import XrayReleases
 from open_node_agent.xray_takeover import ENDPOINT as TAKEOVER_ENDPOINT
@@ -251,6 +253,7 @@ class Operations:
         self.warp = Warp(runtime)
         self.http01 = HttpChallenges(runtime.config, journal)
         self.takeover = XrayTakeover(runtime, journal)
+        self.subscription_access = SubscriptionAccess(runtime, journal)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
 
@@ -305,6 +308,8 @@ class Operations:
             if method == "DELETE":
                 return self.logs.delete(query)
         async with self.runtime.lock:
+            if path == ACCESS_ENDPOINT and method == "POST":
+                return await self.subscription_access.apply(body)
             if path == "/api/child/limiter":
                 if method == "GET":
                     return await self.runtime.limiter.status()

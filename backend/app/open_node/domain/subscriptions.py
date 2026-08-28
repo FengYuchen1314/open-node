@@ -4,7 +4,7 @@ from math import isfinite
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from open_node.domain.inventory import AgentCommandRead
 
@@ -101,6 +101,34 @@ class ProductUserRead(BaseModel):
     last_traffic_reset_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ProductUserActiveUpdate(BaseModel):
+    is_active: bool = Field(strict=True)
+
+
+class SubscriptionAccessEntryRead(BaseModel):
+    inbound_tag: str
+    email: str
+    enabled: bool
+    reason: str
+
+
+class SubscriptionAccessServerRead(BaseModel):
+    server_id: UUID
+    server_name: str
+    status: Literal["pending", "applied", "failed"]
+    command_id: UUID | None = None
+    error: str | None = None
+    updated_at: datetime
+    entries: list[SubscriptionAccessEntryRead]
+
+
+class SubscriptionAccessResponse(BaseModel):
+    username: str
+    managed: bool
+    servers: list[SubscriptionAccessServerRead]
+    license_required: Literal[False] = False
 
 
 class ProductUsersResponse(BaseModel):
@@ -765,8 +793,14 @@ class SubscriptionPlanAssignRequest(BaseModel):
     is_reset: bool | None = None
     reset_day: int | None = Field(default=None, ge=1, le=31)
     queue_agent_commands: bool = False
-    no_restart: bool = True
+    no_restart: bool = False
     command_timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    @model_validator(mode="after")
+    def enforce_runtime_activation(self):
+        if self.queue_agent_commands and self.no_restart:
+            raise ValueError("Managed subscription access requires immediate runtime activation")
+        return self
 
 
 class SubscriptionProvisionBatch(BaseModel):

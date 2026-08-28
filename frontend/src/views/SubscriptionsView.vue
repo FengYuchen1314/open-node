@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import SubscriptionAccessPanel from "../components/SubscriptionAccessPanel.vue";
 
 import type { ServerSummary } from "../domain/inventory";
 import type {
@@ -125,7 +126,7 @@ const assignForm = reactive({
   start_date: "",
   expire_date: "",
   queue_agent_commands: false,
-  no_restart: true,
+  no_restart: false,
   command_timeout_ms: 60_000,
 });
 const subscriptionFormat = ref<SubscriptionClientFormat>("clash");
@@ -1240,14 +1241,7 @@ function formatBytes(value: number) {
                   color="warning"
                   density="comfortable"
                   hide-details
-                  label="Queue commands"
-                />
-                <v-switch
-                  v-model="assignForm.no_restart"
-                  color="primary"
-                  density="comfortable"
-                  hide-details
-                  label="No restart"
+                  label="Apply to nodes (restart Xray)"
                 />
               </div>
               <v-text-field
@@ -1294,6 +1288,12 @@ function formatBytes(value: number) {
             density="comfortable"
             label="User"
             variant="outlined"
+          />
+          <SubscriptionAccessPanel
+            :username="assignForm.username"
+            :is-active="users.find((user) => user.username === assignForm.username)?.is_active ?? false"
+            :refresh-key="lastAssignment?.user.updated_at"
+            @updated="(updated) => { users = users.map((user) => user.username === updated.username ? updated : user); subscriptionQuota = null; }"
           />
           <div class="subscription-action-row">
             <v-btn

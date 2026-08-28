@@ -225,6 +225,7 @@ class AgentCapabilities(BaseModel):
     stream: bool = False
     return_route_test: bool = False
     native_limiter: bool = False
+    subscription_access: bool = False
 
 
 class ServerCreate(BaseModel):

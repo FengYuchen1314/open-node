@@ -222,7 +222,9 @@ class XrayRuntime:
         await self.stop()
         await self.start()
 
-    async def write(self, value: str | dict, *, restart: bool = False) -> dict:
+    async def write(
+        self, value: str | dict, *, restart: bool = False, expected: dict | None = None
+    ) -> dict:
         candidate = decode_config(value)
         ok, output = await self.validate(candidate)
         if not ok:
@@ -236,6 +238,8 @@ class XrayRuntime:
         )
         was_running = await self.running()
         await self.binding()
+        if expected is not None and self.read() != expected:
+            raise RuntimeFailure("Xray configuration changed during the guarded update")
         atomic_write(self.config.xray_config, json.dumps(candidate, indent=2).encode() + b"\n")
         try:
             if restart and was_running:

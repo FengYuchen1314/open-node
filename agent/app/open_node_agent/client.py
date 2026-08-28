@@ -102,6 +102,7 @@ class Agent:
                 "stream": True,
                 "return_route_test": self.operations.diagnostics.route_available(),
                 "native_limiter": True,
+                "subscription_access": True,
             },
         }
 

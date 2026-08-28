@@ -3,6 +3,21 @@ import type { AgentCommand } from "./inventory";
 export type ProductUserRole = "admin" | "user";
 export type ManagedNodeType = "physical" | "routed";
 export type SubscriptionTrafficMode = "oneway" | "twoway";
+
+export interface SubscriptionAccessResponse {
+  username: string;
+  managed: boolean;
+  servers: Array<{
+    server_id: string;
+    server_name: string;
+    status: "pending" | "applied" | "failed";
+    command_id: string | null;
+    error: string | null;
+    updated_at: string;
+    entries: Array<{ inbound_tag: string; email: string; enabled: boolean; reason: string }>;
+  }>;
+  license_required: false;
+}
 export type SubscriptionClientFormat = "clash" | "sing-box" | "xray" | "uri-list" | "base64";
 
 export interface SubscriptionFormatPreview {

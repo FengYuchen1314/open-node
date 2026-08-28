@@ -6,11 +6,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
-from open_node.domain.inventory import AgentCommandCreate
 from open_node.domain.subscriptions import (
     ManagedNodeCreate,
     ManagedNodeResponse,
     ManagedNodesResponse,
+    ProductUserActiveUpdate,
     ProductUserCreate,
     ProductUserCredentialsResponse,
     ProductUserResponse,
@@ -18,6 +18,7 @@ from open_node.domain.subscriptions import (
     ProductUserSubscriptionTokenRead,
     ProductUserSubscriptionTokenResponse,
     ProductUserTrafficResponse,
+    SubscriptionAccessResponse,
     SubscriptionCatalogExportResponse,
     SubscriptionCatalogImportRequest,
     SubscriptionCatalogImportResponse,
@@ -48,9 +49,52 @@ from open_node.services.inventory import (
     SubscriptionTokenRecord,
     SubscriptionUnavailableError,
 )
+from open_node.services.subscription_access import SubscriptionAccessConflict
 
 router = APIRouter(tags=["subscriptions"])
 public_router = APIRouter(tags=["subscriptions"])
+
+
+@router.get("/users/{username}/access", response_model=SubscriptionAccessResponse)
+def subscription_access(
+    username: str,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+):
+    try:
+        return store._subscription_access().read(username)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/users/{username}/access/sync", response_model=SubscriptionAccessResponse)
+async def sync_subscription_access(
+    username: str,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+):
+    try:
+        commands = store._subscription_access().run_once(username=username, force=True)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    for command in commands:
+        await connections.dispatch_command(store, command)
+    return store._subscription_access().read(username)
+
+
+@router.patch("/users/{username}/active", response_model=ProductUserResponse)
+async def update_product_user_active(
+    username: str,
+    payload: ProductUserActiveUpdate,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+):
+    try:
+        user, commands = store._subscription_access().set_active(username, payload.is_active)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    for command in commands:
+        await connections.dispatch_command(store, command)
+    return ProductUserResponse(user=user)
 
 
 @router.get("/users", response_model=ProductUsersResponse)
@@ -329,26 +373,21 @@ async def assign_subscription_plan(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> SubscriptionPlanAssignResponse:
+    queued = []
     try:
-        user, plan, batches, warnings = store.assign_subscription_plan(username, payload)
+        user, plan, batches, warnings = store.assign_subscription_plan(
+            username, payload, queued_commands=queued
+        )
     except ProductUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SubscriptionPlanNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except SubscriptionAccessConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     commands = []
-    if payload.queue_agent_commands:
-        for batch in batches:
-            command = store.create_command(
-                batch.server_id,
-                AgentCommandCreate(
-                    method="POST",
-                    path="/api/child/batch-apply",
-                    body=batch.body,
-                    timeout_ms=payload.command_timeout_ms,
-                ),
-            )
-            commands.append(await connections.dispatch_command(store, command))
+    for command in queued:
+        commands.append(await connections.dispatch_command(store, command))
 
     return SubscriptionPlanAssignResponse(
         user=user,

@@ -10,6 +10,7 @@ import type {
   ProductUserTrafficResponse,
   ProductUsersResponse,
   SubscriptionCatalogExportResponse,
+  SubscriptionAccessResponse,
   SubscriptionCatalogImportRequest,
   SubscriptionCatalogImportResponse,
   SubscriptionClientFormat,
@@ -43,6 +44,36 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const jsonHeaders = {
   "Content-Type": "application/json",
 };
+
+export async function getSubscriptionAccess(
+  username: string,
+  fetcher = authenticatedFetch,
+): Promise<SubscriptionAccessResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/access`);
+  if (!response.ok) throw await apiError(response, "Subscription access request failed");
+  return response.json() as Promise<SubscriptionAccessResponse>;
+}
+
+export async function syncSubscriptionAccess(
+  username: string,
+  fetcher = authenticatedFetch,
+): Promise<SubscriptionAccessResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/access/sync`, { method: "POST" });
+  if (!response.ok) throw await apiError(response, "Subscription access sync failed");
+  return response.json() as Promise<SubscriptionAccessResponse>;
+}
+
+export async function setProductUserActive(
+  username: string,
+  isActive: boolean,
+  fetcher = authenticatedFetch,
+): Promise<ProductUserResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/users/${encodeURIComponent(username)}/active`, {
+    method: "PATCH", headers: jsonHeaders, body: JSON.stringify({ is_active: isActive }),
+  });
+  if (!response.ok) throw await apiError(response, "User status update failed");
+  return response.json() as Promise<ProductUserResponse>;
+}
 
 export async function getSubscriptionFormatPreview(
   username: string,
