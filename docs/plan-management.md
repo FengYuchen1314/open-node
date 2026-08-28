@@ -96,5 +96,6 @@ formatting and browser execution run on the configured VPS.
 This implements the lifecycle of existing Open Node plan fields, not every
 original package feature. Per-plan node name aliases, automatic speed-rule
 binding and custom Clash/Surge template selection still need migration and
-real-client verification. Ordinary user and node editing/removal also remain
-separate product work. These are not license-gated features.
+real-client verification. [User profile editing and removal](user-management.md)
+are implemented separately; ordinary node editing/removal remains product work.
+These are not license-gated features.

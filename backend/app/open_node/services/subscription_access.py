@@ -247,7 +247,9 @@ class SubscriptionAccessCoordinator:
         )
         quota = self.store._subscription_quota_status(session, user, plan, now)
         reason = (
-            "disabled"
+            "removing"
+            if user.removal_id
+            else "disabled"
             if not user.is_active
             else "no_plan"
             if not plan
@@ -378,6 +380,10 @@ class SubscriptionAccessCoordinator:
         return commands
 
     def can_lease(self, session, command, now):
+        if not command.attempts and self.store._user_management().retired_restore(session, command):
+            self.skip(session, command, now, "Not sent: user removal retired these credentials")
+            self.after_result(session, command, now)
+            return False
         legacy = command_clients(command)
         if legacy and not command.attempts:
             self.adopt_command(session, command, now)
@@ -508,6 +514,8 @@ class SubscriptionAccessCoordinator:
             if username is not None and session.get(ProductUserModel, username) is None:
                 raise ProductUserNotFoundError(f"user not found: {username}")
             commands = self.reconcile(session, active_now, username=username, force=force)
+            if username is None:
+                self.store._user_management().finalize_ready(session, active_now)
             session.commit()
             return [self.store._command_read(command) for command in commands]
 
@@ -517,6 +525,20 @@ class SubscriptionAccessCoordinator:
             user = session.get(ProductUserModel, username)
             if user is None:
                 raise ProductUserNotFoundError(f"user not found: {username}")
+            self.store._user_management().require_editable(user)
+            self.store._user_management().check_active(user, active)
+            if not active:
+                view = self.store._user_management()._view(session, user)
+                if view.blockers:
+                    from open_node.services.inventory import ProductUserConflict
+
+                    raise ProductUserConflict("; ".join(view.blockers))
+                plan = (
+                    session.get(SubscriptionPlanModel, user.current_plan_id)
+                    if user.current_plan_id
+                    else None
+                )
+                self.store._plan_management()._track_revocations(session, user, plan, now)
             user.is_active, user.updated_at = active, now
             commands = self.reconcile(session, now, username=username)
             session.commit()
@@ -526,46 +548,47 @@ class SubscriptionAccessCoordinator:
 
     def read(self, username):
         with self.store._session() as session:
-            if session.get(ProductUserModel, username) is None:
-                raise ProductUserNotFoundError(f"user not found: {username}")
-            states = []
-            for row in self.rows(session, username):
-                body, reasons = self.desired(session, row, datetime.now(UTC))
-                command = session.get(CommandModel, row.command_id) if row.command_id else None
-                state = (
-                    "applied"
-                    if body["revision"] == row.applied_revision
-                    else (
-                        "failed"
-                        if command and command.status in {"failed", "skipped"}
-                        else "pending"
-                    )
-                )
-                states.append(
-                    {
-                        "server_id": row.server_id,
-                        "server_name": session.get(ServerModel, row.server_id).name,
-                        "status": state,
-                        "command_id": row.command_id,
-                        "error": row.last_error,
-                        "updated_at": row.updated_at,
-                        "entries": [
-                            {
-                                "inbound_tag": item["tag"],
-                                "email": item["client"]["email"],
-                                "enabled": item["enabled"],
-                                "reason": reason,
-                            }
-                            for item, reason in zip(body["entries"], reasons, strict=True)
-                        ],
-                    }
-                )
-            return {
-                "username": username,
-                "managed": bool(states),
-                "servers": states,
-                "license_required": False,
-            }
+            return self.read_in_session(session, username)
+
+    def read_in_session(self, session, username):
+        if session.get(ProductUserModel, username) is None:
+            raise ProductUserNotFoundError(f"user not found: {username}")
+        states = []
+        for row in self.rows(session, username):
+            body, reasons = self.desired(session, row, datetime.now(UTC))
+            command = session.get(CommandModel, row.command_id) if row.command_id else None
+            state = (
+                "applied"
+                if body["revision"] == row.applied_revision
+                else "failed"
+                if command and command.status in {"failed", "skipped"}
+                else "pending"
+            )
+            states.append(
+                {
+                    "server_id": row.server_id,
+                    "server_name": session.get(ServerModel, row.server_id).name,
+                    "status": state,
+                    "command_id": row.command_id,
+                    "error": row.last_error,
+                    "updated_at": row.updated_at,
+                    "entries": [
+                        {
+                            "inbound_tag": item["tag"],
+                            "email": item["client"]["email"],
+                            "enabled": item["enabled"],
+                            "reason": reason,
+                        }
+                        for item, reason in zip(body["entries"], reasons, strict=True)
+                    ],
+                }
+            )
+        return {
+            "username": username,
+            "managed": bool(states),
+            "servers": states,
+            "license_required": False,
+        }
 
 
 class SubscriptionAccessWorker:

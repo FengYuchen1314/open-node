@@ -46,6 +46,11 @@ Remaining migration gates still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
 
+User [editing and removal](docs/user-management.md) now preserve runtime identity
+during profile edits and support confirmed disable/reactivation. Removal tracks
+offline withdrawals before local cleanup, rejects old credential replays and
+isolates traffic when a username is recreated.
+
 Plan [editing, unassignment and removal](docs/plan-management.md) now preserve
 credentials and charged usage while coordinating node membership and limits.
 Revision guards protect concurrent edits, and the dialog tracks remote access

@@ -41,6 +41,7 @@ from open_node.services.inventory import (
     DuplicateSubscriptionPlanNameError,
     InventoryStore,
     ManagedNodeNotFoundError,
+    ProductUserConflict,
     ProductUserNotFoundError,
     ServerNotFoundError,
     SubscriptionPlanNotFoundError,
@@ -90,6 +91,8 @@ async def update_product_user_active(
 ):
     try:
         user, commands = store._subscription_access().set_active(username, payload.is_active)
+    except (ProductUserConflict, SubscriptionAccessConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ProductUserNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     for command in commands:
@@ -129,6 +132,8 @@ def get_subscription_token(
         token = store.get_or_create_subscription_token(username)
     except ProductUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductUserConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _subscription_token_response(request, token)
 
 
@@ -146,6 +151,8 @@ def create_subscription_token(
         token = store.get_or_create_subscription_token(username)
     except ProductUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductUserConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _subscription_token_response(request, token)
 
 
@@ -162,6 +169,8 @@ def reset_subscription_token(
         token = store.reset_subscription_token(username)
     except ProductUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductUserConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _subscription_token_response(request, token)
 
 
@@ -275,7 +284,10 @@ def import_subscription_catalog(
     payload: SubscriptionCatalogImportRequest,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
 ) -> SubscriptionCatalogImportResponse:
-    return store.import_subscription_catalog(payload)
+    try:
+        return store.import_subscription_catalog(payload)
+    except ProductUserConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/nodes", response_model=ManagedNodesResponse)
@@ -382,7 +394,7 @@ async def assign_subscription_plan(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SubscriptionPlanNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except SubscriptionAccessConflict as exc:
+    except (ProductUserConflict, SubscriptionAccessConflict) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     commands = []

@@ -244,9 +244,10 @@ class PlanManagement:
                 None,
             )
             if previous:
-                if previous["client"] != client or previous["protocol"] != protocol(
-                    credential.protocol
-                ):
+                if any(
+                    previous["client"].get(key) != value
+                    for key, value in credential.credential.items()
+                ) or previous["protocol"] != protocol(credential.protocol):
                     raise SubscriptionAccessConflict(
                         "A tracked credential changed; review its runtime identity first"
                     )

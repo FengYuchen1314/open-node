@@ -19,6 +19,7 @@ from open_node.services.inventory import (
     CommandModel,
     DuplicateServerNameError,
     ManagedNodeModel,
+    ProductUserRemovalModel,
     ServerModel,
     ServerNotFoundError,
     SubscriptionArchivedTrafficModel,
@@ -187,6 +188,17 @@ class ServerManagement:
             for change in changes
             if change.status not in SETTLED_CHANGES
         ]
+        pending_user_removals = [
+            job.id
+            for job in session.scalars(
+                select(ProductUserRemovalModel).where(
+                    ProductUserRemovalModel.completed_at.is_(None)
+                )
+            )
+            if any(item["server_id"] == server.id for item in job.fingerprints)
+        ]
+        if pending_user_removals:
+            blockers.append("Complete pending user removals before removing this server")
         if session.get(ChangeSetServerLockModel, server.id):
             blockers.append("A change set still holds this server")
         blockers += [
@@ -239,6 +251,7 @@ class ServerManagement:
         preview.revision = digest(
             {
                 "server": self._settings(server).revision,
+                "user_removals": pending_user_removals,
                 "nodes": [(row.id, row.updated_at) for row in nodes],
                 "plans": [(row.id, row.node_ids, row.updated_at) for row in plans],
                 "changes": [(row.id, row.status, row.updated_at) for row in changes],

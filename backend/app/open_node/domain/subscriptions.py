@@ -73,6 +73,7 @@ class ProductUserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=80)
     email: str | None = Field(default=None, max_length=255)
     display_name: str | None = Field(default=None, max_length=120)
+    remark: str = Field(default="", max_length=1000)
     role: ProductUserRole = ProductUserRole.USER
     is_active: bool = True
 
@@ -91,6 +92,8 @@ class ProductUserRead(BaseModel):
     username: str
     email: str | None = None
     display_name: str
+    remark: str = ""
+    removal_id: UUID | None = None
     role: ProductUserRole
     is_active: bool
     current_plan_id: UUID | None = None
@@ -604,6 +607,7 @@ class SubscriptionCatalogUserEntry(BaseModel):
     username: str
     email: str | None = None
     display_name: str | None = None
+    remark: str = Field(default="", max_length=1000)
     role: ProductUserRole = ProductUserRole.USER
     is_active: bool = True
     current_plan_name: str | None = None

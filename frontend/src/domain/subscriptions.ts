@@ -32,6 +32,7 @@ export interface ProductUserCreateRequest {
   username: string;
   email?: string | null;
   display_name?: string | null;
+  remark?: string;
   role?: ProductUserRole;
   is_active?: boolean;
 }
@@ -40,6 +41,8 @@ export interface ProductUser {
   username: string;
   email?: string | null;
   display_name: string;
+  remark?: string;
+  removal_id?: string | null;
   role: ProductUserRole;
   is_active: boolean;
   current_plan_id?: string | null;

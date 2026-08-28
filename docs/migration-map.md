@@ -257,7 +257,16 @@ These passing command and snapshot checks do not prove a complete replacement:
   credentials. Revision guards, transaction rollback and per-user deployment
   status protect concurrent changes. Per-plan node aliases, automatic speed-rule
   binding and custom Clash/Surge template selection remain to be migrated;
-  ordinary user and node editing/removal remain open product workflows.
+  ordinary node editing/removal remains an open product workflow.
+- User [editing/removal](user-management.md) adds profile/remark changes,
+  protected administrator-role subscribers, revision guards and durable
+  two-phase removal. Pending users cannot be re-enabled, reassigned or restored
+  through catalog import. Runtime work drains before confirmed withdrawal and
+  local cleanup; retired identity fingerprints reject structured command replay.
+  Same-name recreation uses fresh traffic labels. Per-user quota/speed/node
+  overrides, custom short codes, subscriber login/password/session/TOTP
+  workflows and privately owned routed-node cleanup still require migration
+  or dedicated parity verification.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both

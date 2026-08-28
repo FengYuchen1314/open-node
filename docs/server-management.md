@@ -63,7 +63,7 @@ Removal performs one serialized database transaction:
   the old validation-server reference for audit; create a replacement profile
   with an available validation server before resuming issuance.
 
-Unsettled change sets/reservations, active remote certificate jobs, unreleased
+Pending user-removal withdrawals, unsettled change sets/reservations, active remote certificate jobs, unreleased
 HTTP challenge leases and unfinished cross-server command dependents block
 removal. Resolve or cancel them using their own workflows first. An ordinary
 unfinished command on the removed server is forgotten, not remotely cancelled.

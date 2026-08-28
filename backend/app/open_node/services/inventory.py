@@ -232,6 +232,10 @@ class ProductUserNotFoundError(ValueError):
     """Raised when a product user lookup targets an unknown username."""
 
 
+class ProductUserConflict(ValueError):
+    """Raised when a user change conflicts with removal or protected identity."""
+
+
 class DuplicateSubscriptionPlanNameError(ValueError):
     """Raised when a subscription plan name is already taken."""
 
@@ -1038,6 +1042,10 @@ class ProductUserModel(Base):
     username: Mapped[str] = mapped_column(String(80), primary_key=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str] = mapped_column(String(120))
+    remark: Mapped[str] = mapped_column(Text, default="")
+    removal_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("product_user_removals.id"), nullable=True
+    )
     role: Mapped[str] = mapped_column(String(24))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     current_plan_id: Mapped[str | None] = mapped_column(
@@ -1062,6 +1070,18 @@ class ProductUserModel(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ProductUserRemovalModel(Base):
+    __tablename__ = "product_user_removals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fingerprints: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
+    servers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
 
 
 class ManagedNodeModel(Base):
@@ -1342,7 +1362,11 @@ class InventoryStore:
             self._sqlite_add_missing_columns(
                 inspector,
                 "product_users",
-                {"last_traffic_reset_at": "DATETIME"},
+                {
+                    "last_traffic_reset_at": "DATETIME",
+                    "remark": "TEXT NOT NULL DEFAULT ''",
+                    "removal_id": "VARCHAR(36) REFERENCES product_user_removals(id)",
+                },
             )
         if "servers" in table_names:
             self._sqlite_add_missing_columns(
@@ -2879,6 +2903,7 @@ class InventoryStore:
                 username=payload.username,
                 email=payload.email,
                 display_name=payload.display_name or payload.username,
+                remark=payload.remark,
                 role=payload.role.value,
                 is_active=payload.is_active,
                 current_plan_id=None,
@@ -2972,13 +2997,19 @@ class InventoryStore:
             servers = session.scalars(select(ServerModel)).all()
             server_names = {server.id: server.name for server in servers}
             users = session.scalars(
-                select(ProductUserModel).order_by(ProductUserModel.created_at)
+                select(ProductUserModel)
+                .where(ProductUserModel.removal_id.is_(None))
+                .order_by(ProductUserModel.created_at)
             ).all()
 
             credentials: list[SubscriptionCatalogCredentialEntry] = []
             if include_credentials:
                 credential_rows = session.scalars(
-                    select(SubscriptionCredentialModel).order_by(
+                    select(SubscriptionCredentialModel)
+                    .where(
+                        SubscriptionCredentialModel.username.in_([user.username for user in users])
+                    )
+                    .order_by(
                         SubscriptionCredentialModel.username,
                         SubscriptionCredentialModel.created_at,
                     )
@@ -3004,6 +3035,7 @@ class InventoryStore:
                         username=user.username,
                         email=user.email,
                         display_name=user.display_name,
+                        remark=user.remark,
                         role=ProductUserRole(user.role),
                         is_active=user.is_active,
                         current_plan_name=plan_names.get(user.current_plan_id or ""),
@@ -3046,8 +3078,10 @@ class InventoryStore:
             for user_entry in payload.catalog.users:
                 existing = session.get(ProductUserModel, user_entry.username)
                 if existing:
+                    self._user_management().require_editable(existing)
                     existing.email = user_entry.email
                     existing.display_name = user_entry.display_name or user_entry.username
+                    existing.remark = user_entry.remark
                     existing.role = user_entry.role.value
                     existing.is_active = user_entry.is_active
                     existing.is_reset = user_entry.is_reset
@@ -3061,6 +3095,7 @@ class InventoryStore:
                         username=user_entry.username,
                         email=user_entry.email,
                         display_name=user_entry.display_name or user_entry.username,
+                        remark=user_entry.remark,
                         role=user_entry.role.value,
                         is_active=user_entry.is_active,
                         current_plan_id=None,
@@ -3208,6 +3243,7 @@ class InventoryStore:
             if not user:
                 raise ProductUserNotFoundError(f"user not found: {username}")
             plan = session.get(SubscriptionPlanModel, str(payload.plan_id))
+            self._user_management().require_editable(user)
             if not plan:
                 raise SubscriptionPlanNotFoundError(
                     f"subscription plan not found: {payload.plan_id}"
@@ -3266,6 +3302,7 @@ class InventoryStore:
             if not user:
                 raise ProductUserNotFoundError(f"user not found: {username}")
             token = session.get(ProductUserSubscriptionTokenModel, username)
+            self._user_management().require_editable(user)
             if not token:
                 token = ProductUserSubscriptionTokenModel(
                     username=username,
@@ -3289,6 +3326,7 @@ class InventoryStore:
             if not user:
                 raise ProductUserNotFoundError(f"user not found: {username}")
             token = session.get(ProductUserSubscriptionTokenModel, username)
+            self._user_management().require_editable(user)
             if not token:
                 token = ProductUserSubscriptionTokenModel(
                     username=username,
@@ -3386,7 +3424,7 @@ class InventoryStore:
     def _available_subscription_plan(
         self, session: Session, user: ProductUserModel | None
     ) -> SubscriptionPlanModel:
-        if not user or not user.is_active:
+        if not user or not user.is_active or user.removal_id:
             raise SubscriptionUnavailableError("subscription user is not active")
         if not user.current_plan_id:
             raise SubscriptionUnavailableError("user has no active subscription plan")
@@ -4749,6 +4787,8 @@ class InventoryStore:
             username=user.username,
             email=user.email,
             display_name=user.display_name or user.username,
+            remark=user.remark,
+            removal_id=user.removal_id,
             role=user.role,
             is_active=user.is_active,
             current_plan_id=UUID(user.current_plan_id) if user.current_plan_id else None,
@@ -5050,17 +5090,20 @@ class InventoryStore:
     ) -> int:
         imported = 0
         for entry in entries:
-            if not session.get(ProductUserModel, entry.username):
+            user = session.get(ProductUserModel, entry.username)
+            if not user:
                 warnings.append(
                     f"credential {entry.email} skipped; user {entry.username} not found"
                 )
                 continue
+            self._user_management().require_editable(user)
             server = self._catalog_server(session, server_map, entry.server_name)
             if not server:
                 warnings.append(
                     f"credential {entry.email} skipped; server {entry.server_name} not found"
                 )
                 continue
+            self._user_management().check_imported_credential(session, server.id, entry)
             node_id = node_ids_by_name.get(entry.node_name)
             if not node_id:
                 node = self._catalog_node_by_name(session, entry.node_name, server.id)
@@ -5376,6 +5419,16 @@ class InventoryStore:
 
         now = datetime.now(tz=UTC)
         email = self._default_client_email(user, node)
+        if session.scalar(
+            select(ProductUserRemovalModel.id)
+            .where(
+                ProductUserRemovalModel.username == user.username,
+                ProductUserRemovalModel.completed_at.is_not(None),
+            )
+            .limit(1)
+        ):
+            incarnation = self._aware_datetime(user.created_at).isoformat()
+            email += "--" + hashlib.sha256(incarnation.encode()).hexdigest()[:12]
         credential = SubscriptionCredentialModel(
             id=str(uuid4()),
             username=user.username,
@@ -5934,7 +5987,9 @@ class InventoryStore:
             username=user.username,
             is_active=user.is_active,
             has_plan=plan is not None,
-            available=bool(user.is_active and plan and not expired and not over_quota),
+            available=bool(
+                user.is_active and not user.removal_id and plan and not expired and not over_quota
+            ),
             expired=expired,
             over_quota=over_quota,
             reset_enabled=user.is_reset,
@@ -6249,7 +6304,7 @@ class InventoryStore:
     @staticmethod
     def _template_context(
         user: ProductUserModel,
-        plan: SubscriptionPlanModel,
+        plan: SubscriptionPlanModel | None,
         node: ManagedNodeModel,
         server: ServerModel,
         credential: SubscriptionCredentialModel,
@@ -6259,8 +6314,8 @@ class InventoryStore:
             "user_email": user.email or user.username,
             "display_name": user.display_name or user.username,
             "client_email": credential.email,
-            "plan_id": plan.id,
-            "plan_name": plan.name,
+            "plan_id": plan.id if plan else "",
+            "plan_name": plan.name if plan else "",
             "node_id": node.id,
             "node_name": node.name,
             "protocol": node.protocol,
@@ -6370,6 +6425,11 @@ class InventoryStore:
         from open_node.services.plan_management import PlanManagement
 
         return PlanManagement(self)
+
+    def _user_management(self):
+        from open_node.services.user_management import UserManagement
+
+        return UserManagement(self)
 
     @staticmethod
     def _server_record(server: ServerModel) -> ServerRecord:
