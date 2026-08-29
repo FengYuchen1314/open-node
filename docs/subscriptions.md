@@ -37,6 +37,14 @@ node control in the Subscriptions view, or add `&node_id={managed-node-uuid}`,
 to export a specific node. Selection is restricted to the token's active plan.
 Local listener ports can be changed in the downloaded client configuration.
 
+Administrators can also create [temporary subscription links](temporary-subscriptions.md)
+at `/t/{code}` for selected nodes from one subscriber's current plan. These
+links use the same renderer and all six formats, but have a 1-100 successful
+download limit and expire after 1-60 minutes. They recheck the source user,
+plan, quota, templates and credentials on every request and omit the
+`subscription-userinfo` header. Expiry, exhaustion or deletion blocks future
+downloads; it does not invalidate node credentials already downloaded.
+
 Unsupported nodes are excluded without breaking compatible entries. The
 authenticated `GET /api/v1/users/{username}/subscription-preview?format=...`
 returns node IDs, names, protocols, availability, reasons and catalog warnings,

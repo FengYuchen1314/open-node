@@ -7,6 +7,7 @@ import os
 import secrets
 import sqlite3
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pyotp
 from playwright.sync_api import expect, sync_playwright
@@ -109,6 +110,76 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 target.on("pageerror", lambda error: errors.append(str(error)))
                 target.on("request", lambda request: requests.append(request.url))
             page.goto(backend + "/subscriptions")
+            admin_context.grant_permissions(
+                ["clipboard-read", "clipboard-write"], origin=backend
+            )
+            page.get_by_role("button", name="Share", exact=True).click()
+            temporary_dialog = page.get_by_role("dialog")
+            temporary_dialog.get_by_label("Label", exact=True).fill(
+                "Smoke temporary link"
+            )
+            temporary_dialog.get_by_label("Downloads", exact=True).fill("2")
+            accounts.capture(page, args.output, "temporary-link-create")
+            with page.expect_response(
+                lambda response: (
+                    response.url.endswith("/api/v1/temporary-subscriptions")
+                    and response.request.method == "POST"
+                )
+            ) as temporary_response:
+                temporary_dialog.get_by_role(
+                    "button", name="Create", exact=True
+                ).click()
+            assert temporary_response.value.status == 201, (
+                temporary_response.value.text()
+            )
+            temporary = temporary_response.value.json()
+            expect(
+                temporary_dialog.get_by_label("Temporary URL", exact=True)
+            ).to_have_value(temporary["subscription_url"])
+            temporary_dialog.get_by_role("button", name="Close", exact=True).click()
+
+            temporary_path = urlsplit(temporary["subscription_url"]).path
+            temporary_xray = client.get(
+                temporary_path, params={"format": "xray"}
+            ).raise_for_status()
+            assert "subscription-userinfo" not in temporary_xray.headers
+            forward(temporary_xray.json())
+            client.get(temporary_path, params={"format": "uri-list"}).raise_for_status()
+            assert client.get(temporary_path).status_code == 404
+            page.reload()
+            temporary_item = page.locator(".catalog-item").filter(
+                has_text="Smoke temporary link"
+            )
+            expect(temporary_item).to_contain_text("2/2 downloads")
+            expect(temporary_item).to_contain_text("exhausted")
+            temporary_item.get_by_role(
+                "button", name="Copy temporary link Smoke temporary link", exact=True
+            ).click()
+            assert (
+                page.evaluate("navigator.clipboard.readText()")
+                == temporary["subscription_url"]
+            )
+            accounts.capture(page, args.output, "temporary-link-exhausted")
+            with page.expect_response(
+                lambda response: (
+                    response.url.endswith(
+                        "/api/v1/temporary-subscriptions/" + temporary["id"]
+                    )
+                    and response.request.method == "DELETE"
+                )
+            ) as revoked_response:
+                temporary_item.get_by_role(
+                    "button",
+                    name="Revoke temporary link Smoke temporary link",
+                    exact=True,
+                ).click()
+            assert revoked_response.value.status == 200, revoked_response.value.text()
+            expect(temporary_item).to_have_count(0)
+            print(
+                "PASS temporary link browser lifecycle, access limit and real forwarding",
+                flush=True,
+            )
+
             page.get_by_role(
                 "button", name="Edit short code for alice", exact=True
             ).click()

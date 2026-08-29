@@ -290,47 +290,18 @@ class SubscriptionProfiles:
                 profile.expires_at
             ):
                 raise SubscriptionUnavailableError("subscription profile has expired")
-        selected_ids = set(profile.node_ids) if profile and profile.node_ids else None
-        template = self._template(session, profile, client_format) if profile else None
-        proxies, report = self.store._prepare_subscription_format(
+        return self.store._render_user_subscription(
             session,
             user,
             plan,
             client_format,
-            template.content if template else None,
-            selected_ids,
-        )
-        if node_id is not None:
-            allowed_ids = [node.node_id for node in report.nodes if node.available]
-            proxies = [
-                proxy
-                for proxy, identifier in zip(proxies, allowed_ids, strict=True)
-                if identifier == node_id
-            ]
-        if not proxies:
-            raise SubscriptionUnavailableError(
-                "subscription has no compatible nodes for this format and selection"
-            )
-        selected = template or self.store.subscription_templates().resolve(
-            session, user, plan, client_format.value
-        )
-        content, media_type, extension = self.store._render_subscription_content(
-            proxies, client_format, selected.content if selected else None
-        )
-        title = profile.name if profile else plan.name
-        warnings = list(report.warnings)
-        if profile:
-            warnings.extend(profile.migration_warnings or [])
-        return RenderedSubscription(
-            username=user.username,
-            plan_name=title,
-            content=content,
-            media_type=media_type,
-            filename=f"{self.store._safe_filename(title or user.username)}.{extension}",
-            subscription_userinfo=self.store._subscription_userinfo_header(session, user, plan),
-            warnings=list(dict.fromkeys(warnings)),
-            included_nodes=len(proxies),
-            excluded_nodes=sum(not node.available for node in report.nodes),
+            node_id=node_id,
+            selected_node_ids=(set(profile.node_ids) if profile and profile.node_ids else None),
+            template_override=(
+                self._template(session, profile, client_format) if profile else None
+            ),
+            title=profile.name if profile else plan.name,
+            extra_warnings=profile.migration_warnings if profile else None,
         )
 
     @staticmethod

@@ -1278,6 +1278,23 @@ class LegacySubscriptionPlanCodeModel(Base):
     __table_args__ = (Index("uq_legacy_subscription_plan_code", func.lower(code), unique=True),)
 
 
+class TemporarySubscriptionModel(Base):
+    __tablename__ = "temporary_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    username: Mapped[str] = mapped_column(
+        String(80), ForeignKey("product_users.username", ondelete="CASCADE"), index=True
+    )
+    label: Mapped[str] = mapped_column(String(120))
+    node_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    max_access: Mapped[int] = mapped_column(Integer)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class SubscriptionCredentialModel(Base):
     __tablename__ = "subscription_credentials"
     __table_args__ = (
@@ -3692,37 +3709,69 @@ class InventoryStore:
                 raise SubscriptionTokenNotFoundError("subscription not found")
             user = session.get(ProductUserModel, token.username)
             plan = self._available_subscription_plan(session, user)
-            proxies, report = self._prepare_subscription_format(session, user, plan, client_format)
-            if node_id is not None:
-                allowed_ids = [node.node_id for node in report.nodes if node.available]
-                proxies = [
-                    proxy
-                    for proxy, identifier in zip(proxies, allowed_ids, strict=True)
-                    if identifier == node_id
-                ]
-            if not proxies:
-                raise SubscriptionUnavailableError(
-                    "subscription has no compatible nodes for this format and selection"
-                )
+            return self._render_user_subscription(
+                session,
+                user,
+                plan,
+                client_format,
+                node_id=node_id,
+            )
 
-            selected = self.subscription_templates().resolve(
-                session, user, plan, client_format.value
+    def _render_user_subscription(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        client_format: SubscriptionClientFormat,
+        *,
+        node_id: UUID | None = None,
+        selected_node_ids: set[str] | None = None,
+        template_override=None,
+        title: str | None = None,
+        extra_warnings: list[str] | None = None,
+        include_userinfo: bool = True,
+    ) -> RenderedSubscription:
+        proxies, report = self._prepare_subscription_format(
+            session,
+            user,
+            plan,
+            client_format,
+            template_override.content if template_override else None,
+            selected_node_ids,
+        )
+        if node_id is not None:
+            allowed_ids = [node.node_id for node in report.nodes if node.available]
+            proxies = [
+                proxy
+                for proxy, identifier in zip(proxies, allowed_ids, strict=True)
+                if identifier == node_id
+            ]
+        if not proxies:
+            raise SubscriptionUnavailableError(
+                "subscription has no compatible nodes for this format and selection"
             )
-            content, media_type, extension = self._render_subscription_content(
-                proxies, client_format, selected.content if selected else None
-            )
-            filename = f"{self._safe_filename(plan.name or user.username)}.{extension}"
-            return RenderedSubscription(
-                username=user.username,
-                plan_name=plan.name,
-                content=content,
-                media_type=media_type,
-                filename=filename,
-                subscription_userinfo=self._subscription_userinfo_header(session, user, plan),
-                warnings=report.warnings,
-                included_nodes=len(proxies),
-                excluded_nodes=sum(not node.available for node in report.nodes),
-            )
+        selected = template_override or self.subscription_templates().resolve(
+            session, user, plan, client_format.value
+        )
+        content, media_type, extension = self._render_subscription_content(
+            proxies, client_format, selected.content if selected else None
+        )
+        rendered_title = title or plan.name or user.username
+        return RenderedSubscription(
+            username=user.username,
+            plan_name=rendered_title,
+            content=content,
+            media_type=media_type,
+            filename=f"{self._safe_filename(rendered_title)}.{extension}",
+            subscription_userinfo=(
+                self._subscription_userinfo_header(session, user, plan)
+                if include_userinfo
+                else None
+            ),
+            warnings=list(dict.fromkeys([*report.warnings, *(extra_warnings or [])])),
+            included_nodes=len(proxies),
+            excluded_nodes=sum(not node.available for node in report.nodes),
+        )
 
     def subscription_format_preview(
         self, username: str, client_format: SubscriptionClientFormat
@@ -6907,6 +6956,11 @@ class InventoryStore:
         from open_node.services.subscription_profiles import SubscriptionProfiles
 
         return SubscriptionProfiles(self)
+
+    def _temporary_subscriptions(self):
+        from open_node.services.temporary_subscriptions import TemporarySubscriptions
+
+        return TemporarySubscriptions(self)
 
     def _server_traffic(self):
         from open_node.services.server_traffic import ServerTrafficCoordinator

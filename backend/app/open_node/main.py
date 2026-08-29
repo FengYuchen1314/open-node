@@ -13,6 +13,7 @@ from open_node.api.routes.agents import agent_websocket
 from open_node.api.routes.public import router as public_router
 from open_node.api.routes.subscription_profiles import legacy_router
 from open_node.api.routes.system import healthz
+from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
 from open_node.core.config import Settings, get_settings
 from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.services.agent_ws import AgentConnectionManager
@@ -161,6 +162,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_api_websocket_route("/api/remote/ws", agent_websocket)
     app.include_router(public_router, prefix="/api")
     app.include_router(legacy_router)
+    app.include_router(temporary_public_router)
     app.add_api_route("/healthz", healthz, methods=["GET"], include_in_schema=False)
     if active_settings.frontend_dir:
         app.mount(

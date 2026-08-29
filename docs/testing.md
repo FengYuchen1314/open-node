@@ -117,8 +117,13 @@ python scripts/vps/smoke-subscription-links.py \
 Repeat with `--transport http`. Operator/subscriber browser edits, password
 and second-factor proof, stale/colliding values, clearing, custom-URL downloads
 and complete link reset are checked against real forwarding and an unchanged
-runtime PID. The temporary Agent installation is removed after the run.
-See [subscription-links.md](subscription-links.md) for identity and security rules.
+runtime PID. The same run creates a [temporary subscription link](temporary-subscriptions.md)
+through the administrator UI, copies it, consumes its access limit with Xray and
+URI-list downloads, proves real forwarding, checks exhaustion and revokes it.
+Screenshots and overflow checks cover 1440px, 390px and 320px. The temporary
+Agent installation is removed after the run. See
+[subscription-links.md](subscription-links.md) for permanent link identity and
+security rules.
 
 ## Plan Alias Smoke
 

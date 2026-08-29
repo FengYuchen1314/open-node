@@ -10,14 +10,20 @@ import UserLoginDialog from "../components/UserLoginDialog.vue";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog.vue";
 import LegacyMMWXImportDialog from "../components/LegacyMMWXImportDialog.vue";
 import SubscriptionProfileDialog from "../components/SubscriptionProfileDialog.vue";
+import TemporarySubscriptionDialog from "../components/TemporarySubscriptionDialog.vue";
 import NodeManagementDialog from "../components/NodeManagementDialog.vue";
 import type { NodeOperation } from "../services/node-management";
 import type { UserOperation } from "../services/user-management";
 import type { PlanOperation } from "../services/plan-management";
 import type { SubscriptionTemplate } from "../domain/subscription-templates";
 import type { SubscriptionProfile } from "../domain/subscription-profiles";
+import type { TemporarySubscription } from "../domain/temporary-subscriptions";
 import { listSubscriptionTemplates } from "../services/subscription-templates";
 import { listSubscriptionProfiles } from "../services/subscription-profiles";
+import {
+  deleteTemporarySubscription,
+  listTemporarySubscriptions,
+} from "../services/temporary-subscriptions";
 
 import type { ServerSummary } from "../domain/inventory";
 import type {
@@ -72,6 +78,9 @@ const nodes = ref<ManagedNode[]>([]);
 const plans = ref<SubscriptionPlan[]>([]);
 const templates = ref<SubscriptionTemplate[]>([]);
 const subscriptionProfiles = ref<SubscriptionProfile[]>([]);
+const temporarySubscriptions = ref<TemporarySubscription[]>([]);
+const temporaryShare = reactive({ open: false });
+const temporaryDeleting = ref("");
 const profileManagement = reactive({ profile: null as SubscriptionProfile | null, open: false });
 const planManagement = reactive({ id: "", mode: "edit" as PlanOperation, open: false });
 const userManagement = reactive({ username: "", mode: "edit" as UserOperation, removalId: null as string | null, open: false });
@@ -224,6 +233,16 @@ const userOptions = computed(() =>
 const nodeOptions = computed(() =>
   nodes.value.filter(node => !node.removal_id).map((node) => ({ title: `${node.name} (${node.protocol})`, value: node.id })),
 );
+const selectedUserPlan = computed(() => {
+  const user = users.value.find(item => item.username === assignForm.username);
+  return plans.value.find(plan => plan.id === user?.current_plan_id) ?? null;
+});
+const temporaryNodeOptions = computed(() => {
+  const selectedIds = new Set(selectedUserPlan.value?.node_ids ?? []);
+  return nodes.value
+    .filter(node => selectedIds.has(node.id) && !node.removal_id)
+    .map(node => ({ title: `${node.name} (${node.protocol})`, value: node.id }));
+});
 const planOptions = computed(() =>
   plans.value.map((plan) => ({ title: plan.name, value: plan.id })),
 );
@@ -279,7 +298,7 @@ async function refresh() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [serverList, userResponse, nodeResponse, planResponse, presetResponse, templateResponse, profileResponse] =
+    const [serverList, userResponse, nodeResponse, planResponse, presetResponse, templateResponse, profileResponse, temporaryResponse] =
       await Promise.all([
         listServers(),
         listProductUsers(),
@@ -288,6 +307,7 @@ async function refresh() {
         listSubscriptionTemplatePresets(),
         listSubscriptionTemplates(),
         listSubscriptionProfiles(),
+        listTemporarySubscriptions(),
       ]);
     servers.value = serverList;
     users.value = userResponse.users;
@@ -296,6 +316,7 @@ async function refresh() {
     nodePresets.value = presetResponse.presets;
     templates.value = templateResponse.templates;
     subscriptionProfiles.value = profileResponse.profiles;
+    temporarySubscriptions.value = temporaryResponse.subscriptions;
     syncDefaults();
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -663,6 +684,40 @@ async function resetDueTraffic() {
   }
 }
 
+function temporaryShareCreated(value: TemporarySubscription) {
+  temporarySubscriptions.value = [
+    value,
+    ...temporarySubscriptions.value.filter(item => item.id !== value.id),
+  ];
+  successMessage.value = `Temporary link created for ${value.username}.`;
+}
+
+async function copyTemporaryLink(value: TemporarySubscription) {
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    await navigator.clipboard.writeText(value.subscription_url);
+    successMessage.value = `Copied temporary link ${value.label}.`;
+  } catch {
+    errorMessage.value = "Clipboard access failed.";
+  }
+}
+
+async function revokeTemporaryLink(value: TemporarySubscription) {
+  temporaryDeleting.value = value.id;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    await deleteTemporarySubscription(value.id);
+    temporarySubscriptions.value = temporarySubscriptions.value.filter(item => item.id !== value.id);
+    successMessage.value = `Revoked temporary link ${value.label}.`;
+  } catch (error) {
+    errorMessage.value = readableError(error);
+  } finally {
+    temporaryDeleting.value = "";
+  }
+}
+
 async function exportCatalog() {
   savingAction.value = "export";
   errorMessage.value = "";
@@ -852,6 +907,14 @@ function formatPercent(value: number) {
 
 function formatDate(value?: string | null) {
   return value ? value.slice(0, 10) : "Not set";
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString();
+}
+
+function temporaryStatusColor(status: TemporarySubscription["status"]) {
+  return status === "active" ? "success" : status === "expired" ? "warning" : "error";
 }
 
 function credentialIdentifier(credential: SubscriptionCredential) {
@@ -1421,6 +1484,16 @@ function formatBytes(value: number) {
             >
               Traffic
             </v-btn>
+            <v-btn
+              :disabled="!assignForm.username || temporaryNodeOptions.length === 0"
+              color="secondary"
+              prepend-icon="mdi-link-plus"
+              size="small"
+              variant="tonal"
+              @click="temporaryShare.open = true"
+            >
+              Share
+            </v-btn>
           </div>
           <div class="subscription-action-row">
             <v-btn
@@ -1712,6 +1785,24 @@ function formatBytes(value: number) {
 
           <v-divider />
 
+          <div class="section-title compact-title">Temporary links</div>
+          <div v-if="temporarySubscriptions.length === 0" class="empty-command">No temporary links.</div>
+          <div v-for="item in temporarySubscriptions" :key="item.id" class="catalog-item">
+            <div>
+              <div class="server-name">{{ item.label }}</div>
+              <div class="server-subline">
+                {{ item.username }} - {{ item.access_count }}/{{ item.max_access }} downloads - expires {{ formatDateTime(item.expires_at) }}
+              </div>
+            </div>
+            <div class="catalog-controls temporary-controls">
+              <v-tooltip text="Copy temporary link"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Copy temporary link ${item.label}`" icon="mdi-content-copy" variant="text" size="32" @click="copyTemporaryLink(item)" /></template></v-tooltip>
+              <v-tooltip text="Revoke temporary link"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Revoke temporary link ${item.label}`" icon="mdi-link-off" variant="text" size="32" :loading="temporaryDeleting === item.id" @click="revokeTemporaryLink(item)" /></template></v-tooltip>
+              <v-chip :color="temporaryStatusColor(item.status)" size="small" variant="tonal">{{ item.status }}</v-chip>
+            </div>
+          </div>
+
+          <v-divider />
+
           <div class="section-title compact-title">Subscription profiles</div>
           <div v-if="subscriptionProfiles.length === 0" class="empty-command">No imported profiles.</div>
           <div v-for="item in subscriptionProfiles" :key="item.id" class="catalog-item">
@@ -1826,6 +1917,7 @@ function formatBytes(value: number) {
     <SubscriptionShortCodeDialog v-model:open="shortCode.open" :username="shortCode.username" @saved="shortCodeSaved" />
     <LegacyMMWXImportDialog v-model:open="legacyMMWX.open" :plans="plans" @imported="refresh" />
     <SubscriptionProfileDialog v-model:open="profileManagement.open" :profile="profileManagement.profile" :nodes="nodes" :users="users" :templates="templates" @saved="refresh" />
+    <TemporarySubscriptionDialog v-model:open="temporaryShare.open" :username="assignForm.username" :nodes="temporaryNodeOptions" @created="temporaryShareCreated" />
     <UserLoginDialog v-model:open="userLogin.open" :username="userLogin.username" />
     <NodeManagementDialog v-model:open="nodeManagement.open" :id="nodeManagement.id" :mode="nodeManagement.mode" :nodes="nodes" @changed="refresh" />
   </div>
@@ -1834,5 +1926,6 @@ function formatBytes(value: number) {
 <style scoped>
 .catalog-item > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 .catalog-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; max-width: 148px; }
+.temporary-controls { max-width: 180px; }
 @media (max-width: 600px) { .catalog-controls { max-width: 112px; } }
 </style>

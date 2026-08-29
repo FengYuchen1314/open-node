@@ -287,7 +287,11 @@ These passing command and snapshot checks do not prove a complete replacement:
   now support operator/self-service editing, clearing and complete reset with
   collision and revision guards. Active-main direct and combined `/x` URLs now
   resolve through imported profiles and explicit package mappings. Privately owned
-  routed-node cleanup still requires migration.
+  routed-node cleanup still requires migration. [Temporary subscription links](temporary-subscriptions.md)
+  replace active-main's in-memory eight-character Clash-only shares with durable
+  high-entropy records, all six formats, selected current-plan nodes, atomic
+  access limits, administrator listing/copy/revocation and restart persistence.
+  Link expiry does not revoke credentials already downloaded.
 - [Subscriber accounts](subscriber-accounts.md) now have a separate login and
   session realm, password provisioning/recovery, own-plan usage and downloads,
   device revocation, encrypted TOTP enrollment and one-use recovery codes.

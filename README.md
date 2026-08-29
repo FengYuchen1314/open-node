@@ -66,6 +66,13 @@ legacy packages to Open Node plans; multi-file assignments become selectable
 subscription profiles, and direct plus combined legacy `/x` links keep resolving.
 Raw uploads and legacy templates/rules/scripts require managed reconfiguration.
 
+[Temporary subscription links](docs/temporary-subscriptions.md) let an
+administrator share selected nodes from a subscriber's current plan with a
+durable high-entropy URL, a 1-100 download limit and a 1-60 minute lifetime.
+They support all six subscription formats, survive controller restarts and
+recheck the source subscriber on every download. Expiry or revocation blocks
+future downloads but does not revoke credentials already downloaded.
+
 [Custom subscription short codes](docs/subscription-links.md) can be edited
 by administrators and subscribers, with collision/revision protection, original
 key preservation and complete link reset. Subscriber edits require password
