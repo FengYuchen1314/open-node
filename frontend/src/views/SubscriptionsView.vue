@@ -11,6 +11,7 @@ import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDial
 import LegacyMMWXImportDialog from "../components/LegacyMMWXImportDialog.vue";
 import SubscriptionProfileDialog from "../components/SubscriptionProfileDialog.vue";
 import TemporarySubscriptionDialog from "../components/TemporarySubscriptionDialog.vue";
+import PrivateRoutedPolicyDialog from "../components/PrivateRoutedPolicyDialog.vue";
 import NodeManagementDialog from "../components/NodeManagementDialog.vue";
 import type { NodeOperation } from "../services/node-management";
 import type { UserOperation } from "../services/user-management";
@@ -18,12 +19,14 @@ import type { PlanOperation } from "../services/plan-management";
 import type { SubscriptionTemplate } from "../domain/subscription-templates";
 import type { SubscriptionProfile } from "../domain/subscription-profiles";
 import type { TemporarySubscription } from "../domain/temporary-subscriptions";
+import type { PrivateRoutedNodesResponse } from "../domain/private-routed-nodes";
 import { listSubscriptionTemplates } from "../services/subscription-templates";
 import { listSubscriptionProfiles } from "../services/subscription-profiles";
 import {
   deleteTemporarySubscription,
   listTemporarySubscriptions,
 } from "../services/temporary-subscriptions";
+import { listPrivateRoutes } from "../services/private-routed-nodes";
 
 import type { ServerSummary } from "../domain/inventory";
 import type {
@@ -79,6 +82,8 @@ const plans = ref<SubscriptionPlan[]>([]);
 const templates = ref<SubscriptionTemplate[]>([]);
 const subscriptionProfiles = ref<SubscriptionProfile[]>([]);
 const temporarySubscriptions = ref<TemporarySubscription[]>([]);
+const privateRoutes = ref<PrivateRoutedNodesResponse | null>(null);
+const privateRoutePolicy = reactive({ open: false });
 const temporaryShare = reactive({ open: false });
 const temporaryDeleting = ref("");
 const profileManagement = reactive({ profile: null as SubscriptionProfile | null, open: false });
@@ -298,7 +303,7 @@ async function refresh() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [serverList, userResponse, nodeResponse, planResponse, presetResponse, templateResponse, profileResponse, temporaryResponse] =
+    const [serverList, userResponse, nodeResponse, planResponse, presetResponse, templateResponse, profileResponse, temporaryResponse, privateRouteResponse] =
       await Promise.all([
         listServers(),
         listProductUsers(),
@@ -308,6 +313,7 @@ async function refresh() {
         listSubscriptionTemplates(),
         listSubscriptionProfiles(),
         listTemporarySubscriptions(),
+        listPrivateRoutes(),
       ]);
     servers.value = serverList;
     users.value = userResponse.users;
@@ -317,6 +323,7 @@ async function refresh() {
     templates.value = templateResponse.templates;
     subscriptionProfiles.value = profileResponse.profiles;
     temporarySubscriptions.value = temporaryResponse.subscriptions;
+    privateRoutes.value = privateRouteResponse;
     syncDefaults();
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -1785,6 +1792,31 @@ function formatBytes(value: number) {
 
           <v-divider />
 
+          <div class="section-title compact-title private-route-title">
+            <span>Private routes</span>
+            <div class="private-route-summary">
+              <v-chip :color="privateRoutes?.policy.enabled ? 'success' : 'default'" size="small" variant="tonal">
+                {{ privateRoutes?.policy.enabled ? 'Enabled' : 'Disabled' }}
+              </v-chip>
+              <v-tooltip text="Edit private route policy"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-cog-outline" aria-label="Edit private route policy" variant="text" size="32" @click="privateRoutePolicy.open = true" /></template></v-tooltip>
+            </div>
+          </div>
+          <div v-if="!privateRoutes?.nodes.length" class="empty-command">No private routes.</div>
+          <div v-for="item in privateRoutes?.nodes" :key="item.id" class="catalog-item">
+            <div>
+              <div class="server-name">{{ item.name }}</div>
+              <div class="server-subline">
+                {{ item.username }} - {{ item.parent_name }} to {{ item.target_name }}
+              </div>
+              <div v-if="item.last_error" class="server-subline private-route-error">{{ item.last_error }}</div>
+            </div>
+            <div class="catalog-controls">
+              <v-chip :color="item.status === 'active' ? 'success' : item.status === 'failed' ? 'error' : 'warning'" size="small" variant="tonal">{{ item.status }}</v-chip>
+            </div>
+          </div>
+
+          <v-divider />
+
           <div class="section-title compact-title">Temporary links</div>
           <div v-if="temporarySubscriptions.length === 0" class="empty-command">No temporary links.</div>
           <div v-for="item in temporarySubscriptions" :key="item.id" class="catalog-item">
@@ -1918,6 +1950,7 @@ function formatBytes(value: number) {
     <LegacyMMWXImportDialog v-model:open="legacyMMWX.open" :plans="plans" @imported="refresh" />
     <SubscriptionProfileDialog v-model:open="profileManagement.open" :profile="profileManagement.profile" :nodes="nodes" :users="users" :templates="templates" @saved="refresh" />
     <TemporarySubscriptionDialog v-model:open="temporaryShare.open" :username="assignForm.username" :nodes="temporaryNodeOptions" @created="temporaryShareCreated" />
+    <PrivateRoutedPolicyDialog v-model:open="privateRoutePolicy.open" :policy="privateRoutes?.policy ?? null" @saved="refresh" />
     <UserLoginDialog v-model:open="userLogin.open" :username="userLogin.username" />
     <NodeManagementDialog v-model:open="nodeManagement.open" :id="nodeManagement.id" :mode="nodeManagement.mode" :nodes="nodes" @changed="refresh" />
   </div>
@@ -1927,5 +1960,9 @@ function formatBytes(value: number) {
 .catalog-item > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 .catalog-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; max-width: 148px; }
 .temporary-controls { max-width: 180px; }
+.private-route-title, .private-route-summary { display: flex; align-items: center; gap: 8px; }
+.private-route-title { justify-content: space-between; }
+.private-route-summary { flex-shrink: 0; }
+.private-route-error { color: #b42318; }
 @media (max-width: 600px) { .catalog-controls { max-width: 112px; } }
 </style>

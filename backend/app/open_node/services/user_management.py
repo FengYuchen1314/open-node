@@ -16,6 +16,7 @@ from open_node.domain.user_management import (
 from open_node.services.inventory import (
     CommandModel,
     ManagedNodeModel,
+    PrivateRoutedNodeModel,
     ProductUserConflict,
     ProductUserModel,
     ProductUserNotFoundError,
@@ -226,7 +227,9 @@ class UserManagement:
             for field in ("display_name", "email", "remark", "is_active"):
                 setattr(user, field, getattr(payload, field))
             user.updated_at = now
-            commands = self.store._subscription_access().reconcile(session, now, username=username)
+            commands = self.store._subscription_access().reconcile(
+                session, now, username=username
+            )
             session.flush()
             result = UserManagementResult(
                 **self._view(session, user).model_dump(),
@@ -320,7 +323,14 @@ class UserManagement:
                     ProductUserSubscriptionTokenModel.username == username
                 )
             )
-            commands = self.store._subscription_access().reconcile(session, now, username=username)
+            commands = self.store._private_routed_nodes().prepare_user_removal(
+                session, username, now
+            )
+            commands.extend(
+                self.store._subscription_access().reconcile(
+                    session, now, username=username
+                )
+            )
             self.finalize_ready(session, now, identifier=job.id)
             result = self._removal_read(session, job, commands)
             session.commit()
@@ -332,8 +342,13 @@ class UserManagement:
             job = self._removal(session, identifier)
             commands = []
             if not job.completed_at:
-                commands = self.store._subscription_access().reconcile(
-                    session, now, username=job.username, force=True
+                commands = self.store._private_routed_nodes().prepare_user_removal(
+                    session, job.username, now
+                )
+                commands.extend(
+                    self.store._subscription_access().reconcile(
+                        session, now, username=job.username, force=True
+                    )
                 )
                 self.finalize_ready(session, now, identifier=job.id)
             result = self._removal_read(session, job, commands)
@@ -373,6 +388,12 @@ class UserManagement:
                         session, command, now, "Not sent: user removal retired these credentials"
                     )
             if in_flight:
+                continue
+            if session.scalar(
+                select(PrivateRoutedNodeModel.node_id)
+                .where(PrivateRoutedNodeModel.username == job.username)
+                .limit(1)
+            ):
                 continue
             states = access.read_in_session(session, job.username)["servers"]
             if any(

@@ -160,10 +160,17 @@ def edit_entries(config: dict, key: str, payload: dict) -> None:
         item = payload.get(item_key)
         if not isinstance(item, dict) or not item.get("tag"):
             raise RuntimeFailure("A tagged entry is required")
-        if any(entry.get("tag") == item["tag"] for entry in entries):
+        existing = [entry for entry in entries if entry.get("tag") == item["tag"]]
+        if existing and payload.get("allow_existing") is True and existing == [item]:
+            return
+        if existing:
             raise RuntimeFailure("Tag already exists")
         entries.append(copy.deepcopy(item))
         return
+    if action == "remove" and payload.get("ignore_missing") is True:
+        matches = [entry for entry in entries if entry.get("tag") == payload.get("tag")]
+        if not matches:
+            return
     current = find_tag(entries, payload.get("tag"))
     if action == "remove":
         entries.remove(current)
@@ -213,7 +220,10 @@ def edit_routing(config: dict, payload: dict) -> None:
         rule = payload.get("rule")
         if not isinstance(rule, dict):
             raise RuntimeFailure("Rule must be an object")
-        if rule.get("marktag") and any(item.get("marktag") == rule["marktag"] for item in rules):
+        existing = [item for item in rules if item.get("marktag") == rule.get("marktag")]
+        if existing and payload.get("allow_existing") is True and existing == [rule]:
+            return
+        if rule.get("marktag") and existing:
             raise RuntimeFailure("Rule marktag already exists")
         index = payload.get("index", len(rules))
         if not isinstance(index, int) or not 0 <= index <= len(rules):
@@ -221,6 +231,10 @@ def edit_routing(config: dict, payload: dict) -> None:
         rules.insert(index, copy.deepcopy(rule))
     elif action == "remove_rule":
         if payload.get("marktag"):
+            if payload.get("ignore_missing") is True and not any(
+                rule.get("marktag") == payload["marktag"] for rule in rules
+            ):
+                return
             rules.remove(routing_rule(rules, payload))
         else:
             index = payload.get("index")

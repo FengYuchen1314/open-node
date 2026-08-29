@@ -261,6 +261,53 @@ def test_reordering_requires_complete_unique_tags():
     assert config["outbounds"][0]["tag"] == "proxy"
 
 
+def test_private_route_cleanup_retries_are_strictly_idempotent():
+    outbound = {"tag": "private:alice:1", "protocol": "freedom"}
+    config = {"outbounds": [outbound], "routing": {"rules": []}}
+    edit_entries(
+        config,
+        "outbounds",
+        {"action": "add", "outbound": outbound, "allow_existing": True},
+    )
+    with pytest.raises(RuntimeFailure, match="already exists"):
+        edit_entries(
+            config,
+            "outbounds",
+            {
+                "action": "add",
+                "outbound": {**outbound, "protocol": "blackhole"},
+                "allow_existing": True,
+            },
+        )
+    edit_entries(
+        config,
+        "outbounds",
+        {"action": "remove", "tag": outbound["tag"], "ignore_missing": True},
+    )
+    edit_entries(
+        config,
+        "outbounds",
+        {"action": "remove", "tag": outbound["tag"], "ignore_missing": True},
+    )
+
+    rule = {
+        "type": "field",
+        "marktag": outbound["tag"],
+        "user": ["alice"],
+        "outboundTag": outbound["tag"],
+    }
+    edit_routing(config, {"action": "add_rule", "rule": rule, "allow_existing": True})
+    edit_routing(config, {"action": "add_rule", "rule": rule, "allow_existing": True})
+    edit_routing(
+        config,
+        {"action": "remove_rule", "marktag": rule["marktag"], "ignore_missing": True},
+    )
+    edit_routing(
+        config,
+        {"action": "remove_rule", "marktag": rule["marktag"], "ignore_missing": True},
+    )
+
+
 async def test_subprocess_output_and_time_are_bounded():
     with pytest.raises(RuntimeFailure, match="output limit"):
         await run_command(sys.executable, "-c", "print('x' * 300000)")

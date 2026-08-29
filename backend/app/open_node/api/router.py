@@ -10,6 +10,7 @@ from open_node.api.routes import (
     license,
     node_management,
     plan_management,
+    private_routed_nodes,
     probe,
     public,
     server_management,
@@ -34,6 +35,7 @@ private_router.include_router(probe.router)
 private_router.include_router(subscriptions.router)
 private_router.include_router(subscription_profiles.router)
 private_router.include_router(temporary_subscriptions.router)
+private_router.include_router(private_routed_nodes.router)
 private_router.include_router(plan_management.router)
 private_router.include_router(user_management.router)
 private_router.include_router(node_management.router)
@@ -41,6 +43,7 @@ private_router.include_router(subscriber_auth.management_router)
 api_router.include_router(private_router)
 api_router.include_router(auth.router)
 api_router.include_router(subscriber_auth.router)
+api_router.include_router(private_routed_nodes.account_router)
 api_router.include_router(subscription_templates.router)
 api_router.include_router(subscription_templates.router, prefix="/account")
 api_router.include_router(system.router)

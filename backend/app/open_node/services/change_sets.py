@@ -224,31 +224,36 @@ class ChangeSetCoordinator:
     def dispatch(self, identifier):
         with self.store._coordinated_session() as session:
             change = self.store._change_set_model(session, identifier)
-            if change.archived_steps:
-                raise ChangeSetConflict("An archived change set cannot be dispatched")
-            commands = []
-            if change.status == State.PLANNED:
-                steps = self.steps(session, change)
-                self.reserve(session, change, steps)
-                previous = None
-                for step in steps:
-                    previous = self.store._create_command_model(
-                        session,
-                        session.get(ServerModel, step.server_id),
-                        self.store._step_forward_command(step),
-                        depends_on=previous,
-                    )
-                    step.forward_command_id = previous.id
-                    session.flush()
-                    commands.append(previous)
-                change.status = State.DISPATCHED
-                change.updated_at = datetime.now(UTC)
-            elif change.status != State.DISPATCHED:
-                raise ChangeSetConflict("Only a planned change set can be dispatched")
+            commands = self.dispatch_model(session, change)
             session.commit()
             return self.store._change_set_read(session, change), [
                 self.store._command_read(c) for c in commands
             ]
+
+    def dispatch_model(self, session, change):
+        if change.archived_steps:
+            raise ChangeSetConflict("An archived change set cannot be dispatched")
+        commands = []
+        if change.status == State.PLANNED:
+            steps = self.steps(session, change)
+            self.reserve(session, change, steps)
+            previous = None
+            for step in steps:
+                previous = self.store._create_command_model(
+                    session,
+                    session.get(ServerModel, step.server_id),
+                    self.store._step_forward_command(step),
+                    depends_on=previous,
+                )
+                step.forward_command_id = previous.id
+                session.flush()
+                commands.append(previous)
+            change.status = State.DISPATCHED
+            change.updated_at = datetime.now(UTC)
+        elif change.status != State.DISPATCHED:
+            raise ChangeSetConflict("Only a planned change set can be dispatched")
+        session.flush()
+        return commands
 
     def stop_unsent(self, session, steps, now):
         for step in steps:
@@ -412,6 +417,7 @@ class ChangeSetCoordinator:
                     self.release(session, change)
         change.updated_at = now
         session.flush()
+        self.store._private_routed_nodes().after_change_set(session, change, now)
 
     def migrate_legacy(self):
         with self.store._coordinated_session() as session:

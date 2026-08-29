@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import SubscriberSecurityPanel from "../components/SubscriberSecurityPanel.vue";
+import PrivateRoutedNodesPanel from "../components/PrivateRoutedNodesPanel.vue";
 import TemplatesWorkspace from "../components/TemplatesWorkspace.vue";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog.vue";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat } from "../domain/subscriptions";
@@ -121,7 +122,7 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
     <header class="account-header"><div class="account-brand"><div class="brand-mark" aria-hidden="true">ON</div><h1>Open Node</h1></div><div class="account-identity"><span>{{ subscriberState.session.username }}</span><v-tooltip text="Sign out"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-logout" aria-label="Sign out" variant="text" @click="logout" /></template></v-tooltip></div></header>
     <main class="account-content">
       <div class="account-heading"><h2>{{ profile?.display_name || subscriberState.session.username }}</h2><v-tooltip text="Refresh account"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-refresh" aria-label="Refresh account" variant="text" :loading="loading" @click="load" /></template></v-tooltip></div>
-      <v-tabs v-model="tab" color="primary" class="account-tabs"><v-tab value="subscription" prepend-icon="mdi-link-variant">Subscription</v-tab><v-tab value="templates" prepend-icon="mdi-file-document-edit-outline">Templates</v-tab><v-tab value="security" prepend-icon="mdi-shield-account-outline">Security</v-tab></v-tabs>
+      <v-tabs v-model="tab" color="primary" class="account-tabs"><v-tab value="subscription" prepend-icon="mdi-link-variant">Subscription</v-tab><v-tab value="routes" prepend-icon="mdi-routes">Routes</v-tab><v-tab value="templates" prepend-icon="mdi-file-document-edit-outline">Templates</v-tab><v-tab value="security" prepend-icon="mdi-shield-account-outline">Security</v-tab></v-tabs>
       <v-alert v-if="error" type="error" variant="tonal" class="my-4">{{ error }}</v-alert>
       <v-progress-linear v-if="loading" indeterminate color="primary" />
       <template v-if="tab === 'subscription' && profile && quota">
@@ -147,6 +148,7 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
           </div>
         </section>
       </template>
+      <PrivateRoutedNodesPanel v-else-if="tab === 'routes'" />
       <TemplatesWorkspace v-else-if="tab === 'templates'" subscriber class="account-templates" />
       <SubscriberSecurityPanel v-else-if="tab === 'security'" class="account-security-panel" @changed="load" />
     </main>
@@ -193,8 +195,9 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
   .account-heading h2 { font-size: 22px; }
   .account-link-controls { gap: 8px; }
   .account-node-limit { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .account-tabs :deep(.v-slide-group__content) { width: 100%; }
-  .account-tabs :deep(.v-tab) { flex: 1; min-width: 0; padding-inline: 8px; }
+  .account-tabs :deep(.v-slide-group__content) { width: 100%; min-width: 100%; max-width: 100%; }
+  .account-tabs :deep(.v-tab) { flex: 1 1 25% !important; width: 25% !important; max-width: 25% !important; min-width: 0 !important; padding-inline: 4px; font-size: 11px; }
   .account-tabs :deep(.v-btn__prepend) { display: none; }
 }
+@media (max-width: 360px) { .account-tabs :deep(.v-tab) { padding-inline: 2px; font-size: 10px; } }
 </style>

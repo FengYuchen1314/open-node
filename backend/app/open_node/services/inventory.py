@@ -1135,6 +1135,52 @@ class ManagedNodeModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class PrivateRoutedPolicyModel(Base):
+    __tablename__ = "private_routed_policy"
+
+    id: Mapped[str] = mapped_column(String(24), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_nodes: Mapped[int] = mapped_column(Integer, default=2)
+    daily_limit: Mapped[int] = mapped_column(Integer, default=5)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PrivateRoutedNodeModel(Base):
+    __tablename__ = "private_routed_nodes"
+
+    node_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("managed_nodes.id", ondelete="CASCADE"), primary_key=True
+    )
+    username: Mapped[str] = mapped_column(
+        String(80), ForeignKey("product_users.username", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    action: Mapped[str] = mapped_column(String(16))
+    change_set_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("agent_change_sets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    outbound: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    client: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PrivateRoutedActionModel(Base):
+    __tablename__ = "private_routed_actions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    username: Mapped[str] = mapped_column(
+        String(80), ForeignKey("product_users.username", ondelete="CASCADE"), index=True
+    )
+    node_id: Mapped[str] = mapped_column(String(36), index=True)
+    action: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class ManagedNodeRemovalModel(Base):
     __tablename__ = "managed_node_removals"
 
@@ -3213,7 +3259,14 @@ class InventoryStore:
             nodes = session.scalars(
                 select(ManagedNodeModel).order_by(ManagedNodeModel.created_at)
             ).all()
-            nodes = [node for node in nodes if not node.removal_id]
+            private_node_ids = set(
+                session.scalars(select(PrivateRoutedNodeModel.node_id)).all()
+            )
+            nodes = [
+                node
+                for node in nodes
+                if not node.removal_id and node.id not in private_node_ids
+            ]
             node_names = {node.id: node.name for node in nodes}
             servers = session.scalars(select(ServerModel)).all()
             server_names = {server.id: server.name for server in servers}
@@ -3502,7 +3555,7 @@ class InventoryStore:
                 raise DuplicateSubscriptionPlanNameError(
                     f"subscription plan name already exists: {payload.name}"
                 )
-            self._ensure_managed_nodes_exist(session, payload.node_ids)
+            self._ensure_plan_nodes_assignable(session, payload.node_ids)
             plan = SubscriptionPlanModel(
                 **self.subscription_templates().validate_selection(session, payload),
                 id=str(uuid4()),
@@ -4209,52 +4262,62 @@ class InventoryStore:
             return self._change_set_read(session, change_set)
 
     def create_change_set(self, payload: AgentChangeSetCreate) -> AgentChangeSetRead:
+        with self._coordinated_session() as session:
+            change_set = self._create_change_set_model(session, payload)
+            session.commit()
+            session.refresh(change_set)
+            return self._change_set_read(session, change_set)
+
+    def _create_change_set_model(
+        self,
+        session: Session,
+        payload: AgentChangeSetCreate,
+        now: datetime | None = None,
+    ) -> AgentChangeSetModel:
         for step in payload.steps:
             step.forward.validate_wire_payload()
             if step.rollback:
                 step.rollback.validate_wire_payload()
-        now = datetime.now(tz=UTC)
-        with self._coordinated_session() as session:
-            self._ensure_step_servers_exist(session, payload.steps)
-            change_set = AgentChangeSetModel(
-                id=str(uuid4()),
-                name=payload.name,
-                description=payload.description,
-                status=AgentChangeSetStatus.PLANNED.value,
-                rollback_on_failure=payload.rollback_on_failure,
-                rollback_reason="",
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(change_set)
-            for index, step in enumerate(payload.steps, start=1):
-                rollback = step.rollback
-                session.add(
-                    AgentChangeSetStepModel(
-                        id=str(uuid4()),
-                        change_set_id=change_set.id,
-                        sequence=index,
-                        server_id=str(step.server_id),
-                        label=step.label or f"Step {index}",
-                        forward_method=step.forward.method,
-                        forward_path=step.forward.path,
-                        forward_query=step.forward.query,
-                        forward_body=step.forward.body,
-                        forward_timeout_ms=step.forward.timeout_ms,
-                        forward_stream=step.forward.stream,
-                        rollback_method=rollback.method if rollback else None,
-                        rollback_path=rollback.path if rollback else None,
-                        rollback_query=rollback.query if rollback else "",
-                        rollback_body=rollback.body if rollback else None,
-                        rollback_timeout_ms=rollback.timeout_ms if rollback else None,
-                        rollback_stream=rollback.stream if rollback else False,
-                        created_at=now,
-                        updated_at=now,
-                    )
+        now = now or datetime.now(tz=UTC)
+        self._ensure_step_servers_exist(session, payload.steps)
+        change_set = AgentChangeSetModel(
+            id=str(uuid4()),
+            name=payload.name,
+            description=payload.description,
+            status=AgentChangeSetStatus.PLANNED.value,
+            rollback_on_failure=payload.rollback_on_failure,
+            rollback_reason="",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(change_set)
+        for index, step in enumerate(payload.steps, start=1):
+            rollback = step.rollback
+            session.add(
+                AgentChangeSetStepModel(
+                    id=str(uuid4()),
+                    change_set_id=change_set.id,
+                    sequence=index,
+                    server_id=str(step.server_id),
+                    label=step.label or f"Step {index}",
+                    forward_method=step.forward.method,
+                    forward_path=step.forward.path,
+                    forward_query=step.forward.query,
+                    forward_body=step.forward.body,
+                    forward_timeout_ms=step.forward.timeout_ms,
+                    forward_stream=step.forward.stream,
+                    rollback_method=rollback.method if rollback else None,
+                    rollback_path=rollback.path if rollback else None,
+                    rollback_query=rollback.query if rollback else "",
+                    rollback_body=rollback.body if rollback else None,
+                    rollback_timeout_ms=rollback.timeout_ms if rollback else None,
+                    rollback_stream=rollback.stream if rollback else False,
+                    created_at=now,
+                    updated_at=now,
                 )
-            session.commit()
-            session.refresh(change_set)
-            return self._change_set_read(session, change_set)
+            )
+        session.flush()
+        return change_set
 
     def dispatch_change_set(
         self,
@@ -5336,7 +5399,9 @@ class InventoryStore:
             cycle_days=plan.cycle_days,
             is_reset=plan.is_reset,
             reset_day=plan.reset_day,
-            node_names=[node_names.get(node_id, node_id) for node_id in (plan.node_ids or [])],
+            node_names=[
+                node_names[node_id] for node_id in (plan.node_ids or []) if node_id in node_names
+            ],
             node_multipliers=InventoryStore._catalog_map_keys_to_names(
                 plan.node_multipliers or {},
                 node_names,
@@ -5365,7 +5430,11 @@ class InventoryStore:
         values: dict[str, Any],
         node_names: dict[str, str],
     ) -> dict[str, Any]:
-        return {node_names.get(node_id, node_id): value for node_id, value in values.items()}
+        return {
+            node_names[node_id]: value
+            for node_id, value in values.items()
+            if node_id in node_names
+        }
 
     @staticmethod
     def _catalog_server(
@@ -5623,6 +5692,64 @@ class InventoryStore:
             if node.removal_id:
                 raise ManagedNodeConflict("A selected node is being removed")
 
+    @staticmethod
+    def _ensure_plan_nodes_assignable(session: Session, node_ids: list[UUID]) -> None:
+        InventoryStore._ensure_managed_nodes_exist(session, node_ids)
+        if session.scalar(
+            select(PrivateRoutedNodeModel.node_id)
+            .where(PrivateRoutedNodeModel.node_id.in_([str(node_id) for node_id in node_ids]))
+            .limit(1)
+        ):
+            raise ManagedNodeConflict("Private routed nodes cannot be assigned to shared plans")
+
+    @staticmethod
+    def _effective_subscription_node_ids(
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        selected_node_ids: set[str] | None = None,
+    ) -> list[str]:
+        plan_node_ids = plan.node_ids or []
+        private_node_ids = set(
+            session.scalars(
+                select(PrivateRoutedNodeModel.node_id).where(
+                    PrivateRoutedNodeModel.node_id.in_(plan_node_ids)
+                )
+            ).all()
+        )
+        identifiers = [
+            node_id
+            for node_id in plan_node_ids
+            if node_id not in private_node_ids
+            and (selected_node_ids is None or node_id in selected_node_ids)
+        ]
+        owned = session.scalars(
+            select(PrivateRoutedNodeModel)
+            .where(
+                PrivateRoutedNodeModel.username == user.username,
+                PrivateRoutedNodeModel.status == "active",
+            )
+            .order_by(PrivateRoutedNodeModel.created_at, PrivateRoutedNodeModel.node_id)
+        ).all()
+        identifiers.extend(
+            row.node_id
+            for row in owned
+            if selected_node_ids is None or row.node_id in selected_node_ids
+        )
+        return list(dict.fromkeys(identifiers))
+
+    @staticmethod
+    def _subscription_node_allowed(
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        node_id: str,
+    ) -> bool:
+        private = session.get(PrivateRoutedNodeModel, node_id)
+        if private is not None:
+            return private.username == user.username and private.status == "active"
+        return node_id in plan.node_ids
+
     def _subscription_provision_batches(
         self,
         session: Session,
@@ -5633,11 +5760,12 @@ class InventoryStore:
         from open_node.services.user_limits import effective_limits
 
         warnings: list[str] = []
-        if not plan.node_ids:
+        effective_node_ids = self._effective_subscription_node_ids(session, user, plan)
+        if not effective_node_ids:
             return [], warnings
 
         nodes = session.scalars(
-            select(ManagedNodeModel).where(ManagedNodeModel.id.in_(plan.node_ids))
+            select(ManagedNodeModel).where(ManagedNodeModel.id.in_(effective_node_ids))
         ).all()
         nodes_by_id = {node.id: node for node in nodes}
         batches: dict[str, dict[str, Any]] = {}
@@ -5646,7 +5774,7 @@ class InventoryStore:
         seen_route: set[tuple[str, str, str, str]] = set()
         limiter_bindings: dict[tuple[str, str, str], dict[str, Any]] = {}
 
-        for node_id in plan.node_ids:
+        for node_id in effective_node_ids:
             node = nodes_by_id.get(node_id)
             if not node:
                 warnings.append(f"node {node_id} no longer exists")
@@ -5760,11 +5888,9 @@ class InventoryStore:
         selected_node_ids: set[str] | None = None,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
         warnings: list[str] = []
-        plan_node_ids = [
-            node_id
-            for node_id in plan.node_ids
-            if selected_node_ids is None or node_id in selected_node_ids
-        ]
+        plan_node_ids = self._effective_subscription_node_ids(
+            session, user, plan, selected_node_ids
+        )
         if not plan_node_ids:
             return [], warnings
 
@@ -6961,6 +7087,11 @@ class InventoryStore:
         from open_node.services.temporary_subscriptions import TemporarySubscriptions
 
         return TemporarySubscriptions(self)
+
+    def _private_routed_nodes(self):
+        from open_node.services.private_routed_nodes import PrivateRoutedNodes
+
+        return PrivateRoutedNodes(self)
 
     def _server_traffic(self):
         from open_node.services.server_traffic import ServerTrafficCoordinator

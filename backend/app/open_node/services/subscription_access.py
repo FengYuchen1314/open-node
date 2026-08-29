@@ -164,7 +164,7 @@ class SubscriptionAccessCoordinator:
     def authorize(self, session, user, plan, batches, now):
         by_server = {str(batch.server_id): batch.body for batch in batches}
         additions = {}
-        for node_id in plan.node_ids:
+        for node_id in self.store._effective_subscription_node_ids(session, user, plan):
             node = session.get(ManagedNodeModel, node_id)
             if not node or not node.enabled or node.removal_id:
                 continue
@@ -272,7 +272,9 @@ class SubscriptionAccessCoordinator:
                         node
                         and node.enabled
                         and not node.removal_id
-                        and node_id in plan.node_ids
+                        and self.store._subscription_node_allowed(
+                            session, user, plan, node_id
+                        )
                         and node.server_id == row.server_id
                         and node.inbound_tag == binding["tag"]
                         and protocol(node.protocol) == binding["protocol"]

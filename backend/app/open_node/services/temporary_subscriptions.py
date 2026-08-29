@@ -70,7 +70,8 @@ class TemporarySubscriptions:
                 raise TemporarySubscriptionConflict(str(exc)) from exc
             node_ids = [str(node_id) for node_id in payload.node_ids]
             self.store._ensure_managed_nodes_exist(session, payload.node_ids)
-            if not set(node_ids).issubset(plan.node_ids or []):
+            effective = set(self.store._effective_subscription_node_ids(session, user, plan))
+            if not set(node_ids).issubset(effective):
                 raise TemporarySubscriptionConflict(
                     "temporary subscription nodes must belong to the subscriber's current plan"
                 )
@@ -137,7 +138,8 @@ class TemporarySubscriptions:
             user = session.get(ProductUserModel, row.username)
             plan = self.store._available_subscription_plan(session, user)
             selected = set(row.node_ids or [])
-            if not selected or not selected.issubset(plan.node_ids or []):
+            effective = set(self.store._effective_subscription_node_ids(session, user, plan))
+            if not selected or not selected.issubset(effective):
                 raise SubscriptionUnavailableError(
                     "temporary subscription nodes are outside the current plan"
                 )
