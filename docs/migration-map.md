@@ -295,6 +295,9 @@ These passing command and snapshot checks do not prove a complete replacement:
 - [Subscriber accounts](subscriber-accounts.md) now have a separate login and
   session realm, password provisioning/recovery, own-plan usage and downloads,
   device revocation, encrypted TOTP enrollment and one-use recovery codes.
+  [Registration invitations](registration-invitations.md) add administrator-created,
+  plan-bound, high-entropy one-time signup links with digest-only storage,
+  atomic account/plan/runtime enrollment and automatic subscriber sign-in.
   Product-user roles do not grant controller access. Disablement, removal and
   password reset revoke old sessions; reactivation cannot revive them. The
   subscriber UI is available at `/account`. [Legacy identity migration](legacy-mmwx-identities.md)
@@ -305,7 +308,8 @@ These passing command and snapshot checks do not prove a complete replacement:
   profiles and legacy `/x` file/package combinations remain usable. Source
   administrators are demoted and old sessions/API tokens are not imported. Raw
   uploads and legacy templates/rules/scripts require managed reconfiguration;
-  public registration and third-party identity providers remain unimplemented.
+  open anonymous registration and third-party identity providers remain
+  unimplemented.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both

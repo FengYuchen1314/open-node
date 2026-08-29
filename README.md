@@ -35,9 +35,11 @@ the Vue interface. [Administrator setup and recovery](docs/administrator-access.
 also covers HTTPS cookies, local previews, session expiry, and API clients.
 
 Subscribers use the separate `/account` portal. Administrators provision their
-login passwords from Subscriptions; product-user roles never grant controller
-access. [Subscriber accounts](docs/subscriber-accounts.md) covers subscription
-downloads, usage, device sessions, password recovery and optional TOTP.
+login passwords directly or issue a high-entropy, single-use
+[registration invitation](docs/registration-invitations.md) bound to an existing
+plan; product-user roles never grant controller access. [Subscriber accounts](docs/subscriber-accounts.md)
+covers subscription downloads, usage, device sessions, password recovery and
+optional TOTP.
 [Legacy MMWX identity migration](docs/legacy-mmwx-identities.md) can preserve
 bcrypt logins, TOTP/recovery state and current per-user subscription keys through
 a transactional preview/import workflow. It also imports active-main package
@@ -93,6 +95,12 @@ credentials and assignment dates.
 current-plan usage and downloads, password changes, session revocation and
 TOTP with one-use recovery codes. Account disablement and removal invalidate
 sessions; password recovery preserves existing subscriptions and traffic.
+
+[Registration invitations](docs/registration-invitations.md) let an administrator
+bind a one-time signup link to an existing plan. Only a SHA-256 digest is stored,
+the bearer token stays in the `/account` URL fragment, and an atomic claim creates
+the ordinary subscriber, password account, plan assignment and runtime access
+intent. Open anonymous registration remains disabled.
 
 User [editing and removal](docs/user-management.md) now preserve runtime identity
 during profile edits and support confirmed disable/reactivation. Removal tracks

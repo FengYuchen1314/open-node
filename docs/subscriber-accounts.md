@@ -11,9 +11,11 @@ No activation, entitlement lookup or paid feature gate is involved.
 Create the product user and assign a plan from Subscriptions. The key icon
 beside that user opens **User login**. Set a password of 12-1024 characters
 and confirm session revocation. Existing catalog users have no login password
-until one is explicitly provisioned. There is no public registration endpoint
-and no default subscriber password. Even a product user with `role=admin`
-cannot use controller management APIs.
+until one is explicitly provisioned. Alternatively, an administrator can issue
+a single-use [registration invitation](registration-invitations.md) for an
+existing plan. There is no open anonymous registration and no default subscriber
+password. Even a product user with `role=admin` cannot use controller management
+APIs.
 
 Password reset preserves the plan, assigned credentials, subscription tokens,
 dates and charged traffic. Existing sessions and pending login challenges are
@@ -97,9 +99,10 @@ subscriber and administrator cookies share the deployment's lifetime/idle
 timeout settings. Use HTTPS in production.
 
 Writes require a subscriber-specific CSRF token and an allowed Origin. Login
-also requires `X-Open-Node-Client: browser`. Subscriber API responses, including
-validation errors, are `Cache-Control: no-store`; validation errors omit raw
-request values. No browser-storage bearer token is used.
+and invited registration also require `X-Open-Node-Client: browser` and an
+allowed Origin. Subscriber API responses, including validation errors, are
+`Cache-Control: no-store`; validation errors omit raw request values. No
+browser-storage bearer token is used.
 
 Login and credential-management attempts each have a persistent ten-per-minute
 account limit, with an additional sixty-per-minute peer limit across both.
@@ -129,6 +132,8 @@ offline Agent has already stopped traffic.
 All paths below are relative to `/api/v1/account`:
 
 - `GET /session`, `POST /login`, `POST /login/verify`: session discovery and login.
+- `POST /register`: atomically claim an administrator-issued invitation and
+  create an ordinary subscriber account.
 - `POST /logout`, `POST /password`: logout and password changes.
 - `GET /me`: own display name, contact, current quota and resolved account/node
   limits, including administrator [user overrides](user-limits.md).

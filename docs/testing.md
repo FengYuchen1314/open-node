@@ -1080,6 +1080,32 @@ rollback rejection, restart persistence and missing-column SQLite migration.
 
 ## Latest Verification
 
+Registration invitations passed on the designated VPS:
+
+- Backend full regression: 883 tests. Frontend: 32 files and 216 tests, Vue
+  typecheck and production build. Ruff passed for all backend sources, tests and
+  the new smoke script.
+- Focused coverage passed digest-only persistence, working subscriber login,
+  exact plan/runtime enrollment, generic invalid/revoked/expired/used responses,
+  case-insensitive username retry, atomic concurrent claims, plan cleanup and
+  administrator/public route isolation.
+- The WebSocket smoke installed a temporary non-root Agent, claimed a plan-bound
+  invitation, waited for the durable access command, exported the invited user's
+  Xray configuration and forwarded 32 KiB of real TCP traffic. Reuse failed with
+  the generic unavailable response and temporary services were removed.
+- The production preview completed actual HTTP registration and subscriber login.
+  Administrator invitation management and the invited account form passed at
+  1440, 390 and 320 pixels without horizontal overflow or console errors.
+- A copy of the prior preview database retained every count across 48 existing
+  tables and two existing rows. Startup added an empty `registration_invitations`
+  table and `PRAGMA foreign_key_check` remained clean.
+
+The existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+These results do not enable open anonymous signup or close the remaining
+[migration gates](migration-map.md).
+
+## Earlier Template Verification
+
 Custom Clash and Surge templates passed on the designated VPS:
 
 - Backend full regression: 858 tests. Frontend: 205 tests and production

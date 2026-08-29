@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import type { RegistrationClaim, RegistrationClaimResponse } from "../domain/registration-invitations";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat, SubscriptionIpPolicy, SubscriptionQuotaStatus } from "../domain/subscriptions";
 import { authenticatedFetch } from "./auth";
 import type { UserNodeLimits } from "../domain/user-limits";
@@ -82,6 +83,13 @@ export async function subscriberSignIn(username: string, password: string, fetch
   const result = await accountRequest<SubscriberSession>("login", { method: "POST", body: JSON.stringify({ username, password }) }, fetcher);
   if (current === epoch && result.authenticated) subscriberState.session = result;
   return result;
+}
+
+export function subscriberRegister(payload: RegistrationClaim, fetcher = fetch) {
+  return accountRequest<RegistrationClaimResponse>("register", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, fetcher);
 }
 
 export async function verifySubscriberLogin(challenge: string, code: string, fetcher = fetch) {

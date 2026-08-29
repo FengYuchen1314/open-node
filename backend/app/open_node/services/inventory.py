@@ -1112,6 +1112,22 @@ class SubscriptionIpPolicyModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class RegistrationInvitationModel(Base):
+    __tablename__ = "registration_invitations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    token_hint: Mapped[str] = mapped_column(String(12))
+    plan_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("subscription_plans.id", ondelete="CASCADE"), index=True
+    )
+    used_by: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class ManagedNodeModel(Base):
     __tablename__ = "managed_nodes"
 
@@ -7107,6 +7123,11 @@ class InventoryStore:
         from open_node.services.subscription_ip_policy import SubscriptionIpPolicy
 
         return SubscriptionIpPolicy(self)
+
+    def _registration_invitations(self):
+        from open_node.services.registration_invitations import RegistrationInvitations
+
+        return RegistrationInvitations(self)
 
     def _server_traffic(self):
         from open_node.services.server_traffic import ServerTrafficCoordinator

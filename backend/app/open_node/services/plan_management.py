@@ -4,7 +4,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from open_node.domain.plan_management import PlanManagementRead, PlanManagementResult
 from open_node.domain.subscriptions import SubscriptionPlanCreate
@@ -13,6 +13,7 @@ from open_node.services.inventory import (
     ManagedNodeModel,
     ProductUserModel,
     ProductUserNotFoundError,
+    RegistrationInvitationModel,
     ServerModel,
     SubscriptionAccessModel,
     SubscriptionCredentialModel,
@@ -326,6 +327,11 @@ class PlanManagement:
             users = self._members(session, plan)
             self._check(self._view(session, plan, users), payload, plan.name)
             result = self._unbind(session, plan, users, datetime.now(UTC))
+            session.execute(
+                delete(RegistrationInvitationModel).where(
+                    RegistrationInvitationModel.plan_id == plan.id
+                )
+            )
             session.delete(plan)
             session.commit()
             return result

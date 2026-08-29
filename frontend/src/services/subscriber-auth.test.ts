@@ -3,7 +3,7 @@ import { authState } from "./auth";
 import {
   accountRequest, clearSubscriberSession, loadSubscriberSession, subscriberAccount,
   subscriberChangePassword, subscriberFormatUrl, subscriberSignIn, subscriberSignOut,
-  subscriberProfiles, subscriberState, verifySubscriberLogin,
+  subscriberProfiles, subscriberRegister, subscriberState, verifySubscriberLogin,
 } from "./subscriber-auth";
 import type { ProductUserSubscriptionToken } from "../domain/subscriptions";
 
@@ -38,6 +38,26 @@ describe("subscriber authentication", () => {
     await verifySubscriberLogin("pending", "123456", fetcher);
     expect(subscriberState.session?.authenticated).toBe(true);
     expect(JSON.parse(fetcher.mock.calls[1][1]?.body as string)).toEqual({ challenge: "pending", code: "123456" });
+  });
+
+  it("registers an invited subscriber without changing session state", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({
+      user: { username: "alice" }, plan: { id: "plan-id" }, commands: [], warnings: [],
+      license_required: false,
+    }, 201));
+    const payload = {
+      token: "invitation-secret",
+      username: "alice",
+      password: "subscriber-password",
+      email: "alice@example.com",
+      display_name: "Alice",
+    };
+    await subscriberRegister(payload, fetcher);
+    expect(fetcher.mock.calls[0][0]).toBe("/api/v1/account/register");
+    expect(fetcher.mock.calls[0][1]?.method).toBe("POST");
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("X-Open-Node-Client")).toBe("browser");
+    expect(JSON.parse(fetcher.mock.calls[0][1]?.body as string)).toEqual(payload);
+    expect(subscriberState.session).toBeNull();
   });
 
   it("restores a persistent session and reports network failure", async () => {

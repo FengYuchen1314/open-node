@@ -1,3 +1,4 @@
+import asyncio
 from secrets import compare_digest
 from typing import Annotated
 from uuid import UUID
@@ -6,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from open_node.api.auth import check_request_origin
 from open_node.api.routes.subscriptions import _subscription_token_response
+from open_node.domain.registration_invitations import RegistrationClaim, RegistrationClaimResponse
 from open_node.domain.subscriber_auth import (
     SubscriberAccountRead,
     SubscriberAccountUpdate,
@@ -29,12 +31,17 @@ from open_node.domain.subscriptions import (
     SubscriptionIpPolicyUpdate,
 )
 from open_node.services.inventory import ProductUserConflict, ProductUserNotFoundError
+from open_node.services.registration_invitations import (
+    RegistrationInvitationConflict,
+    RegistrationInvitationUnavailable,
+)
 from open_node.services.subscriber_auth import (
     SubscriberAuthenticationError,
     SubscriberFactorUnavailable,
     SubscriberIdentity,
     SubscriberSessionExpired,
 )
+from open_node.services.subscription_access import SubscriptionAccessConflict
 
 COOKIE = "open_node_subscriber"
 router = APIRouter(prefix="/account", tags=["subscriber account"])
@@ -118,6 +125,31 @@ def session(request: Request):
         if identity
         else SubscriberSessionRead()
     )
+
+
+@router.post("/register", response_model=RegistrationClaimResponse, status_code=201)
+async def register(payload: RegistrationClaim, request: Request):
+    login_request(request)
+    limit(request, payload.username)
+    try:
+        result = await asyncio.to_thread(
+            request.app.state.inventory._registration_invitations().claim, payload
+        )
+    except RegistrationInvitationUnavailable as exc:
+        raise HTTPException(404, "Invitation unavailable") from exc
+    except RegistrationInvitationConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except SubscriptionAccessConflict as exc:
+        raise HTTPException(409, "Invitation plan cannot provision subscriber access") from exc
+
+    commands = []
+    for command in result.commands:
+        commands.append(
+            await request.app.state.agent_connections.dispatch_command(
+                request.app.state.inventory, command
+            )
+        )
+    return result.model_copy(update={"commands": commands})
 
 
 @router.post("/login", response_model=SubscriberSessionRead)

@@ -8,11 +8,15 @@ import type { ProductUserSubscriptionToken, SubscriptionClientFormat } from "../
 import type { SubscriberSubscriptionProfile } from "../domain/subscription-profiles";
 import {
   loadSubscriberSession, subscriberFormatUrl, subscriberProfile, subscriberProfiles, subscriberSignIn, subscriberSignOut,
-  subscriberState, subscriberToken, verifySubscriberLogin, type SubscriberProfile,
+  subscriberRegister, subscriberState, subscriberToken, verifySubscriberLogin, type SubscriberProfile,
 } from "../services/subscriber-auth";
 
 const username = ref("");
 const password = ref("");
+const confirmPassword = ref("");
+const email = ref("");
+const displayName = ref("");
+const invitationToken = ref("");
 const code = ref("");
 const challenge = ref("");
 const busy = ref(false);
@@ -28,6 +32,10 @@ const format = ref<SubscriptionClientFormat>("clash");
 const copied = ref(false);
 const shortCodeOpen = ref(false);
 const linkType = ref("full");
+const registering = computed(() => Boolean(invitationToken.value));
+const canRegister = computed(() => Boolean(
+  username.value.trim() && password.value.length >= 12 && password.value === confirmPassword.value,
+));
 const formats = [
   { title: "Clash / Mihomo", value: "clash" }, { title: "sing-box", value: "sing-box" },
   { title: "Surge", value: "surge" }, { title: "Xray", value: "xray" },
@@ -64,7 +72,38 @@ async function submit() {
   } catch (failure) { signInError.value = failure instanceof Error ? failure.message : "Sign-in failed"; }
   finally { password.value = ""; code.value = ""; busy.value = false; }
 }
+async function submitRegistration() {
+  if (busy.value || !canRegister.value) return;
+  busy.value = true; signInError.value = "";
+  let created = false;
+  try {
+    await subscriberRegister({
+      token: invitationToken.value,
+      username: username.value.trim(),
+      password: password.value,
+      email: email.value.trim() || null,
+      display_name: displayName.value.trim() || null,
+    });
+    created = true;
+    await subscriberSignIn(username.value.trim(), password.value);
+    clearInvitation();
+  } catch (failure) {
+    if (created) clearInvitation();
+    const detail = failure instanceof Error ? failure.message : "Registration failed";
+    signInError.value = created ? `Account created. Sign-in failed: ${detail}` : detail;
+  } finally {
+    password.value = ""; confirmPassword.value = ""; busy.value = false;
+  }
+}
 function restartSignIn() { challenge.value = ""; code.value = ""; password.value = ""; signInError.value = ""; }
+function clearInvitation() {
+  invitationToken.value = "";
+  window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+}
+function cancelRegistration() {
+  clearInvitation();
+  confirmPassword.value = ""; email.value = ""; displayName.value = ""; signInError.value = "";
+}
 async function load() {
   const current = ++version;
   loading.value = true; error.value = "";
@@ -95,19 +134,35 @@ watch(url, () => { copied.value = false; });
 watch(() => subscriberState.ready && subscriberState.session?.authenticated, (authenticated) => {
   shortCodeOpen.value = false; linkType.value = "full";
   ++version; profile.value = null; subscription.value = null; subscriptionProfiles.value = []; configuration.value = "default"; error.value = "";
-  if (authenticated) { tab.value = "subscription"; void load(); }
+  if (authenticated) { clearInvitation(); tab.value = "subscription"; void load(); }
   else restartSignIn();
 });
-onMounted(async () => { subscriberState.ready = false; await loadSubscriberSession(); });
-onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challenge.value = ""; });
+onMounted(async () => {
+  invitationToken.value = new URLSearchParams(window.location.hash.slice(1)).get("invite") ?? "";
+  subscriberState.ready = false;
+  await loadSubscriberSession();
+});
+onBeforeUnmount(() => {
+  ++version; password.value = ""; confirmPassword.value = ""; code.value = ""; challenge.value = "";
+});
 </script>
 
 <template>
   <div v-if="!subscriberState.ready" class="auth-page" role="status" aria-label="Loading account"><v-progress-circular indeterminate color="primary" /></div>
   <section v-else-if="!subscriberState.session?.authenticated" class="auth-page">
     <div class="auth-workspace">
-      <div class="brand-mark" aria-hidden="true">ON</div><h1>Open Node</h1><h2>{{ challenge ? 'Two-Factor Verification' : 'Subscriber Sign-In' }}</h2>
+      <div class="brand-mark" aria-hidden="true">ON</div><h1>Open Node</h1><h2>{{ registering ? 'Create Subscriber Account' : challenge ? 'Two-Factor Verification' : 'Subscriber Sign-In' }}</h2>
       <v-alert v-if="subscriberState.error" type="error" variant="tonal">{{ subscriberState.error }}<v-btn icon="mdi-refresh" aria-label="Retry account connection" title="Retry account connection" @click="loadSubscriberSession()" /></v-alert>
+      <form v-else-if="registering" class="auth-form" @submit.prevent="submitRegistration">
+        <v-alert v-if="signInError" type="error" variant="tonal">{{ signInError }}</v-alert>
+        <v-text-field v-model="username" label="Username" autocomplete="username" autofocus required maxlength="80" :disabled="busy" />
+        <v-text-field v-model="displayName" label="Display name" autocomplete="name" maxlength="120" :disabled="busy" />
+        <v-text-field v-model="email" label="Email" type="email" autocomplete="email" maxlength="255" :disabled="busy" />
+        <v-text-field v-model="password" label="Password" type="password" autocomplete="new-password" required minlength="12" maxlength="1024" :disabled="busy" />
+        <v-text-field v-model="confirmPassword" label="Confirm password" type="password" autocomplete="new-password" required minlength="12" maxlength="1024" :disabled="busy" :error-messages="confirmPassword && password !== confirmPassword ? ['Passwords do not match'] : []" />
+        <v-btn type="submit" color="primary" prepend-icon="mdi-account-plus-outline" :loading="busy" :disabled="!canRegister">Create Account</v-btn>
+        <v-btn variant="text" prepend-icon="mdi-arrow-left" :disabled="busy" @click="cancelRegistration">Sign In</v-btn>
+      </form>
       <form v-else class="auth-form" @submit.prevent="submit">
         <v-alert v-if="signInError" type="error" variant="tonal">{{ signInError }}</v-alert>
         <template v-if="!challenge"><v-text-field v-model="username" label="Username" autocomplete="username" autofocus required maxlength="80" :disabled="busy" /><v-text-field v-model="password" label="Password" type="password" autocomplete="current-password" required maxlength="1024" :disabled="busy" /></template>

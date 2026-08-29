@@ -13,6 +13,7 @@ import SubscriptionProfileDialog from "../components/SubscriptionProfileDialog.v
 import TemporarySubscriptionDialog from "../components/TemporarySubscriptionDialog.vue";
 import PrivateRoutedPolicyDialog from "../components/PrivateRoutedPolicyDialog.vue";
 import SubscriptionIpPolicyDialog from "../components/SubscriptionIpPolicyDialog.vue";
+import RegistrationInvitationsDialog from "../components/RegistrationInvitationsDialog.vue";
 import NodeManagementDialog from "../components/NodeManagementDialog.vue";
 import type { NodeOperation } from "../services/node-management";
 import type { UserOperation } from "../services/user-management";
@@ -86,6 +87,7 @@ const temporarySubscriptions = ref<TemporarySubscription[]>([]);
 const privateRoutes = ref<PrivateRoutedNodesResponse | null>(null);
 const privateRoutePolicy = reactive({ open: false });
 const temporaryShare = reactive({ open: false });
+const registrationInvitations = reactive({ open: false });
 const temporaryDeleting = ref("");
 const profileManagement = reactive({ profile: null as SubscriptionProfile | null, open: false });
 const planManagement = reactive({ id: "", mode: "edit" as PlanOperation, open: false });
@@ -1819,6 +1821,16 @@ function formatBytes(value: number) {
 
           <v-divider />
 
+          <div class="section-title compact-title private-route-title">
+            <span>Registration</span>
+            <div class="private-route-summary">
+              <v-chip size="small" variant="tonal">{{ plans.length }} plans</v-chip>
+              <v-tooltip text="Manage registration invitations"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-account-multiple-plus-outline" aria-label="Manage registration invitations" variant="text" size="32" :disabled="plans.length === 0" @click="registrationInvitations.open = true" /></template></v-tooltip>
+            </div>
+          </div>
+
+          <v-divider />
+
           <div class="section-title compact-title">Temporary links</div>
           <div v-if="temporarySubscriptions.length === 0" class="empty-command">No temporary links.</div>
           <div v-for="item in temporarySubscriptions" :key="item.id" class="catalog-item">
@@ -1953,6 +1965,7 @@ function formatBytes(value: number) {
     <SubscriptionIpPolicyDialog v-model:open="ipPolicy.open" :username="ipPolicy.username" />
     <LegacyMMWXImportDialog v-model:open="legacyMMWX.open" :plans="plans" @imported="refresh" />
     <SubscriptionProfileDialog v-model:open="profileManagement.open" :profile="profileManagement.profile" :nodes="nodes" :users="users" :templates="templates" @saved="refresh" />
+    <RegistrationInvitationsDialog v-model:open="registrationInvitations.open" :plans="plans" />
     <TemporarySubscriptionDialog v-model:open="temporaryShare.open" :username="assignForm.username" :nodes="temporaryNodeOptions" @created="temporaryShareCreated" />
     <PrivateRoutedPolicyDialog v-model:open="privateRoutePolicy.open" :policy="privateRoutes?.policy ?? null" @saved="refresh" />
     <UserLoginDialog v-model:open="userLogin.open" :username="userLogin.username" />
