@@ -4,6 +4,9 @@ Open Node is a single-repository refactor of the MMWX stack. The target is a
 free-to-use server and subscription management system with no activation keys,
 paid entitlement checks, commercial license server calls, or feature gates.
 
+The current implementation status, deployment snapshot, remaining work, and
+next-task handoff are recorded in [the refactor handoff](docs/refactor-handoff.md).
+
 ## Scope
 
 This repository is the new implementation home for the active MMWX line:
