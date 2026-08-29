@@ -160,16 +160,22 @@ class PlanManagement:
                 if "node_name_override_enabled" in payload.model_fields_set
                 else plan.node_name_override_enabled
             )
-            alias_only = (
+            templates = self.store.subscription_templates().validate_selection(
+                session, payload, plan
+            )
+            subscription_only = (
                 aliases != plan.node_name_overrides
                 or aliases_enabled != plan.node_name_override_enabled
+                or any(value != getattr(plan, key) for key, value in templates.items())
             ) and all(
                 getattr(payload, key) == getattr(before.plan, key)
                 for key in SubscriptionPlanCreate.model_fields
-                if key not in {"node_name_overrides", "node_name_override_enabled"}
+                if key not in {"node_name_overrides", "node_name_override_enabled", *templates}
                 and (key != "auto_speed_rules" or key in payload.model_fields_set)
             )
             plan.node_name_overrides, plan.node_name_override_enabled = aliases, aliases_enabled
+            for key, value in templates.items():
+                setattr(plan, key, value)
             if "auto_speed_rules" in payload.model_fields_set:
                 plan.auto_speed_rules = [rule.model_dump() for rule in payload.auto_speed_rules]
             for key in (
@@ -196,7 +202,7 @@ class PlanManagement:
             warnings, commands = list(before.warnings), []
             access = self.store._subscription_access()
             for user in users:
-                if alias_only:
+                if subscription_only:
                     continue
                 batches, notices = self.store._subscription_provision_batches(
                     session, user, plan, no_restart=False

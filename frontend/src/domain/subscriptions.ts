@@ -19,7 +19,7 @@ export interface SubscriptionAccessResponse {
   }>;
   license_required: false;
 }
-export type SubscriptionClientFormat = "clash" | "sing-box" | "xray" | "uri-list" | "base64";
+export type SubscriptionClientFormat = "clash" | "surge" | "sing-box" | "xray" | "uri-list" | "base64";
 
 export interface SubscriptionFormatPreview {
   username: string;
@@ -116,6 +116,8 @@ export interface SubscriptionPlanCreateRequest {
   speed_limit_mbps?: number;
   device_limit?: number;
   traffic_mode?: SubscriptionTrafficMode;
+  clash_template_id?: string | null;
+  surge_template_id?: string | null;
 }
 
 export interface SubscriptionPlan extends SubscriptionPlanCreateRequest {
@@ -342,6 +344,26 @@ export interface SubscriptionCatalogPlanEntry {
   speed_limit_mbps: number;
   device_limit: number;
   traffic_mode: SubscriptionTrafficMode;
+  clash_template_name?: string | null;
+  surge_template_name?: string | null;
+}
+
+export interface SubscriptionCatalogTemplateEntry {
+  name: string;
+  format: "clash" | "surge";
+  content: string;
+  owner_username?: string | null;
+  is_public?: boolean;
+}
+
+export interface SubscriptionCatalogTemplateSettings {
+  clash_template_name?: string | null;
+  surge_template_name?: string | null;
+}
+
+export interface SubscriptionCatalogTemplatePreference extends SubscriptionCatalogTemplateSettings {
+  username: string;
+  enabled: boolean;
 }
 
 export interface SubscriptionCatalogCredentialEntry {
@@ -361,6 +383,9 @@ export interface SubscriptionCatalogBundle {
   nodes: SubscriptionCatalogNodeEntry[];
   plans: SubscriptionCatalogPlanEntry[];
   credentials: SubscriptionCatalogCredentialEntry[];
+  templates?: SubscriptionCatalogTemplateEntry[] | null;
+  template_defaults?: SubscriptionCatalogTemplateSettings | null;
+  template_preferences?: SubscriptionCatalogTemplatePreference[] | null;
 }
 
 export interface SubscriptionCatalogExportResponse {

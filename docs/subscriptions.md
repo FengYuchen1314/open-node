@@ -24,6 +24,7 @@ The public endpoint is `/api/v1/subscribe/{token}?format=...`:
 | Format | Verified Client |
 | --- | --- |
 | `clash` (default) | Mihomo v1.19.30 |
+| `surge` | Server-side profile validation; Apple client gate remains |
 | `sing-box` | sing-box v1.13.19 |
 | `xray` | Pinned, patched [compatibility runtime](fork-runtime.md) |
 | `uri-list`, `base64` | Mihomo v1.19.30 file-provider URI importer |
@@ -49,28 +50,34 @@ When nothing compatible remains, export returns 404, not an empty configuration
 or a direct-connection fallback. Unknown, out-of-plan or incompatible selected
 nodes also return 404; malformed UUIDs and unknown formats return 422.
 Reserved and duplicate proxy names receive stable unique suffixes.
+Clash and Surge can use [custom templates](subscription-templates.md) selected
+per subscriber, plan or system. These files affect only rendered subscriptions.
 
 ## Verified Protocols
 
 The VPS full-export fixture provisions 18 inbound variants through the installed
 non-root Agent, imports nodes, assigns a plan and consumes the resulting links:
 
-| Protocol | Clash | sing-box | Xray | URI / Base64 |
-| --- | --- | --- | --- | --- |
-| VLESS TCP/TLS (including Vision), WebSocket, gRPC | Yes | Yes | Yes | Yes |
-| VLESS HTTPUpgrade | Yes | Yes | Yes | Excluded |
-| VMess TCP, Trojan TLS | Yes | Yes | Yes | Yes |
-| Shadowsocks AES-GCM, Shadowsocks 2022 AES-GCM | Yes | Yes | Yes | Yes |
-| Hysteria2 TLS | Yes | Yes | Yes | Yes |
-| AnyTLS TLS | Yes | Yes | Yes | Excluded |
-| Snell v4 plain/HTTP, v5 TLS obfuscation | Yes | Excluded | Yes | Excluded |
-| Snell v6 default/unshaped | Excluded | Excluded | Yes | Excluded |
-| Mieru TCP/UDP underlay | TCP targets | Excluded | Excluded | Excluded |
+| Protocol | Clash | Surge profile | sing-box | Xray | URI / Base64 |
+| --- | --- | --- | --- | --- | --- |
+| VLESS TCP/TLS (including Vision), WebSocket, gRPC | Yes | Excluded | Yes | Yes | Yes |
+| VLESS HTTPUpgrade | Yes | Excluded | Yes | Yes | Excluded |
+| VMess TCP, Trojan TLS | Yes | Yes | Yes | Yes | Yes |
+| Shadowsocks AES-GCM, Shadowsocks 2022 AES-GCM | Yes | Yes | Yes | Yes | Yes |
+| Hysteria2 TLS | Yes | Yes | Yes | Yes | Yes |
+| AnyTLS TLS | Yes | Yes | Yes | Yes | Excluded |
+| Snell v4 plain/HTTP | Yes | Yes | Excluded | Yes | Excluded |
+| Snell v5 TLS obfuscation | Yes | Excluded | Excluded | Yes | Excluded |
+| Snell v6 default/unshaped | Excluded | Yes | Excluded | Yes | Excluded |
+| Mieru TCP/UDP underlay | TCP targets | Excluded | Excluded | Excluded | Excluded |
 
 All affirmative entries other than Mieru are exercised with TCP and UDP target
 traffic. The Xray tests use the full export and each selected-node export;
 Mihomo and sing-box use the complete configuration and switch its selector.
 URI and Base64 payloads are passed unchanged to Mihomo's own parser.
+Surge entries are produced by the public endpoint and checked against the exact
+fixture node set and an independent profile parser. They are not claimed as
+real-client traffic tests because the proprietary app cannot run on the VPS.
 
 These are version-specific boundaries. In particular, sing-box v1.13.19 has no
 registered Snell outbound; newer documentation is not evidence for that binary.

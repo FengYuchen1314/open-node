@@ -12,6 +12,8 @@ import NodeManagementDialog from "../components/NodeManagementDialog.vue";
 import type { NodeOperation } from "../services/node-management";
 import type { UserOperation } from "../services/user-management";
 import type { PlanOperation } from "../services/plan-management";
+import type { SubscriptionTemplate } from "../domain/subscription-templates";
+import { listSubscriptionTemplates } from "../services/subscription-templates";
 
 import type { ServerSummary } from "../domain/inventory";
 import type {
@@ -64,6 +66,7 @@ const servers = ref<ServerSummary[]>([]);
 const users = ref<ProductUser[]>([]);
 const nodes = ref<ManagedNode[]>([]);
 const plans = ref<SubscriptionPlan[]>([]);
+const templates = ref<SubscriptionTemplate[]>([]);
 const planManagement = reactive({ id: "", mode: "edit" as PlanOperation, open: false });
 const userManagement = reactive({ username: "", mode: "edit" as UserOperation, removalId: null as string | null, open: false });
 const userLogin = reactive({ username: "", open: false });
@@ -152,6 +155,8 @@ const planForm = reactive({
   node_name_overrides: {} as Record<string, string>,
   auto_speed_rules: [] as AutoSpeedRule[],
   node_name_override_enabled: false,
+  clash_template_id: null as string | null,
+  surge_template_id: null as string | null,
 });
 const planAliasesValid = ref(true);
 const planRulesValid = ref(true);
@@ -193,6 +198,7 @@ const trafficModeOptions: Array<{ title: string; value: SubscriptionTrafficMode 
 ];
 const subscriptionFormatOptions: Array<{ title: string; value: SubscriptionClientFormat }> = [
   { title: "Clash YAML", value: "clash" },
+  { title: "Surge profile", value: "surge" },
   { title: "sing-box JSON", value: "sing-box" },
   { title: "Xray JSON", value: "xray" },
   { title: "URI list", value: "uri-list" },
@@ -214,6 +220,8 @@ const nodeOptions = computed(() =>
 const planOptions = computed(() =>
   plans.value.map((plan) => ({ title: plan.name, value: plan.id })),
 );
+const clashTemplateOptions = computed(() => templates.value.filter(item => item.format === "clash").map(item => ({ title: item.name, value: item.id })));
+const surgeTemplateOptions = computed(() => templates.value.filter(item => item.format === "surge").map(item => ({ title: item.name, value: item.id })));
 const assignmentJson = computed(() =>
   lastAssignment.value ? JSON.stringify(lastAssignment.value.provisioning_batches, null, 2) : "",
 );
@@ -264,19 +272,21 @@ async function refresh() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [serverList, userResponse, nodeResponse, planResponse, presetResponse] =
+    const [serverList, userResponse, nodeResponse, planResponse, presetResponse, templateResponse] =
       await Promise.all([
         listServers(),
         listProductUsers(),
         listManagedNodes(),
         listSubscriptionPlans(),
         listSubscriptionTemplatePresets(),
+        listSubscriptionTemplates(),
       ]);
     servers.value = serverList;
     users.value = userResponse.users;
     nodes.value = nodeResponse.nodes;
     plans.value = planResponse.plans;
     nodePresets.value = presetResponse.presets;
+    templates.value = templateResponse.templates;
     syncDefaults();
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -438,6 +448,8 @@ async function submitPlan() {
       speed_limit_mbps: planForm.speed_limit_mbps,
       device_limit: planForm.device_limit,
       traffic_mode: planForm.traffic_mode,
+      clash_template_id: planForm.clash_template_id,
+      surge_template_id: planForm.surge_template_id,
     };
     const response = await createSubscriptionPlan(payload);
     successMessage.value = `Created plan ${response.plan.name}.`;
@@ -738,6 +750,8 @@ function resetPlanForm() {
     node_name_overrides: {},
     auto_speed_rules: [],
     node_name_override_enabled: false,
+    clash_template_id: null,
+    surge_template_id: null,
   });
 }
 
@@ -1228,6 +1242,10 @@ function formatBytes(value: number) {
                   type="number"
                   variant="outlined"
                 />
+              </div>
+              <div class="form-row">
+                <v-select v-model="planForm.clash_template_id" :items="clashTemplateOptions" label="Clash template" clearable density="comfortable" variant="outlined" />
+                <v-select v-model="planForm.surge_template_id" :items="surgeTemplateOptions" label="Surge template" clearable density="comfortable" variant="outlined" />
               </div>
               <v-select
                 v-model="planForm.node_ids"

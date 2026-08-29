@@ -5,6 +5,8 @@ import AutoSpeedRuleEditor from "./AutoSpeedRuleEditor.vue";
 import type { ManagedNode, SubscriptionAccessResponse } from "../domain/subscriptions";
 import { getSubscriptionAccess, syncSubscriptionAccess } from "../services/subscriptions";
 import { getPlanManagement, planSettings, removePlan, savePlan, type PlanManagementRead, type PlanManagementResult, type PlanOperation, type PlanSettings } from "../services/plan-management";
+import { listSubscriptionTemplates } from "../services/subscription-templates";
+import type { SubscriptionTemplate } from "../domain/subscription-templates";
 
 const props = defineProps<{ id: string; mode: PlanOperation; open: boolean; nodes: ManagedNode[] }>();
 const emit = defineEmits<{ "update:open": [value: boolean]; changed: [] }>();
@@ -18,6 +20,7 @@ const confirmName = ref("");
 const aliasesValid = ref(true);
 const rulesValid = ref(true);
 const states = reactive<Record<string, SubscriptionAccessResponse>>({});
+const templates = ref<SubscriptionTemplate[]>([]);
 const stateErrors = reactive<Record<string, string>>({});
 let version = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -26,6 +29,8 @@ const removed = computed(() => !!result.value && props.mode !== "edit");
 const expectedName = computed(() => props.mode === "unassign" ? props.id : detail.value?.plan.name ?? "");
 const options = computed(() => props.nodes.filter(node => !node.removal_id).map(node => ({ title: node.name, value: node.id })));
 const selectedNodes = computed(() => form.value?.node_ids.map(id => ({ id, name: props.nodes.find(node => node.id === id)?.name ?? id })) ?? []);
+const clashTemplates = computed(() => templates.value.filter(item => item.format === "clash").map(item => ({ title: item.name, value: item.id })));
+const surgeTemplates = computed(() => templates.value.filter(item => item.format === "surge").map(item => ({ title: item.name, value: item.id })));
 const canSubmit = computed(() => !busy.value && !!detail.value && acknowledgment.value && !removed.value && (props.mode === "edit" ? !!form.value?.name.trim() && aliasesValid.value && rulesValid.value : confirmName.value === expectedName.value));
 
 function resetStatus() {
@@ -41,8 +46,12 @@ async function load() {
   if (!props.open || !props.id) return;
   busy.value = true;
   try {
-    const value = await getPlanManagement(props.id, props.mode);
+    const [value, library] = await Promise.all([
+      getPlanManagement(props.id, props.mode),
+      listSubscriptionTemplates(),
+    ]);
     if (request !== version) return;
+    templates.value = library.templates;
     detail.value = value;
     form.value = planSettings(value.plan);
   } catch (failure) {
@@ -125,6 +134,10 @@ onBeforeUnmount(() => { ++version; resetStatus(); });
               <v-select v-model="form.reset_day" :items="Array.from({ length: 31 }, (_, i) => i + 1)" label="New reset day (UTC)" variant="outlined" density="compact" hide-details :disabled="busy || !form.is_reset" />
             </div>
             <v-switch v-model="form.is_reset" label="Monthly reset for new assignments" color="primary" density="compact" hide-details :disabled="busy" />
+            <div class="plan-fields">
+              <v-select v-model="form.clash_template_id" :items="clashTemplates" label="Clash template" clearable variant="outlined" density="compact" hide-details :disabled="busy" />
+              <v-select v-model="form.surge_template_id" :items="surgeTemplates" label="Surge template" clearable variant="outlined" density="compact" hide-details :disabled="busy" />
+            </div>
             <v-autocomplete v-model="form.node_ids" :items="options" label="Plan nodes" multiple chips closable-chips variant="outlined" density="compact" hide-details :disabled="busy" />
             <PlanNodeAliases v-model:names="form.node_name_overrides" v-model:enabled="form.node_name_override_enabled" :nodes="selectedNodes" :disabled="busy" @valid="aliasesValid = $event">
               <template #default="{ node }">

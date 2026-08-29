@@ -8,6 +8,7 @@ import ConfigView from "./views/ConfigView.vue";
 import DashboardView from "./views/DashboardView.vue";
 import ProbeView from "./views/ProbeView.vue";
 import SubscriptionsView from "./views/SubscriptionsView.vue";
+import TemplatesView from "./views/TemplatesView.vue";
 
 export const routes: RouteRecordRaw[] = [
   { path: "/account", name: "account", component: AccountView, meta: { subscriber: true } },
@@ -41,5 +42,10 @@ export const routes: RouteRecordRaw[] = [
     path: "/subscriptions",
     name: "subscriptions",
     component: SubscriptionsView,
+  },
+  {
+    path: "/templates",
+    name: "templates",
+    component: TemplatesView,
   },
 ];

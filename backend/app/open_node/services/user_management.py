@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from open_node.domain.subscriptions import SubscriptionAccessResponse
 from open_node.domain.user_limits import UserLimitsRead
@@ -394,6 +394,19 @@ class UserManagement:
                 SubscriptionArchivedTrafficModel,
             ):
                 session.execute(delete(model).where(model.username == user.username))
+            from open_node.services.subscription_templates import (
+                TemplatePreference,
+                TemplateRecord,
+            )
+
+            session.execute(
+                update(TemplateRecord)
+                .where(TemplateRecord.owner_username == user.username)
+                .values(owner_username=None)
+            )
+            session.execute(
+                delete(TemplatePreference).where(TemplatePreference.username == user.username)
+            )
             session.delete(user)
             session.flush()
 

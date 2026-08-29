@@ -1152,6 +1152,13 @@ class ManagedNodeRemovalModel(Base):
 class SubscriptionPlanModel(Base):
     __tablename__ = "subscription_plans"
 
+    clash_template_id: Mapped[str | None] = mapped_column(
+        ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
+    )
+    surge_template_id: Mapped[str | None] = mapped_column(
+        ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
+    )
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
@@ -1350,8 +1357,10 @@ class InventoryStore:
 
     def create_schema(self) -> None:
         from open_node.services.subscriber_auth import SubscriberAccount
+        from open_node.services.subscription_templates import TemplateRecord
 
         SubscriberAccount.metadata.create_all(self._engine)
+        TemplateRecord.metadata.create_all(self._engine)
         self._migrate_schema()
         self._change_sets().migrate_legacy()
         self._server_traffic().backfill()
@@ -1369,6 +1378,12 @@ class InventoryStore:
                     "node_name_overrides": "JSON NOT NULL DEFAULT '{}'",
                     "node_name_override_enabled": "BOOLEAN NOT NULL DEFAULT 0",
                     "auto_speed_rules": "JSON NOT NULL DEFAULT '[]'",
+                    "clash_template_id": (
+                        "VARCHAR(36) REFERENCES subscription_templates(id) ON DELETE SET NULL"
+                    ),
+                    "surge_template_id": (
+                        "VARCHAR(36) REFERENCES subscription_templates(id) ON DELETE SET NULL"
+                    ),
                 },
             )
         if "product_user_subscription_tokens" in table_names:
@@ -3089,6 +3104,11 @@ class InventoryStore:
         from open_node.services.user_limits import catalog_overrides
 
         with self._session() as session:
+            from open_node.services.subscription_templates import TemplateRecord
+
+            template_names = dict(
+                session.execute(select(TemplateRecord.id, TemplateRecord.name)).all()
+            )
             plans = session.scalars(
                 select(SubscriptionPlanModel).order_by(SubscriptionPlanModel.created_at)
             ).all()
@@ -3172,8 +3192,12 @@ class InventoryStore:
                     )
                     for node in nodes
                 ],
-                plans=[self._subscription_catalog_plan_entry(plan, node_names) for plan in plans],
+                plans=[
+                    self._subscription_catalog_plan_entry(plan, node_names, template_names)
+                    for plan in plans
+                ],
                 credentials=credentials,
+                **self.subscription_templates().export_catalog(session),
             )
 
     def import_subscription_catalog(
@@ -3226,6 +3250,7 @@ class InventoryStore:
 
             session.flush()
             node_ids_by_name: dict[str, str] = {}
+            self.subscription_templates().import_templates(session, payload.catalog.templates)
             for node_entry in payload.catalog.nodes:
                 server = self._catalog_server(session, payload.server_map, node_entry.server_name)
                 if not server:
@@ -3288,12 +3313,24 @@ class InventoryStore:
                     self._apply_catalog_plan(plan, plan_entry, node_ids, node_ids_by_name, now)
                     summary.updated_plans += 1
                 else:
-                    session.add(
-                        self._catalog_plan_model(plan_entry, node_ids, node_ids_by_name, now)
-                    )
+                    plan = self._catalog_plan_model(plan_entry, node_ids, node_ids_by_name, now)
+                    session.add(plan)
                     summary.created_plans += 1
+                for format in ("clash", "surge"):
+                    field = format + "_template_name"
+                    if field in plan_entry.model_fields_set:
+                        setattr(
+                            plan,
+                            format + "_template_id",
+                            self.subscription_templates().id_for(
+                                session, getattr(plan_entry, field), format
+                            ),
+                        )
 
             session.flush()
+            self.subscription_templates().import_preferences(
+                session, payload.catalog.template_defaults, payload.catalog.template_preferences
+            )
             plan_ids_by_name = dict(
                 session.execute(select(SubscriptionPlanModel.name, SubscriptionPlanModel.id)).all()
             )
@@ -3370,6 +3407,7 @@ class InventoryStore:
                 )
             self._ensure_managed_nodes_exist(session, payload.node_ids)
             plan = SubscriptionPlanModel(
+                **self.subscription_templates().validate_selection(session, payload),
                 id=str(uuid4()),
                 name=payload.name,
                 description=payload.description,
@@ -3587,9 +3625,11 @@ class InventoryStore:
                     "subscription has no compatible nodes for this format and selection"
                 )
 
+            selected = self.subscription_templates().resolve(
+                session, user, plan, client_format.value
+            )
             content, media_type, extension = self._render_subscription_content(
-                proxies,
-                client_format,
+                proxies, client_format, selected.content if selected else None
             )
             filename = f"{self._safe_filename(plan.name or user.username)}.{extension}"
             return RenderedSubscription(
@@ -3638,6 +3678,7 @@ class InventoryStore:
         user: ProductUserModel,
         plan: SubscriptionPlanModel,
         client_format: SubscriptionClientFormat,
+        template_override: str | None = None,
     ) -> tuple[list[dict[str, Any]], SubscriptionFormatPreview]:
         candidates, warnings = self._subscription_proxy_configs(session, user, plan)
         proxies, nodes = [], []
@@ -3651,15 +3692,51 @@ class InventoryStore:
             "GLOBAL",
             "COMPATIBLE",
         }
+        from open_node.services.template_rendering import DEFAULT_SURGE, reserved_names, surge_name
+
+        if client_format.value in {"clash", "surge"}:
+            selected = self.subscription_templates().resolve(
+                session, user, plan, client_format.value
+            )
+            content = (
+                template_override
+                if template_override is not None
+                else selected.content
+                if selected
+                else DEFAULT_SURGE
+                if client_format.value == "surge"
+                else None
+            )
+            if content is not None:
+                used_names.update(reserved_names(content, client_format.value))
+        prepared = []
+        name_map: dict[str, str] = {}
+        ambiguous_names: set[str] = set()
         for identifier, proxy in candidates:
-            name = str(proxy.get("name") or "Node")
+            original_name = str(proxy.get("name") or "Node")
+            name = original_name
+            if client_format == SubscriptionClientFormat.SURGE:
+                name = surge_name(name)
             unique, suffix = name, 2
             while unique in used_names:
                 unique = f"{name} ({suffix})"
                 suffix += 1
             used_names.add(unique)
             proxy["name"] = unique
-            reason = subscription_clients.unsupported_reason(proxy, client_format.value)
+            for alias in {original_name, name}:
+                if alias in name_map and name_map[alias] != unique:
+                    ambiguous_names.add(alias)
+                else:
+                    name_map[alias] = unique
+            prepared.append((identifier, proxy, unique))
+        for identifier, proxy, unique in prepared:
+            reason = None
+            dialer = proxy.get("dialer-proxy")
+            if isinstance(dialer, str) and dialer in ambiguous_names:
+                reason = "Dialer proxy reference is ambiguous after node naming"
+            elif isinstance(dialer, str) and dialer in name_map:
+                proxy["dialer-proxy"] = name_map[dialer]
+            reason = reason or subscription_clients.unsupported_reason(proxy, client_format.value)
             if (
                 reason is None
                 and client_format
@@ -5069,6 +5146,8 @@ class InventoryStore:
     @staticmethod
     def _subscription_plan_read(plan: SubscriptionPlanModel) -> SubscriptionPlanRead:
         return SubscriptionPlanRead(
+            clash_template_id=plan.clash_template_id,
+            surge_template_id=plan.surge_template_id,
             id=UUID(plan.id),
             name=plan.name,
             description=plan.description,
@@ -5104,6 +5183,7 @@ class InventoryStore:
     def _subscription_catalog_plan_entry(
         plan: SubscriptionPlanModel,
         node_names: dict[str, str],
+        template_names: dict[str, str] | None = None,
     ) -> SubscriptionCatalogPlanEntry:
         from collections import Counter
 
@@ -5116,6 +5196,8 @@ class InventoryStore:
                 "Plan aliases require unique, existing node names for catalog export"
             )
         return SubscriptionCatalogPlanEntry(
+            clash_template_name=(template_names or {}).get(plan.clash_template_id),
+            surge_template_name=(template_names or {}).get(plan.surge_template_id),
             name=plan.name,
             description=plan.description,
             traffic_limit_gb=plan.traffic_limit_bytes / (1024 * 1024 * 1024),
@@ -5840,7 +5922,18 @@ class InventoryStore:
         cls,
         proxies: list[dict[str, Any]],
         client_format: SubscriptionClientFormat,
+        template_content: str | None = None,
     ) -> tuple[str, str, str]:
+        from open_node.services.template_rendering import DEFAULT_SURGE, render
+
+        if client_format == SubscriptionClientFormat.SURGE:
+            return (
+                render(template_content or DEFAULT_SURGE, "surge", proxies)[0],
+                "text/plain; charset=utf-8",
+                "conf",
+            )
+        if template_content is not None and client_format == SubscriptionClientFormat.CLASH:
+            return render(template_content, "clash", proxies)[0], "text/yaml; charset=utf-8", "yaml"
         match client_format:
             case SubscriptionClientFormat.CLASH:
                 return cls._render_clash_subscription(proxies), "text/yaml; charset=utf-8", "yaml"
@@ -6693,6 +6786,11 @@ class InventoryStore:
 
     def _session(self) -> Session:
         return self._session_factory()
+
+    def subscription_templates(self):
+        from open_node.services.subscription_templates import TemplateStore
+
+        return TemplateStore(self)
 
     @contextmanager
     def _coordinated_session(self):

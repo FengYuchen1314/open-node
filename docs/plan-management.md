@@ -168,8 +168,10 @@ subscriber and runtime restart through both transports at 1440/390/320px.
 
 ## Migration Boundaries
 
-This implements the lifecycle of existing Open Node plan fields, not every
-original package feature. Custom Clash/Surge template selection still needs migration and
-real-client verification. [User profile editing and removal](user-management.md)
+This implements the lifecycle of existing Open Node plan fields, including
+separate [Clash and Surge template](subscription-templates.md) bindings.
+Template-only edits are revision guarded and issue no Agent commands. Actual
+Surge application import remains an Apple-platform verification gate.
+[User profile editing and removal](user-management.md)
 and [node editing/removal](node-management.md) are implemented separately.
 These are not license-gated features.

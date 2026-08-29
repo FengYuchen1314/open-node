@@ -13,6 +13,12 @@ from uuid import uuid4
 
 import httpx
 import yaml
+from open_node.domain.subscriptions import SubscriptionPlanCreate
+from open_node.services.template_rendering import (
+    DEFAULT_CLASH,
+    DEFAULT_SURGE,
+    parse_template,
+)
 from playwright.sync_api import expect, sync_playwright
 
 SPEC = importlib.util.spec_from_file_location(
@@ -22,6 +28,15 @@ protocols = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(protocols)
 runtime, lifecycle, service = protocols.runtime, protocols.lifecycle, protocols.service
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def agent_command(client, base, operation):
+    queued = (
+        client.post(base + "/operations/" + operation)
+        .raise_for_status()
+        .json()["command"]
+    )
+    return lifecycle.wait_command(client, base, queued)["result_body"]
 
 
 def configuration(work):
@@ -364,6 +379,265 @@ def browser_workflow(client, url, output, username, node_id):
             browser.close()
 
 
+def capture_templates(page, output, name):
+    for width, height, suffix in (
+        (1440, 1000, "desktop"),
+        (390, 844, "mobile"),
+        (320, 740, "narrow"),
+    ):
+        page.set_viewport_size({"width": width, "height": height})
+        page.wait_for_timeout(250)
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+        assert page.locator(".templates-workspace").evaluate(
+            "element => element.scrollWidth <= element.clientWidth + 1"
+        )
+        page.screenshot(
+            path=output / f"templates-{name}-{suffix}.png",
+            full_page=True,
+            animations="disabled",
+        )
+    page.set_viewport_size({"width": 1440, "height": 1000})
+
+
+def template_workflow(
+    work, args, client, backend, base, ca, echo, udp, username, plan, token, reports
+):
+    templates = "/api/v1/subscription-templates"
+    before_credentials = client.get(f"/api/v1/users/{username}/credentials").json()
+    before_token = client.get(
+        "/api/v1/user-subscription-token", params={"username": username}
+    ).json()
+    pid = agent_command(client, base, "limiter/status")["pid"]
+    clash_source = DEFAULT_CLASH.replace(
+        "rules:\n  - MATCH,Proxy\n",
+        "proxy-groups:\n"
+        "  - {name: Proxy, type: select, proxies: [__PROXY_NODES__]}\n"
+        "  - {name: Backup, type: select, proxies: [DIRECT]}\n"
+        "rules:\n  - MATCH,Proxy\n"
+        "x-open-node-smoke: clash-custom\n",
+    ).replace(
+        "proxy-groups:\n  - name: Proxy\n    type: select\n    proxies: [__PROXY_NODES__]\n",
+        "",
+    )
+    surge_source = DEFAULT_SURGE.replace(
+        "loglevel = notify", "loglevel = warning\nx-open-node-smoke = surge-custom"
+    )
+
+    def create(name, format, content, owner=None, public=False):
+        return (
+            client.post(
+                templates,
+                json={
+                    "name": name,
+                    "format": format,
+                    "content": content,
+                    "owner_username": owner,
+                    "is_public": public,
+                },
+            )
+            .raise_for_status()
+            .json()
+        )
+
+    clash = create("vps-custom.yaml", "clash", clash_source, public=True)
+    surge = create("vps-custom.conf", "surge", surge_source, public=True)
+    stale = dict(clash)
+    updated = (
+        client.put(
+            templates + "/" + clash["id"],
+            json={
+                **{
+                    field: clash[field]
+                    for field in (
+                        "name",
+                        "format",
+                        "content",
+                        "owner_username",
+                        "is_public",
+                    )
+                },
+                "content": clash["content"] + "# revision update\n",
+                "expected_revision": clash["revision"],
+            },
+        )
+        .raise_for_status()
+        .json()
+    )
+    assert (
+        client.put(
+            templates + "/" + clash["id"],
+            json={
+                **{
+                    field: stale[field]
+                    for field in (
+                        "name",
+                        "format",
+                        "content",
+                        "owner_username",
+                        "is_public",
+                    )
+                },
+                "expected_revision": stale["revision"],
+            },
+        ).status_code
+        == 409
+    )
+    clash = updated
+
+    read = client.get(f"/api/v1/plans/{plan['id']}/settings").raise_for_status().json()
+    saved = (
+        client.put(
+            f"/api/v1/plans/{plan['id']}/settings",
+            json={
+                **{
+                    field: read["plan"][field]
+                    for field in SubscriptionPlanCreate.model_fields
+                },
+                "clash_template_id": clash["id"],
+                "surge_template_id": surge["id"],
+                "expected_revision": read["revision"],
+                "acknowledge_runtime_restart": True,
+            },
+        )
+        .raise_for_status()
+        .json()
+    )
+    assert saved["commands"] == []
+
+    clash_response = client.get(
+        f"/api/v1/subscribe/{token}?format=clash"
+    ).raise_for_status()
+    clash_config = yaml.safe_load(clash_response.text)
+    assert clash_config["x-open-node-smoke"] == "clash-custom"
+    assert [group["name"] for group in clash_config["proxy-groups"]] == [
+        "Proxy",
+        "Backup",
+    ]
+    exercise_export(work, client, token, "clash", args.mihomo, ca, echo, udp, reports)
+
+    surge_response = client.get(
+        f"/api/v1/subscribe/{token}?format=surge"
+    ).raise_for_status()
+    parsed = parse_template(surge_response.text, "surge")
+    assert "x-open-node-smoke = surge-custom" in surge_response.text
+    assert len(
+        [
+            line
+            for section, line in parsed["chunks"]
+            if section == "proxy"
+            and "=" in line
+            and not line.lstrip().startswith(("#", ";", "//"))
+        ]
+    ) == len([node for node in reports["surge"]["nodes"] if node["available"]])
+
+    password = secrets.token_urlsafe(24)
+    account = (
+        client.get("/api/v1/subscriber-accounts", params={"username": username})
+        .raise_for_status()
+        .json()
+    )
+    client.put(
+        "/api/v1/subscriber-accounts",
+        params={"username": username},
+        json={"expected_revision": account["revision"], "new_password": password},
+    ).raise_for_status()
+
+    args.output.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        admin_context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        account_context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        errors = []
+        try:
+            admin_context.add_cookies(
+                [
+                    {
+                        "name": cookie.name,
+                        "value": cookie.value,
+                        "url": backend,
+                        "httpOnly": True,
+                        "sameSite": "Lax",
+                    }
+                    for cookie in client.cookies.jar
+                ]
+            )
+            admin = admin_context.new_page()
+            portal = account_context.new_page()
+            admin.on("pageerror", lambda error: errors.append(str(error)))
+            portal.on("pageerror", lambda error: errors.append(str(error)))
+            admin.goto(backend + "/templates")
+            expect(
+                admin.get_by_role("heading", name="Subscription templates", exact=True)
+            ).to_be_visible()
+            admin.get_by_text("vps-custom.yaml", exact=True).click()
+            expect(admin.get_by_label("Template source", exact=True)).to_have_value(
+                re.compile("x-open-node-smoke")
+            )
+            preview_user = admin.get_by_role(
+                "combobox", name="Preview subscriber", exact=True
+            )
+            preview_user.press("Enter")
+            admin.get_by_role(
+                "option", name=re.compile(re.escape(username))
+            ).first.click()
+            admin.get_by_role("button", name="Preview", exact=True).click()
+            expect(admin.get_by_text(re.compile(r"\d+ included"))).to_be_visible()
+            capture_templates(admin, args.output, "admin")
+
+            subscriber_select = admin.get_by_role(
+                "combobox", name="Subscriber", exact=True
+            )
+            subscriber_select.press("Enter")
+            admin.get_by_role(
+                "option", name=re.compile(re.escape(username))
+            ).first.click()
+            permission = admin.get_by_label("Allow personal templates", exact=True)
+            permission.check()
+            with admin.expect_response(
+                lambda response: (
+                    response.url.endswith(
+                        "/subscription-templates/settings?username=" + username
+                    )
+                    and response.request.method == "PUT"
+                )
+            ) as permission_saved:
+                admin.get_by_role("button", name="Save defaults", exact=True).click()
+            assert permission_saved.value.status == 200, permission_saved.value.text()
+            assert permission_saved.value.json()["enabled"] is True
+
+            portal.goto(backend + "/account")
+            portal.get_by_label("Username", exact=True).fill(username)
+            portal.get_by_label("Password", exact=True).fill(password)
+            portal.get_by_role("button", name="Sign In", exact=True).click()
+            portal.get_by_role("tab", name="Templates", exact=True).click()
+            expect(portal.get_by_text("Editing enabled", exact=True)).to_be_visible()
+            portal.get_by_text("vps-custom.conf", exact=True).click()
+            expect(portal.get_by_label("Template source", exact=True)).to_have_value(
+                re.compile("surge-custom")
+            )
+            capture_templates(portal, args.output, "account")
+            assert not errors, errors
+        finally:
+            admin_context.close()
+            account_context.close()
+            browser.close()
+
+    assert (
+        client.get(f"/api/v1/users/{username}/credentials").json() == before_credentials
+    )
+    assert (
+        client.get(
+            "/api/v1/user-subscription-token", params={"username": username}
+        ).json()
+        == before_token
+    )
+    assert agent_command(client, base, "limiter/status")["pid"] == pid
+    print(
+        "PASS custom Clash/Surge templates, real Mihomo forwarding and both template UIs",
+        flush=True,
+    )
+
+
 def exercise(work, fixture, args, client, backend, endpoint, control_ca, echo, udp):
     config, ca, stats_port = configuration(work)
     created = (
@@ -459,7 +733,7 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, echo, u
         kind: client.get(f"/api/v1/users/{username}/subscription-preview?format={kind}")
         .raise_for_status()
         .json()
-        for kind in ("clash", "sing-box", "xray", "uri-list", "base64")
+        for kind in ("clash", "surge", "sing-box", "xray", "uri-list", "base64")
     }
     assert server_key not in str(reports)
     excluded = {
@@ -474,6 +748,16 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, echo, u
             "mieru-udp",
         },
         "xray": {"mieru-tcp", "mieru-udp"},
+        "surge": {
+            "snell5-tls",
+            "mieru-tcp",
+            "mieru-udp",
+            "vless-tls",
+            "vless-vision",
+            "vless-ws",
+            "vless-grpc",
+            "vless-upgrade",
+        },
         "uri-list": {
             "anytls",
             "snell4",
@@ -493,16 +777,34 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, echo, u
         }
         actual = {node["node_id"] for node in report["nodes"] if node["available"]}
         assert expected == actual, (kind, report)
-    for kind, binary in (
-        ("clash", args.mihomo),
-        ("sing-box", args.sing_box),
-        ("xray", args.xray),
-        ("uri-list", args.mihomo),
-        ("base64", args.mihomo),
-    ):
-        exercise_export(work, client, token, kind, binary, ca, echo, udp, reports)
-    snell6 = next(node for node in nodes if node["inbound_tag"] == "snell6")
-    browser_workflow(client, backend, args.output, username, snell6["id"])
+    surge = client.get(f"/api/v1/subscribe/{token}?format=surge").raise_for_status()
+    assert surge.headers["content-type"].startswith("text/plain")
+    assert ".conf" in surge.headers["content-disposition"]
+    parsed_surge = parse_template(surge.text, "surge")
+    surge_names = {
+        line.partition("=")[0].strip()
+        for section, line in parsed_surge["chunks"]
+        if section == "proxy"
+        and "=" in line
+        and not line.lstrip().startswith(("#", ";", "//"))
+    }
+    assert surge_names == {
+        node["name"] for node in reports["surge"]["nodes"] if node["available"]
+    }
+    if not args.templates_only:
+        for kind, binary in (
+            ("clash", args.mihomo),
+            ("sing-box", args.sing_box),
+            ("xray", args.xray),
+            ("uri-list", args.mihomo),
+            ("base64", args.mihomo),
+        ):
+            exercise_export(work, client, token, kind, binary, ca, echo, udp, reports)
+        snell6 = next(node for node in nodes if node["inbound_tag"] == "snell6")
+        browser_workflow(client, backend, args.output, username, snell6["id"])
+    template_workflow(
+        work, args, client, backend, base, ca, echo, udp, username, plan, token, reports
+    )
 
 
 def run(args):
@@ -537,4 +839,5 @@ if __name__ == "__main__":
     for name in ("xray", "mihomo", "sing-box", "wheel", "nginx", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--xray-archive", type=Path)
+    parser.add_argument("--templates-only", action="store_true")
     run(parser.parse_args())

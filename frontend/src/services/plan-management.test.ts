@@ -20,6 +20,8 @@ describe("plan management", () => {
     settings.node_name_overrides.node = "Osaka";
     expect(plan.node_name_overrides.node).toBe("Tokyo");
     expect(settings.node_name_override_enabled).toBe(true);
+    expect(settings.clash_template_id).toBeNull();
+    expect(settings.surge_template_id).toBeNull();
     settings.auto_speed_rules[0].limit_mbps = 20;
     expect(plan.auto_speed_rules[0].limit_mbps).toBe(10);
   });

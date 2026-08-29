@@ -51,6 +51,12 @@ async function logout() {
           to="/subscriptions"
         />
         <v-list-item
+          prepend-icon="mdi-file-document-edit-outline"
+          title="Templates"
+          value="templates"
+          to="/templates"
+        />
+        <v-list-item
           prepend-icon="mdi-clipboard-text-clock-outline"
           title="Changes"
           value="changes"

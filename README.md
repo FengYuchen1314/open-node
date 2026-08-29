@@ -38,6 +38,8 @@ Subscribers use the separate `/account` portal. Administrators provision their
 login passwords from Subscriptions; product-user roles never grant controller
 access. [Subscriber accounts](docs/subscriber-accounts.md) covers subscription
 downloads, usage, device sessions, password recovery and optional TOTP.
+Both workspaces include free [custom Clash and Surge templates](docs/subscription-templates.md)
+with personal permissions, plan/system defaults, draft preview and catalog portability.
 
 ## Deployment
 
@@ -76,11 +78,14 @@ Plan [editing, unassignment and removal](docs/plan-management.md) now preserve
 credentials and charged usage while coordinating node membership and limits.
 Revision guards protect concurrent edits, and the dialog tracks remote access
 confirmation, including pending withdrawal from an offline Agent.
-Per-plan node aliases apply across all five subscription formats, with saved
+Per-plan node aliases apply across all six subscription formats, with saved
 enable switches, catalog import/export and no runtime changes for alias-only edits.
 Plans also support ordered sustained/burst speed rules, isolated by subscriber
 credential with native enforcement, expiry and old-runtime rejection. Both the
 current Agent and free runtime are required; see [native limits](docs/native-limits.md).
+Plans can bind separate Clash and Surge templates. Personal defaults override
+the plan, followed by system and built-in fallbacks; template-only edits never
+restart the runtime or rotate subscription identity.
 
 Server [editing and removal](docs/server-management.md) now include guarded
 profile updates, selective node-address synchronization and an impact preview.
@@ -149,7 +154,7 @@ agent operation, maintenance, diagnostic, and config-preparation wrappers, and
 Xray/nginx config plus agent setting wrappers, high-level runtime/site
 operation wrappers, a subscription catalog with user-plan binding, optional
 guarded Agent provisioning, public subscription links with generated
-per-user credentials, Clash/sing-box/Xray/URI subscription rendering, durable
+per-user credentials, Clash/Surge/sing-box/Xray/URI subscription rendering, durable
 per-user traffic ledgering, [coordinated multi-server change sets](docs/change-sets.md) plus a
 routed-outbound change-set planner, and subscription template presets including
 Xray fork AnyTLS/Snell/Mieru coverage,

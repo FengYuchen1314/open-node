@@ -24,6 +24,12 @@ from open_node.services.secure_channel import AgentIdentity
 from open_node.services.server_traffic import ServerTrafficWorker
 from open_node.services.subscriber_auth import SubscriberAuthStore
 from open_node.services.subscription_access import SubscriptionAccessWorker
+from open_node.services.subscription_templates import (
+    TemplateConflict,
+    TemplateForbidden,
+    TemplateNotFound,
+)
+from open_node.services.template_rendering import TemplateError
 from open_node.web import FrontendFiles
 
 
@@ -110,6 +116,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def conflicting_node_mutation(_request, exc):
         return JSONResponse(
             status_code=409, content={"detail": str(exc), "license_required": False}
+        )
+
+    @app.exception_handler(TemplateError)
+    async def invalid_template(_request, exc):
+        code = (
+            404
+            if isinstance(exc, TemplateNotFound)
+            else 403
+            if isinstance(exc, TemplateForbidden)
+            else 409
+            if isinstance(exc, TemplateConflict)
+            else 422
+        )
+        return JSONResponse(
+            status_code=code,
+            content={"detail": str(exc), "license_required": False},
+            headers={"Cache-Control": "no-store"},
         )
 
     app.add_middleware(

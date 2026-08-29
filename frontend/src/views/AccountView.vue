@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import SubscriberSecurityPanel from "../components/SubscriberSecurityPanel.vue";
+import TemplatesWorkspace from "../components/TemplatesWorkspace.vue";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog.vue";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat } from "../domain/subscriptions";
 import {
@@ -25,7 +26,8 @@ const shortCodeOpen = ref(false);
 const linkType = ref("full");
 const formats = [
   { title: "Clash / Mihomo", value: "clash" }, { title: "sing-box", value: "sing-box" },
-  { title: "Xray", value: "xray" }, { title: "URI list", value: "uri-list" }, { title: "Base64", value: "base64" },
+  { title: "Surge", value: "surge" }, { title: "Xray", value: "xray" },
+  { title: "URI list", value: "uri-list" }, { title: "Base64", value: "base64" },
 ];
 let version = 0;
 const url = computed(() => subscription.value ? subscriberFormatUrl(subscription.value, format.value, linkType.value === "short") : "");
@@ -97,7 +99,7 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
     <header class="account-header"><div class="account-brand"><div class="brand-mark" aria-hidden="true">ON</div><h1>Open Node</h1></div><div class="account-identity"><span>{{ subscriberState.session.username }}</span><v-tooltip text="Sign out"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-logout" aria-label="Sign out" variant="text" @click="logout" /></template></v-tooltip></div></header>
     <main class="account-content">
       <div class="account-heading"><h2>{{ profile?.display_name || subscriberState.session.username }}</h2><v-tooltip text="Refresh account"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-refresh" aria-label="Refresh account" variant="text" :loading="loading" @click="load" /></template></v-tooltip></div>
-      <v-tabs v-model="tab" color="primary" class="account-tabs"><v-tab value="subscription" prepend-icon="mdi-link-variant">Subscription</v-tab><v-tab value="security" prepend-icon="mdi-shield-account-outline">Security</v-tab></v-tabs>
+      <v-tabs v-model="tab" color="primary" class="account-tabs"><v-tab value="subscription" prepend-icon="mdi-link-variant">Subscription</v-tab><v-tab value="templates" prepend-icon="mdi-file-document-edit-outline">Templates</v-tab><v-tab value="security" prepend-icon="mdi-shield-account-outline">Security</v-tab></v-tabs>
       <v-alert v-if="error" type="error" variant="tonal" class="my-4">{{ error }}</v-alert>
       <v-progress-linear v-if="loading" indeterminate color="primary" />
       <template v-if="tab === 'subscription' && profile && quota">
@@ -121,6 +123,7 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
           </div>
         </section>
       </template>
+      <TemplatesWorkspace v-else-if="tab === 'templates'" subscriber class="account-templates" />
       <SubscriberSecurityPanel v-else-if="tab === 'security'" class="account-security-panel" @changed="load" />
     </main>
     <SubscriptionShortCodeDialog v-model:open="shortCodeOpen" :username="subscriberState.session?.username ?? ''" subscriber @saved="subscription = $event" />
@@ -157,6 +160,7 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
 .account-nodes h3 { font-size: 18px; margin-bottom: 20px; }
 .account-node-limit { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding-block: 14px; border-bottom: 1px solid #e9eeeb; font-size: 14px; overflow-wrap: anywhere; }
 .account-security-panel { padding-top: 24px; }
+.account-templates { padding-top: 24px; }
 .account-admin-link { font-size: 13px; color: #176b5b; justify-self: start; }
 @media (max-width: 600px) {
   .account-header { padding: 14px 16px; flex-wrap: wrap; }
@@ -165,5 +169,8 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
   .account-heading h2 { font-size: 22px; }
   .account-link-controls { gap: 8px; }
   .account-node-limit { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .account-tabs :deep(.v-slide-group__content) { width: 100%; }
+  .account-tabs :deep(.v-tab) { flex: 1; min-width: 0; padding-inline: 8px; }
+  .account-tabs :deep(.v-btn__prepend) { display: none; }
 }
 </style>

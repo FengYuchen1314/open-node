@@ -14,6 +14,7 @@ from open_node.api.routes import (
     server_management,
     servers,
     subscriber_auth,
+    subscription_templates,
     subscriptions,
     system,
     user_management,
@@ -34,6 +35,8 @@ private_router.include_router(subscriber_auth.management_router)
 api_router.include_router(private_router)
 api_router.include_router(auth.router)
 api_router.include_router(subscriber_auth.router)
+api_router.include_router(subscription_templates.router)
+api_router.include_router(subscription_templates.router, prefix="/account")
 api_router.include_router(system.router)
 api_router.include_router(license.router)
 api_router.include_router(agents.router)

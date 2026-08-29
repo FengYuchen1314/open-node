@@ -158,6 +158,11 @@ python scripts/vps/smoke-subscription-clients.py \
   --output /tmp/open-node-subscription-screenshots
 ```
 
+Pass `--templates-only` to retain the full 18-variant fixture while running only
+the custom-template API, Mihomo forwarding and administrator/subscriber browser
+workflow. Surge output is validated from the real endpoint but not imported
+into the proprietary Apple client on this Linux host.
+
 This disposable root/systemd fixture installs a non-root Agent and provisions
 18 inbound variants. It validates complete native exports, switches selectors,
 tests each selected Xray node, and feeds unchanged URI/Base64 payloads to the
@@ -171,6 +176,11 @@ Xray selection, selected URLs, desktop/mobile/narrow layout, and delayed
 responses during format/user changes. Consult [subscriptions.md](subscriptions.md)
 for the exact version-specific boundaries; this fixture is not an assertion
 that arbitrary protocol extension fields are portable.
+
+The template workflow additionally covers CRUD revisions, plan bindings,
+unchanged credentials/tokens/runtime PID, custom Clash group order, real Mihomo
+TCP/UDP forwarding, custom Surge section/node validation, personal permission,
+and 1440/390/320px screenshots for both workspaces.
 
 Verified on 2026-08-28 (UTC), Debian 12 x86-64 on the designated VPS:
 
@@ -1043,6 +1053,29 @@ lease races, overlapping reservations, draining earlier sequences, late
 rollback rejection, restart persistence and missing-column SQLite migration.
 
 ## Latest Verification
+
+Custom Clash and Surge templates passed on the designated VPS:
+
+- Backend full regression: 858 tests. Frontend: 205 tests and production
+  build. Ruff formatting and checks passed for all backend sources, tests and
+  the subscription-client smoke script.
+- The existing 18-variant client fixture passed real Mihomo, sing-box and Xray
+  forwarding. Its focused template run passed administrator/subscriber CRUD,
+  revision guards, personal permission, plan/system defaults and catalog
+  remapping without changing credentials, tokens or the runtime PID.
+- Custom Clash output was downloaded from the public endpoint, loaded by
+  Mihomo and forwarded real TCP and UDP traffic. Custom Surge output from the
+  same endpoint preserved the non-proxy profile text and matched the exact
+  compatible node set under an independent parser.
+- Administrator and subscriber workspaces passed at 1440, 390 and 320 pixels.
+  Actual Surge application import remains an Apple-platform gate.
+- Agent sources did not change. The prior 536-test Agent baseline, wheel and
+  free-core artifacts were reused by the real lifecycle/client smoke.
+
+The existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+These results do not close the remaining [migration gates](migration-map.md).
+
+## Earlier Automatic Speed Rule Verification
 
 Per-plan automatic speed rules passed on the designated VPS:
 

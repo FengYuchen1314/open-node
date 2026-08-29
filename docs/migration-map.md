@@ -256,11 +256,14 @@ These passing command and snapshot checks do not prove a complete replacement:
   withdrawal intents, including for offline Agents and stored preview-only
   credentials. Revision guards, transaction rollback and per-user deployment
   status protect concurrent changes. Per-plan node aliases now support a saved
-  enable switch, validation, all five subscription formats, catalog remapping
+  enable switch, validation, all six subscription formats, catalog remapping
   and removal cleanup without changing runtime identity. Ordered automatic
   speed rules bind to each subscriber's credentials, preserve other plans and
-  inbound rules, and reject incapable Agents/runtimes. Custom Clash/Surge
-  template selection remains to be migrated.
+  inbound rules, and reject incapable Agents/runtimes. Custom
+  [Clash/Surge templates](subscription-templates.md) now include owned/public
+  libraries, personal permissions, plan/system defaults, draft preview,
+  catalog remapping and guarded deletion. Native Surge app import remains an
+  Apple-platform verification gate.
 - Native [node resource cleanup](node-cleanup.md) now supplies revision-guarded
   remote removal, suspended-template and limiter cleanup, local outbound
   dependency closure, shared-rule preservation and recoverable receipts.

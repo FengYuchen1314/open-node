@@ -158,6 +158,36 @@ def test_disabling_preview_credentials_enrolls_only_for_current_access_intent(tm
 def test_removal_waits_for_confirmation_then_purges_only_user_data(env):
     client, token = env[:2]
     client.post("/api/v1/users", json={"username": "bob"}).raise_for_status()
+    from open_node.services.subscription_templates import TemplatePreference
+    from open_node.services.template_rendering import DEFAULT_CLASH
+
+    template = (
+        client.post(
+            "/api/v1/subscription-templates",
+            json={
+                "name": "alice-private.yaml",
+                "format": "clash",
+                "content": DEFAULT_CLASH,
+                "owner_username": "alice",
+                "is_public": False,
+            },
+        )
+        .raise_for_status()
+        .json()
+    )
+    template_settings = client.get(
+        "/api/v1/subscription-templates/settings", params={"username": "alice"}
+    ).json()
+    client.put(
+        "/api/v1/subscription-templates/settings",
+        params={"username": "alice"},
+        json={
+            "expected_revision": template_settings["revision"],
+            "enabled": True,
+            "clash_template_id": template["id"],
+            "surge_template_id": None,
+        },
+    ).raise_for_status()
     old_token = client.post("/api/v1/users/alice/subscription-token").json()["subscription"][
         "token"
     ]
@@ -176,6 +206,8 @@ def test_removal_waits_for_confirmation_then_purges_only_user_data(env):
     exported = client.get("/api/v1/catalog/export?include_credentials=true").json()["catalog"]
     assert [user["username"] for user in exported["users"]] == ["bob"]
     assert exported["credentials"] == []
+    assert exported["templates"][0]["owner_username"] is None
+    assert exported["template_preferences"] == []
     command = current(client, token)
     assert not command["body"]["entries"][0]["enabled"]
     reconcile(client)
@@ -188,7 +220,12 @@ def test_removal_waits_for_confirmation_then_purges_only_user_data(env):
     assert [user["username"] for user in client.get("/api/v1/users").json()["users"]] == ["bob"]
     assert len(client.get("/api/v1/plans").json()["plans"]) == 1
     assert len(client.get("/api/v1/nodes").json()["nodes"]) == 1
+    orphan = (
+        client.get("/api/v1/subscription-templates/" + template["id"]).raise_for_status().json()
+    )
+    assert orphan["owner_username"] is None and not orphan["is_public"]
     with client.app.state.inventory._session() as session:
+        assert session.get(TemplatePreference, "user:alice") is None
         for table in (
             "subscription_credentials",
             "subscription_access",
