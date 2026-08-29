@@ -26,10 +26,10 @@
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 本地主分支 | `main`，工作区在写本文档前干净 |
-| 本地提交 | `1d46cf0d477c0edc0a7c72bb40daff60a2ba3c81` |
-| GitHub `main` | 同一提交 |
-| VPS 源码 | `/opt/open-node`，同一提交 |
+| 本地主分支 | `main`，已包含本文档；具体提交以 `git rev-parse HEAD` 为准 |
+| GitHub `main` | 已包含本文档；应与本地主分支一致 |
+| 已部署功能基线 | `1d46cf0d477c0edc0a7c72bb40daff60a2ba3c81` |
+| VPS 源码 | `/opt/open-node`，当前仍是上述功能基线；文档提交不需要重启服务 |
 | VPS 后端 | `127.0.0.1:8000`，2026-08-29 复核 `/healthz` 为 200 |
 | VPS 进程快照 | PID `2765086`；PID 会变化，应以 `pgrep` 和健康检查为准 |
 | 后端解释器 | `/tmp/open-node-preview.49YeIB/backend-ca-admin-venv/bin/python` |
