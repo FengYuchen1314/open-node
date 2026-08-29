@@ -23,7 +23,11 @@ from open_node.domain.subscriber_auth import (
     SubscriberShortCodeUpdate,
 )
 from open_node.domain.subscription_profiles import SubscriberSubscriptionProfilesResponse
-from open_node.domain.subscriptions import ProductUserSubscriptionTokenResponse
+from open_node.domain.subscriptions import (
+    ProductUserSubscriptionTokenResponse,
+    SubscriptionIpPolicyRead,
+    SubscriptionIpPolicyUpdate,
+)
 from open_node.services.inventory import ProductUserConflict, ProductUserNotFoundError
 from open_node.services.subscriber_auth import (
     SubscriberAuthenticationError,
@@ -180,6 +184,22 @@ def subscription_profiles(request: Request, identity: Identity):
         identity.username, request.url_for
     )
     return SubscriberSubscriptionProfilesResponse(profiles=profiles)
+
+
+@router.get("/subscription-ip-policy", response_model=SubscriptionIpPolicyRead)
+def subscription_ip_policy(request: Request, identity: Identity):
+    return invoke(request.app.state.inventory._subscription_ip_policy().read, identity.username)
+
+
+@router.put("/subscription-ip-policy", response_model=SubscriptionIpPolicyRead)
+def update_subscription_ip_policy(
+    payload: SubscriptionIpPolicyUpdate, request: Request, identity: Identity
+):
+    return invoke(
+        request.app.state.inventory._subscription_ip_policy().update,
+        identity.username,
+        payload,
+    )
 
 
 @router.post("/subscription-token/reset", response_model=ProductUserSubscriptionTokenResponse)

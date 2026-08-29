@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from enum import StrEnum
+from ipaddress import ip_network
 from math import isfinite
 from typing import Any, Literal
 from uuid import UUID
@@ -139,6 +140,31 @@ class ProductUserRead(BaseModel):
 
 class ProductUserActiveUpdate(BaseModel):
     is_active: bool = Field(strict=True)
+
+
+class SubscriptionIpPolicyUpdate(BaseModel):
+    networks: list[str] = Field(default_factory=list, max_length=32)
+
+    @field_validator("networks")
+    @classmethod
+    def normalize_networks(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            try:
+                network = str(ip_network(value.strip(), strict=False))
+            except (AttributeError, ValueError):
+                raise ValueError(f"Invalid IP address or network: {value}") from None
+            if network not in normalized:
+                normalized.append(network)
+        return normalized
+
+
+class SubscriptionIpPolicyRead(BaseModel):
+    username: str
+    enabled: bool
+    networks: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = None
+    license_required: Literal[False] = False
 
 
 class SubscriptionAccessEntryRead(BaseModel):

@@ -16,6 +16,7 @@ import type {
   SubscriptionCatalogImportResponse,
   SubscriptionClientFormat,
   SubscriptionFormatPreview,
+  SubscriptionIpPolicy,
   SubscriptionDueTrafficResetRequest,
   SubscriptionDueTrafficResetResponse,
   SubscriptionPlanAssignRequest,
@@ -45,6 +46,20 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const jsonHeaders = {
   "Content-Type": "application/json",
 };
+
+export async function getProductUserIpPolicy(username: string, fetcher = authenticatedFetch): Promise<SubscriptionIpPolicy> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "subscription-ip-policy")}`);
+  if (!response.ok) throw await apiError(response, "Subscription IP policy request failed");
+  return response.json() as Promise<SubscriptionIpPolicy>;
+}
+
+export async function updateProductUserIpPolicy(username: string, networks: string[], fetcher = authenticatedFetch): Promise<SubscriptionIpPolicy> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "subscription-ip-policy")}`, {
+    method: "PUT", headers: jsonHeaders, body: JSON.stringify({ networks }),
+  });
+  if (!response.ok) throw await apiError(response, "Subscription IP policy update failed");
+  return response.json() as Promise<SubscriptionIpPolicy>;
+}
 
 export async function updateProductUserShortCode(username: string, code: string, revision: string, fetcher = authenticatedFetch): Promise<ProductUserSubscriptionTokenResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "subscription-short-code")}`, {

@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import QRCode from "qrcode";
+import SubscriptionIpPolicyDialog from "./SubscriptionIpPolicyDialog.vue";
+import type { SubscriptionIpPolicy } from "../domain/subscriptions";
 import {
   beginSubscriberTotp, clearSubscriberSession, confirmSubscriberTotp, revokeSubscriberDevice,
-  subscriberChangePassword, subscriberDevices, subscriberSecurity, subscriberToken, updateSubscriberTotp,
+  subscriberChangePassword, subscriberDevices, subscriberIpPolicy, subscriberSecurity, subscriberToken, updateSubscriberTotp,
   type SubscriberDevice, type SubscriberEnrollment, type SubscriberSecurity,
 } from "../services/subscriber-auth";
 
 const emit = defineEmits<{ changed: [] }>();
 const security = ref<SubscriberSecurity | null>(null);
 const devices = ref<SubscriberDevice[]>([]);
+const ipPolicy = ref<SubscriptionIpPolicy | null>(null);
+const ipDialog = ref(false);
 const loading = ref(false);
 const error = ref("");
 const notice = ref("");
@@ -37,8 +41,8 @@ async function load() {
   const current = ++version;
   loading.value = true; error.value = "";
   try {
-    const [settings, sessions] = await Promise.all([subscriberSecurity(), subscriberDevices()]);
-    if (current === version) { security.value = settings; devices.value = sessions; }
+    const [settings, sessions, policy] = await Promise.all([subscriberSecurity(), subscriberDevices(), subscriberIpPolicy()]);
+    if (current === version) { security.value = settings; devices.value = sessions; ipPolicy.value = policy; }
   } catch (failure) {
     if (current === version) error.value = failure instanceof Error ? failure.message : "Security settings unavailable";
   } finally { if (current === version) loading.value = false; }
@@ -50,6 +54,7 @@ function clearSecrets() {
 function open(action: Mode) {
   ++operationVersion; clearSecrets(); mode.value = action; dialogError.value = ""; dialog.value = true;
 }
+function ipPolicyUpdated(value: SubscriptionIpPolicy) { ipPolicy.value = value; }
 function close() {
   if (busy.value || (recovery.value.length && !accepted.value)) return;
   ++operationVersion; dialog.value = false; clearSecrets();
@@ -123,6 +128,7 @@ onBeforeUnmount(() => { ++version; ++operationVersion; clearSecrets(); });
       <section class="security-setting"><div><h3>Password</h3></div><v-btn variant="text" prepend-icon="mdi-key-outline" @click="open('password')">Change password</v-btn></section>
       <section class="security-setting"><div><h3>Two-factor authentication</h3><p>{{ security.totp_enabled ? 'Enabled' : 'Not enabled' }}</p><p v-if="security.totp_enabled">{{ security.recovery_codes_remaining }} recovery codes remaining</p><p v-else-if="!security.totp_available">Enrollment unavailable</p></div><div class="security-actions"><template v-if="security.totp_enabled"><v-btn variant="text" prepend-icon="mdi-key-change" @click="open('recovery')">New recovery codes</v-btn><v-btn variant="text" color="error" prepend-icon="mdi-shield-off-outline" @click="open('disable')">Disable</v-btn></template><v-btn v-else variant="text" color="primary" prepend-icon="mdi-shield-plus-outline" :disabled="!security.totp_available" @click="open('enroll')">Enable</v-btn></div></section>
       <section class="security-setting"><h3>Subscription links</h3><v-btn variant="text" prepend-icon="mdi-link-variant-remove" @click="open('link')">Reset links</v-btn></section>
+      <section class="security-setting"><div><h3>Subscription IP access</h3><p>{{ ipPolicy?.enabled ? `${ipPolicy.networks.length} allowed ${ipPolicy.networks.length === 1 ? 'range' : 'ranges'}` : 'Unrestricted' }}</p></div><v-btn variant="text" prepend-icon="mdi-ip-network-outline" @click="ipDialog = true">Edit access</v-btn></section>
     </template>
     <section class="security-devices" aria-label="Active sessions">
       <div class="security-heading"><h2>Active sessions</h2><v-btn variant="text" prepend-icon="mdi-logout-variant" :disabled="loading || devices.length < 2" @click="revoke()">Revoke others</v-btn></div>
@@ -164,6 +170,7 @@ onBeforeUnmount(() => { ++version; ++operationVersion; clearSecrets(); });
         <v-card-actions><v-btn :disabled="busy || (!!recovery.length && !accepted)" @click="close">{{ recovery.length ? 'Done' : 'Cancel' }}</v-btn><v-spacer /><v-btn v-if="!recovery.length" form="subscriber-security-form" type="submit" color="primary" :prepend-icon="mode === 'enroll' ? 'mdi-shield-check-outline' : 'mdi-check'" :disabled="!canSubmit" :loading="busy">{{ mode === 'enroll' ? (enrollment ? 'Verify and enable' : 'Continue') : 'Confirm' }}</v-btn></v-card-actions>
       </v-card>
     </v-dialog>
+    <SubscriptionIpPolicyDialog v-model:open="ipDialog" subscriber @updated="ipPolicyUpdated" />
   </div>
 </template>
 

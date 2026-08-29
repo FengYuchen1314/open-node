@@ -1102,6 +1102,16 @@ class ProductUserRemovalModel(Base):
     servers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
 
 
+class SubscriptionIpPolicyModel(Base):
+    __tablename__ = "subscription_ip_policies"
+
+    username: Mapped[str] = mapped_column(
+        String(80), ForeignKey("product_users.username", ondelete="CASCADE"), primary_key=True
+    )
+    networks: Mapped[list[str]] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ManagedNodeModel(Base):
     __tablename__ = "managed_nodes"
 
@@ -7092,6 +7102,11 @@ class InventoryStore:
         from open_node.services.private_routed_nodes import PrivateRoutedNodes
 
         return PrivateRoutedNodes(self)
+
+    def _subscription_ip_policy(self):
+        from open_node.services.subscription_ip_policy import SubscriptionIpPolicy
+
+        return SubscriptionIpPolicy(self)
 
     def _server_traffic(self):
         from open_node.services.server_traffic import ServerTrafficCoordinator

@@ -27,6 +27,8 @@ from open_node.domain.subscriptions import (
     SubscriptionDueTrafficResetRequest,
     SubscriptionDueTrafficResetResponse,
     SubscriptionFormatPreview,
+    SubscriptionIpPolicyRead,
+    SubscriptionIpPolicyUpdate,
     SubscriptionPlanAssignRequest,
     SubscriptionPlanAssignResponse,
     SubscriptionPlanCreate,
@@ -55,6 +57,41 @@ from open_node.services.subscription_access import SubscriptionAccessConflict
 
 router = APIRouter(tags=["subscriptions"])
 public_router = APIRouter(tags=["subscriptions"])
+
+
+def enforce_subscription_ip(store, username, request):
+    peer = request.client.host if request.client else "unknown"
+    if not store._subscription_ip_policy().allowed(username, peer):
+        raise HTTPException(status_code=404, detail="subscription not found")
+
+
+@router.get("/user-subscription-ip-policy", response_model=SubscriptionIpPolicyRead)
+@router.get(
+    "/users/{username}/subscription-ip-policy", response_model=SubscriptionIpPolicyRead
+)
+def get_subscription_ip_policy(
+    username: str,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+):
+    try:
+        return store._subscription_ip_policy().read(username)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/user-subscription-ip-policy", response_model=SubscriptionIpPolicyRead)
+@router.put(
+    "/users/{username}/subscription-ip-policy", response_model=SubscriptionIpPolicyRead
+)
+def update_subscription_ip_policy(
+    username: str,
+    payload: SubscriptionIpPolicyUpdate,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+):
+    try:
+        return store._subscription_ip_policy().update(username, payload)
+    except ProductUserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/user-access", response_model=SubscriptionAccessResponse)
@@ -383,6 +420,7 @@ def preview_subscription_format(
 @public_router.get("/subscribe/{subscription_key}", name="render_user_subscription")
 def render_user_subscription(
     subscription_key: str,
+    request: Request,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     client_format: Annotated[
         SubscriptionClientFormat,
@@ -397,6 +435,7 @@ def render_user_subscription(
     except SubscriptionUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    enforce_subscription_ip(store, rendered.username, request)
     return rendered_subscription_response(rendered)
 
 

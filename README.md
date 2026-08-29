@@ -73,6 +73,11 @@ They support all six subscription formats, survive controller restarts and
 recheck the source subscriber on every download. Expiry or revocation blocks
 future downloads but does not revoke credentials already downloaded.
 
+[Subscription IP access](docs/subscription-ip-access.md) optionally limits each
+subscriber's long, short and compatible `/x` links to normalized IPv4/IPv6 hosts
+or CIDR networks. Administrators and the subscriber can edit the policy without
+rotating credentials; denied sources receive the same response as unknown links.
+
 [Custom subscription short codes](docs/subscription-links.md) can be edited
 by administrators and subscribers, with collision/revision protection, original
 key preservation and complete link reset. Subscriber edits require password

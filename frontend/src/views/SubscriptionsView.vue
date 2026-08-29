@@ -12,6 +12,7 @@ import LegacyMMWXImportDialog from "../components/LegacyMMWXImportDialog.vue";
 import SubscriptionProfileDialog from "../components/SubscriptionProfileDialog.vue";
 import TemporarySubscriptionDialog from "../components/TemporarySubscriptionDialog.vue";
 import PrivateRoutedPolicyDialog from "../components/PrivateRoutedPolicyDialog.vue";
+import SubscriptionIpPolicyDialog from "../components/SubscriptionIpPolicyDialog.vue";
 import NodeManagementDialog from "../components/NodeManagementDialog.vue";
 import type { NodeOperation } from "../services/node-management";
 import type { UserOperation } from "../services/user-management";
@@ -91,6 +92,7 @@ const planManagement = reactive({ id: "", mode: "edit" as PlanOperation, open: f
 const userManagement = reactive({ username: "", mode: "edit" as UserOperation, removalId: null as string | null, open: false });
 const userLogin = reactive({ username: "", open: false });
 const shortCode = reactive({ username: "", open: false });
+const ipPolicy = reactive({ username: "", open: false });
 const legacyMMWX = reactive({ open: false });
 function shortCodeSaved(value: ProductUserSubscriptionToken) {
   if (assignForm.username === value.username) subscriptionToken.value = value;
@@ -1860,6 +1862,7 @@ function formatBytes(value: number) {
             <div class="catalog-controls">
               <template v-if="!user.removal_id">
                 <v-tooltip text="Edit subscription short code"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit short code for ${user.username}`" icon="mdi-link-edit" variant="text" size="32" @click="Object.assign(shortCode, { username: user.username, open: true })" /></template></v-tooltip>
+                <v-tooltip text="Edit subscription IP access"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit subscription IP access for ${user.username}`" icon="mdi-ip-network-outline" variant="text" size="32" @click="Object.assign(ipPolicy, { username: user.username, open: true })" /></template></v-tooltip>
                 <v-tooltip text="User login settings"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Login settings for ${user.username}`" icon="mdi-account-key-outline" variant="text" size="32" @click="Object.assign(userLogin, { username: user.username, open: true })" /></template></v-tooltip>
                 <v-tooltip text="Edit user"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit user ${user.username}`" icon="mdi-pencil-outline" variant="text" size="32" @click="manageUser(user, 'edit')" /></template></v-tooltip>
                 <v-tooltip text="Remove user"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Remove user ${user.username}`" icon="mdi-delete-outline" variant="text" size="32" :disabled="user.role === 'admin'" @click="manageUser(user, 'remove')" /></template></v-tooltip>
@@ -1947,6 +1950,7 @@ function formatBytes(value: number) {
     <PlanManagementDialog v-model:open="planManagement.open" :id="planManagement.id" :mode="planManagement.mode" :nodes="nodes" @changed="refresh" />
     <UserManagementDialog v-model:open="userManagement.open" :username="userManagement.username" :mode="userManagement.mode" :removal-id="userManagement.removalId" :nodes="nodes" @changed="refresh" />
     <SubscriptionShortCodeDialog v-model:open="shortCode.open" :username="shortCode.username" @saved="shortCodeSaved" />
+    <SubscriptionIpPolicyDialog v-model:open="ipPolicy.open" :username="ipPolicy.username" />
     <LegacyMMWXImportDialog v-model:open="legacyMMWX.open" :plans="plans" @imported="refresh" />
     <SubscriptionProfileDialog v-model:open="profileManagement.open" :profile="profileManagement.profile" :nodes="nodes" :users="users" :templates="templates" @saved="refresh" />
     <TemporarySubscriptionDialog v-model:open="temporaryShare.open" :username="assignForm.username" :nodes="temporaryNodeOptions" @created="temporaryShareCreated" />

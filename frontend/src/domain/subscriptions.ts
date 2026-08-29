@@ -2,6 +2,14 @@ import type { AgentCommand } from "./inventory";
 import type { UserLimitOverrides } from "./user-limits";
 
 export type ProductUserRole = "admin" | "user";
+
+export interface SubscriptionIpPolicy {
+  username: string;
+  enabled: boolean;
+  networks: string[];
+  updated_at: string | null;
+  license_required: false;
+}
 export type ManagedNodeType = "physical" | "routed";
 export type SubscriptionTrafficMode = "oneway" | "twoway";
 

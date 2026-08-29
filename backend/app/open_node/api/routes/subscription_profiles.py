@@ -4,7 +4,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from open_node.api.dependencies import get_inventory_store
-from open_node.api.routes.subscriptions import rendered_subscription_response
+from open_node.api.routes.subscriptions import (
+    enforce_subscription_ip,
+    rendered_subscription_response,
+)
 from open_node.domain.subscription_profiles import (
     SubscriptionProfileRead,
     SubscriptionProfilesResponse,
@@ -62,4 +65,5 @@ def render_legacy_mmwx_subscription(
         rendered = profiles.resolve(code, selected_format, node_id)
     except (SubscriptionTokenNotFoundError, SubscriptionUnavailableError) as exc:
         raise HTTPException(404, str(exc)) from exc
+    enforce_subscription_ip(request.app.state.inventory, rendered.username, request)
     return rendered_subscription_response(rendered)
