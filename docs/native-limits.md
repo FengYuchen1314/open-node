@@ -8,7 +8,9 @@ requests. The control plane remains MIT; the runtime extension is MPL-2.0.
 
 Build the pinned compatibility runtime with the included limiter patch and
 overlay. `xray open-node-capabilities` reports `limiter: 1` and
-`user_auto_speed_rules: 1`. Install that
+`user_auto_speed_rules: 1`, plus `mieru_udp_target: 1` for the compatibility
+runtime's UDP target path. These are versioned integer capabilities; an actual
+integer equal to one is required. Install that
 binary through the host deployment CLI. Managed mode supplies
 `OPEN_NODE_LIMITER_DIR=<agent state directory>/limits` to Xray automatically.
 Official Xray continues to work for unlimited configurations.
@@ -124,6 +126,7 @@ with no existing policies retain ordinary official-Xray compatibility.
 
 Tests and builds run only on the designated VPS. The real limiter smoke uses
 an installed non-root Agent, trusted HTTPS/WSS, actual proxy clients and real
-traffic; see [testing](testing.md). Mieru UDP target forwarding remains outside
-the pinned core's support even though its TCP and UDP underlays support limited
-TCP targets.
+traffic; see [testing](testing.md). Mieru UDP target packets over both TCP and
+UDP underlays retain the authenticated user context on each association's
+single dispatcher link, so the same per-user traffic accounting and native
+limiter policies apply.

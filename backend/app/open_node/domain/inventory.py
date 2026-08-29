@@ -531,6 +531,7 @@ class AgentScanResultPayload(BaseModel):
     nginx: AgentNginxScan | None = None
     xray_running: bool = False
     xray_version: str | None = Field(default=None, max_length=120)
+    xray_capabilities: dict[str, int] = Field(default_factory=dict, max_length=16)
     api_port: int | None = Field(default=None, ge=0, le=65535)
     config_path: str | None = Field(default=None, max_length=512)
     inbounds: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
@@ -543,6 +544,17 @@ class AgentScanResultPayload(BaseModel):
     @classmethod
     def validate_optional_scan_text(cls, value: str | None) -> str | None:
         return _strip_optional_text(value, "scan field") or None
+
+    @field_validator("xray_capabilities", mode="before")
+    @classmethod
+    def validate_xray_capabilities(cls, value: Any) -> dict[str, int]:
+        if (
+            not isinstance(value, dict)
+            or set(value) - {"mieru_udp_target"}
+            or any(type(version) is not int or version != 1 for version in value.values())
+        ):
+            raise ValueError("Invalid Xray runtime capability report")
+        return value
 
     @field_validator("inbounds")
     @classmethod
@@ -663,6 +675,7 @@ class XrayRuntimeInventoryResponse(BaseModel):
     has_scan: bool = False
     xray_running: bool = False
     xray_version: str | None = None
+    xray_capabilities: dict[str, int] = Field(default_factory=dict)
     api_port: int | None = None
     config_path: str | None = None
     config_modified: bool = False

@@ -669,6 +669,7 @@ _SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
             "server": "{server_domain}",
             "port": 2999,
             "transport": "TCP",
+            "udp": False,
         },
     },
     {
@@ -866,6 +867,7 @@ class AgentScanResultModel(Base):
     nginx: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     http01: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     xray_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    xray_capabilities: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
     api_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     config_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     inbounds: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
@@ -1603,7 +1605,13 @@ class InventoryStore:
             )
         if "agent_scan_results" in table_names:
             self._sqlite_add_missing_columns(
-                inspector, "agent_scan_results", {"nginx": "JSON", "http01": "JSON"}
+                inspector,
+                "agent_scan_results",
+                {
+                    "nginx": "JSON",
+                    "http01": "JSON",
+                    "xray_capabilities": "JSON NOT NULL DEFAULT '{}'",
+                },
             )
         if "agent_commands" in table_names:
             self._sqlite_add_missing_columns(
@@ -5951,6 +5959,22 @@ class InventoryStore:
             proxy = dict(rendered)
             proxy.setdefault("name", node.name)
             proxy.setdefault("type", self._proxy_type_for_protocol(node.protocol))
+            is_mieru = subscription_clients.protocol(proxy) == "mieru"
+            scan = (
+                session.get(AgentScanResultModel, server.id)
+                if is_mieru and node.protocol == "mieru"
+                else None
+            )
+            if is_mieru:
+                proxy["udp"] = node.protocol == "mieru" and self._scan_supports_xray_capability(
+                    scan,
+                    "mieru_udp_target",
+                )
+                if not proxy["udp"]:
+                    warnings.append(
+                        f"node {node.name}: Mieru UDP targets require a current "
+                        "patched runtime scan"
+                    )
             runtime_key_required = proxy.pop("server-key-source", None) == "runtime"
             server_key = None
             if runtime_key_required:
@@ -5973,6 +5997,24 @@ class InventoryStore:
 
         session.flush()
         return proxies, warnings
+
+    @classmethod
+    def _scan_supports_xray_capability(
+        cls,
+        scan: AgentScanResultModel | None,
+        capability: str,
+        now: datetime | None = None,
+    ) -> bool:
+        if scan is None or not scan.xray_running:
+            return False
+        current = now or datetime.now(tz=UTC)
+        if cls._aware_datetime(scan.updated_at) < current - timedelta(minutes=10):
+            return False
+        capabilities = scan.xray_capabilities
+        if not isinstance(capabilities, dict):
+            return False
+        value = capabilities.get(capability)
+        return type(value) is int and value == 1
 
     @classmethod
     def _runtime_shadowsocks_server_key(
@@ -7734,6 +7776,7 @@ class InventoryStore:
             has_scan=True,
             xray_running=scan.xray_running,
             xray_version=scan.xray_version,
+            xray_capabilities=scan.xray_capabilities or {},
             api_port=scan.api_port,
             config_path=scan.config_path,
             config_modified=scan.config_modified,
@@ -8351,6 +8394,10 @@ class InventoryStore:
                 warnings.append("snell_mixed_transport_options")
 
         protocol = managed_protocol or "unsupported"
+        mieru_udp_target = protocol == "mieru" and cls._scan_supports_xray_capability(
+            session.get(AgentScanResultModel, server.id),
+            "mieru_udp_target",
+        )
         node_name = cls._runtime_node_name(server, runtime, payload.name if payload else None)
         draft = ManagedNodeCreate(
             name=node_name,
@@ -8375,6 +8422,7 @@ class InventoryStore:
                 node_name=node_name,
                 host=(payload.host if payload else host),
                 warnings=warnings,
+                mieru_udp_target=mieru_udp_target,
             ),
         )
         existing = cls._existing_xray_runtime_node(
@@ -8438,6 +8486,7 @@ class InventoryStore:
         node_name: str,
         host: str | None,
         warnings: list[str],
+        mieru_udp_target: bool = False,
     ) -> dict[str, Any]:
         config: dict[str, Any] = {
             "name": node_name,
@@ -8465,7 +8514,12 @@ class InventoryStore:
             else:
                 warnings.append("missing_reality_public_key")
         cls._add_runtime_transport_options(config, stream_settings)
-        cls._add_protocol_runtime_options(config, settings, protocol)
+        cls._add_protocol_runtime_options(
+            config,
+            settings,
+            protocol,
+            mieru_udp_target=mieru_udp_target,
+        )
         return config
 
     @classmethod
@@ -8511,6 +8565,7 @@ class InventoryStore:
         config: dict[str, Any],
         settings: dict[str, Any],
         protocol: str,
+        mieru_udp_target: bool = False,
     ) -> None:
         if protocol == "shadowsocks":
             clients = [
@@ -8538,7 +8593,7 @@ class InventoryStore:
         if protocol == "mieru":
             transport = cls._text_value(settings.get("transport"))
             config["transport"] = (transport or "TCP").upper()
-            config["udp"] = False
+            config["udp"] = mieru_udp_target
             return
         if protocol in {"anytls", "hysteria2"}:
             config.setdefault("udp", True)
@@ -8816,6 +8871,12 @@ class InventoryStore:
             ("config.sni", draft.config.get("sni"), managed_config.get("sni")),
             ("config.alpn", draft.config.get("alpn"), managed_config.get("alpn")),
             (
+                "config.transport",
+                draft.config.get("transport"),
+                managed_config.get("transport"),
+            ),
+            ("config.udp", draft.config.get("udp"), managed_config.get("udp")),
+            (
                 "config.ws_path",
                 cls._nested_config_value(draft.config, "ws-opts", "path"),
                 cls._nested_config_value(managed_config, "ws-opts", "path"),
@@ -8924,6 +8985,8 @@ class InventoryStore:
             "sni",
             "alpn",
             "cipher",
+            "transport",
+            "udp",
         ]:
             if cls._sync_json_public_value(next_config, [field], draft.config.get(field)):
                 updated_fields.append(f"config.{field}")
@@ -9240,6 +9303,7 @@ class InventoryStore:
             http01=scan.http01,
             xray_running=scan.xray_running,
             xray_version=scan.xray_version,
+            xray_capabilities=scan.xray_capabilities or {},
             api_port=scan.api_port,
             config_path=scan.config_path,
             inbounds=scan.inbounds or [],

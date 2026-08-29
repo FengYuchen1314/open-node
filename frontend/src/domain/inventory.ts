@@ -271,6 +271,7 @@ export interface AgentScanResult {
   server_id: string;
   xray_running: boolean;
   xray_version?: string | null;
+  xray_capabilities: Record<string, number>;
   api_port?: number | null;
   config_path?: string | null;
   inbounds: Record<string, unknown>[];
@@ -313,6 +314,7 @@ export interface XrayRuntimeInventoryResponse {
   has_scan: boolean;
   xray_running: boolean;
   xray_version?: string | null;
+  xray_capabilities: Record<string, number>;
   api_port?: number | null;
   config_path?: string | null;
   config_modified: boolean;

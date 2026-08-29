@@ -459,6 +459,7 @@ def test_subscription_node_preset_creates_renderable_node(tmp_path: Path) -> Non
     assert presets_by_id["snell-v6"]["client_template"]["v6Mode"] == "default"
     assert "clientId" not in presets_by_id["snell-v6"]["client_template"]
     assert presets_by_id["mieru"]["config"]["transport"] == "TCP"
+    assert presets_by_id["mieru"]["config"]["udp"] is False
 
     create_response = client.post(
         "/api/v1/node-presets/vless-vision-tls/nodes",
@@ -582,6 +583,7 @@ def test_xray_fork_protocols_provision_and_render_subscriptions(tmp_path: Path) 
                 "server": "fork.example.com",
                 "port": 2999,
                 "transport": "TCP",
+                "udp": True,
             },
         },
     ]
@@ -638,6 +640,7 @@ def test_xray_fork_protocols_provision_and_render_subscriptions(tmp_path: Path) 
     assert clash_proxies["Mieru Edge"]["username"] == "bob"
     assert clash_proxies["Mieru Edge"]["password"] == mieru_client["password"]
     assert clash_proxies["Mieru Edge"]["transport"] == "TCP"
+    assert clash_proxies["Mieru Edge"]["udp"] is False
 
     assert sing_box_response.status_code == 200
     sing_box = json.loads(sing_box_response.text)

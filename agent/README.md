@@ -145,10 +145,20 @@ static-only policies still support the earlier free limiter core.
 Unsupported operations return 501 rather than reporting success. Public WARP
 provider verification and further migration workflows remain release gates.
 Native [fork protocol user management](../docs/fork-runtime.md) now edits
-AnyTLS/Snell/Mieru user containers. Its optional MPL-2.0 runtime patch retains
-empty listeners while rejecting traffic, so last-user revocation can persist.
-Native subscription formats have pinned-client forwarding coverage; broader
-client combinations and Mieru UDP targets remain unfinished.
+AnyTLS/Snell/Mieru user containers. The optional MPL-2.0 compatibility runtime
+can retain an explicitly edited empty Snell or Mieru listener while rejecting
+every connection. Managed subscription access uses a different contract: it
+suspends the final-user inbound and keeps a private recovery template instead
+of leaving that listener active.
+
+The runtime advertises Mieru UDP target support as the versioned integer
+`mieru_udp_target: 1`. The Agent accepts only an actual integer equal to one,
+caches the capability probe by binary identity, and reports it in
+`xray_capabilities` during a scan. A binding error, failed probe, official or
+older runtime, or any other value degrades to an empty capability report.
+Native subscription formats have pinned-client forwarding coverage, including
+UDP targets through Mieru TCP and UDP underlays; broader client combinations
+remain explicit compatibility boundaries.
 
 ## Verification
 

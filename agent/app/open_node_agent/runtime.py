@@ -261,6 +261,7 @@ class XrayRuntime:
             return {
                 "xray_running": False,
                 "xray_version": None,
+                "xray_capabilities": {},
                 "config_path": str(self.config.xray_config),
                 "inbounds": [],
                 "message": self.binding_error,
@@ -274,9 +275,13 @@ class XrayRuntime:
             version = output.splitlines()[0][:120] if output else None
         except (OSError, ValueError, TimeoutError):
             version = None
+        capabilities = {}
+        if await self.limiter.mieru_udp_target_supported():
+            capabilities["mieru_udp_target"] = 1
         return {
             "xray_running": running,
             "xray_version": version,
+            "xray_capabilities": capabilities,
             "config_path": str(self.config.xray_config),
             "inbounds": config.get("inbounds", []),
             "message": None,

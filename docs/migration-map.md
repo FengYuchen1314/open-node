@@ -97,6 +97,10 @@ This document records the starting source map for the Open Node refactor.
    - Done: latest agent scan-result persistence from WebSocket `scan_result`
      and successful `/api/child/scan` command results, exposed to the Vue
      inventory table as Xray runtime status.
+   - Done: scans persist strict versioned Xray runtime capabilities. Mieru UDP
+     import and subscription rendering require a running scan no more than ten
+     minutes old with integer `mieru_udp_target: 1`; missing or invalid evidence
+     degrades to `udp: false`, regardless of catalog node claims.
    - Done: scan-derived Xray runtime inventory summaries with protocol/client
      counts, sanitized user labels, sniffing state, and Vue Runtime tab
      display.
@@ -330,15 +334,21 @@ These passing command and snapshot checks do not prove a complete replacement:
   rollback, and restart recovery verified over WebSocket and HTTP. This does
   not prove every fork-only protocol or arbitrary existing-config migration.
 - Native [fork protocol migration](fork-runtime.md) covers user containers,
-  Snell first-user transport settings and an optional MPL-2.0 empty-user patch.
+  Snell first-user transport settings, the MPL-2.0 empty-user and AnyTLS address
+  patches, Mieru UDP targets, and the independent native limiter. Direct
+  empty-user edits retain a rejecting Snell/Mieru inbound, while managed access
+  suspends the final-user inbound and journals its private recovery template.
   The real-client smoke covers original configs, runtime-node import, assigned
   subscription credentials, statistics, rotation, last-user revocation,
   restart persistence and reactivation. [Client-format filtering](subscriptions.md)
   and native free-client Snell v6 export now have full-configuration tests in
   pinned Mihomo, sing-box and the patched Xray client, including real target
   traffic and URI/Base64 imports. The AnyTLS native-client UDP address bug is
-  patched separately. Mieru UDP target forwarding and wider combinations
-  remain open; pinned-client results do not prove universal compatibility.
+  patched separately. Mieru TCP and UDP underlays now carry both TCP and UDP
+  targets when a fresh scan proves the strict runtime capability; forged node
+  configuration cannot bypass that gate. Wider client, transport, OS and
+  architecture combinations remain open, and pinned-client results do not
+  prove universal compatibility.
 - External [systemd runtime mode](external-systemd.md) now verifies a dedicated
   non-root service's binary/config binding and uses scoped host-installed
   polkit authorization. Both transports have real forwarding, provisioning,

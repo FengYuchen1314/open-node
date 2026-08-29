@@ -273,6 +273,7 @@ describe("inventory API client", () => {
             server_id: "srv_1",
             xray_running: true,
             xray_version: "Xray 1.8.24",
+            xray_capabilities: { mieru_udp_target: 1 },
             api_port: 46736,
             config_path: "/usr/local/etc/xray/config.json",
             inbounds: [{ tag: "vless-443", port: 443 }],
@@ -310,6 +311,7 @@ describe("inventory API client", () => {
           has_scan: true,
           xray_running: true,
           xray_version: "Xray 1.8.24",
+          xray_capabilities: { mieru_udp_target: 1 },
           api_port: 46736,
           config_path: "/usr/local/etc/xray/config.json",
           config_modified: false,
@@ -353,6 +355,7 @@ describe("inventory API client", () => {
     expect(requestUrl).toBe("/api/v1/servers/srv_1/xray/runtime");
     expect(headers).toBeUndefined();
     expect(response.license_required).toBe(false);
+    expect(response.xray_capabilities.mieru_udp_target).toBe(1);
     expect(response.inbounds[0]?.client_count).toBe(2);
     expect(response.traffic.uplink).toBe(100);
     expect(response.inbounds[0]?.user_traffic.downlink).toBe(34);

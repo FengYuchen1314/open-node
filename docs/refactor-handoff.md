@@ -4,9 +4,9 @@
 
 这份文件供后续聊天直接接手。开始工作前，以当前 Git、GitHub 和 VPS 状态为准，先核对本文件中的快照，不要只依赖聊天记录。
 
-建议在新聊天中直接说明：
+Mieru UDP 目标转发已经在本轮完成。建议在新聊天中直接说明：
 
-> 请先阅读 `docs/refactor-handoff.md` 和 `docs/migration-map.md`，然后从 Mieru UDP 目标转发继续。只处理 `open-node` 主仓库和 `miaomiaowuX` 默认主线，所有测试都放在 `185.99.135.224` 上运行。
+> 请先阅读 `docs/refactor-handoff.md` 和 `docs/migration-map.md`，然后从历史私有资源迁移继续。只处理 `open-node` 主仓库和 `miaomiaowuX` 默认主线，所有测试都放在 `185.99.135.224` 上运行。
 
 ## 固定目标和边界
 
@@ -20,21 +20,23 @@
 - 所有测试、构建和真实流量烟测都在 VPS `185.99.135.224` 上完成，通过 SSH key 连接。不要在本机运行测试。
 - 不复制旧项目的许可证校验，也不依赖旧许可证服务。
 
-按功能面和实机验证门槛粗略估算，当前约完成 **90%**。核心产品链路已经形成，但剩余运行时门槛尚未全部关闭，不能宣布完整替代 MMWX。
+按功能面和实机验证门槛粗略估算，当前约完成 **93%**。Mieru UDP
+运行时门槛已经关闭，核心产品链路已经形成；历史私有资源发现、部分旧
+Agent 路径和更广外部环境仍未闭环，不能宣布完整替代 MMWX。
 
 ## 当前权威状态
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 本地主分支 | `main`，已包含本文档；具体提交以 `git rev-parse HEAD` 为准 |
-| GitHub `main` | 已包含本文档；应与本地主分支一致 |
-| 已部署功能基线 | `1d46cf0d477c0edc0a7c72bb40daff60a2ba3c81` |
-| VPS 源码 | `/opt/open-node`，当前仍是上述功能基线；文档提交不需要重启服务 |
-| VPS 后端 | `127.0.0.1:8000`，2026-08-29 复核 `/healthz` 为 200 |
-| VPS 进程快照 | PID `2765086`；PID 会变化，应以 `pgrep` 和健康检查为准 |
+| 本地主分支 | `main`，包含 Mieru UDP 里程碑；具体提交以 `git rev-parse HEAD` 为准 |
+| GitHub `main` | 应与本地主分支一致；接手时用 `git ls-remote` 复核 |
+| 已部署功能基线 | 应与 GitHub `main` 一致；接手时核对 `/opt/open-node` 的提交和 clean 状态 |
+| VPS 源码 | `/opt/open-node`，使用干净的 `main` checkout |
+| VPS 后端 | `127.0.0.1:8000`；接手时重新检查 `/healthz`、根页面和账户入口 |
+| VPS 进程快照 | PID 会变化，应以 `pgrep`、`/proc/<pid>/cwd`、命令行和健康检查为准 |
 | 后端解释器 | `/tmp/open-node-preview.49YeIB/backend-ca-admin-venv/bin/python` |
-| 最近部署备份 | `/tmp/open-node-preview.49YeIB/before-registration-invitations-1d46cf0`，约 12 MiB |
-| 最近功能提交 | `1d46cf0 feat: add plan-bound subscriber invitations` |
+| 最近部署备份 | `/tmp/open-node-preview.49YeIB/before-mieru-udp-b6267f8` |
+| 最近功能提交 | `feat: add Mieru UDP target forwarding`；具体 SHA 以 `git log -1` 为准 |
 
 后端当前是测试预览进程，解释器和备份位于 `/tmp`，主机重启后不能视为持久生产部署。正式部署能力已经写入 Dockerfile、Compose 和部署文档，当前预览状态与正式容器交付是两件事。
 
@@ -59,7 +61,8 @@
 
 - 独立托管 Xray、外部 systemd 绑定、多文件接管、配置验证、写入、重启和回滚已完成。
 - VLESS、VMess、Trojan、Shadowsocks、Hysteria、AnyTLS、Snell 和 Mieru 的用户增删与持久恢复已接入。
-- AnyTLS UDP 地址修复、Snell/Mieru 空用户启动和独立原生限速补丁已纳入可重现构建。
+- AnyTLS UDP 地址修复、Snell/Mieru 空用户启动、Mieru UDP 目标转发和独立原生限速补丁已纳入可重现构建。
+- Mieru TCP/UDP underlay 都支持 TCP 与 UDP 目标；Agent 通过按二进制身份缓存的严格版本能力上报，后端只在十分钟内、运行中的 `mieru_udp_target: 1` 扫描证据下为导入和订阅启用 UDP。
 - Xray 版本安装、切换、回滚、恢复和数据保留已完成。
 - 运行时扫描、节点导入、目录对账、凭据修复、额外用户清理和配置漂移恢复已完成。
 - 多节点变更集、依赖顺序、失败补偿、回滚屏障和人工接受部分状态已完成。
@@ -95,30 +98,28 @@
 
 ## 最近一次完整验证
 
-注册邀请里程碑合入并部署前后，VPS 上完成了以下验证：
+Mieru UDP 里程碑在 Debian 12 x86-64 VPS 上完成了以下验证：
 
-- 后端全量回归：883 项通过。
-- 前端：32 个测试文件、216 项测试通过。
-- `vue-tsc --noEmit` 通过。
-- 前端生产构建通过，只有既有的 500 KiB bundle 提示。
-- Python Ruff 检查和格式检查通过。
-- 真实非 root Agent、真实 Xray、邀请领取、登录、配置导出和 32 KiB TCP 转发通过。
-- 邀请重复领取、摘要存储、Argon2id、数据库外键检查和清理通过。
-- 浏览器在 1440×1000、390×844、320×700 下检查通过，无横向溢出或控制台错误。
-- 旧数据库升级后原有 48 张表的记录数不变，新邀请表为空，外键检查为零错误。
+- 固定源 `d3fdae5833a92070414db588ee9893264147b789`、Go 1.26.7 的四补丁运行时构建、包测试、三个 race 包、`go mod verify` 和 matching-source 归档通过。
+- 运行时 SHA-256 为 `7386109a5664ed83e23e38e48b41f09dddedf5092f09f51e35d182eb9fba2154`；matching-source SHA-256 为 `1674ecc92af85bbc0c0d9cc5094b1cd13845a5585d67486a97460a0efda80675`。
+- WebSocket 与 HTTP 两份完整协议烟测分别退出 0。真实 Mihomo 覆盖 Mieru TCP/UDP underlay 的 UDP echo、DNS、4096 字节、多目标、统计归属、轮换、直接零用户、托管 suspension、Agent 重启和恢复。
+- 未修改参考运行时在两种 Mieru underlay 上拒绝 UDP 目标；官方 Xray 迁移失败时配置字节和当前 fork PID 均不变。
+- 订阅客户端烟测使用 Mihomo v1.19.30、sing-box v1.13.19 和固定 Xray，完整 18 变体、URI/Base64、模板 API 与浏览器流程通过。
+- 原生限速烟测的 18 个 TCP 与 18 个 UDP 变体全部通过，包含两种 Mieru underlay、Vision TLS、热更新、连接名额、自动规则、重启持久性和三种视口。
+- 后端全量回归 904 项、Agent 544 项、前端 32 文件/216 项通过；前端类型检查与生产构建、probe-worker 类型检查、Ruff 和目标格式检查通过。
+- 重建 Agent wheel SHA-256 为 `a049c7b76a34341b01c3de6705edd8fa888011054330bb42b9133e371ed552f2`。
 
-已有的 Starlette/httpx 弃用提示和前端 bundle 大小提示不是本轮回归。
+已有的 Starlette/httpx 弃用提示、npm install-script 审批提示和前端 bundle 大小提示不是本轮回归。
 
 ## 还没完成
 
 ### 尚未实现或尚未闭环
 
-1. **Mieru UDP 目标转发**：Mieru TCP/UDP underlay 都能传 TCP 目标，但 SOCKS5 UDP ASSOCIATE 仍被服务端忽略。订阅导入会强制写入 `udp: false`，真实客户端烟测也跳过 Mieru UDP 目标流量。这是当前优先级最高的运行时缺口。
-2. **历史私有资源迁移**：当前系统自己创建的私有 routed node 有完整生命周期，但旧 MMWX 中未记录的私有 ownership、provider/relay-group 关系、Nginx/tunnel 资源和跨对象历史依赖还不能自动发现并清理。
-3. **部分旧 Agent 迁移**：旧 `securechan-v1` WebSocket 已兼容；旧 HTTP/pull 回调没有伪装成新租约协议，只提供明确迁移路径。
-4. **剩余 host 操作**：独立 Agent 对未实现操作返回 501。更广的 tracing 工具、Linux 发行版和任意现有进程接管仍需逐项实现或验证。
-5. **更广的协议组合**：固定客户端版本覆盖了主要组合，但不能代表所有传输包装、插件、OS 和架构。
-6. **多主机控制面扩展和任意数据库降级**：当前单控制面部署足够运行，但没有把多主机水平扩展和未来任意 schema downgrade 作为已完成能力。
+1. **历史私有资源迁移**：当前系统自己创建的私有 routed node 有完整生命周期，但旧 MMWX 中未记录的私有 ownership、provider/relay-group 关系、Nginx/tunnel 资源和跨对象历史依赖还不能自动发现并清理。这是下一项优先工作。
+2. **部分旧 Agent 迁移**：旧 `securechan-v1` WebSocket 已兼容；旧 HTTP/pull 回调没有伪装成新租约协议，只提供明确迁移路径。
+3. **剩余 host 操作**：独立 Agent 对未实现操作返回 501。更广的 tracing 工具、Linux 发行版和任意现有进程接管仍需逐项实现或验证。
+4. **更广的协议组合**：固定客户端版本覆盖了主要组合，但不能代表所有传输包装、插件、OS 和架构。
+5. **多主机控制面扩展和任意数据库降级**：当前单控制面部署足够运行，但没有把多主机水平扩展和未来任意 schema downgrade 作为已完成能力。
 
 ### 已有实现，但缺少外部环境证明
 
@@ -136,36 +137,17 @@
 
 这些项目是否进入最终发布范围，应按产品需求决定，不能因为“所有人免费使用”就自动等同于“任何人都能在公开实例匿名注册”。
 
-## 正在调查的下一项：Mieru UDP
+## 本轮完成：Mieru UDP 目标转发
 
-这项工作只完成了源码定位，**尚未修改本仓库文件，也没有实现提交**。
-
-### 已确认的事实
-
-- 固定运行时源为 `FengYuchen1314/Xray-core-mmwx` 提交 `d3fdae5833a92070414db588ee9893264147b789`。
-- VPS 临时审计目录为 `/tmp/open-node-mieru-audit-1d46cf0`。它不属于 `open-node`，只用于读取固定源。
-- `proxy/mieru/server.go` 的 TCP underlay `handleOpen` 只接受 SOCKS5 CONNECT。
-- `proxy/mieru/server_udp.go` 的 UDP underlay `handleOpen` 同样只接受 CONNECT。
-- `proxy/mieru/socks5.go` 已识别 `UDP ASSOCIATE` 并把目标网络标为 UDP，但两个入口都会拒绝该命令。
-- 官方 Mieru 协议为 UDP ASSOCIATE 数据报定义了边界：`0x00`、2 字节大端长度、原始 SOCKS5 UDP 数据报、`0xff`。
-- Xray 内部已有可复用模式：建立一条 UDP dispatcher link，每个 `buf.Buffer` 用 `buf.UDP` 携带逐包目标；AnyTLS 的 UDP 实现正在使用这一机制。
-- `backend/app/open_node/services/inventory.py` 当前会为导入的 Mieru 节点写入 `udp: false`。
-- `scripts/vps/smoke-protocol-runtime.py` 和 `smoke-subscription-clients.py` 当前明确跳过 Mieru UDP 目标流量。
+- `runtime/xray/mieru-udp-target.patch` 是依据公开 Mieru 协议和 RFC 1928 独立实现的 MPL-2.0 补丁，没有复制 GPL-3.0 服务端实现。它使用 `0x00`、两字节大端长度、SOCKS5 UDP 数据报和 `0xff` 封装，限制单个 SOCKS 数据报为 8192 字节。
+- IPv4、IPv6 和域名目标均受支持；只接受 `FRAG=0`，非法帧、超长数据、空域名和提前 EOF 都会失败关闭。
+- TCP 与 UDP underlay 共用认证 UDP association。每个 association 懒建立一条 dispatcher UDP link，逐包保留目标和认证用户上下文；会话数量、首包等待和并发关闭都有边界。
+- Agent 从运行时版本命令读取严格整数 `mieru_udp_target: 1`，按二进制身份缓存；扫描或绑定失败不沿用旧能力。后端还要求扫描不超过十分钟且运行时正在运行，才允许草稿、导入和订阅把 Mieru 标记为 UDP 可用。
+- 固定源构建、单元和 race 测试、matching source、两种 Agent transport、参考运行时负控、两种 Mieru underlay 的真实 UDP 流量、订阅客户端、原生限速、撤权与重启恢复均已通过；摘要和数量见上方验证记录及 [`testing.md`](testing.md)。
 
 官方协议说明：<https://github.com/enfein/mieru/blob/main/docs/protocol.md#udp-associate-encapsulation>
 
-### 推荐实现顺序
-
-1. 在 `runtime/xray/` 新增独立实现的 MPL-2.0 补丁，例如 `mieru-udp-target.patch`，并加入 `build-protocol-runtime.py` 的固定补丁列表。不要复制 GPL-3.0 Mieru 服务端源码，只按公开协议和 RFC 1928 独立实现。
-2. 实现有边界和大小限制的 Mieru UDP frame reader/writer，正确处理跨 segment 拆包、粘包、非法 marker、零长度和超长数据。
-3. 实现 SOCKS5 UDP 数据报解析与编码，覆盖 IPv4、IPv6、域名、`FRAG=0`，明确拒绝不支持的分片。
-4. 抽出 TCP underlay 与 UDP underlay 共用的 UDP association，对每个认证会话只建立一条 dispatcher UDP link，并为逐包目标设置 `buf.UDP`。
-5. 保留认证用户的 inbound context，使现有流量统计、限速和连接约束继续归属于正确用户。
-6. 增加 Go 单元测试：frame 边界、地址类型、多目标、响应源地址、恶意长度、提前关闭、两种 underlay 和并发关闭。
-7. 在 VPS 重新构建固定运行时，运行 `go test`、`go test -race`、模块校验并检查 matching-source 与补丁摘要。
-8. 修改订阅导入和 Clash/Mihomo 输出，在运行时能力得到证明后才将 Mieru 改为 `udp: true`；同步更新后端测试和兼容矩阵。
-9. 扩展真实烟测，用固定 Mihomo 分别经过 Mieru TCP underlay 和 UDP underlay访问本地 UDP echo/DNS 目标，验证多目标往返、用户流量、限制、重启和最后一个用户撤销。
-10. 跑 VPS 后端、Agent、前端全量回归，再更新文档、提交、推送和部署。不要只凭 Go 单元测试宣称完成。
+下一轮建议从**历史私有资源迁移**开始：先建立旧 ownership、provider/relay-group、Nginx/tunnel 和跨对象依赖的只读发现清单与不可变 fixture，再设计预览、冲突处理、事务导入和可恢复清理。不要在没有来源证据时猜测资源归属。
 
 ## 接手续查
 

@@ -38,6 +38,7 @@ def scan_result_payload() -> dict[str, object]:
             "html_path": "/opt/open-node-agent/state/nginx/html",
         },
         "xray_version": "Xray 1.8.24",
+        "xray_capabilities": {},
         "api_port": 46736,
         "config_path": "/usr/local/etc/xray/config.json",
         "inbounds": [{"tag": "vless-443", "port": 443, "protocol": "vless"}],
@@ -59,9 +60,41 @@ def test_agent_can_report_scan_over_http_without_operator_session(tmp_path: Path
     assert created["agent_token"] not in response.text
     stored = client.get(f"/api/v1/servers/{created['server']['id']}/scan/latest").json()
     assert stored["scan"]["xray_running"] is True
+    assert stored["scan"]["xray_capabilities"] == {}
     assert stored["scan"]["nginx"] == scan_result_payload()["nginx"]
     rejected = public.post("/api/v1/agents/scan", json={**payload, "token": "invalid"})
     assert rejected.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "xray_capabilities",
+    [
+        True,
+        {"mieru_udp_target": True},
+        {"mieru_udp_target": 0},
+        {"mieru_udp_target": 2},
+        {"mieru_udp_target": "1"},
+        {"mieru_udp_target": 1.0},
+        {"unknown_capability": 1},
+    ],
+)
+def test_agent_scan_rejects_untrusted_xray_capability_values(
+    tmp_path: Path,
+    xray_capabilities: object,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "strict-capability"}).json()
+
+    response = TestClient(client.app).post(
+        "/api/v1/agents/scan",
+        json={
+            "token": created["agent_token"],
+            **scan_result_payload(),
+            "xray_capabilities": xray_capabilities,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def queue_recovery(client: TestClient) -> tuple[dict, dict]:
@@ -411,7 +444,14 @@ def test_scan_command_result_updates_latest_scan_without_license(tmp_path: Path)
 
     result = client.post(
         f"/api/v1/agents/commands/{command['id']}/result",
-        json={"token": created["agent_token"], "status": 200, "body": scan_result_payload()},
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {
+                **scan_result_payload(),
+                "xray_capabilities": {"mieru_udp_target": 1},
+            },
+        },
     )
 
     assert result.status_code == 200
@@ -424,6 +464,7 @@ def test_scan_command_result_updates_latest_scan_without_license(tmp_path: Path)
     assert payload["license_required"] is False
     assert payload["scan"]["xray_running"] is True
     assert payload["scan"]["xray_version"] == "Xray 1.8.24"
+    assert payload["scan"]["xray_capabilities"] == {"mieru_udp_target": 1}
     assert payload["scan"]["api_port"] == 46736
     assert payload["scan"]["inbounds"][0]["tag"] == "vless-443"
     assert payload["scan"]["device_kicks"] == {"alice@example.com": 2}
@@ -441,6 +482,7 @@ def test_xray_runtime_inventory_returns_empty_summary_without_scan(tmp_path: Pat
     payload = response.json()
     assert payload["license_required"] is False
     assert payload["has_scan"] is False
+    assert payload["xray_capabilities"] == {}
     assert payload["inbound_count"] == 0
     assert payload["client_count"] == 0
     assert payload["protocol_counts"] == {}
@@ -463,6 +505,7 @@ def test_xray_runtime_inventory_summarizes_scan_inbounds_without_secrets(
             "status": 200,
             "body": {
                 **scan_result_payload(),
+                "xray_capabilities": {"mieru_udp_target": 1},
                 "inbounds": [
                     {
                         "tag": "vless-443",
@@ -525,6 +568,7 @@ def test_xray_runtime_inventory_summarizes_scan_inbounds_without_secrets(
     assert payload["has_scan"] is True
     assert payload["xray_running"] is True
     assert payload["xray_version"] == "Xray 1.8.24"
+    assert payload["xray_capabilities"] == {"mieru_udp_target": 1}
     assert payload["api_port"] == 46736
     assert payload["config_modified"] is True
     assert payload["config_added_sections"] == ["api", "stats"]
@@ -3029,7 +3073,9 @@ def test_existing_sqlite_commands_migrate_without_losing_history(tmp_path: Path)
     assert recovery["commands"][1]["depends_on_command_id"] == recovery["commands"][0]["id"]
 
 
-def test_existing_sqlite_scans_gain_nginx_without_losing_xray_inventory(tmp_path: Path) -> None:
+def test_existing_sqlite_scans_gain_nginx_and_capabilities_without_losing_inventory(
+    tmp_path: Path,
+) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-scan-schema"}).json()
     reported = client.post("/api/v1/agents/scan", json={
@@ -3041,7 +3087,8 @@ def test_existing_sqlite_scans_gain_nginx_without_losing_xray_inventory(tmp_path
         *[
             Column(column.name, column.type,
                    primary_key=column.primary_key, nullable=column.nullable)
-            for column in AgentScanResultModel.__table__.columns if column.name != "nginx"
+            for column in AgentScanResultModel.__table__.columns
+            if column.name not in {"nginx", "xray_capabilities"}
         ],
     )
     with client.app.state.inventory._engine.begin() as connection:
@@ -3055,11 +3102,16 @@ def test_existing_sqlite_scans_gain_nginx_without_losing_xray_inventory(tmp_path
     url = f"/api/v1/servers/{created['server']['id']}/scan/latest"
     migrated = upgraded.get(url).json()["scan"]
     assert migrated["nginx"] is None
+    assert migrated["xray_capabilities"] == {}
     assert migrated["inbounds"] == scan_result_payload()["inbounds"]
     assert upgraded.post("/api/v1/agents/scan", json={
-        "token": created["agent_token"], **scan_result_payload(),
+        "token": created["agent_token"],
+        **scan_result_payload(),
+        "xray_capabilities": {"mieru_udp_target": 1},
     }).status_code == 200
-    assert upgraded.get(url).json()["scan"]["nginx"] == scan_result_payload()["nginx"]
+    refreshed = upgraded.get(url).json()["scan"]
+    assert refreshed["nginx"] == scan_result_payload()["nginx"]
+    assert refreshed["xray_capabilities"] == {"mieru_udp_target": 1}
 
 
 def test_xray_mutating_commands_queue_deduped_master_snapshot_refresh(

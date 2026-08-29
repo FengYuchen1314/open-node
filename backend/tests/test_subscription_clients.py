@@ -1,5 +1,6 @@
 import base64
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
@@ -8,13 +9,31 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from open_node.services import subscription_clients
-from open_node.services.inventory import InventoryStore
+from open_node.services.inventory import AgentScanResultModel, InventoryStore
+from sqlalchemy import select
 from test_subscriptions import create_catalog_fixture, make_client
 
 
-def catalog(tmp_path, kinds=("anytls", "snell4", "snell6", "mieru"), names=None):
+def catalog(
+    tmp_path,
+    kinds=("anytls", "snell4", "snell6", "mieru"),
+    names=None,
+    xray_capabilities=None,
+    mieru_udp=None,
+):
     client = make_client(tmp_path)
-    server = client.post("/api/v1/servers", json={"name": "format-edge"}).json()["server"]
+    created = client.post("/api/v1/servers", json={"name": "format-edge"}).json()
+    server = created["server"]
+    if xray_capabilities is not None:
+        scan = client.post(
+            "/api/v1/agents/scan",
+            json={
+                "token": created["agent_token"],
+                "xray_running": True,
+                "xray_capabilities": xray_capabilities,
+            },
+        )
+        assert scan.status_code == 200
     client.post("/api/v1/users", json={"username": "reader"}).raise_for_status()
     ids = {}
     for index, kind in enumerate(kinds):
@@ -34,6 +53,8 @@ def catalog(tmp_path, kinds=("anytls", "snell4", "snell6", "mieru"), names=None)
             config.update({"tls": True, "sni": "edge.example.com"})
         if protocol == "mieru":
             config["transport"] = "TCP"
+            if mieru_udp is not None:
+                config["udp"] = mieru_udp
         response = client.post(
             "/api/v1/nodes",
             json={
@@ -71,6 +92,7 @@ def test_mixed_formats_filter_unsupported_nodes_and_report_counts(tmp_path):
     clash = yaml.safe_load(clash_response.text)
     assert [proxy["name"] for proxy in clash["proxies"]] == ["anytls", "snell4", "mieru"]
     assert clash["proxy-groups"][0]["proxies"] == ["anytls", "snell4", "mieru"]
+    assert clash["proxies"][2]["udp"] is False
     assert clash_response.headers["x-open-node-included-nodes"] == "3"
     assert clash_response.headers["x-open-node-excluded-nodes"] == "1"
     assert clash_response.headers["cache-control"] == "no-store"
@@ -92,6 +114,62 @@ def test_mixed_formats_filter_unsupported_nodes_and_report_counts(tmp_path):
     )
     assert client.get(f"/api/v1/subscribe/{token}?format=xray&node_id={uuid4()}").status_code == 404
     assert client.get(f"/api/v1/subscribe/{token}?format=xray&node_id=invalid").status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("xray_running", "value", "expected"),
+    [
+        (True, 1, True),
+        (False, 1, False),
+        (True, None, False),
+        (True, True, False),
+        (True, 0, False),
+        (True, 2, False),
+        (True, "1", False),
+        (True, 1.0, False),
+    ],
+)
+def test_mieru_udp_target_capability_requires_running_and_strict_integer_one(
+    xray_running,
+    value,
+    expected,
+):
+    scan = SimpleNamespace(
+        xray_running=xray_running,
+        updated_at=datetime.now(tz=UTC),
+        xray_capabilities={"mieru_udp_target": value},
+    )
+
+    assert InventoryStore._scan_supports_xray_capability(scan, "mieru_udp_target") is expected
+
+
+def test_mieru_clash_udp_target_requires_fresh_server_scan(tmp_path):
+    client, token, _, _ = catalog(
+        tmp_path,
+        kinds=("mieru",),
+        xray_capabilities={"mieru_udp_target": 1},
+    )
+    fresh = yaml.safe_load(client.get(f"/api/v1/subscribe/{token}").text)
+    assert fresh["proxies"][0]["udp"] is True
+
+    with client.app.state.inventory._session() as session:
+        scan = session.scalar(select(AgentScanResultModel))
+        scan.updated_at = datetime.now(tz=UTC) - timedelta(minutes=11)
+        session.commit()
+
+    stale = yaml.safe_load(client.get(f"/api/v1/subscribe/{token}").text)
+    assert stale["proxies"][0]["udp"] is False
+
+
+def test_mieru_clash_udp_target_ignores_forged_node_config_without_scan(tmp_path):
+    client, token, _, _ = catalog(
+        tmp_path,
+        kinds=("mieru",),
+        mieru_udp=True,
+    )
+
+    rendered = yaml.safe_load(client.get(f"/api/v1/subscribe/{token}").text)
+    assert rendered["proxies"][0]["udp"] is False
 
 
 def test_preview_is_authenticated_and_never_contains_credentials(tmp_path):

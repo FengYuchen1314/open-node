@@ -221,10 +221,21 @@ class NativeLimiter:
                 value
                 and type(data.get("user_auto_speed_rules")) is int
                 and data["user_auto_speed_rules"] == 1,
+                value
+                and type(data.get("mieru_udp_target")) is int
+                and data["mieru_udp_target"] == 1,
             )
             return value
         except (OSError, ValueError, TimeoutError):
             return False
+
+    async def mieru_udp_target_supported(self, binary: Path | None = None):
+        return (
+            await self.supported(binary)
+            and self._capability is not None
+            and len(self._capability) >= 4
+            and self._capability[3]
+        )
 
     async def require_binary(self, binary: Path | None = None):
         document = self.document()

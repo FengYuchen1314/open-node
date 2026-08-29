@@ -192,9 +192,11 @@ into the proprietary Apple client on this Linux host.
 This disposable root/systemd fixture installs a non-root Agent and provisions
 18 inbound variants. It validates complete native exports, switches selectors,
 tests each selected Xray node, and feeds unchanged URI/Base64 payloads to the
-pinned Mihomo parser. Every compatible non-Mieru entry must forward TCP and UDP;
-Mieru's verified target support remains TCP only. Explicit expected node sets
-prevent a broken converter from passing by excluding everything.
+pinned Mihomo parser. Every compatible entry must forward TCP and UDP. Mieru is
+covered over both TCP and UDP underlays only after a fresh Agent scan reports
+strict integer `mieru_udp_target: 1`; the fixture checks both transports and
+the backend's fail-closed capability gate. Explicit expected node sets prevent
+a broken converter from passing by excluding everything.
 
 It also verifies that the Shadowsocks 2022 shared key stays out of imported
 node metadata and compatibility reports. Browser checks cover the format report,
@@ -208,25 +210,28 @@ unchanged credentials/tokens/runtime PID, custom Clash group order, real Mihomo
 TCP/UDP forwarding, custom Surge section/node validation, personal permission,
 and 1440/390/320px screenshots for both workspaces.
 
-Verified on 2026-08-28 (UTC), Debian 12 x86-64 on the designated VPS:
+Verified on 2026-08-29 (UTC), Debian 12 x86-64 on the designated VPS:
 
-- Backend: 451 tests; Agent: 397 tests; frontend: 99 tests and production build.
-- Ruff and probe Worker TypeScript checks passed.
+- Backend: 904 tests; Agent: 544 tests; frontend: 32 files and 216 tests,
+  TypeScript checks and production build. Ruff, targeted formatting and probe
+  Worker TypeScript checks passed.
 - All 18 inbound variants passed their supported native client formats and
-  unchanged URI/Base64 imports, including VLESS Vision and real TCP/UDP target
-  traffic. Mieru target coverage remains TCP only.
-- The HTTPS/WSS fork-protocol lifecycle regression passed again, including
-  password rotation, final-user revocation, empty restart and reactivation.
-- Desktop 1440x900, mobile 390x844 and narrow 320x740 browser checks passed.
-  Screenshots were inspected; node labels wrap without clipping, action buttons
-  fit, and delayed format/user responses cannot replace the current selection.
-- The patched runtime binary SHA-256 is
-  `ccdaed47d4ee77f7aa37d342df91d05f2e947478f8ac863a085d176ac9558691`.
-  Matching-source SHA-256 is
-  `18a4410c09e0142948c6987a4f21d3a480561f482150f4cfffc2b71dbdbbf5da`.
-  Its `build.json` records both MPL-2.0 patch digests. The build also passed
-  all three protocol-package Go tests and module verification.
-- Existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+  unchanged URI/Base64 imports with real TCP/UDP target traffic. Mieru TCP and
+  UDP underlays both passed through Mihomo v1.19.30; its executable SHA-256 was
+  `8ad44e28fe72be4640254b96741b677f4074991b99186cc4486a1c28ded02b1a`.
+  The sing-box v1.13.19 executable SHA-256 was
+  `7e9dcd7239c49478a576d79f272751e5ed1c2aba7cc08ab1b2bd69c00c904ba1`.
+- The custom Clash/Surge API, real Mihomo forwarding and both template browser
+  workspaces passed. Generated credentials, subscription tokens and runtime
+  identity remained stable.
+- The patched runtime SHA-256 was
+  `7386109a5664ed83e23e38e48b41f09dddedf5092f09f51e35d182eb9fba2154`;
+  matching-source SHA-256 was
+  `1674ecc92af85bbc0c0d9cc5094b1cd13845a5585d67486a97460a0efda80675`.
+  Its `build.json` records four MPL-2.0 patches, package and race tests, and
+  successful module verification.
+- Existing Starlette/httpx deprecation, npm install-script approval and frontend
+  bundle-size warnings remain.
 
 These results do not close the other [migration gates](migration-map.md).
 
@@ -256,33 +261,55 @@ provider registration. Both HTTPS lease and WSS paths use a trusted fixture CA.
 The source runtime is first exercised unchanged, followed by the installed
 Agent's patched runtime using the same configuration. The tests then import
 nodes, assign a plan, consume actual subscribed credentials, check per-user
-statistics, rotate passwords, revoke original and final users, restart the
-service with empty listeners and reactivate the same catalog credentials.
-They also check invalid-write preservation and refusal of an official Xray
-switch without changing the fork PID. The unpatched core's refusal of the
-same empty configuration is checked explicitly.
+statistics, rotate non-managed credentials, exercise direct zero-user listeners,
+withdraw managed access, restart the service with suspended listeners and
+reactivate the same catalog credentials. Direct empty-user edits must keep each
+TCP/UDP listener owned only by the new fork PID and reject old credentials;
+managed withdrawal must remove every listener and preserve the private recovery
+template across an Agent restart. The smoke also checks invalid-write
+preservation and refusal of an official Xray switch without changing the fork
+PID.
 
-AnyTLS and Snell cover TCP and UDP target bytes. Mieru covers TCP target bytes
-over both TCP/UDP underlays; UDP target forwarding is absent in the pinned
-source and is not claimed. Snell v6 uses the free fork client. The smoke
-consumes per-node proxies and native Snell v6 outbounds. Complete mixed exports
-are covered separately by the subscription-client smoke above.
+AnyTLS, every Snell variant and both Mieru underlays cover TCP and UDP target
+bytes. Mieru additionally covers transformed UDP echo, DNS, a 4096-byte packet,
+multiple targets on one association, user-attributed statistics and three fresh
+negative associations. The UDP targets accept traffic only from Xray's explicit
+loopback egress address, preventing Mihomo local-direct behavior from becoming a
+false positive. The unmodified reference runtime is the Mieru UDP negative
+control. Snell v6 uses the free fork client. Complete mixed exports are covered
+separately by the subscription-client smoke above.
 Other architectures, multi-file takeover and public-provider staging are not
 established by these tests.
 
-Verified on 2026-08-28 (UTC), Debian 12 x86-64 on the designated VPS:
+Verified on 2026-08-29 (UTC), Debian 12 x86-64 on the designated VPS:
 
-- Backend: 401 tests; Agent: 397 tests; frontend: 98 tests and production build.
-- Go tests for all three protocol packages and module verification passed.
-- Ruff and probe Worker TypeScript checks passed.
-- Both complete protocol smokes passed using non-root installed Agents,
-  trusted HTTPS/WSS and real Mihomo/fork clients, including empty-user restart,
-  exact catalog credential reactivation and unchanged PID after a rejected
-  official-runtime switch.
-- The optional runtime binary SHA-256 is
-  `2810093e9715a9ac4fcd9c864fafa0e0100097f511e3ad0e19be7d3e42bc2f42`.
-  Source revision, patch and matching-source digests are in its `build.json`.
-- Existing Starlette/httpx deprecation and frontend bundle-size warnings remain.
+- The complete smoke passed independently over WebSocket and HTTP with exit
+  code zero. Both used disposable non-root systemd Agents, trusted local TLS,
+  real Mihomo and the pinned fork client.
+- The unmodified reference accepted all original TCP paths but rejected Mieru
+  UDP target traffic over both underlays. The patched runtime passed TCP/UDP,
+  DNS, multi-target, large-packet, statistics, rotation, direct zero-user,
+  managed suspension, Agent-restart persistence and exact reactivation checks.
+- The failed official-Xray migration preserved the config bytes and the exact
+  running fork PID. Every deliberate runtime restart removed the prior PID;
+  `fuser` proved each active TCP/UDP listener belonged only to the replacement
+  process, while managed suspension left no owner.
+- The runtime SHA-256 was
+  `7386109a5664ed83e23e38e48b41f09dddedf5092f09f51e35d182eb9fba2154`;
+  the unmodified reference SHA-256 was
+  `b0f43766871def4cad3952b9cecd2f4dfd4ac4dd9771866e9e778980682e5cbb`.
+  Fixed source revision was `d3fdae5833a92070414db588ee9893264147b789`.
+- Matching source SHA-256 was
+  `1674ecc92af85bbc0c0d9cc5094b1cd13845a5585d67486a97460a0efda80675`.
+  Patch SHA-256 values were
+  `0914ab8149646801904d91f6229520acbe6cae1e749229fb5c8e129fee458814`
+  (empty users),
+  `d85463cfdf6b0c5ca3f17f046e2bf78e1dc44a1e21146baff9faf804137708d7`
+  (AnyTLS UDP),
+  `3841a90cae74b978de31671057a3bb05ec84589d86cecdf34222175f318da506`
+  (Mieru UDP) and
+  `91e7f33c3752f5fb8f46852e89cdc02ef2cfd7479657e154e26e5ea184c7d644`
+  (limiter). Go 1.26.7 package, race and module-verification gates passed.
 
 ## Host Policy Smoke
 
@@ -520,21 +547,23 @@ checks real Vision TLS traffic, live cap changes on existing connections,
 shared parallel buckets and admission quotas, automatic rules and persistence.
 Its browser portion exercises desktop/mobile/narrow limit editing, stale
 revisions and confirmed removal. It does not reuse existing host services.
-Mieru's two underlays have TCP-target coverage, not UDP-target support.
+Both Mieru underlays carry UDP targets and retain the authenticated user's
+limiter context.
 
 Core unit tests cover policy persistence, private files, stale revisions,
 concurrent admission, live bucket updates and automatic rule timing. Run
 `go test -race ./common/nodelimits` inside the matching source tree with an
 isolated C compiler on the VPS. Do not run tests or builds on the local workstation.
 
-The native-limiter milestone passed on the designated Linux amd64 VPS:
-471 backend, 458 Agent and 101 frontend tests (1030 total), frontend production
-build, probe Worker typecheck, protocol/core unit tests and the limiter race
-detector. The real smoke measured 18 TCP variants and 16 UDP-target variants,
-plus Vision TLS bulk, shared credential aliases, sustained/burst rules,
-restart persistence and desktop/mobile/narrow editing.
-The runtime binary SHA-256 is
-`275e144b09dd58bf6c9bbe8177fa024f3f49c46a706970dd9eca5629c9886305`.
+Verified again on 2026-08-29 on the designated Linux amd64 VPS: the real smoke
+measured all 18 TCP variants and all 18 UDP-target variants, including Mieru
+TCP/UDP underlays. It also passed Vision TLS bulk, hot caps, shared credential
+aliases, admission/release, parallel slot release, sustained/burst activation
+and expiry, restart persistence and desktop/mobile/narrow editing. The current
+runtime SHA-256 is
+`7386109a5664ed83e23e38e48b41f09dddedf5092f09f51e35d182eb9fba2154`;
+the rebuilt Agent wheel SHA-256 is
+`a049c7b76a34341b01c3de6705edd8fa888011054330bb42b9133e371ed552f2`.
 These results do not establish arbitrary OS, external-service or public-provider
 compatibility.
 
@@ -1078,7 +1107,7 @@ private state are removed; only requested artifacts remain. Unit tests cover
 lease races, overlapping reservations, draining earlier sequences, late
 rollback rejection, restart persistence and missing-column SQLite migration.
 
-## Latest Verification
+## Earlier Registration Invitation Verification
 
 Registration invitations passed on the designated VPS:
 

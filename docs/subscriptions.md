@@ -61,6 +61,15 @@ Reserved and duplicate proxy names receive stable unique suffixes.
 Clash and Surge can use [custom templates](subscription-templates.md) selected
 per subscriber, plan or system. These files affect only rendered subscriptions.
 
+Mieru UDP target advertisement is derived from runtime evidence, not trusted
+catalog JSON. The latest Agent scan must report Xray running, be no more than
+ten minutes old, and contain the actual integer `mieru_udp_target: 1`. The
+backend overwrites the Mieru proxy's `udp` field from that evidence even when a
+node config claims support. A missing, stale or invalid report keeps
+`udp: false` and adds a catalog warning, so the node remains usable for TCP
+targets without advertising an unsupported UDP path. Runtime-node drafts and
+imports use the same gate.
+
 ## Verified Protocols
 
 The VPS full-export fixture provisions 18 inbound variants through the installed
@@ -77,10 +86,10 @@ non-root Agent, imports nodes, assigns a plan and consumes the resulting links:
 | Snell v4 plain/HTTP | Yes | Yes | Excluded | Yes | Excluded |
 | Snell v5 TLS obfuscation | Yes | Excluded | Excluded | Yes | Excluded |
 | Snell v6 default/unshaped | Excluded | Yes | Excluded | Yes | Excluded |
-| Mieru TCP/UDP underlay | TCP targets | Excluded | Excluded | Excluded | Excluded |
+| Mieru TCP/UDP underlay | TCP and UDP targets | Excluded | Excluded | Excluded | Excluded |
 
-All affirmative entries other than Mieru are exercised with TCP and UDP target
-traffic. The Xray tests use the full export and each selected-node export;
+All affirmative entries are exercised with TCP and UDP target traffic. The
+Xray tests use the full export and each selected-node export;
 Mihomo and sing-box use the complete configuration and switch its selector.
 URI and Base64 payloads are passed unchanged to Mihomo's own parser.
 Surge entries are produced by the public endpoint and checked against the exact
@@ -111,6 +120,6 @@ copied into node drafts, compatibility reports or credential-free catalog
 exports. A missing/ambiguous scan or changed cipher prevents that node's export;
 restoring a catalog therefore requires a fresh scan before these links work.
 
-Mieru UDP target forwarding, broader protocol/transport combinations and other
-OS/architecture coverage remain separate [migration gates](migration-map.md).
-Reproduction commands are in [testing.md](testing.md#subscription-client-smoke).
+Broader protocol/transport combinations and other OS/architecture coverage
+remain separate [migration gates](migration-map.md). Reproduction commands are
+in [testing.md](testing.md#subscription-client-smoke).

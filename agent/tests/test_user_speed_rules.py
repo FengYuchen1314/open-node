@@ -137,6 +137,45 @@ async def test_new_runtime_capability_is_cached_and_stored_rules_block_downgrade
         await limiter.require_binary(old)
 
 
+@pytest.mark.parametrize("capability", [None, False, True, 0, 2, "1"])
+async def test_mieru_udp_target_requires_strict_versioned_capability(
+    tmp_path, monkeypatch, capability
+):
+    runtime = fake_runtime(tmp_path)
+    runtime.binary = tmp_path / "xray"
+    runtime.binary.touch()
+    monkeypatch.setattr(
+        "open_node_agent.limiter.run_command",
+        AsyncMock(
+            return_value=(
+                0,
+                json.dumps({"limiter": 1, "mieru_udp_target": capability}),
+            )
+        ),
+    )
+    limiter = NativeLimiter(runtime)
+    assert not await limiter.mieru_udp_target_supported()
+
+
+async def test_mieru_udp_target_capability_is_cached_per_binary_identity(tmp_path, monkeypatch):
+    runtime = fake_runtime(tmp_path)
+    runtime.binary = tmp_path / "xray"
+    runtime.binary.write_bytes(b"old")
+    probe = AsyncMock(return_value=(0, '{"limiter":1,"mieru_udp_target":1}'))
+    monkeypatch.setattr("open_node_agent.limiter.run_command", probe)
+    limiter = NativeLimiter(runtime)
+    assert await limiter.mieru_udp_target_supported()
+    assert await limiter.mieru_udp_target_supported()
+    assert probe.await_count == 1
+
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(b"new-runtime")
+    replacement.replace(runtime.binary)
+    probe.return_value = (0, '{"limiter":1}')
+    assert not await limiter.mieru_udp_target_supported()
+    assert probe.await_count == 2
+
+
 async def test_manual_user_rules_require_new_runtime(tmp_path):
     limiter = NativeLimiter(fake_runtime(tmp_path))
     limiter.require_user_rules = AsyncMock(side_effect=RuntimeFailure("Upgrade"))

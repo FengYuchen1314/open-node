@@ -12,7 +12,7 @@ func init() {
 		UsageLine: "{{.Exec}} open-node-capabilities",
 		Short:     "Report Open Node runtime extensions",
 		Run: func(*base.Command, []string) {
-			fmt.Println(`{"limiter":1,"user_auto_speed_rules":1,"activation_required":false}`)
+			fmt.Println(`{"limiter":1,"user_auto_speed_rules":1,"mieru_udp_target":1,"activation_required":false}`)
 		},
 	})
 }

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PATCHES = [
     ROOT / "runtime/xray/empty-users.patch",
     ROOT / "runtime/xray/anytls-udp-address.patch",
+    ROOT / "runtime/xray/mieru-udp-target.patch",
     ROOT / "runtime/xray/limiter.patch",
 ]
 OVERLAY = ROOT / "runtime/xray/overlay"
@@ -99,6 +100,7 @@ def build(work: Path, go: Path, jobs: int, reference: bool):
         go,
         "test",
         "-mod=readonly",
+        "-count=1",
         f"-p={jobs}",
         "./proxy/anytls",
         "./proxy/snell",

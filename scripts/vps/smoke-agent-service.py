@@ -504,6 +504,12 @@ def run(wheel, archive):
                 timeout=10,
             )
             print(journal.stdout, file=sys.stderr)
+            for service_log in fixture.root.rglob("*.log"):
+                print(
+                    str(service_log.relative_to(fixture.root)),
+                    service_log.read_text(errors="replace")[-12000:],
+                    file=sys.stderr,
+                )
             raise
         finally:
             fixture.cleanup()

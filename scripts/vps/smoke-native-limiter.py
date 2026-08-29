@@ -138,7 +138,8 @@ def udp_transfer(socks, target):
                 frame += struct.pack("!H", target) + payload
                 datagram.sendto(frame, ("127.0.0.1", relay))
                 returned, _ = datagram.recvfrom(65535)
-                assert returned == frame, "UDP datagram identity changed"
+                expected = frame[:10] + protocols.UDP_ECHO_PREFIX + payload
+                assert returned == expected, "UDP datagram identity changed"
             return time.monotonic() - start
 
 
@@ -188,7 +189,8 @@ def browser_workflow(client, base, backend, output):
                 )
                 assert (
                     panel.evaluate("""el => [...el.querySelectorAll('.v-input,.v-btn')].filter(
-                    item => item.getClientRects().length && item.getBoundingClientRect().right > innerWidth + 1
+                    item => item.getClientRects().length
+                        && item.getBoundingClientRect().right > innerWidth + 1
                 ).length""")
                     == 0
                 )
@@ -389,10 +391,14 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, _http_e
     clash = yaml.safe_load(
         client.get(f"/api/v1/subscribe/{token}?format=clash").raise_for_status().text
     )
+    mieru = [proxy for proxy in clash["proxies"] if proxy["type"] == "mieru"]
+    assert len(mieru) == 2 and all(proxy.get("udp") is True for proxy in mieru), mieru
+    assert {proxy["transport"] for proxy in mieru} == {"TCP", "UDP"}, mieru
     xray = (
         client.get(f"/api/v1/subscribe/{token}?format=xray").raise_for_status().json()
     )
     measurements = {}
+    udp_variants = 0
     with (
         echo_server(work) as (echo, _),
         echo_server(work, tls=True) as (tls_echo, tls_ca),
@@ -410,15 +416,18 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, _http_e
                         elapsed,
                         flush=True,
                     )
-                if node["protocol"] != "mieru":
-                    elapsed = udp_transfer(socks, udp)
-                    assert 0.65 <= elapsed <= 8, (node["inbound_tag"], "UDP", elapsed)
-                    print(
-                        "PASS real limited UDP",
-                        node["inbound_tag"],
-                        elapsed,
-                        flush=True,
-                    )
+                elapsed = udp_transfer(socks, udp)
+                assert 0.65 <= elapsed <= 8, (node["inbound_tag"], "UDP", elapsed)
+                measurements[node["inbound_tag"] + " UDP"] = round(elapsed, 3)
+                udp_variants += 1
+                print(
+                    "PASS real limited UDP",
+                    node["inbound_tag"],
+                    elapsed,
+                    flush=True,
+                )
+        assert udp_variants == 18, udp_variants
+        print("PASS 18 protocol variants enforce real UDP target limits", flush=True)
         node = next(node for node in nodes if node["inbound_tag"] == "vless-vision")
         policy = copy.deepcopy(
             next(

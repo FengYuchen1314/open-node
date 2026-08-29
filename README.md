@@ -161,10 +161,14 @@ upgrades, rollback and data-preserving removal through a separate privileged
 helper, with verified release pins and durable final results.
 Native [fork protocol user management](docs/fork-runtime.md) now supports
 AnyTLS, Snell and Mieru through an optional source-pinned compatibility runtime,
-including empty-user revocation. [Subscription exports](docs/subscriptions.md)
-now filter incompatible nodes and provide native free-client Xray/Snell v6
-configurations. Mieru UDP targets, public WARP verification and further
-migration workflows remain incomplete.
+including Mieru UDP targets over both TCP and UDP underlays. Direct runtime
+edits can retain an empty Snell or Mieru listener that rejects all traffic;
+[managed subscription access](docs/subscription-access.md) instead suspends the
+final-user inbound and journals its private template for restoration.
+[Subscription exports](docs/subscriptions.md) now filter incompatible nodes,
+provide native free-client Xray/Snell v6 configurations, and enable Mieru UDP
+only after a fresh Agent scan proves the versioned runtime capability. Public
+WARP verification and further migration workflows remain incomplete.
 
 [Managed subscription access](docs/subscription-access.md) now revokes actual
 credentials on expiry, account disablement and traffic exhaustion, then restores

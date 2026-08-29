@@ -1,0 +1,1136 @@
+SPDX-License-Identifier: MPL-2.0
+Open Node compatibility changes for the pinned Xray-core-mmwx source.
+Independently implement Mieru UDP target forwarding from the public Mieru
+UDP-associate framing specification and RFC 1928. This patch does not copy
+the GPL-licensed Mieru server implementation.
+diff --git a/proxy/mieru/server.go b/proxy/mieru/server.go
+index d5af563..a1f8b4b 100644
+--- a/proxy/mieru/server.go
++++ b/proxy/mieru/server.go
+@@ -20,6 +20,7 @@ import (
+ 	"github.com/xtls/xray-core/core"
+ 	"github.com/xtls/xray-core/features/policy"
+ 	"github.com/xtls/xray-core/features/routing"
++	"github.com/xtls/xray-core/transport"
+ 	"github.com/xtls/xray-core/transport/internet/stat"
+ )
+ 
+@@ -135,11 +136,15 @@ func (s *Server) Process(ctx context.Context, network xnet.Network, conn stat.Co
+ 	sessions := make(map[uint32]*serverSession)
+ 	closeAll := func() {
+ 		mu.Lock()
++		active := make([]*serverSession, 0, len(sessions))
+ 		for _, ss := range sessions {
+-			ss.interrupt()
++			active = append(active, ss)
+ 		}
+ 		sessions = map[uint32]*serverSession{}
+ 		mu.Unlock()
++		for _, ss := range active {
++			ss.interrupt()
++		}
+ 	}
+ 	defer closeAll()
+ 
+@@ -157,7 +162,7 @@ func (s *Server) Process(ctx context.Context, network xnet.Network, conn stat.Co
+ 			mu.Unlock()
+ 			if ss != nil {
+ 				if ferr := ss.feed(seg.payload); ferr != nil {
+-					ss.interrupt()
++					ss.closeAndNotify()
+ 				}
+ 			}
+ 		case protoCloseSessionRequest:
+@@ -192,10 +197,16 @@ func (s *Server) handleOpen(ctx context.Context, base *session.Inbound, user *pr
+ 	if perr != nil {
+ 		return
+ 	}
+-	if cmd != socks5CmdConnect {
+-		// UDP-associate 等后续支持;此处仅优雅忽略(不建会话)。
++	if cmd != socks5CmdConnect && cmd != socks5CmdUDPAssociate {
+ 		return
+ 	}
++	mu.Lock()
++	previous := sessions[seg.sessionID]
++	if previous == nil && len(sessions) >= maxServerSessions {
++		mu.Unlock()
++		return
++	}
++	mu.Unlock()
+ 
+ 	// 每会话独立 Inbound(带认证用户),供 dispatcher 归属统计/限速/限连接数。
+ 	ib := session.Inbound{}
+@@ -207,16 +218,33 @@ func (s *Server) handleOpen(ctx context.Context, base *session.Inbound, user *pr
+ 	ib.CanSpliceCopy = 3
+ 	sctx, cancel := context.WithCancel(session.ContextWithInbound(ctx, &ib))
+ 
+-	link, derr := dispatcher.Dispatch(sctx, dest)
+-	if derr != nil {
+-		cancel()
+-		return
++	var link *transport.Link
++	if cmd == socks5CmdUDPAssociate {
++		activationTimeout := s.policyManager.ForLevel(user.Level).Timeouts.Handshake
++		link = newMieruUDPAssociation(sctx, dispatcher, activationTimeout)
++	} else {
++		var derr error
++		link, derr = dispatcher.Dispatch(sctx, dest)
++		if derr != nil {
++			cancel()
++			return
++		}
+ 	}
+ 
+ 	ss := &serverSession{id: seg.sessionID, link: link, writer: writer, cancel: cancel}
++	ss.onClose = func(closed *serverSession) {
++		mu.Lock()
++		if sessions[closed.id] == closed {
++			delete(sessions, closed.id)
++		}
++		mu.Unlock()
++	}
+ 	mu.Lock()
+ 	sessions[seg.sessionID] = ss
+ 	mu.Unlock()
++	if previous != nil {
++		previous.interrupt()
++	}
+ 
+ 	// openSessionResponse(seq 0)+ socks5 成功回复(首个 data 段,seq 1)
+ 	if err := ss.writeControl(protoOpenSessionResponse); err != nil {
+@@ -230,7 +258,7 @@ func (s *Server) handleOpen(ctx context.Context, base *session.Inbound, user *pr
+ 	// openSessionRequest 里 socks5 请求之后紧跟的初始应用数据 → 写给落地
+ 	if consumed < len(seg.payload) {
+ 		if err := ss.feed(seg.payload[consumed:]); err != nil {
+-			ss.interrupt()
++			ss.closeAndNotify()
+ 			return
+ 		}
+ 	}
+diff --git a/proxy/mieru/server_udp.go b/proxy/mieru/server_udp.go
+index a072522..13ce137 100644
+--- a/proxy/mieru/server_udp.go
++++ b/proxy/mieru/server_udp.go
+@@ -95,10 +95,15 @@ func (s *Server) processUDP(ctx context.Context, conn stat.Connection, dispatche
+ 	sessions := make(map[uint32]*udpServerSession)
+ 	defer func() {
+ 		mu.Lock()
++		active := make([]*udpServerSession, 0, len(sessions))
+ 		for _, us := range sessions {
+-			us.shutdown()
++			active = append(active, us)
+ 		}
++		sessions = map[uint32]*udpServerSession{}
+ 		mu.Unlock()
++		for _, us := range active {
++			us.shutdown()
++		}
+ 	}()
+ 
+ 	handle := func(pkt []byte) {
+@@ -108,8 +113,16 @@ func (s *Server) processUDP(ctx context.Context, conn stat.Connection, dispatche
+ 		}
+ 		mu.Lock()
+ 		us := sessions[seg.sessionID]
+-		if us == nil && seg.protocolType == protoOpenSessionRequest {
+-			us = newUDPServerSession(connCtx, seg.sessionID, user, username, aead, writePkt, base, dispatcher)
++		if us == nil && seg.protocolType == protoOpenSessionRequest && len(sessions) < maxServerSessions {
++			activationTimeout := s.policyManager.ForLevel(user.Level).Timeouts.Handshake
++			us = newUDPServerSession(connCtx, seg.sessionID, user, username, aead, writePkt, base, dispatcher, activationTimeout)
++			us.onClose = func(closed *udpServerSession) {
++				mu.Lock()
++				if sessions[closed.id] == closed {
++					delete(sessions, closed.id)
++				}
++				mu.Unlock()
++			}
+ 			sessions[seg.sessionID] = us
+ 			go us.consume()
+ 		}
+@@ -149,22 +162,26 @@ func splitPackets(mb buf.MultiBuffer) [][]byte {
+ 
+ // udpServerSession 是 UDP underlay 上的一条会话。可靠性由 arq 提供,业务逻辑与 TCP 同。
+ type udpServerSession struct {
+-	id         uint32
+-	arq        *arqSession
+-	ctx        context.Context
+-	cancel     context.CancelFunc
+-	base       *session.Inbound
+-	user       *protocol.MemoryUser
+-	dispatcher routing.Dispatcher
+-	link       *transport.Link
+-	closeOnce  sync.Once
++	id                uint32
++	arq               *arqSession
++	ctx               context.Context
++	cancel            context.CancelFunc
++	base              *session.Inbound
++	user              *protocol.MemoryUser
++	dispatcher        routing.Dispatcher
++	link              *transport.Link
++	closeOnce         sync.Once
++	onClose           func(*udpServerSession)
++	activationTimeout time.Duration
+ }
+ 
+ func newUDPServerSession(ctx context.Context, id uint32, user *protocol.MemoryUser, username string,
+-	aead cipher.AEAD, writePkt func([]byte) error, base *session.Inbound, dispatcher routing.Dispatcher) *udpServerSession {
++	aead cipher.AEAD, writePkt func([]byte) error, base *session.Inbound, dispatcher routing.Dispatcher,
++	activationTimeout time.Duration) *udpServerSession {
+ 	sctx, cancel := context.WithCancel(ctx)
+ 	us := &udpServerSession{
+ 		id: id, ctx: sctx, cancel: cancel, base: base, user: user, dispatcher: dispatcher,
++		activationTimeout: activationTimeout,
+ 	}
+ 	us.arq = newARQSession(id, username, aead, writePkt)
+ 	return us
+@@ -172,6 +189,7 @@ func newUDPServerSession(ctx context.Context, id uint32, user *protocol.MemoryUs
+ 
+ // consume 按 ARQ 有序交付处理会话流:首段=openSessionRequest(socks5+初始数据),后续=数据/关闭。
+ func (us *udpServerSession) consume() {
++	defer us.shutdown()
+ 	for {
+ 		var seg *segment
+ 		select {
+@@ -185,14 +203,14 @@ func (us *udpServerSession) consume() {
+ 		case protoOpenSessionRequest:
+ 			if us.link == nil {
+ 				if !us.handleOpen(seg) {
+-					us.shutdown()
++					us.notifyClose()
+ 					return
+ 				}
+ 			}
+ 		case protoDataClientToServer:
+ 			if us.link != nil && len(seg.payload) > 0 {
+ 				if werr := us.link.Writer.WriteMultiBuffer(bytesToMultiBuffer(seg.payload)); werr != nil {
+-					us.shutdown()
++					us.notifyClose()
+ 					return
+ 				}
+ 			}
+@@ -207,7 +225,7 @@ func (us *udpServerSession) consume() {
+ // handleOpen 解析 socks5 目标 → dispatch → 回 openSessionResponse + socks5 成功回复 + 初始数据 → 启动 pump。
+ func (us *udpServerSession) handleOpen(seg *segment) bool {
+ 	dest, cmd, consumed, perr := parseSocks5Request(seg.payload)
+-	if perr != nil || cmd != socks5CmdConnect {
++	if perr != nil || (cmd != socks5CmdConnect && cmd != socks5CmdUDPAssociate) {
+ 		return false
+ 	}
+ 	ib := session.Inbound{}
+@@ -217,9 +235,16 @@ func (us *udpServerSession) handleOpen(seg *segment) bool {
+ 	ib.User = us.user
+ 	ib.Name = "mieru"
+ 	ib.CanSpliceCopy = 3
+-	link, derr := us.dispatcher.Dispatch(session.ContextWithInbound(us.ctx, &ib), dest)
+-	if derr != nil {
+-		return false
++	userCtx := session.ContextWithInbound(us.ctx, &ib)
++	var link *transport.Link
++	if cmd == socks5CmdUDPAssociate {
++		link = newMieruUDPAssociation(userCtx, us.dispatcher, us.activationTimeout)
++	} else {
++		var derr error
++		link, derr = us.dispatcher.Dispatch(userCtx, dest)
++		if derr != nil {
++			return false
++		}
+ 	}
+ 	us.link = link
+ 
+@@ -242,10 +267,7 @@ func (us *udpServerSession) handleOpen(seg *segment) bool {
+ func (us *udpServerSession) pump() {
+ 	reader := us.link.Reader
+ 	for {
+-		mb, err := reader.ReadMultiBuffer()
+-		if err != nil {
+-			break
+-		}
++		mb, readErr := reader.ReadMultiBuffer()
+ 		data := mbToBytes(mb)
+ 		for _, frag := range bytesToUDPFragments(data) {
+ 			if werr := us.sendData(frag); werr != nil {
+@@ -253,6 +275,9 @@ func (us *udpServerSession) pump() {
+ 				return
+ 			}
+ 		}
++		if readErr != nil {
++			break
++		}
+ 	}
+ 	us.notifyClose()
+ }
+@@ -292,5 +317,8 @@ func (us *udpServerSession) shutdown() {
+ 			common.Interrupt(us.link.Reader)
+ 			common.Interrupt(us.link.Writer)
+ 		}
++		if us.onClose != nil {
++			us.onClose(us)
++		}
+ 	})
+ }
+diff --git a/proxy/mieru/session.go b/proxy/mieru/session.go
+index 967fc26..fa37521 100644
+--- a/proxy/mieru/session.go
++++ b/proxy/mieru/session.go
+@@ -15,8 +15,9 @@ import (
+ )
+ 
+ const (
+-	maxFragmentLen = 32768 // 规范:TCP 单片最大 32768 字节
+-	defaultWindow  = 4096  // 观测值;TCP underlay 下流控为惰性,发送方按需广告固定窗口即可
++	maxFragmentLen    = 32768 // 规范:TCP 单片最大 32768 字节
++	defaultWindow     = 4096  // 观测值;TCP underlay 下流控为惰性,发送方按需广告固定窗口即可
++	maxServerSessions = 1024  // 限制单条 underlay 的未完成会话资源占用
+ )
+ 
+ // lockedWriter 是一条 underlay 连接**一个方向**的段写出器,mutex 串行化以保证 nonce 递增与线序一致。
+@@ -32,12 +33,14 @@ func (lw *lockedWriter) write(meta, payload []byte) error {
+ }
+ 
+ type serverSession struct {
+-	id     uint32
+-	link   *transport.Link
+-	writer *lockedWriter
+-	outSeq atomic.Uint32
+-	cancel context.CancelFunc
+-	closed atomic.Bool
++	id          uint32
++	link        *transport.Link
++	writer      *lockedWriter
++	outSeq      atomic.Uint32
++	cancel      context.CancelFunc
++	closed      atomic.Bool
++	cleanupOnce sync.Once
++	onClose     func(*serverSession)
+ }
+ 
+ // nextSeq 取本会话下一个出站 seq(会话内单调递增;pump 与建链控制段可能并发,故用原子)。
+@@ -76,10 +79,7 @@ func (ss *serverSession) writeData(payload []byte) error {
+ func (ss *serverSession) pump() {
+ 	reader := ss.link.Reader
+ 	for {
+-		mb, err := reader.ReadMultiBuffer()
+-		if err != nil {
+-			break
+-		}
++		mb, readErr := reader.ReadMultiBuffer()
+ 		for _, b := range mb {
+ 			if b.Len() > 0 {
+ 				if werr := ss.writeData(b.Bytes()); werr != nil {
+@@ -90,6 +90,9 @@ func (ss *serverSession) pump() {
+ 			}
+ 		}
+ 		buf.ReleaseMulti(mb)
++		if readErr != nil {
++			break
++		}
+ 	}
+ 	ss.closeAndNotify()
+ }
+@@ -100,17 +103,26 @@ func (ss *serverSession) closeAndNotify() {
+ 		return
+ 	}
+ 	_ = ss.writeControl(protoCloseSessionRequest)
+-	ss.interrupt()
++	ss.cleanup()
+ }
+ 
+ // interrupt 断开本地 link(不再向客户端发关闭段)。
+ func (ss *serverSession) interrupt() {
+ 	ss.closed.Store(true)
+-	if ss.cancel != nil {
+-		ss.cancel()
+-	}
+-	common.Interrupt(ss.link.Reader)
+-	common.Interrupt(ss.link.Writer)
++	ss.cleanup()
++}
++
++func (ss *serverSession) cleanup() {
++	ss.cleanupOnce.Do(func() {
++		if ss.cancel != nil {
++			ss.cancel()
++		}
++		common.Interrupt(ss.link.Reader)
++		common.Interrupt(ss.link.Writer)
++		if ss.onClose != nil {
++			ss.onClose(ss)
++		}
++	})
+ }
+ 
+ // feed 把客户端来的数据写入落地 link。
+diff --git a/proxy/mieru/udp_target.go b/proxy/mieru/udp_target.go
+new file mode 100644
+index 0000000..464deb5
+--- /dev/null
++++ b/proxy/mieru/udp_target.go
+@@ -0,0 +1,366 @@
++// SPDX-License-Identifier: MPL-2.0
++
++package mieru
++
++import (
++	"bytes"
++	"context"
++	"encoding/binary"
++	"io"
++	"sync"
++	"sync/atomic"
++	"time"
++
++	"github.com/xtls/xray-core/common"
++	"github.com/xtls/xray-core/common/buf"
++	"github.com/xtls/xray-core/common/errors"
++	xnet "github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/protocol"
++	"github.com/xtls/xray-core/features/routing"
++	"github.com/xtls/xray-core/transport"
++	"github.com/xtls/xray-core/transport/pipe"
++)
++
++const (
++	mieruUDPFrameStart = 0x00
++	mieruUDPFrameEnd   = 0xff
++
++	// Xray's native UDP paths use one regular buffer per datagram. Keeping the
++	// complete SOCKS5 datagram within that limit prevents a single UDP packet
++	// from being split into several independent writes by downstream code.
++	maxMieruUDPFrameData = buf.Size
++
++	// A SOCKS client must send its first UDP datagram promptly after the
++	// association reply. Bound sessions that have not reached the dispatcher,
++	// where the normal idle timer and native admission limits take over.
++	maxMieruUDPActivationTimeout = time.Minute
++)
++
++var mieruUDPAddressParser = protocol.NewAddressParser(
++	protocol.AddressFamilyByte(socks5ATYPIPv4, xnet.AddressFamilyIPv4),
++	protocol.AddressFamilyByte(socks5ATYPIPv6, xnet.AddressFamilyIPv6),
++	protocol.AddressFamilyByte(socks5ATYPDomain, xnet.AddressFamilyDomain),
++)
++
++// mieruUDPFrameDecoder restores the packet boundaries defined by the public
++// mieru UDP-associate encapsulation. The byte stream can be split or coalesced
++// at arbitrary Mieru segment boundaries.
++type mieruUDPFrameDecoder struct {
++	pending []byte
++}
++
++func (d *mieruUDPFrameDecoder) feed(chunk []byte) ([][]byte, error) {
++	d.pending = append(d.pending, chunk...)
++	var frames [][]byte
++	offset := 0
++	for len(d.pending)-offset > 0 {
++		remaining := d.pending[offset:]
++		if remaining[0] != mieruUDPFrameStart {
++			return nil, errors.New("mieru: invalid UDP frame start marker")
++		}
++		if len(remaining) < 3 {
++			break
++		}
++		length := int(binary.BigEndian.Uint16(remaining[1:3]))
++		if length == 0 {
++			return nil, errors.New("mieru: empty UDP frame")
++		}
++		if length > maxMieruUDPFrameData {
++			return nil, errors.New("mieru: UDP frame exceeds runtime datagram limit")
++		}
++		total := 3 + length + 1
++		if len(remaining) < total {
++			break
++		}
++		if remaining[total-1] != mieruUDPFrameEnd {
++			return nil, errors.New("mieru: invalid UDP frame end marker")
++		}
++		frame := make([]byte, length)
++		copy(frame, remaining[3:3+length])
++		frames = append(frames, frame)
++		offset += total
++	}
++	if offset > 0 {
++		copy(d.pending, d.pending[offset:])
++		d.pending = d.pending[:len(d.pending)-offset]
++	}
++	if len(d.pending) > maxMieruUDPFrameData+4 {
++		return nil, errors.New("mieru: incomplete UDP frame exceeds runtime datagram limit")
++	}
++	return frames, nil
++}
++
++func (d *mieruUDPFrameDecoder) finish() error {
++	if len(d.pending) != 0 {
++		return errors.New("mieru: truncated UDP frame")
++	}
++	return nil
++}
++
++func encodeMieruUDPFrame(datagram []byte) ([]byte, error) {
++	if len(datagram) == 0 {
++		return nil, errors.New("mieru: cannot encode an empty UDP frame")
++	}
++	if len(datagram) > maxMieruUDPFrameData {
++		return nil, errors.New("mieru: UDP frame exceeds runtime datagram limit")
++	}
++	frame := make([]byte, 3+len(datagram)+1)
++	frame[0] = mieruUDPFrameStart
++	binary.BigEndian.PutUint16(frame[1:3], uint16(len(datagram)))
++	copy(frame[3:], datagram)
++	frame[len(frame)-1] = mieruUDPFrameEnd
++	return frame, nil
++}
++
++// parseSocks5UDPDatagram parses RFC 1928's UDP request header. Fragmentation is
++// deliberately unsupported, matching Xray's native SOCKS implementation.
++func parseSocks5UDPDatagram(datagram []byte) (xnet.Destination, *buf.Buffer, error) {
++	var destination xnet.Destination
++	if len(datagram) < 4 {
++		return destination, nil, errors.New("mieru: short SOCKS5 UDP datagram")
++	}
++	if datagram[0] != 0 || datagram[1] != 0 {
++		return destination, nil, errors.New("mieru: invalid SOCKS5 UDP reserved field")
++	}
++	if datagram[2] != 0 {
++		return destination, nil, errors.New("mieru: fragmented SOCKS5 UDP datagram is unsupported")
++	}
++	switch datagram[3] {
++	case socks5ATYPIPv4, socks5ATYPIPv6:
++	case socks5ATYPDomain:
++		// The shared address parser assumes a non-empty domain and indexes its
++		// first byte. Reject the untrusted zero-length form before handing it
++		// to that parser.
++		if len(datagram) < 5 || datagram[4] == 0 {
++			return destination, nil, errors.New("mieru: empty SOCKS5 UDP domain")
++		}
++	default:
++		return destination, nil, errors.New("mieru: unknown SOCKS5 UDP address type")
++	}
++
++	reader := bytes.NewReader(datagram[3:])
++	address, port, err := mieruUDPAddressParser.ReadAddressPort(nil, reader)
++	if err != nil {
++		return destination, nil, errors.New("mieru: invalid SOCKS5 UDP destination").Base(err)
++	}
++	if address == nil || address.String() == "" || port == 0 {
++		return destination, nil, errors.New("mieru: empty SOCKS5 UDP destination")
++	}
++	destination = xnet.UDPDestination(address, port)
++	payloadOffset := len(datagram) - reader.Len()
++	payloadSize := len(datagram) - payloadOffset
++	allocation := payloadSize
++	if allocation == 0 {
++		allocation = 1
++	}
++	payload := buf.NewWithSize(int32(allocation))
++	if _, err := payload.Write(datagram[payloadOffset:]); err != nil {
++		payload.Release()
++		return destination, nil, errors.New("mieru: copy SOCKS5 UDP payload").Base(err)
++	}
++	destCopy := destination
++	payload.UDP = &destCopy
++	return destination, payload, nil
++}
++
++func encodeSocks5UDPDatagram(source xnet.Destination, payload []byte) ([]byte, error) {
++	if source.Network != xnet.Network_UDP || source.Address == nil || source.Address.String() == "" || source.Port == 0 {
++		return nil, errors.New("mieru: invalid SOCKS5 UDP response source")
++	}
++	datagram := buf.NewWithSize(maxMieruUDPFrameData)
++	defer datagram.Release()
++	if _, err := datagram.Write([]byte{0, 0, 0}); err != nil {
++		return nil, err
++	}
++	if err := mieruUDPAddressParser.WriteAddressPort(datagram, source.Address, source.Port); err != nil {
++		return nil, errors.New("mieru: encode SOCKS5 UDP response source").Base(err)
++	}
++	if datagram.Available() < int32(len(payload)) {
++		return nil, errors.New("mieru: SOCKS5 UDP response exceeds runtime datagram limit")
++	}
++	if _, err := datagram.Write(payload); err != nil {
++		return nil, err
++	}
++	result := make([]byte, datagram.Len())
++	copy(result, datagram.Bytes())
++	return result, nil
++}
++
++// mieruUDPAssociation adapts one Mieru logical stream to one Xray UDP
++// dispatcher. The dispatcher opens its single outbound link lazily from the
++// first real packet target; the UDP ASSOCIATE request's bind address is never
++// used as an outbound destination.
++type mieruUDPAssociation struct {
++	ctx            context.Context
++	cancel         context.CancelFunc
++	dispatcher     routing.Dispatcher
++	link           *transport.Link
++	output         *pipe.Writer
++	decoder        mieruUDPFrameDecoder
++	decodeMu       sync.Mutex
++	linkMu         sync.Mutex
++	closeOnce      sync.Once
++	closed         atomic.Bool
++	stopActivation context.CancelFunc
++}
++
++func newMieruUDPAssociation(
++	ctx context.Context,
++	dispatcher routing.Dispatcher,
++	activationTimeout time.Duration,
++) *transport.Link {
++	outputReader, outputWriter := pipe.New(pipe.OptionsFromContext(ctx)...)
++	associationCtx, cancel := context.WithCancel(ctx)
++	association := &mieruUDPAssociation{
++		ctx: associationCtx, cancel: cancel, dispatcher: dispatcher, output: outputWriter,
++	}
++	if activationTimeout <= 0 || activationTimeout > maxMieruUDPActivationTimeout {
++		activationTimeout = maxMieruUDPActivationTimeout
++	}
++	activationCtx, stopActivation := context.WithTimeout(associationCtx, activationTimeout)
++	association.stopActivation = stopActivation
++	go func() {
++		<-activationCtx.Done()
++		if activationCtx.Err() == context.DeadlineExceeded {
++			_ = association.Close()
++		}
++	}()
++	return &transport.Link{Reader: outputReader, Writer: association}
++}
++
++func (a *mieruUDPAssociation) WriteMultiBuffer(mb buf.MultiBuffer) error {
++	defer buf.ReleaseMulti(mb)
++	if a.closed.Load() {
++		return io.ErrClosedPipe
++	}
++
++	a.decodeMu.Lock()
++	defer a.decodeMu.Unlock()
++	for _, input := range mb {
++		frames, err := a.decoder.feed(input.Bytes())
++		if err != nil {
++			_ = a.Close()
++			return err
++		}
++		for _, frame := range frames {
++			destination, payload, err := parseSocks5UDPDatagram(frame)
++			if err != nil {
++				errors.LogDebugInner(a.ctx, err, "mieru: drop invalid SOCKS5 UDP datagram")
++				continue
++			}
++			if payload.IsEmpty() {
++				payload.Release()
++				continue
++			}
++			if err := a.dispatch(destination, payload); err != nil {
++				return err
++			}
++		}
++	}
++	return nil
++}
++
++func (a *mieruUDPAssociation) dispatch(destination xnet.Destination, payload *buf.Buffer) error {
++	a.linkMu.Lock()
++	if a.closed.Load() {
++		a.linkMu.Unlock()
++		payload.Release()
++		return io.ErrClosedPipe
++	}
++	if a.link == nil {
++		link, err := a.dispatcher.Dispatch(a.ctx, destination)
++		if err != nil {
++			a.linkMu.Unlock()
++			payload.Release()
++			_ = a.Close()
++			return errors.New("mieru: UDP dispatcher failed").Base(err)
++		}
++		if a.closed.Load() {
++			a.linkMu.Unlock()
++			payload.Release()
++			common.Interrupt(link.Reader)
++			common.Interrupt(link.Writer)
++			return io.ErrClosedPipe
++		}
++		a.link = link
++		if a.stopActivation != nil {
++			a.stopActivation()
++		}
++		go a.pumpResponses(destination, link)
++	}
++	link := a.link
++	a.linkMu.Unlock()
++
++	if err := link.Writer.WriteMultiBuffer(buf.MultiBuffer{payload}); err != nil {
++		_ = a.Close()
++		return errors.New("mieru: write UDP target payload").Base(err)
++	}
++	return nil
++}
++
++func (a *mieruUDPAssociation) pumpResponses(firstDestination xnet.Destination, link *transport.Link) {
++	for {
++		mb, readErr := link.Reader.ReadMultiBuffer()
++		for i, payload := range mb {
++			source := firstDestination
++			if payload.UDP != nil {
++				source = *payload.UDP
++			}
++			datagram, err := encodeSocks5UDPDatagram(source, payload.Bytes())
++			payload.Release()
++			if err != nil {
++				errors.LogWarningInner(a.ctx, err, "mieru: drop invalid UDP response")
++				continue
++			}
++			frame, err := encodeMieruUDPFrame(datagram)
++			if err != nil {
++				errors.LogWarningInner(a.ctx, err, "mieru: drop oversized UDP response")
++				continue
++			}
++			buffer := buf.NewWithSize(int32(len(frame)))
++			_, _ = buffer.Write(frame)
++			if a.closed.Load() {
++				buffer.Release()
++				buf.ReleaseMulti(mb[i+1:])
++				return
++			}
++			// pipe.Writer owns and releases buffer on both success and failure.
++			if err := a.output.WriteMultiBuffer(buf.MultiBuffer{buffer}); err != nil {
++				buf.ReleaseMulti(mb[i+1:])
++				_ = a.Close()
++				return
++			}
++		}
++		if readErr != nil {
++			_ = a.Close()
++			return
++		}
++	}
++}
++
++func (a *mieruUDPAssociation) Close() error {
++	a.closeOnce.Do(func() {
++		a.closed.Store(true)
++		if a.stopActivation != nil {
++			a.stopActivation()
++		}
++		a.cancel()
++		a.linkMu.Lock()
++		link := a.link
++		a.linkMu.Unlock()
++		if link != nil {
++			common.Interrupt(link.Reader)
++			common.Interrupt(link.Writer)
++		}
++		_ = a.output.Close()
++	})
++	return nil
++}
++
++func (a *mieruUDPAssociation) Interrupt() {
++	_ = a.Close()
++}
++
++var _ buf.Writer = (*mieruUDPAssociation)(nil)
++var _ io.Closer = (*mieruUDPAssociation)(nil)
++var _ common.Interruptible = (*mieruUDPAssociation)(nil)
+diff --git a/proxy/mieru/udp_target_test.go b/proxy/mieru/udp_target_test.go
+new file mode 100644
+index 0000000..2be5052
+--- /dev/null
++++ b/proxy/mieru/udp_target_test.go
+@@ -0,0 +1,395 @@
++// SPDX-License-Identifier: MPL-2.0
++
++package mieru
++
++import (
++	"bytes"
++	"context"
++	"io"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/xtls/xray-core/common/buf"
++	xnet "github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/protocol"
++	"github.com/xtls/xray-core/common/session"
++	"github.com/xtls/xray-core/transport"
++)
++
++func TestMieruUDPFrameSplitAndCoalesced(t *testing.T) {
++	payloads := [][]byte{[]byte("alpha"), bytes.Repeat([]byte{0x42}, 4096), []byte("omega")}
++	var stream []byte
++	for _, payload := range payloads {
++		frame, err := encodeMieruUDPFrame(payload)
++		if err != nil {
++			t.Fatal(err)
++		}
++		stream = append(stream, frame...)
++	}
++
++	decoder := new(mieruUDPFrameDecoder)
++	var got [][]byte
++	for len(stream) > 0 {
++		n := 7
++		if n > len(stream) {
++			n = len(stream)
++		}
++		frames, err := decoder.feed(stream[:n])
++		if err != nil {
++			t.Fatal(err)
++		}
++		got = append(got, frames...)
++		stream = stream[n:]
++	}
++	if err := decoder.finish(); err != nil {
++		t.Fatal(err)
++	}
++	if len(got) != len(payloads) {
++		t.Fatalf("decoded %d frames, want %d", len(got), len(payloads))
++	}
++	for i := range got {
++		if !bytes.Equal(got[i], payloads[i]) {
++			t.Errorf("frame %d payload mismatch", i)
++		}
++	}
++}
++
++func TestMieruUDPFrameRejectsInvalidBoundaries(t *testing.T) {
++	overLimit := maxMieruUDPFrameData + 1
++	tests := []struct {
++		name string
++		data []byte
++	}{
++		{name: "start marker", data: []byte{1}},
++		{name: "zero length", data: []byte{mieruUDPFrameStart, 0, 0}},
++		{name: "oversize", data: []byte{mieruUDPFrameStart, byte(overLimit >> 8), byte(overLimit)}},
++		{name: "end marker", data: []byte{mieruUDPFrameStart, 0, 1, 42, 0}},
++	}
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			decoder := new(mieruUDPFrameDecoder)
++			if _, err := decoder.feed(test.data); err == nil {
++				t.Fatal("expected invalid frame to fail")
++			}
++		})
++	}
++
++	decoder := new(mieruUDPFrameDecoder)
++	if _, err := decoder.feed([]byte{mieruUDPFrameStart, 0}); err != nil {
++		t.Fatal(err)
++	}
++	if err := decoder.finish(); err == nil {
++		t.Fatal("expected truncated frame to fail at stream close")
++	}
++	if _, err := encodeMieruUDPFrame(bytes.Repeat([]byte{1}, maxMieruUDPFrameData+1)); err == nil {
++		t.Fatal("expected oversized outbound frame to fail")
++	}
++}
++
++func TestSocks5UDPDatagramAddressFamilies(t *testing.T) {
++	tests := []xnet.Destination{
++		xnet.UDPDestination(xnet.ParseAddress("127.0.0.1"), 5301),
++		xnet.UDPDestination(xnet.ParseAddress("dns.example"), 5302),
++		xnet.UDPDestination(xnet.ParseAddress("2001:db8::1"), 5303),
++	}
++	for _, source := range tests {
++		t.Run(source.NetAddr(), func(t *testing.T) {
++			datagram, err := encodeSocks5UDPDatagram(source, []byte("packet"))
++			if err != nil {
++				t.Fatal(err)
++			}
++			destination, payload, err := parseSocks5UDPDatagram(datagram)
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer payload.Release()
++			if destination.NetAddr() != source.NetAddr() || destination.Network != xnet.Network_UDP {
++				t.Errorf("destination = %s, want %s", destination, source)
++			}
++			if payload.UDP == nil || payload.UDP.NetAddr() != source.NetAddr() {
++				t.Errorf("per-packet destination = %v, want %s", payload.UDP, source.NetAddr())
++			}
++			if string(payload.Bytes()) != "packet" {
++				t.Errorf("payload = %q", payload.String())
++			}
++		})
++	}
++}
++
++func TestSocks5UDPDatagramRejectsFragmentsAndInvalidHeaders(t *testing.T) {
++	valid, err := encodeSocks5UDPDatagram(xnet.UDPDestination(xnet.ParseAddress("127.0.0.1"), 53), []byte("x"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	tests := [][]byte{
++		{0, 0, 0},
++		{0, 0, 0, socks5ATYPDomain, 0, 0, 53},
++		append([]byte(nil), valid...),
++		append([]byte(nil), valid...),
++		append([]byte(nil), valid...),
++	}
++	tests[2][0] = 1
++	tests[3][2] = 1
++	tests[4][3] = 0x02
++	for i, datagram := range tests {
++		if _, payload, err := parseSocks5UDPDatagram(datagram); err == nil {
++			if payload != nil {
++				payload.Release()
++			}
++			t.Fatalf("invalid datagram %d was accepted", i)
++		}
++	}
++}
++
++func TestMieruUDPAssociationDropsFragmentAndContinues(t *testing.T) {
++	captures := make(chan udpAssociationCapture, 2)
++	responses := &udpAssociationResponseReader{ch: make(chan buf.MultiBuffer)}
++	dispatcher := &udpAssociationDispatcher{link: &transport.Link{
++		Reader: responses,
++		Writer: &udpAssociationCaptureWriter{ch: captures},
++	}}
++	association := newMieruUDPAssociation(context.Background(), dispatcher, time.Minute)
++	defer association.Writer.(*mieruUDPAssociation).Interrupt()
++
++	target := xnet.UDPDestination(xnet.ParseAddress("127.0.0.1"), 5301)
++	datagram, err := encodeSocks5UDPDatagram(target, []byte("accepted"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	fragmented := append([]byte(nil), datagram...)
++	fragmented[2] = 1
++	badFrame, _ := encodeMieruUDPFrame(fragmented)
++	goodFrame, _ := encodeMieruUDPFrame(datagram)
++	if err := association.Writer.WriteMultiBuffer(
++		bytesToMultiBuffer(append(badFrame, goodFrame...)),
++	); err != nil {
++		t.Fatal(err)
++	}
++	select {
++	case got := <-captures:
++		if got.destination != target.NetAddr() || got.payload != "accepted" {
++			t.Fatalf("unexpected datagram after fragment: %+v", got)
++		}
++	case <-time.After(2 * time.Second):
++		t.Fatal("valid datagram after fragment was not dispatched")
++	}
++}
++
++type udpAssociationCapture struct {
++	destination string
++	payload     string
++}
++
++type udpAssociationCaptureWriter struct {
++	ch chan udpAssociationCapture
++}
++
++func (w *udpAssociationCaptureWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
++	for _, payload := range mb {
++		destination := ""
++		if payload.UDP != nil {
++			destination = payload.UDP.NetAddr()
++		}
++		w.ch <- udpAssociationCapture{destination: destination, payload: string(payload.Bytes())}
++	}
++	buf.ReleaseMulti(mb)
++	return nil
++}
++
++type udpAssociationResponseReader struct {
++	ch   chan buf.MultiBuffer
++	once sync.Once
++}
++
++type udpAssociationFinalResponseReader struct {
++	response buf.MultiBuffer
++}
++
++func (r *udpAssociationFinalResponseReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
++	response := r.response
++	r.response = nil
++	return response, io.EOF
++}
++
++func (*udpAssociationFinalResponseReader) Interrupt() {}
++
++func (r *udpAssociationResponseReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
++	mb, ok := <-r.ch
++	if !ok {
++		return nil, io.EOF
++	}
++	return mb, nil
++}
++
++func (r *udpAssociationResponseReader) Interrupt() {
++	r.once.Do(func() { close(r.ch) })
++}
++
++type udpAssociationDispatcher struct {
++	mu               sync.Mutex
++	calls            int
++	firstDestination string
++	user             string
++	link             *transport.Link
++}
++
++func (*udpAssociationDispatcher) Type() interface{} { return nil }
++func (*udpAssociationDispatcher) Start() error      { return nil }
++func (*udpAssociationDispatcher) Close() error      { return nil }
++
++func (d *udpAssociationDispatcher) Dispatch(ctx context.Context, destination xnet.Destination) (*transport.Link, error) {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	d.calls++
++	d.firstDestination = destination.NetAddr()
++	if inbound := session.InboundFromContext(ctx); inbound != nil && inbound.User != nil {
++		d.user = inbound.User.Email
++	}
++	return d.link, nil
++}
++
++func (*udpAssociationDispatcher) DispatchLink(context.Context, xnet.Destination, *transport.Link) error {
++	return nil
++}
++
++func TestMieruUDPAssociationUsesOneUserScopedLinkForMultipleTargets(t *testing.T) {
++	captures := make(chan udpAssociationCapture, 4)
++	responses := &udpAssociationResponseReader{ch: make(chan buf.MultiBuffer, 2)}
++	dispatcher := &udpAssociationDispatcher{link: &transport.Link{
++		Reader: responses,
++		Writer: &udpAssociationCaptureWriter{ch: captures},
++	}}
++	ctx := session.ContextWithInbound(context.Background(), &session.Inbound{
++		User: &protocol.MemoryUser{Email: "alice@example"},
++	})
++	association := newMieruUDPAssociation(ctx, dispatcher, time.Minute)
++
++	targets := []xnet.Destination{
++		xnet.UDPDestination(xnet.ParseAddress("127.0.0.1"), 5301),
++		xnet.UDPDestination(xnet.ParseAddress("127.0.0.2"), 5302),
++	}
++	var stream []byte
++	for i, target := range targets {
++		datagram, err := encodeSocks5UDPDatagram(target, []byte{byte('a' + i)})
++		if err != nil {
++			t.Fatal(err)
++		}
++		frame, err := encodeMieruUDPFrame(datagram)
++		if err != nil {
++			t.Fatal(err)
++		}
++		stream = append(stream, frame...)
++	}
++	for _, chunk := range [][]byte{stream[:2], stream[2:17], stream[17:]} {
++		if err := association.Writer.WriteMultiBuffer(bytesToMultiBuffer(chunk)); err != nil {
++			t.Fatal(err)
++		}
++	}
++
++	for i, target := range targets {
++		select {
++		case got := <-captures:
++			if got.destination != target.NetAddr() || got.payload != string([]byte{byte('a' + i)}) {
++				t.Errorf("capture %d = %+v, want %s", i, got, target.NetAddr())
++			}
++		case <-time.After(2 * time.Second):
++			t.Fatalf("timed out waiting for target %d", i)
++		}
++	}
++	dispatcher.mu.Lock()
++	if dispatcher.calls != 1 || dispatcher.firstDestination != targets[0].NetAddr() || dispatcher.user != "alice@example" {
++		t.Errorf("dispatch calls=%d first=%q user=%q", dispatcher.calls, dispatcher.firstDestination, dispatcher.user)
++	}
++	dispatcher.mu.Unlock()
++
++	source := xnet.UDPDestination(xnet.ParseAddress("192.0.2.10"), 5353)
++	response := buf.New()
++	_, _ = response.Write([]byte("reply"))
++	response.UDP = &source
++	responses.ch <- buf.MultiBuffer{response}
++
++	reader := association.Reader.(buf.TimeoutReader)
++	mb, err := reader.ReadMultiBufferTimeout(2 * time.Second)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(mb) == 0 {
++		t.Fatal("timed out waiting for framed response")
++	}
++	responseStream := mbToBytes(mb)
++	decoder := new(mieruUDPFrameDecoder)
++	frames, err := decoder.feed(responseStream)
++	if err != nil || len(frames) != 1 {
++		t.Fatalf("response frames=%d err=%v", len(frames), err)
++	}
++	responseSource, responsePayload, err := parseSocks5UDPDatagram(frames[0])
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer responsePayload.Release()
++	if responseSource.NetAddr() != source.NetAddr() || responsePayload.String() != "reply" {
++		t.Errorf("response source=%s payload=%q", responseSource.NetAddr(), responsePayload.String())
++	}
++
++	associationWriter := association.Writer.(*mieruUDPAssociation)
++	var wg sync.WaitGroup
++	for i := 0; i < 16; i++ {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			associationWriter.Interrupt()
++		}()
++	}
++	wg.Wait()
++}
++
++func TestMieruUDPAssociationDeliversFinalResponseWithEOF(t *testing.T) {
++	source := xnet.UDPDestination(xnet.ParseAddress("192.0.2.20"), 5353)
++	response := buf.New()
++	_, _ = response.Write([]byte("final"))
++	response.UDP = &source
++	dispatcher := &udpAssociationDispatcher{link: &transport.Link{
++		Reader: &udpAssociationFinalResponseReader{response: buf.MultiBuffer{response}},
++		Writer: &udpAssociationCaptureWriter{ch: make(chan udpAssociationCapture, 1)},
++	}}
++	association := newMieruUDPAssociation(context.Background(), dispatcher, time.Minute)
++	target := xnet.UDPDestination(xnet.ParseAddress("127.0.0.1"), 5301)
++	datagram, _ := encodeSocks5UDPDatagram(target, []byte("request"))
++	frame, _ := encodeMieruUDPFrame(datagram)
++	if err := association.Writer.WriteMultiBuffer(bytesToMultiBuffer(frame)); err != nil {
++		t.Fatal(err)
++	}
++	reader := association.Reader.(buf.TimeoutReader)
++	mb, err := reader.ReadMultiBufferTimeout(2 * time.Second)
++	if err != nil {
++		t.Fatal(err)
++	}
++	frames, err := new(mieruUDPFrameDecoder).feed(mbToBytes(mb))
++	if err != nil || len(frames) != 1 {
++		t.Fatalf("frames=%d err=%v", len(frames), err)
++	}
++	gotSource, payload, err := parseSocks5UDPDatagram(frames[0])
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer payload.Release()
++	if gotSource.NetAddr() != source.NetAddr() || payload.String() != "final" {
++		t.Fatalf("source=%s payload=%q", gotSource.NetAddr(), payload.String())
++	}
++}
++
++func TestMieruUDPAssociationClosesBeforeFirstPacketDeadline(t *testing.T) {
++	dispatcher := &udpAssociationDispatcher{}
++	association := newMieruUDPAssociation(context.Background(), dispatcher, 10*time.Millisecond)
++	reader := association.Reader.(buf.TimeoutReader)
++	if mb, err := reader.ReadMultiBufferTimeout(time.Second); err != io.EOF {
++		buf.ReleaseMulti(mb)
++		t.Fatalf("deadline read error = %v, want EOF", err)
++	}
++	dispatcher.mu.Lock()
++	defer dispatcher.mu.Unlock()
++	if dispatcher.calls != 0 {
++		t.Fatalf("dispatch calls = %d, want 0", dispatcher.calls)
++	}
++}

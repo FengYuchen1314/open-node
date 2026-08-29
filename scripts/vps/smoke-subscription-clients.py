@@ -178,6 +178,11 @@ def exercise_export(work, client, token, kind, binary, ca, echo, udp, reports):
         if kind in {"uri-list", "base64"}
         else response.json()
     )
+    if kind == "clash":
+        mieru = [proxy for proxy in payload["proxies"] if proxy["type"] == "mieru"]
+        assert len(mieru) == 2, mieru
+        assert {proxy["transport"] for proxy in mieru} == {"TCP", "UDP"}, mieru
+        assert all(proxy.get("udp") is True for proxy in mieru), mieru
     nodes = [node for node in reports[kind]["nodes"] if node["available"]]
     assert int(response.headers["x-open-node-included-nodes"]) == len(nodes)
     directory, args, env, port, control, secret = client_config(
@@ -210,11 +215,10 @@ def exercise_export(work, client, token, kind, binary, ca, echo, udp, reports):
                             kind + " " + node["name"] + " TCP",
                             lambda: runtime.forwards(port, echo),
                         )
-                        if node["protocol"] != "mieru":
-                            runtime.poll(
-                                kind + " " + node["name"] + " UDP",
-                                lambda: protocols.udp_forwards(port, udp),
-                            )
+                        runtime.poll(
+                            kind + " " + node["name"] + " UDP",
+                            lambda: protocols.udp_forwards(port, udp),
+                        )
             else:
                 runtime.poll(
                     "xray unselected full export forwards",
@@ -311,9 +315,14 @@ def browser_workflow(client, url, output, username, node_id):
                     re.compile(".*node_id=" + node_id)
                 )
                 lifecycle.ui.check_layout(page)
-                assert page.evaluate("""() => [...document.querySelectorAll('.subscription-action-row .v-btn__content, .subscription-page .v-select__selection-text')]
-                    .filter(el => el.checkVisibility({checkVisibilityCSS: true}))
-                    .every(el => el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1)"""), (
+                assert page.evaluate(
+                    "() => [...document.querySelectorAll("
+                    "'.subscription-action-row .v-btn__content, "
+                    ".subscription-page .v-select__selection-text')].filter("
+                    "el => el.checkVisibility({checkVisibilityCSS: true})).every("
+                    "el => el.scrollWidth <= el.clientWidth + 1 "
+                    "&& el.scrollHeight <= el.clientHeight + 1)"
+                ), (
                     "Control labels are clipped"
                 )
                 select.scroll_into_view_if_needed()
@@ -368,7 +377,20 @@ def browser_workflow(client, url, output, username, node_id):
         except BaseException:
             print(
                 page.evaluate(
-                    """() => ({width: innerWidth, documentWidth: document.documentElement.scrollWidth, overflow: [...document.querySelectorAll('main *')].filter(el => el.checkVisibility({checkVisibilityCSS: true}) && el.getBoundingClientRect().right > innerWidth + 1).slice(0, 20).map(el => ({tag: el.tagName, class: el.className, right: el.getBoundingClientRect().right, width: el.getBoundingClientRect().width}))})"""
+                    """() => ({
+                        width: innerWidth,
+                        documentWidth: document.documentElement.scrollWidth,
+                        overflow: [...document.querySelectorAll('main *')]
+                            .filter(el => el.checkVisibility({checkVisibilityCSS: true})
+                                && el.getBoundingClientRect().right > innerWidth + 1)
+                            .slice(0, 20)
+                            .map(el => ({
+                                tag: el.tagName,
+                                class: el.className,
+                                right: el.getBoundingClientRect().right,
+                                width: el.getBoundingClientRect().width,
+                            })),
+                    })"""
                 ),
                 flush=True,
             )
@@ -802,6 +824,7 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, echo, u
             exercise_export(work, client, token, kind, binary, ca, echo, udp, reports)
         snell6 = next(node for node in nodes if node["inbound_tag"] == "snell6")
         browser_workflow(client, backend, args.output, username, snell6["id"])
+    agent_command(client, base, "scan")
     template_workflow(
         work, args, client, backend, base, ca, echo, udp, username, plan, token, reports
     )

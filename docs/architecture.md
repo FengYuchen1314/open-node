@@ -161,16 +161,24 @@ The active `mmw-agent` sends Xray runtime discovery as `scan_result` messages
 over the authenticated WebSocket, and the same scan body can arrive later as a
 successful `/api/child/scan` command result. Open Node stores the latest scan
 per server in SQLite, including Xray running state, version, API port, config
-path, inbound objects, device kick counters, and config-repair metadata.
+path, versioned runtime capabilities, inbound objects, device kick counters,
+and config-repair metadata. The independent Agent probes the bound binary with
+`xray open-node-capabilities`, caches the result by binary identity, and reports
+only capabilities whose value is an actual integer equal to one. Binding or
+probe failure yields an empty `xray_capabilities` object. The controller accepts
+only its known strict version values and stores the map in an additive SQLite
+JSON column whose legacy-row default is `{}`.
 
 The control plane exposes that latest snapshot at
 `/api/v1/servers/{server_id}/scan/latest`. It also derives a sanitized runtime
 inventory at `/api/v1/servers/{server_id}/xray/runtime`, summarizing inbound
 tags, protocols, ports, transport/security names, client counts, client email
-labels, sniffing state, protocol totals, and config-repair metadata without
-returning UUIDs, passwords, PSKs, or account secrets. When latest telemetry has
-Xray stats, runtime inventory also reports matched inbound traffic counters and
-per-inbound user traffic summed only from already exposed client email labels.
+labels, sniffing state, protocol totals, runtime capabilities, and config-repair
+metadata without returning UUIDs, passwords, PSKs, or account secrets. The
+frontend inventory response types retain the same capability map. When latest
+telemetry has Xray stats, runtime inventory also reports matched inbound traffic
+counters and per-inbound user traffic summed only from already exposed client
+email labels.
 The current Xray config snapshot also powers
 `/api/v1/servers/{server_id}/xray/runtime/tunnels`, a sanitized tunnel
 inventory that lists `protocol=tunnel` inbounds, `tunnel-*` routed forwarding
@@ -196,9 +204,13 @@ It can also derive managed-node drafts from those inbounds at
 through `/api/v1/servers/{server_id}/xray/runtime/nodes`. Operators can also
 bulk-import all available missing runtime inbounds through
 `/api/v1/servers/{server_id}/xray/runtime/nodes/import`, which reports created,
-already-managed, and skipped entries. The reconciliation endpoint at
-`/api/v1/servers/{server_id}/xray/runtime/nodes/reconciliation` compares scan
-inbounds with managed catalog nodes, reporting unmanaged runtime entries,
+already-managed, and skipped entries. Mieru drafts and imports advertise UDP
+only if the latest scan says Xray is running, is no more than ten minutes old,
+and contains integer `mieru_udp_target: 1`; absent, invalid or stale evidence
+produces `udp: false`. Mieru `transport` and `udp` also participate in public
+runtime/catalog drift and guarded synchronization. The reconciliation endpoint
+at `/api/v1/servers/{server_id}/xray/runtime/nodes/reconciliation` compares
+scan inbounds with managed catalog nodes, reporting unmanaged runtime entries,
 managed nodes missing from runtime, and public connection-field drift. Stale
 physical managed nodes can be synced from runtime through
 `/api/v1/servers/{server_id}/xray/runtime/nodes/{node_id}/sync`, which updates
@@ -465,6 +477,13 @@ policies in the free runtime before enabling newly provisioned credentials.
 Capability and result-confirmation checks prevent legacy Agents from silently
 discarding plan limits.
 
+The compatibility runtime's empty-user patch and managed access suspension are
+separate lifecycle mechanisms. A direct runtime edit may retain an empty Snell
+or Mieru inbound that rejects every connection before protocol processing.
+Managed subscription access instead removes the final-user inbound from the
+active config and journals its position and private empty template for guarded
+restoration.
+
 The frontend exposes these wrappers in a dedicated `/config` workspace. It can
 queue Xray and nginx read/write operations, load completed read results back
 into editors, manage config-file read/write calls, dispatch high-level runtime
@@ -540,7 +559,8 @@ Node presets provide ready-made free catalog templates for common MMWX
 subscription shapes: VLESS Vision TLS, Trojan TLS, Shadowsocks 2022, Hysteria2,
 AnyTLS, Snell v4/v6, Mieru, and routed outbound entries. Applying a preset
 creates a normal managed node for an existing inventory server while allowing
-operators to override host, port, tags, and route markers.
+operators to override host, port, tags, and route markers. The Mieru preset
+starts with `udp: false`; a catalog value is not runtime capability evidence.
 
 Catalog export serializes users, nodes, plans, and optionally generated
 credentials by stable names instead of local database IDs. Catalog import can
@@ -581,16 +601,22 @@ YAML, and callers can request alternate formats with
 `GET /api/v1/subscribe/{token_or_short_code}?format=...`:
 
 - `clash`: Clash-compatible YAML with a select group.
-- `sing-box`: sing-box JSON outbounds with a selector, including AnyTLS and
-  Snell when their managed-node config contains the required client fields.
+- `surge`: Surge-compatible profile text with server-side compatibility checks.
+- `sing-box`: sing-box JSON outbounds with a selector, including AnyTLS when
+  its managed-node config contains the required client fields.
+- `xray`: native Xray JSON for the pinned compatibility runtime, with optional
+  selection of one plan-scoped node.
 - `uri-list`: plaintext proxy URI lines.
 - `base64`: base64-encoded URI list for clients that expect legacy
   subscription bodies.
 
 Fork protocol extensions are not a guarantee of stock-client compatibility:
 stock Mihomo does not accept Snell v6 and stock sing-box does not implement
-Snell. Per-client filtering and a native free-client v6 export remain unfinished.
-See [fork-runtime.md](fork-runtime.md) for actual traffic coverage and limits.
+Snell. Per-client filtering and the native free-client Snell v6 export preserve
+those boundaries. Mieru is exported to Clash, where the backend overwrites its
+`udp` flag from the running, fresh scan's strict `mieru_udp_target: 1` capability;
+a forged proxy config cannot opt in. See [fork-runtime.md](fork-runtime.md) for
+actual traffic coverage and limits.
 
 Open Node records subscription traffic in a durable ledger when agent telemetry
 contains `stats.user` counters for known credential emails. The first observed

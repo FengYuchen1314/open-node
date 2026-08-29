@@ -227,6 +227,7 @@ async def test_invalid_binding_keeps_agent_health_and_scan_available(config):
         assert health["connected"] and not health["runtime_ready"]
         scan = await agent.operations.scan()
         assert scan["message"] == "Binding changed" and scan["inbounds"] == []
+        assert scan["xray_capabilities"] == {}
         original = config.xray_config.read_bytes()
         for action in (agent.runtime.start, agent.runtime.restart):
             with pytest.raises(RuntimeFailure, match="Binding changed"):
