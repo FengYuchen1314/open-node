@@ -79,9 +79,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: public long-token subscription links, stable per-user per-node
      credentials, Clash YAML rendering, and subscription userinfo headers from
      latest telemetry. Compatibility-only custom short codes and legacy `/x`
-     routes are implemented, but the release candidate defaults them off. The
-     default-off path and legacy bearer rotation still require final release
-     regression.
+     routes are implemented, but the hardened release baseline defaults them
+     off. Final regression now covers the default-off path and legacy bearer
+     rotation.
    - Done: coordinated multi-server change sets with atomic node reservations,
      persisted cross-node dependencies, prior-work draining, automatic failure
      compensation, in-flight rollback barriers, retry history and explicit
@@ -177,8 +177,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: compatibility wrappers for the active non-stream Xray/nginx
      install/remove child endpoints while keeping stream wrappers as the
      default UI operations.
-   - Next for the first Preview: finish the release security regression,
-     artifact verification, and persistent deployment acceptance.
+   - Next for the first Preview: publish the verified Agent prerelease and pass
+     its anonymous GitHub download and real-release smoke. Public HTTPS remains
+     an operator-supplied deployment step.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.
@@ -222,21 +223,33 @@ The fastest supportable first release is an explicit prerelease for Debian 12
 installations or controlled migrations. It does not claim seamless replacement
 of every historical private MMWX resource.
 
-The remaining first-release P0 work is deliberately narrow:
+The hardened `cb1eb0c` baseline has completed the local release gates:
 
-- complete final validation and commit of the current hardening worktree:
-  short/custom/legacy subscription aliases disabled by default, legacy bearer
-  rotation when compatibility is disabled, access-log suppression and bounded
-  container logs, and SQLite foreign keys enabled on every connection;
-- rebuild the four Agent 0.2.0 release assets from the final clean commit and
-  pass checksum, package-structure, WebSocket/HTTP, upgrade and rollback checks,
-  including a real download from the published GitHub release; and
-- replace the temporary `/tmp` control-plane preview with persistent Compose,
-  then repeat HTTPS, private-volume, backup, isolated-restore and post-deploy
-  checks.
+- final regression covers aliases disabled by default, legacy bearer rotation,
+  access-log suppression, bounded container logs, and SQLite foreign keys on
+  every connection;
+- the four Agent 0.2.0 candidate assets were rebuilt twice from independent
+  archives of the final clean commit. Their byte-for-byte comparison, wheel
+  metadata/RECORD, five-file bootstrap structure, checksums, Agent Ruff and all
+  544 Agent tests passed; and
+- the VPS now runs the hardened image through persistent Compose under an
+  enabled/active systemd unit, bound only to `127.0.0.1:8000` with its private
+  volume. Backup, container/service restart, Compose down/up and an isolated
+  restore have been exercised.
 
-None of those pending items should be described as released or production
-accepted yet. Historical private ownership/provider/relay-group discovery and
+The remaining release P0 is the public GitHub Agent prerelease: create the
+`agent-v0.2.0` tag at the `BUILD.json` revision, upload exactly the four verified
+assets, anonymously download them again, verify `SHA256SUMS`, and pass the real
+release WebSocket/HTTP upgrade, forwarding and rollback smoke. Do not describe
+the Agent as published before that completes.
+
+The current control plane remains an SSH-tunnel Preview. Public HTTPS requires
+operator-provided domain/DNS, a client-trusted certificate and the external
+reverse-proxy configuration. The local backup/isolated-restore workflow is
+verified, but an encrypted off-host recovery copy additionally requires an
+operator-selected destination, recipient public key and recovery owner. These
+operational inputs are not software implementation gaps and are not yet
+deployed facts. Historical private ownership/provider/relay-group discovery and
 arbitrary legacy host import remain full-parity work, not first-Preview P0.
 
 ## Remaining Runtime Gates
@@ -324,10 +337,11 @@ all blockers for the restricted first-Preview support matrix above:
   support operator/self-service editing, clearing and complete reset with
   collision and revision guards. Active-main direct and combined `/x` URLs can
   resolve through imported profiles and explicit package mappings. These alias
-  paths are compatibility-only and default off in the release candidate; the
-  long high-entropy token remains the supported public bearer, and the default-off
-  behavior still needs final release validation. Privately owned
-  routed-node cleanup still requires migration. [Temporary subscription links](temporary-subscriptions.md)
+  paths are compatibility-only and default off in the hardened release baseline;
+  the long high-entropy token remains the supported public bearer. Final
+  regression covers the default-off behavior and legacy bearer rotation.
+  Privately owned routed-node cleanup still requires migration.
+  [Temporary subscription links](temporary-subscriptions.md)
   replace active-main's in-memory eight-character Clash-only shares with durable
   high-entropy records, all six formats, selected current-plan nodes, atomic
   access limits, administrator listing/copy/revocation and restart persistence.
@@ -401,10 +415,13 @@ all blockers for the restricted first-Preview support matrix above:
   See [change-sets.md](change-sets.md) for the explicit failure/review contract.
 - Single-image FastAPI/Vue packaging, non-root read-only Compose deployment,
   HTTPS reverse proxy, administrator initialization/recovery, persistent-volume
-  backup/restore, and explicit image rollback are implemented. Desktop/mobile
-  browser workflows have passed on the current temporary `/tmp` VPS preview; it
-  is not the persistent Compose release deployment. The Compose switch plus
-  backup, isolated restore, HTTPS and post-deploy rechecks remain first-Preview
-  P0. Complete broader operator workflows and the remaining runtime gates before
-  calling the product a full public replacement. Multi-host scaling and arbitrary
-  future database downgrades are not covered. See [deployment.md](deployment.md).
+  backup/restore, and explicit image rollback are implemented. The hardened VPS
+  baseline now runs through persistent Compose under systemd with a loopback-only
+  listener and private volume; backup, restart, Compose down/up and isolated
+  restore checks passed. Access is still through an SSH tunnel. Public HTTPS
+  remains dependent on operator-supplied domain/DNS, trusted certificate and
+  reverse-proxy configuration, while an encrypted off-host recovery copy needs
+  an operator-selected destination, recipient key and recovery owner. Complete
+  broader operator workflows and the remaining runtime gates before calling the
+  product a full public replacement. Multi-host scaling and arbitrary future
+  database downgrades are not covered. See [deployment.md](deployment.md).

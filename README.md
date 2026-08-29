@@ -57,30 +57,33 @@ The root Dockerfile and [Compose deployment](docs/deployment.md) build a
 single non-root image containing FastAPI, the Vue production frontend, and
 pinned lego. The deployment guide covers HTTPS, administrator initialization,
 private persistent storage, backup/restore, upgrades, and explicit rollback.
-No development server is needed. The actual Compose setup has been exercised
-on the VPS with HTTPS desktop/mobile browser workflows and volume recovery.
-The currently running VPS instance is still a temporary `/tmp` preview, not the
-persistent Compose deployment described by that guide. The first Preview release
-is not accepted until the final tested image is switched to persistent Compose,
-backed up, restored in isolation, and rechecked through HTTPS. Remaining migration
+No development server is needed. The hardened `cb1eb0c` baseline now runs on
+the VPS as the persistent Compose deployment, managed by an enabled and active
+systemd unit. It binds only to `127.0.0.1:8000` and is accessed as an
+SSH-tunneled Preview. Backup, restart, Compose down/up, and isolated restore
+have been verified against the deployed state. This is not yet a public HTTPS
+deployment: the production hostname, DNS, trusted certificate, and public
+reverse-proxy configuration still require operator input. Remaining migration
 boundaries still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
 
-The current milestone is a restricted Agent 0.2.0 Preview release and persistent
-control-plane cutover, not another parity expansion. Its supported scope is a
-new installation or controlled migration on Debian 12 amd64, one control-plane
-process and worker, and non-root managed Agents/Xray. Historical discovery of
-unrecorded private MMWX ownership and dependencies remains important for a full
-replacement, but it is not a blocker for this deliberately bounded first release.
+The current milestone is the hardened `cb1eb0c` control-plane Preview baseline
+and a bounded Agent 0.2.0 release candidate, not another parity expansion. Its
+supported scope is a new installation or controlled migration on Debian 12
+amd64, one control-plane process and worker, and non-root managed Agents/Xray.
+Historical discovery of unrecorded private MMWX ownership and dependencies
+remains important for a full replacement, but it is not a blocker for this
+deliberately bounded Preview.
 
-Release hardening is still in progress. The current worktree defaults generated,
-custom and legacy `/x` bearer aliases off, rotates legacy subscription bearers
-when that compatibility mode is disabled, suppresses request-path access logs,
-bounds container logs, and enables SQLite foreign-key enforcement on every
-connection. These changes are not part of the last recorded green baseline and
-must pass the complete VPS regression, exact-artifact checks, and final deployment
-acceptance before they can be described as released.
+The `cb1eb0c` baseline defaults generated, custom, and legacy `/x` bearer
+aliases off; rotates legacy subscription bearers when that compatibility mode
+is disabled; suppresses request-path access logs; bounds container logs; and
+enables SQLite foreign-key enforcement on every connection. These controls
+passed the complete VPS regression, exact-image inspection, and persistent
+Compose acceptance. They establish the current control-plane Preview baseline;
+they do not claim that an Agent 0.2.0 artifact has been published as a GitHub
+release.
 
 [Legacy MMWX identities](docs/legacy-mmwx-identities.md) have a mode-0600
 SQLite exporter and administrator-only preview/import. Existing bcrypt hashes are

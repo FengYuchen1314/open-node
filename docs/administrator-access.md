@@ -38,14 +38,19 @@ Preserve the original Host header at the reverse proxy, proxy `/api` to
 FastAPI, and restrict trusted forwarded headers to your own proxy addresses.
 Keep the backend listener private. The proxy should apply request-size limits,
 additional login rate limits, and normal TLS hardening. Use the shipped
-[Compose and HTTPS deployment guide](deployment.md); do not expose the current
-temporary `/tmp` preview as a production service.
+[Compose and HTTPS deployment guide](deployment.md). The current VPS Preview
+runs the hardened `cb1eb0c` baseline in persistent Compose under an enabled and
+active systemd unit. It listens only on `127.0.0.1:8000` and is reached through
+an SSH tunnel. Backup, restart, Compose down/up, and isolated restore have been
+verified. This is operational persistence, not public HTTPS acceptance: a
+production hostname, DNS, trusted certificate, and public reverse-proxy
+configuration still require operator input.
 
 Subscription and temporary-link bearer credentials can appear in request paths.
-The Preview release candidate therefore removes Uvicorn and edge-proxy access
-logs and bounds retained container logs. Those configuration changes still need
-their final VPS regression and persistent-Compose acceptance before release;
-do not compensate with an access-log format that records the request URI.
+The hardened baseline therefore disables Uvicorn and edge-proxy access logs and
+bounds retained container logs. These controls passed VPS regression and
+persistent-Compose acceptance. Do not compensate with an access-log format that
+records the request URI.
 
 `OPEN_NODE_SESSION_COOKIE_SECURE` defaults to `true`. The session cookie is
 HttpOnly, SameSite=Strict, host-only, and scoped to `/`. The random session
@@ -71,15 +76,15 @@ Human-readable generated/custom subscription aliases and legacy `/x` routes are
 disabled by default with `OPEN_NODE_SHORT_LINKS_ENABLED=false`. Keep that setting
 for a normal public deployment; only the long 256-bit subscription token is then
 accepted. Enable aliases only for a controlled legacy migration on a restricted
-endpoint. The current release hardening also rotates legacy subscription bearers
-when compatibility remains disabled, but that migration is not a released claim
-until the final database upgrade and regression gates pass.
+endpoint. The `cb1eb0c` hardened baseline also rotates legacy subscription
+bearers when compatibility remains disabled; the deployed persistent Compose
+database passed the upgrade and regression gates.
 
-The same release candidate enables SQLite foreign-key enforcement for every
-application connection. Before switching the persistent Compose instance, verify
-`PRAGMA foreign_keys` is `1`, run `PRAGMA foreign_key_check`, and retain the
-pre-upgrade volume backup. A healthy process alone does not prove database
-integrity.
+The same baseline enables SQLite foreign-key enforcement for every application
+connection. The persistent Compose startup verified `PRAGMA foreign_keys` is
+`1` and ran `PRAGMA foreign_key_check`; backup, restart, down/up, and isolated
+restore were also exercised. Retain the pre-upgrade volume backup for future
+upgrades. A healthy process alone does not prove database integrity.
 
 ## API Contract
 

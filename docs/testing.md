@@ -212,7 +212,7 @@ and 1440/390/320px screenshots for both workspaces.
 
 Verified on 2026-08-29 (UTC), Debian 12 x86-64 on the designated VPS:
 
-- Backend: 904 tests; Agent: 544 tests; frontend: 32 files and 216 tests,
+- Backend: 913 tests; Agent: 544 tests; frontend: 32 files and 216 tests,
   TypeScript checks and production build. Ruff, targeted formatting and probe
   Worker TypeScript checks passed.
 - All 18 inbound variants passed their supported native client formats and
@@ -731,7 +731,7 @@ source separately, using that exact release artifact on the designated VPS:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-agent-release.py \
-  --wheel /path/to/published/open_node_agent-0.1.0-py3-none-any.whl \
+  --wheel /path/to/published/open_node_agent-0.2.0-py3-none-any.whl \
   --nginx /path/to/extracted/usr/sbin/nginx
 ```
 
