@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,8 +15,8 @@ from fastapi.testclient import TestClient
 from open_node.core.config import Settings
 from open_node.domain.inventory import AgentCapabilities, AgentCommandResultRequest
 from open_node.main import create_app
-from open_node.services.inventory import AgentScanResultModel, CommandModel
-from sqlalchemy import Column, MetaData, Table, select, update
+from open_node.services.inventory import AgentScanResultModel, CommandModel, create_inventory_engine
+from sqlalchemy import Column, MetaData, Table, select, text, update
 
 
 def sqlite_url(path: Path) -> str:
@@ -25,6 +26,39 @@ def sqlite_url(path: Path) -> str:
 def make_client(tmp_path: Path) -> TestClient:
     settings = Settings(database_url=sqlite_url(tmp_path / "open-node-test.db"))
     return authenticated_client(create_app(settings))
+
+
+def test_sqlite_connections_enforce_foreign_keys(tmp_path: Path) -> None:
+    engine = create_inventory_engine(sqlite_url(tmp_path / "foreign-keys.db"))
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+    finally:
+        engine.dispose()
+
+
+def test_app_refuses_an_existing_sqlite_database_with_foreign_key_violations(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "orphaned.db"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            PRAGMA foreign_keys=OFF;
+            CREATE TABLE legacy_parent (id INTEGER PRIMARY KEY);
+            CREATE TABLE legacy_child (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER NOT NULL REFERENCES legacy_parent(id)
+            );
+            INSERT INTO legacy_child (id, parent_id) VALUES (1, 99);
+            """
+        )
+
+    with pytest.raises(RuntimeError, match="foreign-key integrity check failed"):
+        create_app(Settings(database_url=sqlite_url(database)))
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT parent_id FROM legacy_child").fetchone() == (99,)
 
 
 def scan_result_payload() -> dict[str, object]:

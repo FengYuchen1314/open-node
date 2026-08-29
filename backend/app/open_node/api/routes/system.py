@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from open_node import __version__
@@ -21,6 +21,7 @@ class AppMeta(BaseModel):
     version: str
     api_prefix: str
     license_required: bool
+    short_links_enabled: bool
     stack: dict[str, str]
 
 
@@ -35,13 +36,14 @@ def healthz() -> HealthResponse:
 
 
 @router.get("/meta", response_model=AppMeta)
-def meta() -> AppMeta:
-    settings = get_settings()
+def meta(request: Request) -> AppMeta:
+    settings = request.app.state.settings
     return AppMeta(
         name=settings.app_name,
         version=__version__,
         api_prefix=settings.api_prefix,
         license_required=settings.license_required,
+        short_links_enabled=settings.short_links_enabled,
         stack={
             "backend": "fastapi",
             "frontend": "vue3-vuetify",

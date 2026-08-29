@@ -388,6 +388,7 @@ class PrivateRoutedNodes:
                 deleted_id = UUID(node.id)
                 self._record_action(session, username, node.id, "delete", now)
                 session.delete(lifecycle)
+                session.flush()
                 session.delete(node)
                 session.commit()
                 return PrivateRoutedNodeMutationResponse(deleted_id=deleted_id)
@@ -739,6 +740,7 @@ class PrivateRoutedNodes:
             if change.status == AgentChangeSetStatus.SUCCEEDED.value:
                 self._remove_binding(session, lifecycle, node, now)
                 session.delete(lifecycle)
+                session.flush()
                 session.delete(node)
                 session.flush()
             elif change.status == AgentChangeSetStatus.ROLLED_BACK.value:

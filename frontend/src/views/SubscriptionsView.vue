@@ -29,6 +29,7 @@ import {
   listTemporarySubscriptions,
 } from "../services/temporary-subscriptions";
 import { listPrivateRoutes } from "../services/private-routed-nodes";
+import { fetchAppMeta } from "../services/api";
 
 import type { ServerSummary } from "../domain/inventory";
 import type {
@@ -85,6 +86,7 @@ const templates = ref<SubscriptionTemplate[]>([]);
 const subscriptionProfiles = ref<SubscriptionProfile[]>([]);
 const temporarySubscriptions = ref<TemporarySubscription[]>([]);
 const privateRoutes = ref<PrivateRoutedNodesResponse | null>(null);
+const shortLinksEnabled = ref(false);
 const privateRoutePolicy = reactive({ open: false });
 const temporaryShare = reactive({ open: false });
 const registrationInvitations = reactive({ open: false });
@@ -307,7 +309,7 @@ async function refresh() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [serverList, userResponse, nodeResponse, planResponse, presetResponse, templateResponse, profileResponse, temporaryResponse, privateRouteResponse] =
+    const [serverList, userResponse, nodeResponse, planResponse, presetResponse, templateResponse, profileResponse, temporaryResponse, privateRouteResponse, appMeta] =
       await Promise.all([
         listServers(),
         listProductUsers(),
@@ -318,6 +320,7 @@ async function refresh() {
         listSubscriptionProfiles(),
         listTemporarySubscriptions(),
         listPrivateRoutes(),
+        fetchAppMeta(),
       ]);
     servers.value = serverList;
     users.value = userResponse.users;
@@ -328,6 +331,7 @@ async function refresh() {
     subscriptionProfiles.value = profileResponse.profiles;
     temporarySubscriptions.value = temporaryResponse.subscriptions;
     privateRoutes.value = privateRouteResponse;
+    shortLinksEnabled.value = appMeta.short_links_enabled;
     syncDefaults();
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -1549,6 +1553,7 @@ function formatBytes(value: number) {
               variant="outlined"
             />
             <v-text-field
+              v-if="subscriptionToken.short_links_enabled"
               :model-value="subscriptionToken.short_url"
               density="comfortable"
               label="Short URL"
@@ -1873,7 +1878,7 @@ function formatBytes(value: number) {
             </div>
             <div class="catalog-controls">
               <template v-if="!user.removal_id">
-                <v-tooltip text="Edit subscription short code"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit short code for ${user.username}`" icon="mdi-link-edit" variant="text" size="32" @click="Object.assign(shortCode, { username: user.username, open: true })" /></template></v-tooltip>
+                <v-tooltip v-if="shortLinksEnabled" text="Edit subscription short code"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit short code for ${user.username}`" icon="mdi-link-edit" variant="text" size="32" @click="Object.assign(shortCode, { username: user.username, open: true })" /></template></v-tooltip>
                 <v-tooltip text="Edit subscription IP access"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit subscription IP access for ${user.username}`" icon="mdi-ip-network-outline" variant="text" size="32" @click="Object.assign(ipPolicy, { username: user.username, open: true })" /></template></v-tooltip>
                 <v-tooltip text="User login settings"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Login settings for ${user.username}`" icon="mdi-account-key-outline" variant="text" size="32" @click="Object.assign(userLogin, { username: user.username, open: true })" /></template></v-tooltip>
                 <v-tooltip text="Edit user"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit user ${user.username}`" icon="mdi-pencil-outline" variant="text" size="32" @click="manageUser(user, 'edit')" /></template></v-tooltip>

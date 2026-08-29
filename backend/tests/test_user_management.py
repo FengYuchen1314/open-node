@@ -453,14 +453,21 @@ def test_existing_database_adds_user_fields_without_changing_credentials(env, tm
             if column.name not in {"removal_id", "remark"}
         ],
     )
-    with client.app.state.inventory._engine.begin() as connection:
-        legacy.create(connection)
-        names = list(legacy.columns.keys())
-        connection.execute(
-            legacy.insert().from_select(names, select(*(original.c[name] for name in names)))
-        )
-        original.drop(connection)
-        connection.execute(text("ALTER TABLE legacy_product_users RENAME TO product_users"))
+    with client.app.state.inventory._engine.connect() as connection:
+        # Build the historical schema as an offline fixture. Dropping the parent
+        # table with live FK enforcement would intentionally cascade current rows.
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
+        with connection.begin():
+            legacy.create(connection)
+            names = list(legacy.columns.keys())
+            connection.execute(
+                legacy.insert().from_select(names, select(*(original.c[name] for name in names)))
+            )
+            original.drop(connection)
+            connection.execute(text("ALTER TABLE legacy_product_users RENAME TO product_users"))
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        assert connection.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
     fresh = make_client(tmp_path)
     assert detail(fresh)["user"]["remark"] == ""
     assert detail(fresh)["user"]["removal_id"] is None

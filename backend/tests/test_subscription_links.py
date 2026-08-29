@@ -4,11 +4,16 @@ from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
+from conftest import authenticated_client
 from fastapi.testclient import TestClient
+from open_node.core.config import Settings
 from open_node.domain.subscriber_auth import SubscriberShortCodeUpdate
 from open_node.domain.subscription_links import SubscriptionShortCodeUpdate
+from open_node.main import create_app
 from open_node.services import inventory as module
 from open_node.services.inventory import (
+    LEGACY_SUBSCRIPTION_BEARER_GENERATION,
+    SECURE_SUBSCRIPTION_BEARER_GENERATION,
     CommandModel,
     InventoryStore,
     ProductUserConflict,
@@ -20,7 +25,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from test_subscriber_auth import PASSWORD, enable, identity, login, make, provision
-from test_subscriptions import create_catalog_fixture, make_client
+from test_subscriptions import create_catalog_fixture, make_client, sqlite_url
 
 PATH = "/api/v1/user-subscription-short-code"
 ACCOUNT = "/api/v1/account/subscription-short-code"
@@ -51,6 +56,28 @@ def env(tmp_path):
     token, _, _, plan_id = create_catalog_fixture(client)
     client.post("/api/v1/users/alice/plan", json={"plan_id": plan_id}).raise_for_status()
     return client, token, plan_id
+
+
+def test_short_and_legacy_bearer_links_are_disabled_by_default(tmp_path):
+    client = authenticated_client(
+        create_app(Settings(database_url=sqlite_url(tmp_path / "secure-default.db")))
+    )
+    _, _, _, plan_id = create_catalog_fixture(client)
+    client.post("/api/v1/users/alice/plan", json={"plan_id": plan_id}).raise_for_status()
+
+    current = links(client)
+    assert current["short_links_enabled"] is False
+    assert current["short_url"] == current["subscription_url"]
+    assert client.get(current["subscription_url"]).status_code == 200
+    assert client.get(f"/api/v1/subscribe/{current['generated_short_code']}").status_code == 404
+    assert save(client, "guessable-alias").status_code == 403
+    assert client.get(f"/x/pkg{current['generated_short_code']}").status_code == 404
+    with client.app.state.inventory._coordinated_session() as db:
+        db.get(
+            ProductUserSubscriptionTokenModel, "alice"
+        ).bearer_generation = LEGACY_SUBSCRIPTION_BEARER_GENERATION
+        db.commit()
+    assert client.get(current["subscription_url"]).status_code == 404
 
 
 def test_custom_clear_and_replace_preserve_system_links_credentials_usage_and_commands(env):
@@ -197,7 +224,10 @@ def test_two_controllers_cannot_claim_case_variants_of_the_same_code(env):
     client, _, _ = env
     client.post("/api/v1/users", json={"username": "bob"}).raise_for_status()
     revisions = {name: links(client, name)["revision"] for name in ("alice", "bob")}
-    stores = [InventoryStore(client.app.state.settings.database_url) for _ in range(2)]
+    stores = [
+        InventoryStore(client.app.state.settings.database_url, short_links_enabled=True)
+        for _ in range(2)
+    ]
     barrier = Barrier(2)
 
     def claim(item):
@@ -245,13 +275,16 @@ def test_database_rejects_case_variant_duplicates_and_restart_preserves_codes(en
     with pytest.raises(IntegrityError), store._coordinated_session() as db:
         db.get(ProductUserSubscriptionTokenModel, "bob").custom_short_code = "UNIQUE-LINK"
         db.commit()
-    restarted = InventoryStore(client.app.state.settings.database_url)
+    restarted = InventoryStore(
+        client.app.state.settings.database_url,
+        short_links_enabled=True,
+    )
     restarted.create_schema()
     assert restarted.get_or_create_subscription_token("alice").revision == saved["revision"]
     assert links(client) == saved
 
 
-def test_old_schema_upgrade_preserves_all_existing_subscription_keys(env):
+def test_old_schema_upgrade_preserves_all_existing_keys_in_compatibility_mode(env):
     client, _, _ = env
     old = links(client)
     store = client.app.state.inventory
@@ -261,11 +294,60 @@ def test_old_schema_upgrade_preserves_all_existing_subscription_keys(env):
         db.execute(
             text("ALTER TABLE product_user_subscription_tokens DROP COLUMN custom_short_code")
         )
+        db.execute(
+            text("ALTER TABLE product_user_subscription_tokens DROP COLUMN bearer_generation")
+        )
     store.create_schema()
-    assert links(client) == old
+    upgraded = links(client)
+    for key in ("token", "generated_short_code", "created_at", "updated_at"):
+        assert upgraded[key] == old[key]
+    with store._session() as db:
+        token = db.get(ProductUserSubscriptionTokenModel, "alice")
+        assert token.bearer_generation == LEGACY_SUBSCRIPTION_BEARER_GENERATION
     assert save(client, "after-upgrade").status_code == 200
     assert client.get(old["subscription_url"]).status_code == 200
     assert_indexed_key_lookup(store)
+
+
+def test_old_schema_upgrade_rotates_unmarked_keys_once_by_default(tmp_path):
+    database_url = sqlite_url(tmp_path / "secure-upgrade.db")
+    first = authenticated_client(create_app(Settings(database_url=database_url)))
+    _, _, _, plan_id = create_catalog_fixture(first)
+    first.post("/api/v1/users/alice/plan", json={"plan_id": plan_id}).raise_for_status()
+    links(first)
+    store = first.app.state.inventory
+    legacy = {
+        "token": "legacy-token",
+        "short_code": "oldshort",
+        "custom_short_code": "oldcustom",
+    }
+    with store._engine.begin() as db:
+        db.execute(
+            text(
+                "UPDATE product_user_subscription_tokens "
+                "SET token=:token, short_code=:short_code, custom_short_code=:custom_short_code"
+            ),
+            legacy,
+        )
+        db.execute(
+            text("ALTER TABLE product_user_subscription_tokens DROP COLUMN bearer_generation")
+        )
+
+    restarted = authenticated_client(create_app(Settings(database_url=database_url)))
+    current = links(restarted)
+    assert current["token"] != legacy["token"]
+    assert len(current["token"]) >= 43
+    assert current["generated_short_code"] != legacy["short_code"]
+    assert current["custom_short_code"] is None
+    with restarted.app.state.inventory._session() as db:
+        token = db.get(ProductUserSubscriptionTokenModel, "alice")
+        assert token.bearer_generation == SECURE_SUBSCRIPTION_BEARER_GENERATION
+    for key in legacy.values():
+        assert restarted.get(f"/api/v1/subscribe/{key}").status_code == 404
+    assert restarted.get(current["subscription_url"]).status_code == 200
+
+    second_restart = authenticated_client(create_app(Settings(database_url=database_url)))
+    assert links(second_restart) == current
 
 
 def assert_indexed_key_lookup(store):
@@ -372,6 +454,23 @@ def test_subscriber_edits_only_own_links_with_password_proof(tmp_path):
             stale, SubscriberShortCodeUpdate(**{**body, "custom_short_code": "stale-session"})
         )
     assert links(operator)["custom_short_code"] == "self-service"
+
+
+def test_subscriber_short_code_edit_is_disabled_by_default(tmp_path):
+    _app, operator, client = make(tmp_path, catalog=True, short_links=False)
+    login(client).raise_for_status()
+    before = links(operator)
+    response = client.put(
+        ACCOUNT,
+        json={
+            "custom_short_code": "guessable-alias",
+            "expected_revision": before["revision"],
+            "password": PASSWORD,
+        },
+    )
+
+    assert response.status_code == 403
+    assert links(operator) == before
 
 
 def test_factor_proof_is_required_and_failed_conflicts_do_not_consume_recovery_code(

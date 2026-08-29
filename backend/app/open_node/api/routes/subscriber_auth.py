@@ -212,6 +212,8 @@ def subscription_token(request: Request, identity: Identity):
 
 @router.get("/subscription-profiles", response_model=SubscriberSubscriptionProfilesResponse)
 def subscription_profiles(request: Request, identity: Identity):
+    if not request.app.state.settings.short_links_enabled:
+        return SubscriberSubscriptionProfilesResponse(profiles=[])
     profiles = request.app.state.inventory._subscription_profiles().subscriber_profiles(
         identity.username, request.url_for
     )
@@ -250,6 +252,8 @@ def sessions(request: Request, identity: Identity):
 def update_subscription_short_code(
     payload: SubscriberShortCodeUpdate, request: Request, identity: Identity
 ):
+    if not request.app.state.settings.short_links_enabled:
+        raise HTTPException(403, "Short subscription links are disabled")
     limit(request, identity.username)
     token = invoke(request.app.state.subscriber_auth.set_short_code, identity, payload)
     return _subscription_token_response(request, token)

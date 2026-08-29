@@ -32,6 +32,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    event,
     func,
     inspect,
     select,
@@ -293,6 +294,9 @@ _PROBE_SERIES_RANGES = {
     "6h": (36, 600),
     "24h": (48, 1800),
 }
+
+LEGACY_SUBSCRIPTION_BEARER_GENERATION = 0
+SECURE_SUBSCRIPTION_BEARER_GENERATION = 1
 
 _TUNNEL_NGINX_CONFIG = """user root;
 worker_processes auto;
@@ -1265,6 +1269,11 @@ class ProductUserSubscriptionTokenModel(Base):
     token: Mapped[str] = mapped_column(String(96), unique=True, index=True)
     short_code: Mapped[str] = mapped_column(String(24), unique=True, index=True)
     custom_short_code: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    bearer_generation: Mapped[int] = mapped_column(
+        Integer,
+        default=SECURE_SUBSCRIPTION_BEARER_GENERATION,
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     __table_args__ = (
@@ -1522,7 +1531,8 @@ class ProbeTaskModel(Base):
 
 
 class InventoryStore:
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, *, short_links_enabled: bool = False) -> None:
+        self.short_links_enabled = short_links_enabled
         self._engine = create_inventory_engine(database_url)
         self._session_factory = sessionmaker(self._engine, expire_on_commit=False)
 
@@ -1532,9 +1542,28 @@ class InventoryStore:
 
         SubscriberAccount.metadata.create_all(self._engine)
         TemplateRecord.metadata.create_all(self._engine)
+        # Historical SQLite deployments ran with FK enforcement disabled. Refuse
+        # to mutate such a database until an operator repairs or restores any
+        # existing orphaned rows, then verify again after our own migrations.
+        self._assert_sqlite_foreign_key_integrity()
         self._migrate_schema()
         self._change_sets().migrate_legacy()
         self._server_traffic().backfill()
+        self._assert_sqlite_foreign_key_integrity()
+
+    def _assert_sqlite_foreign_key_integrity(self) -> None:
+        if self._engine.dialect.name != "sqlite":
+            return
+        with self._engine.connect() as connection:
+            enabled = connection.execute(text("PRAGMA foreign_keys")).scalar_one()
+            if enabled != 1:
+                raise RuntimeError("SQLite foreign-key enforcement is unavailable")
+            violation = connection.execute(text("PRAGMA foreign_key_check")).first()
+        if violation is not None:
+            raise RuntimeError(
+                "SQLite foreign-key integrity check failed; restore the pre-upgrade "
+                "backup or repair the database offline"
+            )
 
     def _migrate_schema(self) -> None:
         if self._engine.dialect.name != "sqlite":
@@ -1559,7 +1588,12 @@ class InventoryStore:
             )
         if "product_user_subscription_tokens" in table_names:
             self._sqlite_add_missing_columns(
-                inspector, "product_user_subscription_tokens", {"custom_short_code": "VARCHAR(16)"}
+                inspector,
+                "product_user_subscription_tokens",
+                {
+                    "custom_short_code": "VARCHAR(16)",
+                    "bearer_generation": "INTEGER NOT NULL DEFAULT 0",
+                },
             )
             with self._engine.begin() as connection:
                 connection.execute(
@@ -1575,6 +1609,8 @@ class InventoryStore:
                         "ON product_user_subscription_tokens (custom_short_code)"
                     )
                 )
+            if not self.short_links_enabled:
+                self._rotate_legacy_subscription_bearers()
         if "agents" in table_names:
             self._sqlite_add_missing_columns(
                 inspector,
@@ -1700,6 +1736,21 @@ class InventoryStore:
         with self._engine.begin() as connection:
             for name, kind in missing:
                 connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {kind}"))
+
+    def _rotate_legacy_subscription_bearers(self) -> None:
+        with self._coordinated_session() as session:
+            tokens = session.scalars(
+                select(ProductUserSubscriptionTokenModel).where(
+                    ProductUserSubscriptionTokenModel.bearer_generation
+                    == LEGACY_SUBSCRIPTION_BEARER_GENERATION
+                )
+            ).all()
+            if not tokens:
+                return
+            now = datetime.now(tz=UTC)
+            for token in tokens:
+                self._rotate_subscription_bearer(session, token, now=now)
+            session.commit()
 
     def list_servers(self) -> list[ServerRead]:
         with self._session() as session:
@@ -3746,18 +3797,26 @@ class InventoryStore:
                 username=username,
                 token=self._unique_subscription_token(session),
                 short_code=self._unique_subscription_short_code(session),
+                bearer_generation=SECURE_SUBSCRIPTION_BEARER_GENERATION,
                 created_at=now,
                 updated_at=now,
             )
             session.add(token)
-        elif reset:
-            token.token = self._unique_subscription_token(session)
-            token.short_code = self._unique_subscription_short_code(session)
-            token.custom_short_code = None
-            token.updated_at = now
+        elif reset or (
+            not self.short_links_enabled
+            and token.bearer_generation == LEGACY_SUBSCRIPTION_BEARER_GENERATION
+        ):
+            self._rotate_subscription_bearer(session, token, now=now)
         session.flush()
         session.refresh(token)
         return self._subscription_token_record(token)
+
+    def _rotate_subscription_bearer(self, session, token, *, now=None) -> None:
+        token.token = self._unique_subscription_token(session)
+        token.short_code = self._unique_subscription_short_code(session)
+        token.custom_short_code = None
+        token.bearer_generation = SECURE_SUBSCRIPTION_BEARER_GENERATION
+        token.updated_at = now or datetime.now(tz=UTC)
 
     def list_subscription_credentials(self, username: str) -> list[SubscriptionCredentialRead]:
         username = username.strip()
@@ -3779,19 +3838,26 @@ class InventoryStore:
         subscription_key: str,
         client_format: SubscriptionClientFormat = SubscriptionClientFormat.CLASH,
         node_id: UUID | None = None,
+        *,
+        allow_short: bool = False,
     ) -> RenderedSubscription:
         key = subscription_key.strip()
         if not key:
             raise SubscriptionTokenNotFoundError("subscription key is required")
 
         with self._session() as session:
-            token = session.scalar(
-                select(ProductUserSubscriptionTokenModel).where(
+            if allow_short:
+                key_match = (
                     (ProductUserSubscriptionTokenModel.token == key)
                     | (ProductUserSubscriptionTokenModel.short_code == key)
                     | (ProductUserSubscriptionTokenModel.custom_short_code == key)
                 )
-            )
+            else:
+                key_match = (ProductUserSubscriptionTokenModel.token == key) & (
+                    ProductUserSubscriptionTokenModel.bearer_generation
+                    == SECURE_SUBSCRIPTION_BEARER_GENERATION
+                )
+            token = session.scalar(select(ProductUserSubscriptionTokenModel).where(key_match))
             if not token:
                 raise SubscriptionTokenNotFoundError("subscription not found")
             user = session.get(ProductUserModel, token.username)
@@ -6946,6 +7012,7 @@ class InventoryStore:
             token.token,
             token.short_code,
             token.custom_short_code,
+            token.bearer_generation,
             InventoryStore._aware_datetime(token.updated_at).isoformat(),
         ]
         return SubscriptionTokenRecord(
@@ -9905,4 +9972,15 @@ def create_inventory_engine(database_url: str) -> Engine:
         connect_args["check_same_thread"] = False
         if url.database and url.database != ":memory:":
             Path(url.database).expanduser().parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(url, connect_args=connect_args, future=True)
+    engine = create_engine(url, connect_args=connect_args, future=True)
+    if url.drivername.startswith("sqlite"):
+
+        @event.listens_for(engine, "connect")
+        def enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+            finally:
+                cursor.close()
+
+    return engine

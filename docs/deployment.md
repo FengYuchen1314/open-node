@@ -73,6 +73,43 @@ the loopback upstream port if it differs. Check the host configuration with
 `nginx -t` before reloading. The example preserves Host, forwards WebSocket
 upgrades, and replaces incoming forwarding headers at the edge proxy.
 
+The production image disables Uvicorn request access logs, and the sample
+Nginx virtual hosts disable access logs on both the HTTP redirect and HTTPS
+listener. Subscription and temporary-link bearer credentials are part of the
+request path, so a conventional request-line log would disclose them. This
+also removes ordinary access-audit and traffic records for this virtual host.
+The sample limits this virtual host's error log to `crit` in a dedicated file,
+because ordinary upstream errors can also include the raw request URI. Create
+that file as root with mode `0600`, rotate it privately, and do not forward it
+to a shared collector. Apply an equivalent rule to every CDN, load balancer
+or custom reverse proxy in front of Open Node. If access metrics
+are required, record only an explicit safe allowlist such as status and timing,
+without the raw URI, query string, authorization headers or cookies.
+
+Keep `OPEN_NODE_SHORT_LINKS_ENABLED=false` for production. In that secure
+default, `/api/v1/subscribe/{key}` accepts only the long 256-bit bearer token,
+legacy `/x/...` links return 404, and the UI does not offer generated or custom
+short links. The `/t/...` temporary-share endpoint uses its own 192-bit random
+token and remains available. Setting the option to `true` is a migration-only
+compatibility mode for existing MMWX short links; human-selected aliases can
+be guessed and are not suitable as public bearer credentials.
+
+The production Nginx example also returns 404 for `/x` and for subscription
+paths that are not a 43-character base64url bearer. Keep those edge rules in
+secure-default deployments. They are defense in depth for the current image and
+prevent a break-glass rollback to an older image from silently re-enabling short
+aliases. An operator who deliberately enables migration compatibility must use a
+separate restricted proxy policy instead of removing the protection on a public
+endpoint.
+
+On the first startup with compatibility mode disabled, token rows created by
+an older schema are treated as unverified. Open Node replaces their long token
+with a new 256-bit bearer, replaces the generated alias, clears the custom
+alias, and records the secure generation so later restarts do not rotate it
+again. The legacy MMWX importer applies the same rule. Export or redistribute
+the new long URLs after upgrade; enable compatibility mode before the upgrade
+only when preserving the old values is an explicit migration requirement.
+
 Find the application container's bridge gateway:
 
 ```bash
@@ -167,11 +204,20 @@ prevents startup rather than changing the identity trusted by existing Agents.
    `up -d --no-build --wait` using the same project name and volume.
 4. Verify health, HTTPS login, an existing node, and certificate retrieval.
    A green health check proves process readiness, not every workflow.
-5. If the new image fails, restore the old image tag/configuration and run
-   `up -d --no-build --wait` again. This is an explicit operator rollback,
-   not automatic release rollback.
+5. If the new image fails, restore a security-compatible old image tag and
+   configuration and run `up -d --no-build --wait` again. This is an explicit
+   operator rollback, not automatic release rollback.
 
-The smoke test verifies data-compatible image rollback. Arbitrary future
+Images built before the secure short-link default are **not** security-compatible
+rollbacks: they ignore `OPEN_NODE_SHORT_LINKS_ENABLED` and accept generated,
+custom and legacy `/x` aliases again. The production Nginx deny rules above must
+remain active throughout such a rollback. Without an equivalent edge proxy,
+keep the old image bound to loopback, block subscriber traffic, restore the
+pre-upgrade backup for diagnosis, and return to a hardened image before exposing
+the service. Never expose a pre-hardening image directly as a routine rollback.
+
+The smoke test verifies data-compatible image rollback; it does not make a
+pre-hardening image security-compatible. Arbitrary future
 database downgrades are not guaranteed: if a release has incompatible data
 changes, restore its pre-upgrade backup into a fresh volume with the old
 image, verify it, and then switch traffic. Do not run `down --volumes` during

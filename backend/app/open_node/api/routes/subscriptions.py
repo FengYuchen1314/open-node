@@ -230,6 +230,8 @@ def update_subscription_short_code(
     request: Request,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
 ):
+    if not request.app.state.settings.short_links_enabled:
+        raise HTTPException(403, "Short subscription links are disabled")
     try:
         token = store.set_subscription_short_code(username, payload)
     except ProductUserNotFoundError as exc:
@@ -429,7 +431,12 @@ def render_user_subscription(
     node_id: UUID | None = None,
 ) -> Response:
     try:
-        rendered = store.render_subscription(subscription_key, client_format, node_id)
+        rendered = store.render_subscription(
+            subscription_key,
+            client_format,
+            node_id,
+            allow_short=request.app.state.settings.short_links_enabled,
+        )
     except SubscriptionTokenNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SubscriptionUnavailableError as exc:
@@ -497,7 +504,12 @@ def _subscription_token_response(
     subscription_url = str(
         request.url_for("render_user_subscription", subscription_key=token.token)
     )
-    short_url = str(request.url_for("render_user_subscription", subscription_key=token.short_code))
+    short_links_enabled = request.app.state.settings.short_links_enabled
+    short_url = (
+        str(request.url_for("render_user_subscription", subscription_key=token.short_code))
+        if short_links_enabled
+        else subscription_url
+    )
     return ProductUserSubscriptionTokenResponse(
         subscription=ProductUserSubscriptionTokenRead(
             username=token.username,
@@ -508,6 +520,7 @@ def _subscription_token_response(
             revision=token.revision,
             subscription_url=subscription_url,
             short_url=short_url,
+            short_links_enabled=short_links_enabled,
             created_at=token.created_at,
             updated_at=token.updated_at,
         )

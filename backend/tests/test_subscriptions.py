@@ -17,7 +17,9 @@ def sqlite_url(path: Path) -> str:
 
 
 def make_client(tmp_path: Path) -> TestClient:
-    settings = Settings(database_url=sqlite_url(tmp_path / "open-node-test.db"))
+    settings = Settings(
+        database_url=sqlite_url(tmp_path / "open-node-test.db"), short_links_enabled=True
+    )
     return authenticated_client(create_app(settings))
 
 

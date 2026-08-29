@@ -29,3 +29,4 @@ def test_meta_declares_fastapi_vue_vuetify_stack(tmp_path: Path) -> None:
     assert payload["stack"]["backend"] == "fastapi"
     assert payload["stack"]["frontend"] == "vue3-vuetify"
     assert payload["license_required"] is False
+    assert payload["short_links_enabled"] is False

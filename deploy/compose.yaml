@@ -12,6 +12,11 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
     tmpfs:
       - /tmp:rw,nosuid,noexec,size=64m,mode=1777
     ports:
@@ -19,6 +24,7 @@ services:
     environment:
       OPEN_NODE_SESSION_COOKIE_SECURE: ${OPEN_NODE_SESSION_COOKIE_SECURE:-true}
       OPEN_NODE_SUBSCRIBER_TOTP_KEY: ${OPEN_NODE_SUBSCRIBER_TOTP_KEY:-}
+      OPEN_NODE_SHORT_LINKS_ENABLED: ${OPEN_NODE_SHORT_LINKS_ENABLED:-false}
       OPEN_NODE_AGENT_IDENTITY_FILE: ${OPEN_NODE_AGENT_IDENTITY_FILE:-}
       FORWARDED_ALLOW_IPS: ${OPEN_NODE_TRUSTED_PROXIES:-}
     volumes:

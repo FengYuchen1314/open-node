@@ -11,7 +11,9 @@ from test_subscriptions import create_catalog_fixture
 
 
 def setup(tmp_path: Path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path / 'ip-policy.db'}"))
+    app = create_app(
+        Settings(database_url=f"sqlite:///{tmp_path / 'ip-policy.db'}", short_links_enabled=True)
+    )
     operator = authenticated_client(app)
     _token, _server_id, _node_id, plan_id = create_catalog_fixture(operator)
     assigned = operator.post(

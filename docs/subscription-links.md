@@ -1,5 +1,13 @@
 # Custom Subscription Short Codes
 
+This is a compatibility feature and is disabled by default. Production
+deployments keep `OPEN_NODE_SHORT_LINKS_ENABLED=false`; only the long 256-bit
+subscription token is then accepted, `/x/...` returns 404, `short_url` falls
+back to the long URL, and short-code controls are hidden. Enable the option
+only during a controlled legacy migration on a restricted endpoint. A future
+secure alias design will need a server-generated secret in addition to any
+human-readable label.
+
 Operators can edit a user's short code from the link-edit action in the
 Subscriptions user list. Subscribers can edit their own code from the
 Subscription section at `/account`. The Full/Short selector controls which
@@ -89,21 +97,28 @@ existing `{ "subscription": ..., "license_required": false }` envelope and
 `Cache-Control: no-store`. Validation errors return 422, conflicts return 409,
 and existing session/CSRF/proof failure behavior is unchanged.
 
-SQLite upgrades add a nullable `custom_short_code` column, a unique
-case-insensitive index and an exact-lookup index to `product_user_subscription_tokens`.
-The lookup index keeps all three public key forms off a table scan. Existing long
-and generated keys are not rotated. Database backups preserve the custom
-codes; subscription catalog export intentionally excludes bearer links, and
-catalog imports for existing users leave their token records unchanged.
-Back up the database before upgrading or rolling back.
+SQLite upgrades add a nullable `custom_short_code` column, a bearer-generation
+marker, a unique case-insensitive index and an exact-lookup index to
+`product_user_subscription_tokens`. The lookup index keeps all three key forms
+off a table scan. With compatibility mode disabled, rows from an older schema
+are unverified and rotate once to a new 256-bit long bearer and generated code;
+the custom alias is cleared. The generation marker prevents repeat rotation on
+later restarts. Compatibility mode preserves those existing key values.
+Database backups preserve the custom codes; subscription catalog export
+intentionally excludes bearer links, and catalog imports for existing users
+leave their token records unchanged. Back up the database before upgrading or
+rolling back.
 
-The [legacy identity importer](legacy-mmwx-identities.md) preserves a user's long,
-generated and custom key values; those keys resolve through Open Node's renderer
-after plan assignment. It also restores the active-main `/x/...` direct file,
-file+user and package+user layouts after explicit package-to-plan mapping. Imported
-subscription profiles use the same user availability, quota and credential checks.
-Raw file content and old templates/rules/scripts still require managed
-reconfiguration; see [legacy-mmwx-identities.md](legacy-mmwx-identities.md).
+In compatibility mode, the [legacy identity importer](legacy-mmwx-identities.md)
+preserves a user's long, generated and custom key values; those keys resolve
+through Open Node's renderer after plan assignment. In the secure default mode,
+the importer instead replaces those unverified values once and exposes only the
+new long bearer. Compatibility mode also restores the active-main `/x/...`
+direct file, file+user and package+user layouts after explicit package-to-plan
+mapping. Imported subscription profiles use the same user availability, quota
+and credential checks. Raw file content and old templates/rules/scripts still
+require managed reconfiguration; see
+[legacy-mmwx-identities.md](legacy-mmwx-identities.md).
 
 ## Verification
 

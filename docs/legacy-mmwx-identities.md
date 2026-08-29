@@ -2,11 +2,12 @@
 
 Open Node can import subscriber identities from the active `miaomiaowuX` main-line
 SQLite schema without a license key or activation service. The migration preserves
-the current bcrypt password hash, TOTP seed, unused recovery-code hashes, long
-subscription token, generated user short code and custom user short code. When the
-active-main package and subscription-file tables are present, it also exports package
-assignments, assignment dates/reset state, subscription profiles and legacy `/x`
-codes.
+the current bcrypt password hash, TOTP seed and unused recovery-code hashes. It
+preserves the long subscription token and user short codes only when
+`OPEN_NODE_SHORT_LINKS_ENABLED=true`; the secure default replaces those unverified
+bearers once. When the active-main package and subscription-file tables are present,
+it also exports package assignments, assignment dates/reset state, subscription
+profiles and legacy `/x` codes.
 
 This workflow does not use the catalog JSON importer. It has a separate guarded API
 and administrator dialog because its input contains login and bearer secrets.
@@ -31,8 +32,8 @@ The source database is opened read-only. The exporter verifies the required `use
 and `user_tokens` tables, tolerates optional profile/security and package/file tables
 from older schemas, writes atomically and sets the result to mode `0600`. It refuses
 to replace an existing output unless `--force` is supplied. An old schema without a
-generated short-code column receives a deterministic migration-only generated code;
-its long token is still preserved.
+generated short-code column receives a deterministic migration-only generated code.
+Those values are preserved only in short-link compatibility mode.
 
 The JSON contains password hashes, authenticator seeds and subscription bearer
 tokens. Do not print it, email it, commit it or place it in a web-served directory.
@@ -79,9 +80,11 @@ validation errors:
   Node's 80-bit account-bound codes.
 - MMWX sessions, API tokens, Telegram bindings, controller privileges and password
   reset state are not imported.
-- The long token, generated short code and custom short code resolve through Open
-  Node's `/api/v1/subscribe/{key}` renderer after a plan is assigned. Replacing
-  existing links can invalidate links already issued by Open Node.
+- With `OPEN_NODE_SHORT_LINKS_ENABLED=true`, the long token, generated short code and
+  custom short code resolve through Open Node's renderer after a plan is assigned.
+  With the secure default, import generates a new 256-bit long bearer, replaces the
+  generated code and clears the custom alias; redistribute the new long URL.
+  Replacing existing links can invalidate links already issued by Open Node.
 - Plan assignment creates the desired catalog state. Use the normal plan/access sync
   after import to provision Open Node credentials onto managed Agents; the identity
   transaction does not execute remote Agent commands.
@@ -95,11 +98,13 @@ edit profile users, Open Node node selection, Clash/Surge templates and enabled 
 from Subscriptions. Profiles remain views over each assigned user's current plan,
 quota, runtime credentials and availability checks. They do not grant a second plan.
 
-`GET /x/{code}` preserves active-main lookup order: a direct file code renders for
-the file owner, then combined codes are split right-to-left into file+user or
-package+user. User generated and custom codes are accepted. Package codes act as
-compatibility selectors and render the matched user's current mapped plan. The old
-`t` client selector and Open Node's `format`/`node_id` parameters are supported.
+When short-link compatibility mode is enabled, `GET /x/{code}` preserves active-main
+lookup order: a direct file code renders for the file owner, then combined codes are
+split right-to-left into file+user or package+user. User generated and custom codes
+are accepted. Package codes act as compatibility selectors and render the matched
+user's current mapped plan. The old `t` client selector and Open Node's
+`format`/`node_id` parameters are supported. In the secure default mode `/x/...`
+returns 404.
 
 Generated profiles use current plan nodes by default. The exporter retains old node
 IDs/tags for audit, but cannot infer their Open Node catalog IDs; administrators can

@@ -245,8 +245,11 @@ class ChangeSetCoordinator:
                     self.store._step_forward_command(step),
                     depends_on=previous,
                 )
-                step.forward_command_id = previous.id
+                # Persist the referenced command before exposing its identifier through
+                # the step FK.  The models intentionally do not have an ORM relationship,
+                # so SQLAlchemy cannot otherwise infer this INSERT-before-UPDATE ordering.
                 session.flush()
+                step.forward_command_id = previous.id
                 commands.append(previous)
             change.status = State.DISPATCHED
             change.updated_at = datetime.now(UTC)
@@ -405,8 +408,10 @@ class ChangeSetCoordinator:
                         now,
                         depends_on=previous,
                     )
-                    step.rollback_command_id = command.id
+                    # As with forward dispatch, make the command row durable inside the
+                    # transaction before the step starts referencing it.
                     session.flush()
+                    step.rollback_command_id = command.id
                 rollbacks.append(command)
                 previous = command
             if any(command.status in {"failed", "skipped"} for command in rollbacks):

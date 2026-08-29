@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from open_node.domain.legacy_mmwx import LegacyMMWXImportPreview, LegacyMMWXImportResponse
 from open_node.services.inventory import (
+    LEGACY_SUBSCRIPTION_BEARER_GENERATION,
     LegacySubscriptionPlanCodeModel,
     ProductUserModel,
     ProductUserSubscriptionTokenModel,
@@ -90,7 +91,12 @@ class LegacyMMWXMigration:
                 else None
             ),
             "token": (
-                [hidden(token.token), hidden(token.short_code), hidden(token.custom_short_code)]
+                [
+                    hidden(token.token),
+                    hidden(token.short_code),
+                    hidden(token.custom_short_code),
+                    token.bearer_generation,
+                ]
                 if token
                 else None
             ),
@@ -419,7 +425,10 @@ class LegacyMMWXMigration:
                         token.token = secret(entry.token)
                         token.short_code = secret(entry.generated_short_code)
                         token.custom_short_code = secret(entry.custom_short_code)
+                        token.bearer_generation = LEGACY_SUBSCRIPTION_BEARER_GENERATION
                         token.updated_at = now
+                        if not self.inventory.short_links_enabled:
+                            self.inventory._rotate_subscription_bearer(session, token, now=now)
 
                 for package in payload.bundle.packages:
                     mapped_plan_id = payload.package_mappings.get(package.source_id)

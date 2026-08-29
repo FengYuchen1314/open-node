@@ -30,10 +30,11 @@ PREFIX = "/api/v1/account"
 MANAGEMENT = "/api/v1/subscriber-accounts"
 
 
-def make(tmp_path, *, catalog=False, key=True, username="alice", role="user"):
+def make(tmp_path, *, catalog=False, key=True, username="alice", role="user", short_links=True):
     settings = Settings(
         database_url=f"sqlite:///{tmp_path / 'subscriber.db'}",
         subscriber_totp_key=Fernet.generate_key().decode() if key else None,
+        short_links_enabled=short_links,
     )
     app = create_app(settings)
     operator = authenticated_client(app)

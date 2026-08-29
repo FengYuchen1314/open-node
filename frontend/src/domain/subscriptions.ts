@@ -74,6 +74,7 @@ export interface ProductUserSubscriptionToken {
   revision: string;
   subscription_url: string;
   short_url: string;
+  short_links_enabled: boolean;
   created_at: string;
   updated_at: string;
 }

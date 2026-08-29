@@ -4,9 +4,10 @@
 
 这份文件供后续聊天直接接手。开始工作前，以当前 Git、GitHub 和 VPS 状态为准，先核对本文件中的快照，不要只依赖聊天记录。
 
-Mieru UDP 目标转发已经在本轮完成。建议在新聊天中直接说明：
+Mieru UDP 目标转发已经完成。当前目标已经转为以最短路径完成受限
+Preview 发布，而不是继续扩大完整 MMWX 对等范围。建议在新聊天中直接说明：
 
-> 请先阅读 `docs/refactor-handoff.md` 和 `docs/migration-map.md`，然后从历史私有资源迁移继续。只处理 `open-node` 主仓库和 `miaomiaowuX` 默认主线，所有测试都放在 `185.99.135.224` 上运行。
+> 请先阅读 `docs/refactor-handoff.md`、`docs/migration-map.md` 和 `docs/releases/agent-0.2.0.md`，继续完成发布安全加固、最终制品验证和持久 Compose 切换。历史私有资源迁移保留为完整替代边界，不要把它扩成首发 P0。只处理 `open-node` 主仓库和 `miaomiaowuX` 默认主线，所有测试都放在 `185.99.135.224` 上运行。
 
 ## 固定目标和边界
 
@@ -20,25 +21,33 @@ Mieru UDP 目标转发已经在本轮完成。建议在新聊天中直接说明�
 - 所有测试、构建和真实流量烟测都在 VPS `185.99.135.224` 上完成，通过 SSH key 连接。不要在本机运行测试。
 - 不复制旧项目的许可证校验，也不依赖旧许可证服务。
 
-按功能面和实机验证门槛粗略估算，当前约完成 **93%**。Mieru UDP
-运行时门槛已经关闭，核心产品链路已经形成；历史私有资源发现、部分旧
-Agent 路径和更广外部环境仍未闭环，不能宣布完整替代 MMWX。
+按完整 MMWX 替代功能面和实机验证门槛粗略估算，当前约完成 **93%**。
+这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
+单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
+Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 MMWX，但它们不应
+阻止上述范围的首发。
 
 ## 当前权威状态
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 本地主分支 | `main`，包含 Mieru UDP 里程碑；具体提交以 `git rev-parse HEAD` 为准 |
-| GitHub `main` | 应与本地主分支一致；接手时用 `git ls-remote` 复核 |
-| 已部署功能基线 | 应与 GitHub `main` 一致；接手时核对 `/opt/open-node` 的提交和 clean 状态 |
+| 本地工作区 | `main` 包含 Mieru UDP 基线，并正在进行未发布的首发安全加固；接手时先核对 `git status`、diff 和最终提交 |
+| GitHub `main` | 不能假设包含当前工作区；接手时用 `git ls-remote` 与最终提交逐项复核 |
+| 已部署功能基线 | 当前仍是临时预览；不能假设包含未提交或未验证的安全加固 |
 | VPS 源码 | `/opt/open-node`，使用干净的 `main` checkout |
 | VPS 后端 | `127.0.0.1:8000`；接手时重新检查 `/healthz`、根页面和账户入口 |
 | VPS 进程快照 | PID 会变化，应以 `pgrep`、`/proc/<pid>/cwd`、命令行和健康检查为准 |
 | 后端解释器 | `/tmp/open-node-preview.49YeIB/backend-ca-admin-venv/bin/python` |
 | 最近部署备份 | `/tmp/open-node-preview.49YeIB/before-mieru-udp-b6267f8` |
 | 最近功能提交 | `feat: add Mieru UDP target forwarding`；具体 SHA 以 `git log -1` 为准 |
+| Agent 0.2.0 发布 | 最终 tag、公开四项制品和 GitHub 实下载验收尚未创建/完成 |
 
 后端当前是测试预览进程，解释器和备份位于 `/tmp`，主机重启后不能视为持久生产部署。正式部署能力已经写入 Dockerfile、Compose 和部署文档，当前预览状态与正式容器交付是两件事。
+
+当前工作区正在加入默认关闭短码及旧 `/x` 兼容、旧 bearer 轮换、请求路径
+access log 抑制、容器日志上限和 SQLite 每连接外键启用。这些改动必须在最终
+clean commit 上通过完整 VPS 回归、数据库迁移检查和制品级烟测；在此之前只能
+称为待验证发布加固，不能写成已经进入主线或已经部署。
 
 ## 已完成并进入主线
 
@@ -72,7 +81,8 @@ Agent 路径和更广外部环境仍未闭环，不能宣布完整替代 MMWX。
 
 - 用户、节点、套餐、套餐分配、有效期、流量周期、配额、限速和连接数限制已完成。
 - Clash、Surge、sing-box、Xray、URI list 和 Base64 订阅格式已完成，支持不兼容节点过滤。
-- 订阅 token、短码、自定义短码、旧 `/x` 链接、临时分享链接和链接重置已完成。
+- 长订阅 token、临时分享链接和链接重置已完成。短码、自定义短码和旧
+  `/x` 链接已有兼容实现；首发加固正在把它们改为默认关闭，尚待最终验证。
 - 套餐节点别名、自动速度规则、用户级配额/速度/连接覆盖和原生执行已完成。
 - Clash/Surge 公共及个人模板、默认模板、草稿预览、导入导出和删除保护已完成。
 - 用户、套餐、Server 和节点的编辑、撤销、两阶段删除、运行时清理和历史保留已完成。
@@ -84,7 +94,8 @@ Agent 路径和更广外部环境仍未闭环，不能宣布完整替代 MMWX。
 - `/account` 用户门户、登录、密码管理、设备会话撤销、TOTP 和一次性恢复码已完成。
 - 管理员可创建绑定套餐的一次性注册邀请。系统只存 token 的 SHA-256 摘要，领取时原子创建用户、账户、套餐分配和运行时授权。
 - 邀请 token 放在 `/account#invite=...` 片段中，不进入首个 HTTP 请求和访问日志。
-- 旧 MMWX bcrypt 密码、TOTP、恢复码、订阅 key、套餐分配、多文件 profile 和兼容 `/x` 链接支持预览后事务导入。
+- 旧 MMWX bcrypt 密码、TOTP、恢复码、订阅 key、套餐分配和多文件 profile
+  支持预览后事务导入；兼容 `/x` 链接只属于显式启用的受控迁移模式。
 - 源系统管理员会降级为普通产品用户，旧 session 和 API token 不导入。
 
 ### 证书、探针和界面
@@ -107,19 +118,43 @@ Mieru UDP 里程碑在 Debian 12 x86-64 VPS 上完成了以下验证：
 - 订阅客户端烟测使用 Mihomo v1.19.30、sing-box v1.13.19 和固定 Xray，完整 18 变体、URI/Base64、模板 API 与浏览器流程通过。
 - 原生限速烟测的 18 个 TCP 与 18 个 UDP 变体全部通过，包含两种 Mieru underlay、Vision TLS、热更新、连接名额、自动规则、重启持久性和三种视口。
 - 后端全量回归 904 项、Agent 544 项、前端 32 文件/216 项通过；前端类型检查与生产构建、probe-worker 类型检查、Ruff 和目标格式检查通过。
-- 重建 Agent wheel SHA-256 为 `a049c7b76a34341b01c3de6705edd8fa888011054330bb42b9133e371ed552f2`。
+- 该里程碑曾生成 Agent wheel，但后续会进入 wheel metadata 的文档以及当前
+  安全加固已经变化；历史 wheel 哈希不是 0.2.0 最终发布哈希，禁止复用。
 
 已有的 Starlette/httpx 弃用提示、npm install-script 审批提示和前端 bundle 大小提示不是本轮回归。
+以上数字和证据只覆盖 Mieru UDP 基线，不覆盖当前未提交的短链、日志、外键和
+部署加固。最终 Preview 必须在最终 clean commit 上重新跑完整回归并记录新证据。
 
 ## 还没完成
 
-### 尚未实现或尚未闭环
+### 受限 Preview 首发 P0
 
-1. **历史私有资源迁移**：当前系统自己创建的私有 routed node 有完整生命周期，但旧 MMWX 中未记录的私有 ownership、provider/relay-group 关系、Nginx/tunnel 资源和跨对象历史依赖还不能自动发现并清理。这是下一项优先工作。
-2. **部分旧 Agent 迁移**：旧 `securechan-v1` WebSocket 已兼容；旧 HTTP/pull 回调没有伪装成新租约协议，只提供明确迁移路径。
-3. **剩余 host 操作**：独立 Agent 对未实现操作返回 501。更广的 tracing 工具、Linux 发行版和任意现有进程接管仍需逐项实现或验证。
-4. **更广的协议组合**：固定客户端版本覆盖了主要组合，但不能代表所有传输包装、插件、OS 和架构。
-5. **多主机控制面扩展和任意数据库降级**：当前单控制面部署足够运行，但没有把多主机水平扩展和未来任意 schema downgrade 作为已完成能力。
+1. **完成发布安全加固**：默认关闭生成/自定义短码和旧 `/x`，升级旧数据库时
+   轮换 legacy bearer，关闭包含 bearer path 的 Uvicorn/Nginx access log，限制
+   Compose 日志容量，并为每个 SQLite 连接启用外键。当前改动尚未完成最终 VPS
+   回归、旧库迁移、`foreign_key_check` 和浏览器/真实下载验证。
+2. **生成并验证最终制品**：只从最终 clean commit 重建 Agent 0.2.0 wheel、
+   bootstrap、`BUILD.json` 和 `SHA256SUMS`，并以 `BUILD.json`/`SHA256SUMS`
+   作为 revision 与哈希的权威记录。发布后还要
+   从 GitHub 实际下载同一 wheel，完成 WebSocket/HTTP 安装、流量和回滚烟测。
+   当前没有可对外宣称的最终 tag 或 release。
+3. **切换持久控制面**：备份临时预览和配置，构建并保留经过测试的最终镜像，
+   按部署文档切换到持久 Compose、可信 HTTPS 和私有卷。随后验证管理员登录、
+   `/account`、WSS/HTTP Agent、真实流量、日志边界、数据库外键、服务重启和一次
+   隔离恢复。当前 `/tmp` Uvicorn 预览不满足此门槛。
+
+### 首发明确排除，不是 P0
+
+- **历史私有资源迁移**：当前系统自己创建的私有 routed node 有完整生命周期，
+  但旧 MMWX 中未记录的 ownership、provider/relay-group、Nginx/tunnel 和跨对象
+  历史依赖仍不能自动发现并清理。受限 Preview 只承诺新装或逐项审核的受控迁移；
+  要宣称无缝完整替代时再关闭此门槛。
+- **部分旧 Agent 迁移**：旧 `securechan-v1` WebSocket 已兼容；旧 HTTP/pull
+  回调通过切换 WebSocket 或安装独立 Agent 迁移，不属于首发支持路径。
+- **剩余 host 操作和更广组合**：未实现操作返回 501。其他 tracing 工具、Linux
+  发行版、架构、任意进程接管、传输包装和客户端组合不在受限首发支持矩阵。
+- **多主机和任意降级**：首发只支持单控制面/单 worker，不承诺水平扩展、零停机
+  升级或任意未来 schema downgrade；回退依赖已验证镜像和升级前完整备份。
 
 ### 已有实现，但缺少外部环境证明
 
@@ -147,7 +182,11 @@ Mieru UDP 里程碑在 Debian 12 x86-64 VPS 上完成了以下验证：
 
 官方协议说明：<https://github.com/enfein/mieru/blob/main/docs/protocol.md#udp-associate-encapsulation>
 
-下一轮建议从**历史私有资源迁移**开始：先建立旧 ownership、provider/relay-group、Nginx/tunnel 和跨对象依赖的只读发现清单与不可变 fixture，再设计预览、冲突处理、事务导入和可恢复清理。不要在没有来源证据时猜测资源归属。
+下一轮应先完成**受限 Preview 发布闭环**：验证并提交当前安全加固，从最终 clean
+commit 重建四项 Agent 制品并完成 GitHub 实下载烟测，再把临时 `/tmp` 预览切换到
+持久 Compose，完成 HTTPS、备份和隔离恢复验收。历史私有资源发现与导入仍是完整原地
+替换所需工作，但不阻断新装或受控迁移范围内的首个 Preview；后续开展时仍不得在没有
+来源证据时猜测资源归属。
 
 ## 接手续查
 

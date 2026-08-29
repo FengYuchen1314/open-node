@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     session_lifetime_seconds: int = Field(default=43200, ge=60, le=604800)
     session_idle_seconds: int = Field(default=1800, ge=60, le=86400)
     subscriber_totp_key: SecretStr | None = None
+    short_links_enabled: bool = False
     certificate_state_dir: Path = Path("./data/certificates")
     certificate_lego_binary: Path | None = None
     certificate_ca_file: Path | None = None

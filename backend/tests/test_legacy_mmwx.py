@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from open_node.core.config import Settings
 from open_node.main import create_app
 from open_node.services.inventory import (
+    LEGACY_SUBSCRIPTION_BEARER_GENERATION,
+    SECURE_SUBSCRIPTION_BEARER_GENERATION,
     ProductUserModel,
     ProductUserSubscriptionTokenModel,
 )
@@ -43,10 +45,11 @@ def bundle(username="alice", **changes):
     return {"version": 1, "source_revision": "main-test", "users": [user]}, recovery
 
 
-def app(tmp_path, *, key=True):
+def app(tmp_path, *, key=True, short_links=True):
     settings = Settings(
         database_url=f"sqlite:///{tmp_path / 'legacy.db'}",
         subscriber_totp_key=Fernet.generate_key().decode() if key else None,
+        short_links_enabled=short_links,
     )
     application = create_app(settings)
     return application, authenticated_client(application)
@@ -118,6 +121,7 @@ def test_import_preserves_login_totp_recovery_and_subscription_token(tmp_path):
             "lga",
             "legacy_link",
         )
+        assert token.bearer_generation == LEGACY_SUBSCRIPTION_BEARER_GENERATION
 
     subscriber = TestClient(application, base_url="https://testserver")
     attempt = login(subscriber, password=PASSWORD)
@@ -132,6 +136,32 @@ def test_import_preserves_login_totp_recovery_and_subscription_token(tmp_path):
     rendered = subscriber.get("/api/v1/subscribe/legacy-token-alice-1234567890?format=xray")
     assert rendered.status_code == 200
     assert rendered.headers["Cache-Control"] == "no-store"
+
+
+def test_default_import_rotates_legacy_bearer_and_aliases_once(tmp_path):
+    application, operator = app(tmp_path, short_links=False)
+    _, _, _, plan_id = create_catalog_fixture(operator)
+    operator.post("/api/v1/users/alice/plan", json={"plan_id": plan_id}).raise_for_status()
+    source, _ = bundle(totp_enabled=False, totp_secret=None, recovery_code_hashes=[])
+    state = preview(operator, source)
+    apply(operator, source, state).raise_for_status()
+
+    current = operator.get("/api/v1/users/alice/subscription-token").json()["subscription"]
+    assert current["token"] != "legacy-token-alice-1234567890"
+    assert len(current["token"]) >= 43
+    assert current["generated_short_code"] != "lga"
+    assert current["custom_short_code"] is None
+    with application.state.inventory._session() as session:
+        token = session.get(ProductUserSubscriptionTokenModel, "alice")
+        assert token.bearer_generation == SECURE_SUBSCRIPTION_BEARER_GENERATION
+
+    for legacy_key in ("legacy-token-alice-1234567890", "lga", "legacy_link"):
+        assert operator.get(f"/api/v1/subscribe/{legacy_key}").status_code == 404
+    assert operator.get(current["subscription_url"]).status_code == 200
+
+    _, restarted = app(tmp_path, short_links=False)
+    after_restart = restarted.get("/api/v1/users/alice/subscription-token").json()["subscription"]
+    assert after_restart == current
 
 
 def test_existing_state_is_skipped_or_explicitly_replaced_and_sessions_are_revoked(tmp_path):
@@ -338,3 +368,7 @@ def test_import_maps_packages_profiles_assignments_and_legacy_x_links(tmp_path):
         "Raw managed",
     ]
     assert "/x/moblegacy_link" in assigned.json()["profiles"][0]["subscription_url"]
+
+    application.state.settings.short_links_enabled = False
+    assert operator.get("/x/phone?format=xray").status_code == 404
+    assert subscriber.get("/api/v1/account/subscription-profiles").json()["profiles"] == []

@@ -76,9 +76,12 @@ This document records the starting source map for the Open Node refactor.
      optional agent `batch-apply` command dispatch.
    - Done: Vue subscription workspace for catalog entry, plan assignment, and
      latest provisioning batch inspection.
-   - Done: public subscription token/short-code links, stable per-user
-     per-node credentials, Clash YAML rendering, and subscription userinfo
-     headers from latest telemetry.
+   - Done: public long-token subscription links, stable per-user per-node
+     credentials, Clash YAML rendering, and subscription userinfo headers from
+     latest telemetry. Compatibility-only custom short codes and legacy `/x`
+     routes are implemented, but the release candidate defaults them off. The
+     default-off path and legacy bearer rotation still require final release
+     regression.
    - Done: coordinated multi-server change sets with atomic node reservations,
      persisted cross-node dependencies, prior-work draining, automatic failure
      compensation, in-flight rollback barriers, retry history and explicit
@@ -174,7 +177,8 @@ This document records the starting source map for the Open Node refactor.
    - Done: compatibility wrappers for the active non-stream Xray/nginx
      install/remove child endpoints while keeping stream wrappers as the
      default UI operations.
-   - Next: deeper Xray runtime integration.
+   - Next for the first Preview: finish the release security regression,
+     artifact verification, and persistent deployment acceptance.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.
@@ -207,12 +211,39 @@ This document records the starting source map for the Open Node refactor.
      parity with the active agent operational surface.
    - Done: all active `mmw-agent` child route constants now have an Open Node
      command wrapper or documented stream/default equivalent.
-   - Next: deeper Xray runtime integration.
-5. Revisit Xray integration once the agent protocol surface is stable.
+   - This slice inherits the same first-Preview release gates; broader Xray
+     runtime parity is deferred.
+5. Revisit broader Xray integration after the restricted Preview is accepted.
+
+## First Preview Release Boundary
+
+The fastest supportable first release is an explicit prerelease for Debian 12
+`amd64`, one control-plane process/worker, managed non-root Agent/Xray, and new
+installations or controlled migrations. It does not claim seamless replacement
+of every historical private MMWX resource.
+
+The remaining first-release P0 work is deliberately narrow:
+
+- complete final validation and commit of the current hardening worktree:
+  short/custom/legacy subscription aliases disabled by default, legacy bearer
+  rotation when compatibility is disabled, access-log suppression and bounded
+  container logs, and SQLite foreign keys enabled on every connection;
+- rebuild the four Agent 0.2.0 release assets from the final clean commit and
+  pass checksum, package-structure, WebSocket/HTTP, upgrade and rollback checks,
+  including a real download from the published GitHub release; and
+- replace the temporary `/tmp` control-plane preview with persistent Compose,
+  then repeat HTTPS, private-volume, backup, isolated-restore and post-deploy
+  checks.
+
+None of those pending items should be described as released or production
+accepted yet. Historical private ownership/provider/relay-group discovery and
+arbitrary legacy host import remain full-parity work, not first-Preview P0.
 
 ## Remaining Runtime Gates
 
-These passing command and snapshot checks do not prove a complete replacement:
+These passing command and snapshot checks do not prove a complete replacement.
+The gates below define broader or in-place replacement boundaries; they are not
+all blockers for the restricted first-Preview support matrix above:
 
 - Remote Agent upgrade, rollback and uninstall now have an explicit host-opt-in
   [lifecycle helper](agent-lifecycle.md), fixed HTTPS release source, wheel pins,
@@ -279,6 +310,8 @@ These passing command and snapshot checks do not prove a complete replacement:
   Subscriber accounts, links, dates and charged traffic remain intact.
   Private ownership, historical/unrecorded dependency discovery, external
   provider/relay-group records and Nginx/tunnel cleanup still require migration.
+  This prevents a seamless in-place full-replacement claim, but does not block a
+  new installation or controlled migration in the first-Preview support scope.
 - User [editing/removal](user-management.md) adds profile/remark changes,
   protected administrator-role subscribers, revision guards and durable
   two-phase removal. Pending users cannot be re-enabled, reassigned or restored
@@ -288,9 +321,12 @@ These passing command and snapshot checks do not prove a complete replacement:
   now cover quota, default/per-node bandwidth and connections, explicit unlimited,
   direct-parent inheritance and shared credentials. Catalog remapping, node/server
   removal and subscriber displays use these settings. [Custom user short codes](subscription-links.md)
-  now support operator/self-service editing, clearing and complete reset with
-  collision and revision guards. Active-main direct and combined `/x` URLs now
-  resolve through imported profiles and explicit package mappings. Privately owned
+  support operator/self-service editing, clearing and complete reset with
+  collision and revision guards. Active-main direct and combined `/x` URLs can
+  resolve through imported profiles and explicit package mappings. These alias
+  paths are compatibility-only and default off in the release candidate; the
+  long high-entropy token remains the supported public bearer, and the default-off
+  behavior still needs final release validation. Privately owned
   routed-node cleanup still requires migration. [Temporary subscription links](temporary-subscriptions.md)
   replace active-main's in-memory eight-character Clash-only shares with durable
   high-entropy records, all six formats, selected current-plan nodes, atomic
@@ -309,7 +345,8 @@ These passing command and snapshot checks do not prove a complete replacement:
   current long/generated/custom user keys with transactional preview, collision
   checks and Argon2id upgrade on login. Package assignments and dates are mapped
   explicitly to existing plans; multi-file assignments become editable subscriber
-  profiles and legacy `/x` file/package combinations remain usable. Source
+  profiles and legacy `/x` file/package combinations remain usable only when the
+  operator explicitly enables migration compatibility. Source
   administrators are demoted and old sessions/API tokens are not imported. Raw
   uploads and legacy templates/rules/scripts require managed reconfiguration;
   open anonymous registration and third-party identity providers remain
@@ -364,8 +401,10 @@ These passing command and snapshot checks do not prove a complete replacement:
   See [change-sets.md](change-sets.md) for the explicit failure/review contract.
 - Single-image FastAPI/Vue packaging, non-root read-only Compose deployment,
   HTTPS reverse proxy, administrator initialization/recovery, persistent-volume
-  backup/restore, and explicit image rollback are implemented. The actual
-  deployment has passed desktop/mobile browser workflows on the VPS. Complete
-  broader operator workflows and the remaining runtime gates before calling
-  the product a full public replacement. Multi-host scaling and arbitrary
+  backup/restore, and explicit image rollback are implemented. Desktop/mobile
+  browser workflows have passed on the current temporary `/tmp` VPS preview; it
+  is not the persistent Compose release deployment. The Compose switch plus
+  backup, isolated restore, HTTPS and post-deploy rechecks remain first-Preview
+  P0. Complete broader operator workflows and the remaining runtime gates before
+  calling the product a full public replacement. Multi-host scaling and arbitrary
   future database downgrades are not covered. See [deployment.md](deployment.md).

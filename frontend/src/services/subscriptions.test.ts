@@ -120,6 +120,7 @@ const subscriptionToken = {
   revision: "a".repeat(64),
   subscription_url: "http://testserver/api/v1/subscribe/token_1",
   short_url: "http://testserver/api/v1/subscribe/abcd1234",
+  short_links_enabled: true,
   created_at: timestamp,
   updated_at: timestamp,
 };

@@ -210,6 +210,7 @@ class ProductUserSubscriptionTokenRead(BaseModel):
     revision: str
     subscription_url: str
     short_url: str
+    short_links_enabled: bool
     created_at: datetime
     updated_at: datetime
 

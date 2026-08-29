@@ -59,6 +59,8 @@ def render_legacy_mmwx_subscription(
     t: str | None = None,
     node_id: UUID | None = None,
 ):
+    if not request.app.state.settings.short_links_enabled:
+        raise HTTPException(404, "Subscription not found")
     profiles = request.app.state.inventory._subscription_profiles()
     selected_format = profiles.legacy_format(t, client_format)
     try:

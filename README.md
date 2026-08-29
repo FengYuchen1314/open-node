@@ -59,16 +59,37 @@ pinned lego. The deployment guide covers HTTPS, administrator initialization,
 private persistent storage, backup/restore, upgrades, and explicit rollback.
 No development server is needed. The actual Compose setup has been exercised
 on the VPS with HTTPS desktop/mobile browser workflows and volume recovery.
-Remaining migration gates still apply; this is not yet full MMWX parity.
+The currently running VPS instance is still a temporary `/tmp` preview, not the
+persistent Compose deployment described by that guide. The first Preview release
+is not accepted until the final tested image is switched to persistent Compose,
+backed up, restored in isolation, and rechecked through HTTPS. Remaining migration
+boundaries still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
 
-[Legacy MMWX identities](docs/legacy-mmwx-identities.md) now have a mode-0600
+The current milestone is a restricted Agent 0.2.0 Preview release and persistent
+control-plane cutover, not another parity expansion. Its supported scope is a
+new installation or controlled migration on Debian 12 amd64, one control-plane
+process and worker, and non-root managed Agents/Xray. Historical discovery of
+unrecorded private MMWX ownership and dependencies remains important for a full
+replacement, but it is not a blocker for this deliberately bounded first release.
+
+Release hardening is still in progress. The current worktree defaults generated,
+custom and legacy `/x` bearer aliases off, rotates legacy subscription bearers
+when that compatibility mode is disabled, suppresses request-path access logs,
+bounds container logs, and enables SQLite foreign-key enforcement on every
+connection. These changes are not part of the last recorded green baseline and
+must pass the complete VPS regression, exact-artifact checks, and final deployment
+acceptance before they can be described as released.
+
+[Legacy MMWX identities](docs/legacy-mmwx-identities.md) have a mode-0600
 SQLite exporter and administrator-only preview/import. Existing bcrypt hashes are
-upgraded to Argon2id on successful login; TOTP seeds, unused recovery hashes and
-all three per-user subscription keys are preserved. Administrators explicitly map
+upgraded to Argon2id on successful login; TOTP seeds and unused recovery hashes are
+preserved. The secure default rotates imported subscription bearers once; explicit
+migration compatibility preserves all three legacy key forms. Administrators map
 legacy packages to Open Node plans; multi-file assignments become selectable
-subscription profiles, and direct plus combined legacy `/x` links keep resolving.
+subscription profiles. Direct and combined legacy `/x` links require the
+migration-only short-link compatibility option and are unavailable by default.
 Raw uploads and legacy templates/rules/scripts require managed reconfiguration.
 
 [Temporary subscription links](docs/temporary-subscriptions.md) let an
@@ -79,14 +100,17 @@ recheck the source subscriber on every download. Expiry or revocation blocks
 future downloads but does not revoke credentials already downloaded.
 
 [Subscription IP access](docs/subscription-ip-access.md) optionally limits each
-subscriber's long, short and compatible `/x` links to normalized IPv4/IPv6 hosts
-or CIDR networks. Administrators and the subscriber can edit the policy without
-rotating credentials; denied sources receive the same response as unknown links.
+subscriber's long link and, when compatibility is explicitly enabled, short and
+legacy `/x` links to normalized IPv4/IPv6 hosts or CIDR networks. Administrators
+and the subscriber can edit the policy without rotating credentials; denied
+sources receive the same response as unknown links.
 
-[Custom subscription short codes](docs/subscription-links.md) can be edited
-by administrators and subscribers, with collision/revision protection, original
-key preservation and complete link reset. Subscriber edits require password
-and second-factor proof; no Agent restart is needed.
+[Custom subscription short codes](docs/subscription-links.md) are a migration-only
+compatibility feature and default to disabled. The supported public bearer is the
+long 256-bit token. When an operator deliberately enables compatibility on a
+restricted endpoint, administrators and subscribers can edit short codes with
+collision/revision protection; subscriber edits require password and second-factor
+proof, and no Agent restart is needed.
 
 [Subscriber limits](docs/user-limits.md) add per-user traffic quotas, bandwidth
 and connection overrides, including per-node and parent inheritance. The
@@ -188,7 +212,7 @@ Account contact editing and exact-version
 revocation include crash reconciliation and persistent duplicate protection.
 Public-CA/provider-account staging remains a separate gate.
 
-The first milestone establishes the project skeleton, the no-license contract,
+The implemented product surface includes the project skeleton, the no-license contract,
 persisted server/agent inventory, agent telemetry and command slices, initial
 agent operation, maintenance, diagnostic, and config-preparation wrappers, and
 Xray/nginx config plus agent setting wrappers, high-level runtime/site

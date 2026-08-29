@@ -48,4 +48,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=20s --timeout=5s --start-period=20s --retries=3 \
   CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
 ENTRYPOINT ["open-node-entrypoint"]
-CMD ["uvicorn", "open_node.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
+CMD ["uvicorn", "open_node.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--no-access-log"]

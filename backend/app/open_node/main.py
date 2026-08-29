@@ -152,7 +152,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = active_settings
     app.state.agent_identity = identity
     app.state.auth = AuthStore(active_settings.database_url)
-    app.state.inventory = InventoryStore(active_settings.database_url)
+    app.state.inventory = InventoryStore(
+        active_settings.database_url,
+        short_links_enabled=active_settings.short_links_enabled,
+    )
     app.state.inventory.create_schema()
     app.state.subscriber_auth = SubscriberAuthStore(app.state.inventory, active_settings)
     app.state.certificates = CertificateStore(active_settings, app.state.inventory)
