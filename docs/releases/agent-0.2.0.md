@@ -125,3 +125,21 @@ forward real VLESS traffic, and roll back successfully over both WebSocket and
 HTTP. If the public-download smoke, release-asset digests, tag target, or
 `BUILD.json` revision do not match, the prerelease is not accepted and must not
 be presented as verified.
+
+## Acceptance Record
+
+The prerelease was accepted on 2026-08-29 UTC. The annotated
+`agent-v0.2.0` tag and `BUILD.json` both resolve to
+`3bf30c0b488efe6575927d01acca07f6dc0b3662`. GitHub exposes exactly the four
+specified assets with these SHA-256 digests:
+
+- wheel: `07c0a582b009d1a9eee07eb17e4dd39fa6c5a7b8db986db0cf8543fedc2feb8a`
+- bootstrap: `4584ef44ceaef72d89c145ecd98c2f755600ff6050603d0e1bb934d977e67ac3`
+- `BUILD.json`: `73ee3ed0029c17ee8c9954572eceff6f9d6a333e14dbdda0aa44a775c5715c16`
+- `SHA256SUMS`: `0ef57a0f6c5e48d5f0648fe5288b598c5554d7e10d2b557c5a8077ee3c66838c`
+
+All assets were downloaded again without GitHub credentials. Checksums,
+revision, wheel metadata, and bootstrap structure passed. The downloaded wheel
+then passed the real public-release smoke over both WebSocket and HTTP,
+including the default GitHub download, SHA-pinned upgrade, live VLESS traffic,
+rollback, and systemd lifecycle cleanup.

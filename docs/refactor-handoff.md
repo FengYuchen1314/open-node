@@ -4,11 +4,11 @@
 
 这份文件供后续聊天直接接手。开始工作前，以当前 Git、GitHub 和 VPS 状态为准，先核对本文件中的快照，不要只依赖聊天记录。
 
-Mieru UDP 目标转发、首发安全加固和持久 Compose 切换已经完成。当前只剩
-Agent 0.2.0 的 GitHub 公开发布闭环，不应继续扩大完整 MMWX 对等范围。建议在
-新聊天中直接说明：
+Mieru UDP 目标转发、首发安全加固、持久 Compose 切换和 Agent 0.2.0 GitHub
+公开发布闭环已经完成。受限 Preview 范围内没有剩余代码 P0，不应把更广的完整
+MMWX 对等范围误写成这个首发的未完成项。建议在新聊天中直接说明：
 
-> 请先阅读 `docs/refactor-handoff.md`、`docs/migration-map.md` 和 `docs/releases/agent-0.2.0.md`，核对 `cb1eb0c` 安全代码基线，只从包含该基线及文档收尾的最终 clean commit 创建 `agent-v0.2.0` 标签并发布规定的四项制品，再以匿名 GitHub 下载完成 WebSocket/HTTP 发布烟测。不要重做已经验收的安全加固和持久 Compose 切换。公开 HTTPS 与异地加密备份需要操作者提供域名、证书、远端存储和密钥。只处理 `open-node` 主仓库和 `miaomiaowuX` 默认主线，所有测试都放在 `185.99.135.224` 上运行。
+> 请先阅读 `docs/refactor-handoff.md`、`docs/migration-map.md` 和 `docs/releases/agent-0.2.0.md`，核对 `cb1eb0c` 安全代码基线、`agent-v0.2.0` 标签及公开四项制品，不要重做已经验收的安全加固、持久 Compose 切换和 GitHub 实下载烟测。公开 HTTPS 与异地加密备份只有在操作者提供域名、证书、远端存储和密钥后才继续。只处理 `open-node` 主仓库和 `miaomiaowuX` 默认主线，所有测试都放在 `185.99.135.224` 上运行。
 
 ## 固定目标和边界
 
@@ -39,7 +39,7 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 | 开机管理 | `open-node-compose.service` 为 `enabled`、`active`，从 `/opt/open-node/deploy/.env` 启动持久 Compose |
 | 最近部署备份 | `/var/backups/open-node/20260829T123138Z-cb1eb0c`，目录及文件均为 root 私有权限；含状态、配置、源码和精确新旧镜像 |
 | 隔离恢复验收 | 独立 project `open-node-restore-cb1eb0c`、独立 volume、`127.0.0.1:18081`；健康、管理员认证、数据库完整性/计数和 identity seed 连续性通过，验收资源已按 project label 清理 |
-| Agent 0.2.0 发布 | `agent-v0.2.0` 标签、GitHub prerelease 的四项公开制品和匿名实下载烟测尚未完成；这是最后一项首发 P0 |
+| Agent 0.2.0 发布 | annotated tag `agent-v0.2.0` 指向 `3bf30c0b488efe6575927d01acca07f6dc0b3662`；GitHub prerelease 恰好包含四项制品，匿名校验及 WebSocket/HTTP 实下载、升级、流量和回滚烟测均通过 |
 
 VPS 已不再使用 `/tmp` Uvicorn 进程。控制面由持久 Compose 和 systemd 管理，已经
 通过备份、服务重启、Compose down/up 和隔离恢复验收。当前访问方式仍是 SSH 隧道
@@ -136,8 +136,9 @@ x86-64 VPS 的精确 clean worktree 上完成门禁和持久部署验收：
 - 从停止态备份恢复到独立 `open-node-restore-cb1eb0c` project、独立 volume 和
   `127.0.0.1:18081` 后，健康、管理员认证、数据库完整性/记录计数和 identity seed
   连续性均通过；随后只清理该测试 project 的资源，生产 Compose 全程保持 healthy。
-- Agent 0.2.0 的四项私有候选制品已随部署备份保留，但 GitHub tag/release 尚未
-  创建；只有从公开 release 匿名下载并复验的副本才能作为最终发布证据。
+- Agent 0.2.0 的 annotated tag、公开 GitHub prerelease 和四项制品已创建；四项
+  资产从未认证地址下载后通过 `SHA256SUMS`、`BUILD.json`/tag revision、wheel
+  metadata 和 bootstrap 结构校验，下载 wheel 的 WebSocket/HTTP 实发布烟测退出 0。
 
 该提交也包含并保留 Mieru UDP 里程碑的以下运行时证据：
 
@@ -151,23 +152,23 @@ x86-64 VPS 的精确 clean worktree 上完成门禁和持久部署验收：
 后端全量门禁仅有已知的 Starlette/httpx 弃用提示；npm install-script 审批提示和
 前端 bundle 大小提示也没有造成失败。它们不是当前首发阻断。
 
-## 还没完成
+## 剩余边界
 
-### 受限 Preview 首发 P0
+### 受限 Preview 首发 P0 已完成
 
-只剩一项：从包含
-`cb1eb0ca936bcb46099ac972d4d7b46d800e9a54` 安全代码基线及最终文档收尾的 clean
-commit 创建 `agent-v0.2.0` 标签和 prerelease，
-且 release **恰好**包含以下四项制品：
+包含 `cb1eb0ca936bcb46099ac972d4d7b46d800e9a54` 安全代码基线及文档收尾的
+`3bf30c0b488efe6575927d01acca07f6dc0b3662` 已成为 `agent-v0.2.0` annotated tag
+目标。GitHub prerelease **恰好**包含以下四项制品：
 
 - `open_node_agent-0.2.0-py3-none-any.whl`
 - `open-node-agent-bootstrap-0.2.0.tar.gz`
 - `BUILD.json`
 - `SHA256SUMS`
 
-发布后必须从未认证的 GitHub 下载路径取回四项制品，核对 tag、`BUILD.json`、
-`SHA256SUMS` 和 wheel metadata 指向同一提交，再用下载副本完成 WebSocket/HTTP
-安装、真实流量和回滚烟测。安全加固与持久 Compose 已完成，不再属于剩余 P0。
+四项制品已经从未认证的 GitHub 下载路径取回；tag、`BUILD.json`、`SHA256SUMS`、
+wheel metadata 和 bootstrap 结构校验通过。下载 wheel 随后在 WebSocket/HTTP 两种
+模式完成默认 GitHub 再下载、固定哈希升级、真实 VLESS 流量、回滚和 systemd
+生命周期烟测。受限 Preview 首发没有剩余代码 P0。
 
 ### 依赖运营输入，不是代码 P0
 
@@ -217,13 +218,11 @@ commit 创建 `agent-v0.2.0` 标签和 prerelease，
 
 官方协议说明：<https://github.com/enfein/mieru/blob/main/docs/protocol.md#udp-associate-encapsulation>
 
-下一轮只需完成 **Agent 0.2.0 GitHub 发布闭环**：让 `agent-v0.2.0` 标签、
-`BUILD.json` 和四项制品精确指向同一个包含 `cb1eb0c` 安全代码基线的最终 clean
-commit，发布规定的四项制品，并从匿名公开下载路径完成 WebSocket/HTTP 烟测。
-不要重新打开已经验收的安全加固、持久 Compose、同机备份和隔离恢复。公开 HTTPS
-与异地加密备份在操作者提供域名、证书、远端存储和密钥后另行验收。历史私有资源
-发现与导入仍是完整原地替换所需工作，但不阻断新装或受控迁移范围内的首个 Preview；
-后续开展时仍不得在没有来源证据时猜测资源归属。
+受限 Preview 首发已经闭环。下一轮不要重新打开已经验收的安全加固、持久 Compose、
+同机备份、隔离恢复和 Agent 0.2.0 发布烟测。只有在操作者提供域名、证书、远端
+存储和密钥后，才分别开展公开 HTTPS 与异地加密备份验收。历史私有资源发现与导入
+仍是完整原地替换所需工作，但不影响新装或受控迁移范围内的 Preview；后续开展时
+仍不得在没有来源证据时猜测资源归属。
 
 ## 接手续查
 
@@ -232,7 +231,8 @@ commit，发布规定的四项制品，并从匿名公开下载路径完成 WebS
 ```powershell
 git status --short
 git rev-parse HEAD
-git ls-remote origin refs/heads/main refs/tags/agent-v0.2.0
+git ls-remote origin refs/heads/main
+git ls-remote --tags origin "refs/tags/agent-v0.2.0*"
 ssh root@185.99.135.224 "git -C /opt/open-node status --short; git -C /opt/open-node rev-parse HEAD; systemctl is-enabled open-node-compose.service; systemctl is-active open-node-compose.service; curl -fsS http://127.0.0.1:8000/healthz"
 ```
 

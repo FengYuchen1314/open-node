@@ -81,9 +81,10 @@ aliases off; rotates legacy subscription bearers when that compatibility mode
 is disabled; suppresses request-path access logs; bounds container logs; and
 enables SQLite foreign-key enforcement on every connection. These controls
 passed the complete VPS regression, exact-image inspection, and persistent
-Compose acceptance. They establish the current control-plane Preview baseline;
-they do not claim that an Agent 0.2.0 artifact has been published as a GitHub
-release.
+Compose acceptance. They establish the current control-plane Preview baseline.
+The `agent-v0.2.0` GitHub prerelease is now published from final release commit
+`3bf30c0` and has passed anonymous asset verification plus the real WebSocket
+and HTTP download, upgrade, forwarding, and rollback smoke.
 
 [Legacy MMWX identities](docs/legacy-mmwx-identities.md) have a mode-0600
 SQLite exporter and administrator-only preview/import. Existing bcrypt hashes are

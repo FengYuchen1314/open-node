@@ -177,9 +177,9 @@ This document records the starting source map for the Open Node refactor.
    - Done: compatibility wrappers for the active non-stream Xray/nginx
      install/remove child endpoints while keeping stream wrappers as the
      default UI operations.
-   - Next for the first Preview: publish the verified Agent prerelease and pass
-     its anonymous GitHub download and real-release smoke. Public HTTPS remains
-     an operator-supplied deployment step.
+   - Done: the verified Agent prerelease is published and its anonymous GitHub
+     download and real-release smoke passed. Public HTTPS remains an
+     operator-supplied deployment step.
 4. Port probe read-only API and public status UI.
    - Done: HTTP public probe payload and series endpoints plus the Vue Probe
      view.
@@ -237,11 +237,12 @@ The hardened `cb1eb0c` baseline has completed the local release gates:
   volume. Backup, container/service restart, Compose down/up and an isolated
   restore have been exercised.
 
-The remaining release P0 is the public GitHub Agent prerelease: create the
-`agent-v0.2.0` tag at the `BUILD.json` revision, upload exactly the four verified
-assets, anonymously download them again, verify `SHA256SUMS`, and pass the real
-release WebSocket/HTTP upgrade, forwarding and rollback smoke. Do not describe
-the Agent as published before that completes.
+The restricted release P0 is complete. The annotated `agent-v0.2.0` tag points
+to final release commit `3bf30c0b488efe6575927d01acca07f6dc0b3662`, the
+`BUILD.json` revision matches, and the GitHub prerelease contains exactly the
+four specified assets. All four were downloaded again without GitHub
+credentials, `SHA256SUMS` passed, and the downloaded wheel passed the real
+release WebSocket/HTTP download, upgrade, VLESS forwarding, and rollback smoke.
 
 The current control plane remains an SSH-tunnel Preview. Public HTTPS requires
 operator-provided domain/DNS, a client-trusted certificate and the external
