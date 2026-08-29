@@ -24,8 +24,11 @@ recovery when both the authenticator and recovery codes have been lost.
 Login settings use a revision guard. Stale dialogs must reload before they
 can reset a password. The administrative API uses a `username` query parameter
 so names containing `/` are supported without changing older inventory URLs.
-Legacy MMWX password hashes and authenticator seeds are not imported by the
-catalog importer. Provision new passwords during migration.
+The catalog importer still excludes authentication state. Use the separate
+[legacy MMWX identity migration](legacy-mmwx-identities.md) to preview and import
+bcrypt hashes, authenticator seeds, unused recovery hashes and current user-level
+subscription keys. Existing Open Node identities are preserved unless replacement
+is explicitly selected.
 
 ## Authenticator Key
 
@@ -43,6 +46,10 @@ or secret manager. For Compose, set it in the mode-0600 `deploy/.env` file and
 recreate the service. Keep a separate private backup of this key together
 with the deployment configuration. Do not commit it, log it or regenerate it
 at every start. Key rotation/re-encryption is not automated.
+
+An imported MMWX bcrypt hash is upgraded atomically to Argon2id after the first
+successful password check. Imported legacy recovery hashes remain one-use, but
+their original codes have only 32 bits of randomness; replace them after migration.
 
 An empty setting leaves password login working but makes new TOTP enrollment
 unavailable. Losing or replacing a configured key prevents authenticator-code
@@ -141,6 +148,11 @@ All paths below are relative to `/api/v1/account`:
 The administrator-only `GET` and `PUT /api/v1/subscriber-accounts?username=...`
 read login status and provision/reset the password. No subscriber cookie can
 authorize those routes.
+
+Administrator-only legacy migration routes live under
+`/api/v1/migrations/mmwx/identities`. They use the normal administrator session,
+CSRF protection, sanitized errors, no-store responses, revision checks and exact
+user-count confirmation. They are not available to subscriber sessions.
 
 ## VPS Verification
 

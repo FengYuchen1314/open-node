@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pyotp
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import JSON, Float, ForeignKey, Integer, String, delete, select
+from sqlalchemy import JSON, Float, ForeignKey, Integer, String, delete, select, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 from open_node.domain.subscriber_auth import (
@@ -156,9 +156,21 @@ class SubscriberAuthStore:
             account = session.get(SubscriberAccount, username)
             hashed = account.password_hash if account else dummy_hash
             version = account.version if account else None
-        valid = password_hash.verify(password, hashed)
+        valid, replacement = password_hash.verify_and_update(password, hashed)
         if not valid or version is None:
             raise SubscriberAuthenticationError("Invalid credentials")
+        if replacement:
+            with self.inventory._coordinated_session() as session:
+                session.execute(
+                    update(SubscriberAccount)
+                    .where(
+                        SubscriberAccount.username == username,
+                        SubscriberAccount.password_hash == hashed,
+                        SubscriberAccount.version == version,
+                    )
+                    .values(password_hash=replacement)
+                )
+                session.commit()
         return version
 
     def _check_proof(self, session, identity, proof, version):
@@ -493,6 +505,15 @@ class SubscriberAuthStore:
         if not account.totp_secret:
             return True
         normalized = code.strip().replace("-", "").lower()
+        if re.fullmatch(r"[a-f0-9]{8}", normalized):
+            target = "legacy:" + digest(normalized)
+            for item in account.recovery_hashes:
+                if compare_digest(target, item):
+                    account.recovery_hashes = [
+                        entry for entry in account.recovery_hashes if entry != item
+                    ]
+                    return True
+            return False
         if re.fullmatch(r"[a-f0-9]{20}", normalized):
             hashed = digest(account.username + ":" + normalized)
             for item in account.recovery_hashes:

@@ -486,7 +486,7 @@ def test_reset_cannot_race_an_old_password_login(tmp_path, monkeypatch):
     app, _, _ = make(tmp_path)
     service = app.state.subscriber_auth
     verified, resume = Event(), Event()
-    original = module.password_hash.verify
+    original = module.password_hash.verify_and_update
 
     def paused(password, hashed):
         result = original(password, hashed)
@@ -494,7 +494,7 @@ def test_reset_cannot_race_an_old_password_login(tmp_path, monkeypatch):
         assert resume.wait(10)
         return result
 
-    monkeypatch.setattr(module.password_hash, "verify", paused)
+    monkeypatch.setattr(module.password_hash, "verify_and_update", paused)
     with ThreadPoolExecutor(max_workers=1) as pool:
         pending = pool.submit(service.login, "alice", PASSWORD, "test", "test")
         try:

@@ -97,10 +97,12 @@ codes; subscription catalog export intentionally excludes bearer links, and
 catalog imports for existing users leave their token records unchanged.
 Back up the database before upgrading or rolling back.
 
-This is Open Node's subscription-key API, not an implementation of the old
-MMWX `/x/...` combined file/plan/user URL layout. Legacy bearer-link migration
-and the remaining file/template and private-node ownership work still need
-separate verification; see [migration-map.md](migration-map.md).
+The [legacy identity importer](legacy-mmwx-identities.md) preserves a user's long,
+generated and custom key values; those keys resolve through Open Node's renderer
+after plan assignment. This is still not an implementation of the old MMWX
+`/x/...` combined file/plan/user URL layout. File-to-plan mapping, combined-path
+compatibility and private-node ownership need separate migration; see
+[migration-map.md](migration-map.md).
 
 ## Verification
 

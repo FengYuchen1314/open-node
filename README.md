@@ -38,6 +38,9 @@ Subscribers use the separate `/account` portal. Administrators provision their
 login passwords from Subscriptions; product-user roles never grant controller
 access. [Subscriber accounts](docs/subscriber-accounts.md) covers subscription
 downloads, usage, device sessions, password recovery and optional TOTP.
+[Legacy MMWX identity migration](docs/legacy-mmwx-identities.md) can preserve
+bcrypt logins, TOTP/recovery state and current per-user subscription keys through
+a transactional preview/import workflow.
 Both workspaces include free [custom Clash and Surge templates](docs/subscription-templates.md)
 with personal permissions, plan/system defaults, draft preview and catalog portability.
 
@@ -52,6 +55,12 @@ on the VPS with HTTPS desktop/mobile browser workflows and volume recovery.
 Remaining migration gates still apply; this is not yet full MMWX parity.
 
 ## Current Milestone
+
+[Legacy MMWX identities](docs/legacy-mmwx-identities.md) now have a mode-0600
+SQLite exporter and administrator-only preview/import. Existing bcrypt hashes are
+upgraded to Argon2id on successful login; TOTP seeds, unused recovery hashes and
+all three per-user subscription keys are preserved. Multi-file assignments and
+legacy `/x` combined links remain a separate migration gate.
 
 [Custom subscription short codes](docs/subscription-links.md) can be edited
 by administrators and subscribers, with collision/revision protection, original

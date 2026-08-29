@@ -58,6 +58,25 @@ cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
 
+## Legacy MMWX Identity Smoke
+
+With the frontend built and an Xray binary available on the VPS:
+
+```bash
+PYTHONPATH=backend/app backend/.venv/bin/python \
+  scripts/vps/smoke-legacy-mmwx.py \
+  --xray /absolute/path/to/xray \
+  --output /tmp/open-node-legacy-mmwx-screenshots
+```
+
+The isolated fixture creates an active-main-shaped MMWX SQLite database, runs the
+mode-0600 exporter, uploads the result through the Vue preview/confirmation dialog
+and verifies secret clearing. It then checks bcrypt-to-Argon2id upgrade, original
+TOTP, one-use legacy recovery, source-admin demotion, all three imported user keys
+and real VLESS forwarding. Screenshots and overflow checks cover 1440px, 390px and
+320px. See [legacy-mmwx-identities.md](legacy-mmwx-identities.md) for the deliberate
+multi-file and `/x` boundary.
+
 ## Subscriber Limit Smoke
 
 On the designated VPS, with the frontend built and the independent Agent wheel

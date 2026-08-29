@@ -4,13 +4,15 @@ from secrets import token_urlsafe
 from time import time
 
 from pwdlib import PasswordHash
+from pwdlib.hashers.argon2 import Argon2Hasher
+from pwdlib.hashers.bcrypt import BcryptHasher
 from sqlalchemy import Float, Integer, String, delete, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from open_node.services.inventory import create_inventory_engine
 
-password_hash = PasswordHash.recommended()
+password_hash = PasswordHash((Argon2Hasher(), BcryptHasher()))
 dummy_hash = password_hash.hash(token_urlsafe(32))
 
 

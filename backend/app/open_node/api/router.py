@@ -6,6 +6,7 @@ from open_node.api.routes import (
     auth,
     certificates,
     changes,
+    legacy_mmwx,
     license,
     node_management,
     plan_management,
@@ -26,6 +27,7 @@ private_router.include_router(servers.router)
 private_router.include_router(server_management.router)
 private_router.include_router(certificates.router)
 private_router.include_router(changes.router)
+private_router.include_router(legacy_mmwx.router)
 private_router.include_router(probe.router)
 private_router.include_router(subscriptions.router)
 private_router.include_router(plan_management.router)

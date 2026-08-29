@@ -292,8 +292,12 @@ These passing command and snapshot checks do not prove a complete replacement:
   device revocation, encrypted TOTP enrollment and one-use recovery codes.
   Product-user roles do not grant controller access. Disablement, removal and
   password reset revoke old sessions; reactivation cannot revive them. The
-  subscriber UI is available at `/account`. Legacy password/seed import,
-  public registration and third-party identity providers are not implemented.
+  subscriber UI is available at `/account`. [Legacy identity migration](legacy-mmwx-identities.md)
+  now exports/imports active-main bcrypt hashes, TOTP seeds, recovery hashes and
+  current long/generated/custom user keys with transactional preview, collision
+  checks and Argon2id upgrade on login. Source administrators are demoted and old
+  sessions/API tokens are not imported. Multi-file assignment, combined `/x`
+  links, public registration and third-party identity providers remain unimplemented.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both

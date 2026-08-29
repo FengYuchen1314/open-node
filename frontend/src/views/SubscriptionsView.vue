@@ -8,6 +8,7 @@ import type { AutoSpeedRule } from "../domain/auto-speed";
 import UserManagementDialog from "../components/UserManagementDialog.vue";
 import UserLoginDialog from "../components/UserLoginDialog.vue";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog.vue";
+import LegacyMMWXImportDialog from "../components/LegacyMMWXImportDialog.vue";
 import NodeManagementDialog from "../components/NodeManagementDialog.vue";
 import type { NodeOperation } from "../services/node-management";
 import type { UserOperation } from "../services/user-management";
@@ -71,6 +72,7 @@ const planManagement = reactive({ id: "", mode: "edit" as PlanOperation, open: f
 const userManagement = reactive({ username: "", mode: "edit" as UserOperation, removalId: null as string | null, open: false });
 const userLogin = reactive({ username: "", open: false });
 const shortCode = reactive({ username: "", open: false });
+const legacyMMWX = reactive({ open: false });
 function shortCodeSaved(value: ProductUserSubscriptionToken) {
   if (assignForm.username === value.username) subscriptionToken.value = value;
 }
@@ -1650,6 +1652,14 @@ function formatBytes(value: number) {
             >
               Import
             </v-btn>
+            <v-btn
+              prepend-icon="mdi-account-arrow-right-outline"
+              size="small"
+              variant="outlined"
+              @click="legacyMMWX.open = true"
+            >
+              MMWX identities
+            </v-btn>
           </div>
           <v-textarea
             v-model="catalogForm.catalogText"
@@ -1792,6 +1802,7 @@ function formatBytes(value: number) {
     <PlanManagementDialog v-model:open="planManagement.open" :id="planManagement.id" :mode="planManagement.mode" :nodes="nodes" @changed="refresh" />
     <UserManagementDialog v-model:open="userManagement.open" :username="userManagement.username" :mode="userManagement.mode" :removal-id="userManagement.removalId" :nodes="nodes" @changed="refresh" />
     <SubscriptionShortCodeDialog v-model:open="shortCode.open" :username="shortCode.username" @saved="shortCodeSaved" />
+    <LegacyMMWXImportDialog v-model:open="legacyMMWX.open" @imported="refresh" />
     <UserLoginDialog v-model:open="userLogin.open" :username="userLogin.username" />
     <NodeManagementDialog v-model:open="nodeManagement.open" :id="nodeManagement.id" :mode="nodeManagement.mode" :nodes="nodes" @changed="refresh" />
   </div>

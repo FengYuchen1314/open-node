@@ -83,17 +83,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             active_settings.api_prefix + "/account/"
         )
 
+    def secret_request(request):
+        return subscriber_request(request) or request.url.path.startswith(
+            active_settings.api_prefix + "/migrations/mmwx/"
+        )
+
     @app.middleware("http")
     async def private_subscriber_responses(request, call_next):
         response = await call_next(request)
-        if subscriber_request(request):
+        if secret_request(request):
             response.headers["Cache-Control"] = "no-store"
             response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
-        if subscriber_request(request):
+        if secret_request(request):
             return JSONResponse(
                 status_code=422,
                 content={
