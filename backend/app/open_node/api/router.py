@@ -15,6 +15,7 @@ from open_node.api.routes import (
     server_management,
     servers,
     subscriber_auth,
+    subscription_profiles,
     subscription_templates,
     subscriptions,
     system,
@@ -30,6 +31,7 @@ private_router.include_router(changes.router)
 private_router.include_router(legacy_mmwx.router)
 private_router.include_router(probe.router)
 private_router.include_router(subscriptions.router)
+private_router.include_router(subscription_profiles.router)
 private_router.include_router(plan_management.router)
 private_router.include_router(user_management.router)
 private_router.include_router(node_management.router)

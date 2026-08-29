@@ -40,7 +40,9 @@ access. [Subscriber accounts](docs/subscriber-accounts.md) covers subscription
 downloads, usage, device sessions, password recovery and optional TOTP.
 [Legacy MMWX identity migration](docs/legacy-mmwx-identities.md) can preserve
 bcrypt logins, TOTP/recovery state and current per-user subscription keys through
-a transactional preview/import workflow.
+a transactional preview/import workflow. It also imports active-main package
+assignments and multi-file subscription profiles through explicit plan mappings,
+including compatible legacy `/x` links.
 Both workspaces include free [custom Clash and Surge templates](docs/subscription-templates.md)
 with personal permissions, plan/system defaults, draft preview and catalog portability.
 
@@ -59,8 +61,10 @@ Remaining migration gates still apply; this is not yet full MMWX parity.
 [Legacy MMWX identities](docs/legacy-mmwx-identities.md) now have a mode-0600
 SQLite exporter and administrator-only preview/import. Existing bcrypt hashes are
 upgraded to Argon2id on successful login; TOTP seeds, unused recovery hashes and
-all three per-user subscription keys are preserved. Multi-file assignments and
-legacy `/x` combined links remain a separate migration gate.
+all three per-user subscription keys are preserved. Administrators explicitly map
+legacy packages to Open Node plans; multi-file assignments become selectable
+subscription profiles, and direct plus combined legacy `/x` links keep resolving.
+Raw uploads and legacy templates/rules/scripts require managed reconfiguration.
 
 [Custom subscription short codes](docs/subscription-links.md) can be edited
 by administrators and subscribers, with collision/revision protection, original

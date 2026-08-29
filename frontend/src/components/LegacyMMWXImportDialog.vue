@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import type { LegacyMMWXIdentityBundle, LegacyMMWXImportPreview } from "../domain/legacy-mmwx";
+import type { SubscriptionPlan } from "../domain/subscriptions";
 import { importLegacyMMWXIdentities, previewLegacyMMWXIdentities } from "../services/legacy-mmwx";
 
-const props = defineProps<{ open: boolean }>();
+const props = defineProps<{ open: boolean; plans: SubscriptionPlan[] }>();
 const emit = defineEmits<{ "update:open": [value: boolean]; imported: [] }>();
 const input = ref<HTMLInputElement | null>(null);
 const bundle = ref<LegacyMMWXIdentityBundle | null>(null);
@@ -14,6 +15,7 @@ const confirmUserCount = ref<number | null>(null);
 const busy = ref<"preview" | "import" | "">("");
 const error = ref("");
 const success = ref("");
+const packageMappings = reactive<Record<number, string>>({});
 let version = 0;
 
 const canImport = computed(() => !!bundle.value && !!preview.value?.ready && !busy.value
@@ -34,6 +36,7 @@ function reset() {
   busy.value = "";
   error.value = "";
   success.value = "";
+  Object.keys(packageMappings).forEach((key) => delete packageMappings[Number(key)]);
 }
 
 async function selectFile(event: Event) {
@@ -59,6 +62,7 @@ async function selectFile(event: Event) {
       throw new Error("Invalid MMWX identity bundle");
     }
     bundle.value = value as LegacyMMWXIdentityBundle;
+    for (const item of bundle.value.packages ?? []) packageMappings[item.source_id] = "";
     filename.value = file.name;
   } catch (failure) {
     if (current === version) error.value = failure instanceof Error ? failure.message : "Unable to read identity file";
@@ -75,7 +79,9 @@ async function runPreview() {
   error.value = "";
   success.value = "";
   try {
-    const value = await previewLegacyMMWXIdentities(bundle.value, replaceExisting.value);
+    const value = await previewLegacyMMWXIdentities(
+      bundle.value, replaceExisting.value, undefined, mappedPackages(),
+    );
     if (current === version) preview.value = value;
   } catch (failure) {
     if (current === version) error.value = failure instanceof Error ? failure.message : "Migration preview failed";
@@ -96,6 +102,8 @@ async function applyImport() {
       replaceExisting.value,
       preview.value,
       confirmUserCount.value,
+      undefined,
+      mappedPackages(),
     );
     if (current !== version) return;
     preview.value = result.preview;
@@ -108,6 +116,14 @@ async function applyImport() {
   } finally {
     if (current === version) busy.value = "";
   }
+}
+
+function mappedPackages(): Record<number, string> {
+  return Object.fromEntries(
+    Object.entries(packageMappings)
+      .filter(([, planId]) => Boolean(planId))
+      .map(([sourceId, planId]) => [Number(sourceId), planId]),
+  ) as Record<number, string>;
 }
 
 watch(replaceExisting, () => {
@@ -135,6 +151,23 @@ onBeforeUnmount(reset);
         </div>
         <v-switch v-model="replaceExisting" color="warning" hide-details label="Replace existing logins and links" :disabled="Boolean(busy)" />
         <v-alert v-if="replaceExisting" type="warning" variant="tonal">Existing subscriber sessions will be revoked.</v-alert>
+        <div v-if="bundle?.packages?.length" class="package-mappings">
+          <div class="mapping-heading">Package mappings</div>
+          <v-select
+            v-for="item in bundle.packages"
+            :key="item.source_id"
+            v-model="packageMappings[item.source_id]"
+            :items="plans"
+            item-title="name"
+            item-value="id"
+            :label="item.name"
+            clearable
+            density="compact"
+            variant="outlined"
+            hide-details
+            :disabled="Boolean(busy)"
+          />
+        </div>
         <v-btn color="primary" prepend-icon="mdi-magnify" :loading="busy === 'preview'" :disabled="!bundle || Boolean(busy)" @click="runPreview">Preview</v-btn>
 
         <template v-if="preview">
@@ -145,6 +178,8 @@ onBeforeUnmount(reset);
             <v-chip color="info" variant="tonal">TOTP {{ preview.imported_totp }}</v-chip>
             <v-chip color="primary" variant="tonal">Logins {{ preview.imported_accounts + preview.replaced_accounts }}</v-chip>
             <v-chip color="secondary" variant="tonal">Links {{ preview.imported_tokens + preview.replaced_tokens }}</v-chip>
+            <v-chip color="success" variant="tonal">Profiles {{ preview.imported_profiles + preview.replaced_profiles }}</v-chip>
+            <v-chip color="default" variant="tonal">Mappings {{ preview.mapped_packages }}</v-chip>
           </div>
           <v-alert v-for="blocker in preview.blockers" :key="blocker" type="error" variant="tonal">{{ blocker }}</v-alert>
           <v-alert v-for="warning in preview.warnings" :key="warning" type="warning" variant="tonal">{{ warning }}</v-alert>
@@ -178,6 +213,8 @@ onBeforeUnmount(reset);
 .file-input { display: none; }
 .file-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 12px; align-items: center; min-width: 0; font-size: 13px; }
 .preview-counts { display: flex; flex-wrap: wrap; gap: 8px; }
+.package-mappings { display: grid; gap: 12px; }
+.mapping-heading { font-size: 13px; font-weight: 600; color: #42534d; }
 .legacy-dialog :deep(.v-card-actions) { flex-wrap: wrap; }
 @media (max-width: 420px) { .file-row { grid-template-columns: minmax(0, 1fr); } }
 </style>

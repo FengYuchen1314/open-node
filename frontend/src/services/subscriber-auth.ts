@@ -2,6 +2,7 @@ import { reactive } from "vue";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat, SubscriptionQuotaStatus } from "../domain/subscriptions";
 import { authenticatedFetch } from "./auth";
 import type { UserNodeLimits } from "../domain/user-limits";
+import type { SubscriberSubscriptionProfilesResponse } from "../domain/subscription-profiles";
 
 export interface SubscriberSession {
   authenticated: boolean;
@@ -101,6 +102,7 @@ export async function subscriberChangePassword(proof: SubscriberProof, newPasswo
 }
 
 export const subscriberProfile = () => accountRequest<SubscriberProfile>("me");
+export const subscriberProfiles = (fetcher = fetch) => accountRequest<SubscriberSubscriptionProfilesResponse>("subscription-profiles", {}, fetcher);
 export const subscriberSecurity = () => accountRequest<SubscriberSecurity>("security");
 export const subscriberDevices = () => accountRequest<SubscriberDevice[]>("sessions");
 export async function subscriberToken(proof?: SubscriberProof) {

@@ -36,6 +36,12 @@ const preview: LegacyMMWXImportPreview = {
   replaced_tokens: 0,
   skipped_tokens: 0,
   imported_totp: 1,
+  mapped_packages: 0,
+  assigned_plans: 0,
+  imported_profiles: 0,
+  replaced_profiles: 0,
+  skipped_profiles: 0,
+  imported_profile_assignments: 0,
   blockers: [],
   warnings: [],
   license_required: false,
@@ -54,12 +60,13 @@ describe("legacy MMWX identity migration", () => {
       "/api/v1/migrations/mmwx/identities/preview",
       "/api/v1/migrations/mmwx/identities/import",
     ]);
-    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ bundle, replace_existing: false });
+    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ bundle, replace_existing: false, package_mappings: {} });
     expect(JSON.parse(String(calls[1][1]?.body))).toEqual({
       bundle,
       replace_existing: true,
       expected_revision: preview.revision,
       confirm_user_count: 1,
+      package_mappings: {},
     });
     expect(new Headers(calls[0][1]?.headers).get("Content-Type")).toBe("application/json");
   });

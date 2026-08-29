@@ -56,6 +56,7 @@ def test_every_management_route_requires_an_operator(tmp_path: Path):
         ("post", "/api/v1/account/login"),
         ("post", "/api/v1/account/login/verify"),
         ("get", "/api/v1/subscribe/{subscription_key}"),
+        ("get", "/x/{code}"),
         ("get", "/api/v1/license/status"),
         ("get", "/api/v1/healthz"),
         ("get", "/api/v1/meta"),

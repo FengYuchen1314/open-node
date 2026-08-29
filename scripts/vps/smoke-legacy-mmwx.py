@@ -59,6 +59,11 @@ def legacy_database(path, password, totp_secret, recovery_code, token):
                 totp_secret TEXT NOT NULL,
                 totp_enabled INTEGER NOT NULL,
                 recovery_codes TEXT NOT NULL,
+                package_id INTEGER,
+                package_start_date TEXT,
+                package_end_date TEXT,
+                is_reset INTEGER NOT NULL,
+                reset_day INTEGER NOT NULL,
                 created_at TEXT NOT NULL
             );
             CREATE TABLE user_tokens (
@@ -67,12 +72,41 @@ def legacy_database(path, password, totp_secret, recovery_code, token):
                 user_short_code TEXT NOT NULL,
                 custom_user_short_code TEXT NOT NULL
             );
+            CREATE TABLE packages (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                short_code TEXT NOT NULL
+            );
+            CREATE TABLE subscribe_files (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                type TEXT NOT NULL,
+                filename TEXT,
+                template_filename TEXT,
+                file_short_code TEXT NOT NULL,
+                custom_short_code TEXT,
+                selected_tags TEXT,
+                selected_node_ids TEXT,
+                selected_custom_rule_ids TEXT,
+                selected_override_script_ids TEXT,
+                raw_output INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL,
+                expire_at TEXT,
+                created_by TEXT NOT NULL,
+                created_at TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE user_subscriptions (
+                username TEXT NOT NULL,
+                subscription_id INTEGER NOT NULL
+            );
             """
         )
         password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
         recovery_hash = hashlib.sha256(recovery_code.encode()).hexdigest()
         database.execute(
-            "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "alice",
                 password_hash,
@@ -83,12 +117,66 @@ def legacy_database(path, password, totp_secret, recovery_code, token):
                 totp_secret,
                 1,
                 json.dumps([recovery_hash]),
+                7,
+                "2026-08-01T00:00:00Z",
+                "2027-08-01T00:00:00Z",
+                1,
+                1,
                 "2026-01-02T03:04:05Z",
             ),
         )
         database.execute(
             "INSERT INTO user_tokens VALUES (?, ?, ?, ?)",
             ("alice", token, "lga", "legacy_link"),
+        )
+        database.execute("INSERT INTO packages VALUES (7, 'Legacy Package', 'pkg')")
+        database.executemany(
+            "INSERT INTO subscribe_files VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    11,
+                    "Mobile",
+                    "Phone profile",
+                    "create",
+                    "mobile.yaml",
+                    "",
+                    "mob",
+                    "phone",
+                    "[]",
+                    "[]",
+                    "[]",
+                    "[]",
+                    0,
+                    1,
+                    None,
+                    "alice",
+                    "2026-08-01T00:00:00Z",
+                    "2026-08-02T00:00:00Z",
+                ),
+                (
+                    12,
+                    "TV",
+                    "Living room profile",
+                    "create",
+                    "tv.yaml",
+                    "",
+                    "tv",
+                    None,
+                    "[]",
+                    "[]",
+                    "[]",
+                    "[]",
+                    0,
+                    2,
+                    None,
+                    "alice",
+                    "2026-08-01T00:00:00Z",
+                    "2026-08-02T00:00:00Z",
+                ),
+            ],
+        )
+        database.executemany(
+            "INSERT INTO user_subscriptions VALUES ('alice', ?)", [(11,), (12,)]
         )
 
 
@@ -192,9 +280,15 @@ def browser_import(url, admin_password, bundle, output, secrets_to_hide):
             dialog = page.get_by_role("dialog")
             dialog.locator('input[type="file"]').set_input_files(bundle)
             expect(dialog.get_by_text(bundle.name, exact=True)).to_be_visible()
+            package_select = dialog.get_by_label("Legacy Package", exact=True)
+            package_select.focus()
+            package_select.press("ArrowDown")
+            page.get_by_role("option", name="Legacy", exact=True).click()
             dialog.get_by_role("button", name="Preview", exact=True).click()
             expect(dialog.get_by_text("Users 1", exact=True)).to_be_visible()
             expect(dialog.get_by_text("TOTP 1", exact=True)).to_be_visible()
+            expect(dialog.get_by_text("Profiles 2", exact=True)).to_be_visible()
+            expect(dialog.get_by_text("Mappings 1", exact=True)).to_be_visible()
             expect(
                 dialog.get_by_text(
                     "alice: source administrator will import as subscriber"
@@ -247,6 +341,13 @@ def browser_subscriber(url, password, totp_secret, output):
             expect(
                 page.get_by_role("heading", name="Legacy", exact=True)
             ).to_be_visible()
+            expect(page.get_by_label("Configuration", exact=True)).to_be_visible()
+            page.get_by_label("Configuration", exact=True).focus()
+            page.get_by_label("Configuration", exact=True).press("ArrowDown")
+            page.get_by_role("option", name="Mobile", exact=True).click()
+            assert page.locator("input[readonly]").evaluate_all(
+                "elements => elements.some(element => element.value.includes('/x/moblegacy_link'))"
+            )
             assert page.evaluate(
                 "document.documentElement.scrollWidth <= innerWidth + 1"
             )
@@ -419,7 +520,28 @@ def run(args):
                         )
                         response.raise_for_status()
                         assert response.json() == public
-                    live_link(work, args.xray, port, server_client, public)
+                    legacy_profiles = {}
+                    for key in (
+                        "moblegacy_link",
+                        "phone",
+                        "tvlegacy_link",
+                        "pkglegacy_link",
+                    ):
+                        response = httpx.get(
+                            url + "/x/" + key,
+                            params={"format": "xray"},
+                            trust_env=False,
+                        )
+                        response.raise_for_status()
+                        legacy_profiles[key] = response.json()
+                        assert legacy_profiles[key] == public
+                    live_link(
+                        work,
+                        args.xray,
+                        port,
+                        server_client,
+                        legacy_profiles["moblegacy_link"],
+                    )
                     browser_subscriber(url, password, totp_secret, args.output)
                     recovery_login(url, password, recovery_code)
                 with sqlite3.connect(target) as database:
@@ -431,7 +553,7 @@ def run(args):
                     assert json.loads(recovery) == []
                     assert database.execute("PRAGMA foreign_key_check").fetchall() == []
                 print(
-                    "PASS MMWX export, browser preview/import, bcrypt upgrade, TOTP, recovery and live legacy links",
+                    "PASS MMWX packages/profiles, browser mapping, legacy /x links, auth and live forwarding",
                     flush=True,
                 )
             except Exception:

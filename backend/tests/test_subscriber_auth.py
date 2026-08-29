@@ -140,6 +140,7 @@ def test_roles_cookies_and_operator_routes_are_isolated(tmp_path, role):
             or "agents" in path
             or "public" in path
             or "subscribe/" in path
+            or path == "/x/{code}"
             or path.endswith(("healthz", "meta", "license/status"))
             or "/auth/" in path
         ):

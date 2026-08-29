@@ -397,6 +397,10 @@ def render_user_subscription(
     except SubscriptionUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    return rendered_subscription_response(rendered)
+
+
+def rendered_subscription_response(rendered) -> Response:
     headers = {
         "Cache-Control": "no-store",
         "X-Open-Node-Included-Nodes": str(rendered.included_nodes),

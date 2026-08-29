@@ -99,10 +99,11 @@ Back up the database before upgrading or rolling back.
 
 The [legacy identity importer](legacy-mmwx-identities.md) preserves a user's long,
 generated and custom key values; those keys resolve through Open Node's renderer
-after plan assignment. This is still not an implementation of the old MMWX
-`/x/...` combined file/plan/user URL layout. File-to-plan mapping, combined-path
-compatibility and private-node ownership need separate migration; see
-[migration-map.md](migration-map.md).
+after plan assignment. It also restores the active-main `/x/...` direct file,
+file+user and package+user layouts after explicit package-to-plan mapping. Imported
+subscription profiles use the same user availability, quota and credential checks.
+Raw file content and old templates/rules/scripts still require managed
+reconfiguration; see [legacy-mmwx-identities.md](legacy-mmwx-identities.md).
 
 ## Verification
 

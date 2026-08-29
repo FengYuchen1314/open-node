@@ -11,13 +11,48 @@ export interface LegacyMMWXIdentity {
   token: string | null;
   generated_short_code: string | null;
   custom_short_code: string | null;
+  source_package_id?: number | null;
+  package_started_at?: string | null;
+  package_expires_at?: string | null;
+  is_reset?: boolean;
+  reset_day?: number;
   created_at: string | null;
+}
+
+export interface LegacyMMWXPackage {
+  source_id: number;
+  name: string;
+  short_code: string | null;
+}
+
+export interface LegacyMMWXSubscriptionProfile {
+  source_id: number;
+  owner_username: string;
+  name: string;
+  description: string;
+  source_type: "create" | "import" | "upload" | "package";
+  filename: string;
+  template_filename: string;
+  file_short_code: string;
+  custom_short_code: string | null;
+  selected_tags: string[];
+  selected_node_ids: number[];
+  selected_custom_rule_ids: number[];
+  selected_override_script_ids: number[];
+  raw_output: boolean;
+  sort_order: number;
+  expires_at: string | null;
+  assigned_usernames: string[];
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface LegacyMMWXIdentityBundle {
   version: 1;
   source_revision?: string | null;
   users: LegacyMMWXIdentity[];
+  packages?: LegacyMMWXPackage[];
+  subscription_profiles?: LegacyMMWXSubscriptionProfile[];
 }
 
 export interface LegacyMMWXImportPreview {
@@ -33,6 +68,12 @@ export interface LegacyMMWXImportPreview {
   replaced_tokens: number;
   skipped_tokens: number;
   imported_totp: number;
+  mapped_packages: number;
+  assigned_plans: number;
+  imported_profiles: number;
+  replaced_profiles: number;
+  skipped_profiles: number;
+  imported_profile_assignments: number;
   blockers: string[];
   warnings: string[];
   license_required: false;

@@ -9,12 +9,15 @@ import UserManagementDialog from "../components/UserManagementDialog.vue";
 import UserLoginDialog from "../components/UserLoginDialog.vue";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog.vue";
 import LegacyMMWXImportDialog from "../components/LegacyMMWXImportDialog.vue";
+import SubscriptionProfileDialog from "../components/SubscriptionProfileDialog.vue";
 import NodeManagementDialog from "../components/NodeManagementDialog.vue";
 import type { NodeOperation } from "../services/node-management";
 import type { UserOperation } from "../services/user-management";
 import type { PlanOperation } from "../services/plan-management";
 import type { SubscriptionTemplate } from "../domain/subscription-templates";
+import type { SubscriptionProfile } from "../domain/subscription-profiles";
 import { listSubscriptionTemplates } from "../services/subscription-templates";
+import { listSubscriptionProfiles } from "../services/subscription-profiles";
 
 import type { ServerSummary } from "../domain/inventory";
 import type {
@@ -68,6 +71,8 @@ const users = ref<ProductUser[]>([]);
 const nodes = ref<ManagedNode[]>([]);
 const plans = ref<SubscriptionPlan[]>([]);
 const templates = ref<SubscriptionTemplate[]>([]);
+const subscriptionProfiles = ref<SubscriptionProfile[]>([]);
+const profileManagement = reactive({ profile: null as SubscriptionProfile | null, open: false });
 const planManagement = reactive({ id: "", mode: "edit" as PlanOperation, open: false });
 const userManagement = reactive({ username: "", mode: "edit" as UserOperation, removalId: null as string | null, open: false });
 const userLogin = reactive({ username: "", open: false });
@@ -274,7 +279,7 @@ async function refresh() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [serverList, userResponse, nodeResponse, planResponse, presetResponse, templateResponse] =
+    const [serverList, userResponse, nodeResponse, planResponse, presetResponse, templateResponse, profileResponse] =
       await Promise.all([
         listServers(),
         listProductUsers(),
@@ -282,6 +287,7 @@ async function refresh() {
         listSubscriptionPlans(),
         listSubscriptionTemplatePresets(),
         listSubscriptionTemplates(),
+        listSubscriptionProfiles(),
       ]);
     servers.value = serverList;
     users.value = userResponse.users;
@@ -289,6 +295,7 @@ async function refresh() {
     plans.value = planResponse.plans;
     nodePresets.value = presetResponse.presets;
     templates.value = templateResponse.templates;
+    subscriptionProfiles.value = profileResponse.profiles;
     syncDefaults();
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -1705,6 +1712,21 @@ function formatBytes(value: number) {
 
           <v-divider />
 
+          <div class="section-title compact-title">Subscription profiles</div>
+          <div v-if="subscriptionProfiles.length === 0" class="empty-command">No imported profiles.</div>
+          <div v-for="item in subscriptionProfiles" :key="item.id" class="catalog-item">
+            <div>
+              <div class="server-name">{{ item.name }}</div>
+              <div class="server-subline">{{ item.assigned_usernames.length }} subscribers - {{ item.source_type }}</div>
+            </div>
+            <div class="catalog-controls">
+              <v-tooltip text="Edit subscription profile"><template #activator="{ props: tip }"><v-btn v-bind="tip" :aria-label="`Edit subscription profile ${item.name}`" icon="mdi-file-cog-outline" variant="text" size="32" @click="Object.assign(profileManagement, { profile: item, open: true })" /></template></v-tooltip>
+              <v-chip :color="item.enabled ? 'success' : 'warning'" size="small" variant="tonal">{{ item.enabled ? 'Enabled' : 'Needs setup' }}</v-chip>
+            </div>
+          </div>
+
+          <v-divider />
+
           <div class="section-title compact-title">Users</div>
           <div v-if="users.length === 0" class="empty-command">No users yet.</div>
           <div v-for="user in users" :key="user.username" class="catalog-item">
@@ -1802,7 +1824,8 @@ function formatBytes(value: number) {
     <PlanManagementDialog v-model:open="planManagement.open" :id="planManagement.id" :mode="planManagement.mode" :nodes="nodes" @changed="refresh" />
     <UserManagementDialog v-model:open="userManagement.open" :username="userManagement.username" :mode="userManagement.mode" :removal-id="userManagement.removalId" :nodes="nodes" @changed="refresh" />
     <SubscriptionShortCodeDialog v-model:open="shortCode.open" :username="shortCode.username" @saved="shortCodeSaved" />
-    <LegacyMMWXImportDialog v-model:open="legacyMMWX.open" @imported="refresh" />
+    <LegacyMMWXImportDialog v-model:open="legacyMMWX.open" :plans="plans" @imported="refresh" />
+    <SubscriptionProfileDialog v-model:open="profileManagement.open" :profile="profileManagement.profile" :nodes="nodes" :users="users" :templates="templates" @saved="refresh" />
     <UserLoginDialog v-model:open="userLogin.open" :username="userLogin.username" />
     <NodeManagementDialog v-model:open="nodeManagement.open" :id="nodeManagement.id" :mode="nodeManagement.mode" :nodes="nodes" @changed="refresh" />
   </div>

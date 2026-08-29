@@ -21,6 +21,11 @@ def columns(connection, table):
     return {row[1] for row in rows}
 
 
+def optional_columns(connection, table):
+    rows = connection.execute(f'PRAGMA table_info("{table}")').fetchall()
+    return {row[1] for row in rows}
+
+
 def require_columns(table, available, required):
     missing = sorted(set(required) - available)
     if missing:
@@ -50,6 +55,18 @@ def recovery_hashes(raw, username):
     return values
 
 
+def json_list(raw, label):
+    if raw in (None, ""):
+        return []
+    try:
+        values = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ExportError(f"invalid JSON list for {label}") from exc
+    if not isinstance(values, list):
+        raise ExportError(f"invalid JSON list for {label}")
+    return values
+
+
 def fallback_short_code(token):
     return "mmw_" + hashlib.sha256(token.encode()).hexdigest()[:12]
 
@@ -74,6 +91,11 @@ def export_bundle(database):
             "totp_secret": "NULL",
             "totp_enabled": "0",
             "recovery_codes": "'[]'",
+            "package_id": "NULL",
+            "package_start_date": "NULL",
+            "package_end_date": "NULL",
+            "is_reset": "0",
+            "reset_day": "0",
             "created_at": "NULL",
         }
         token_fields = {
@@ -134,12 +156,135 @@ def export_bundle(database):
                     "token": token,
                     "generated_short_code": generated,
                     "custom_short_code": custom,
+                    "source_package_id": int(row["package_id"] or 0) or None,
+                    "package_started_at": optional_text(row["package_start_date"]),
+                    "package_expires_at": optional_text(row["package_end_date"]),
+                    "is_reset": bool(row["is_reset"]),
+                    "reset_day": int(row["reset_day"] or 0),
                     "created_at": optional_text(row["created_at"]),
                 }
             )
         if not users:
             raise ExportError("MMWX database contains no users")
-        bundle = {"version": 1, "source_revision": None, "users": users}
+
+        packages = []
+        package_columns = optional_columns(connection, "packages")
+        if package_columns:
+            require_columns("packages", package_columns, {"id", "name"})
+            package_sql = ", ".join(
+                [
+                    selected("id", package_columns),
+                    selected("name", package_columns),
+                    selected("short_code", package_columns),
+                ]
+            )
+            for row in connection.execute(
+                f"SELECT {package_sql} FROM packages ORDER BY id"
+            ):
+                packages.append(
+                    {
+                        "source_id": int(row["id"]),
+                        "name": str(row["name"]),
+                        "short_code": optional_text(row["short_code"]),
+                    }
+                )
+
+        assignments = {}
+        assignment_columns = optional_columns(connection, "user_subscriptions")
+        if assignment_columns:
+            require_columns(
+                "user_subscriptions",
+                assignment_columns,
+                {"username", "subscription_id"},
+            )
+            for row in connection.execute(
+                "SELECT username, subscription_id FROM user_subscriptions "
+                "ORDER BY subscription_id, username"
+            ):
+                assignments.setdefault(int(row["subscription_id"]), []).append(
+                    str(row["username"])
+                )
+
+        profiles = []
+        profile_columns = optional_columns(connection, "subscribe_files")
+        if profile_columns:
+            require_columns(
+                "subscribe_files",
+                profile_columns,
+                {"id", "name", "type", "file_short_code", "created_by"},
+            )
+            fields = {
+                "id": "NULL",
+                "name": "NULL",
+                "description": "''",
+                "type": "'create'",
+                "filename": "''",
+                "template_filename": "''",
+                "file_short_code": "NULL",
+                "custom_short_code": "NULL",
+                "selected_tags": "'[]'",
+                "selected_node_ids": "'[]'",
+                "selected_custom_rule_ids": "'[]'",
+                "selected_override_script_ids": "'[]'",
+                "raw_output": "0",
+                "sort_order": "0",
+                "expire_at": "NULL",
+                "created_by": "NULL",
+                "created_at": "NULL",
+                "updated_at": "NULL",
+            }
+            profile_sql = ", ".join(
+                selected(name, profile_columns, default)
+                for name, default in fields.items()
+            )
+            for row in connection.execute(
+                f"SELECT {profile_sql} FROM subscribe_files ORDER BY sort_order, id"
+            ):
+                identifier = int(row["id"])
+                profiles.append(
+                    {
+                        "source_id": identifier,
+                        "owner_username": str(row["created_by"]),
+                        "name": str(row["name"]),
+                        "description": optional_text(row["description"]) or "",
+                        "source_type": str(row["type"]),
+                        "filename": optional_text(row["filename"]) or "",
+                        "template_filename": optional_text(row["template_filename"])
+                        or "",
+                        "file_short_code": str(row["file_short_code"]),
+                        "custom_short_code": optional_text(row["custom_short_code"]),
+                        "selected_tags": json_list(
+                            row["selected_tags"],
+                            f"subscription {identifier} selected_tags",
+                        ),
+                        "selected_node_ids": json_list(
+                            row["selected_node_ids"],
+                            f"subscription {identifier} selected_node_ids",
+                        ),
+                        "selected_custom_rule_ids": json_list(
+                            row["selected_custom_rule_ids"],
+                            f"subscription {identifier} selected_custom_rule_ids",
+                        ),
+                        "selected_override_script_ids": json_list(
+                            row["selected_override_script_ids"],
+                            f"subscription {identifier} selected_override_script_ids",
+                        ),
+                        "raw_output": bool(row["raw_output"]),
+                        "sort_order": int(row["sort_order"] or 0),
+                        "expires_at": optional_text(row["expire_at"]),
+                        "assigned_usernames": assignments.get(identifier, []),
+                        "created_at": optional_text(row["created_at"]),
+                        "updated_at": optional_text(row["updated_at"]),
+                    }
+                )
+
+        bundle = {
+            "version": 1,
+            "source_revision": None,
+            "users": users,
+            "packages": packages,
+            "subscription_profiles": profiles,
+        }
         fingerprint = json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()
         bundle["source_revision"] = hashlib.sha256(fingerprint).hexdigest()
         return bundle

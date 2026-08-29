@@ -7,13 +7,17 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pyotp
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from open_node.domain.legacy_mmwx import LegacyMMWXImportPreview, LegacyMMWXImportResponse
 from open_node.services.inventory import (
+    LegacySubscriptionPlanCodeModel,
     ProductUserModel,
     ProductUserSubscriptionTokenModel,
+    SubscriptionPlanModel,
+    SubscriptionProfileAssignmentModel,
+    SubscriptionProfileModel,
 )
 from open_node.services.subscriber_auth import (
     SubscriberAccount,
@@ -63,6 +67,10 @@ class LegacyMMWXMigration:
                 }
                 for entry in bundle.users
             ],
+            "packages": [entry.model_dump(mode="json") for entry in bundle.packages],
+            "subscription_profiles": [
+                entry.model_dump(mode="json") for entry in bundle.subscription_profiles
+            ],
         }
         return hashlib.sha256(
             json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
@@ -100,6 +108,12 @@ class LegacyMMWXMigration:
             "replaced_tokens": 0,
             "skipped_tokens": 0,
             "imported_totp": 0,
+            "mapped_packages": 0,
+            "assigned_plans": 0,
+            "imported_profiles": 0,
+            "replaced_profiles": 0,
+            "skipped_profiles": 0,
+            "imported_profile_assignments": 0,
         }
         blockers, warnings, target = [], [], []
         incoming_keys = {}
@@ -113,6 +127,121 @@ class LegacyMMWXMigration:
                 if value:
                     existing_key_owners[value.casefold()] = row.username
 
+        packages = {entry.source_id: entry for entry in bundle.packages}
+        unknown_mappings = sorted(set(payload.package_mappings) - set(packages))
+        if unknown_mappings:
+            blockers.append("Package mappings reference unknown legacy package IDs")
+        required_packages = {
+            entry.source_package_id for entry in bundle.users if entry.source_package_id is not None
+        }
+        missing_mappings = sorted(required_packages - set(payload.package_mappings))
+        if missing_mappings:
+            blockers.append(
+                "Map every in-use legacy package before importing: "
+                + ", ".join(str(value) for value in missing_mappings)
+            )
+        mapped_plans = {}
+        for source_id, plan_id in payload.package_mappings.items():
+            plan = session.get(SubscriptionPlanModel, str(plan_id))
+            if plan is None:
+                blockers.append(f"Legacy package {source_id}: selected plan no longer exists")
+            else:
+                mapped_plans[source_id] = plan
+        totals["mapped_packages"] = len(mapped_plans)
+        existing_plan_aliases = session.scalars(select(LegacySubscriptionPlanCodeModel)).all()
+        existing_plan_codes = {
+            row.code.casefold(): row.source_package_id for row in existing_plan_aliases
+        }
+        existing_plan_sources = {row.source_package_id: row for row in existing_plan_aliases}
+        incoming_plan_codes = {}
+        for package in bundle.packages:
+            if package.source_id not in payload.package_mappings or not package.short_code:
+                continue
+            folded = package.short_code.casefold()
+            other = incoming_plan_codes.get(folded)
+            if other is not None and other != package.source_id:
+                blockers.append(f"{package.name}: legacy package short code collides")
+            incoming_plan_codes[folded] = package.source_id
+            owner = existing_plan_codes.get(folded)
+            if owner is not None and owner != package.source_id:
+                blockers.append(f"{package.name}: package short code is already in use")
+            target.append(
+                {
+                    "package": package.source_id,
+                    "alias": (
+                        [
+                            existing_plan_sources[package.source_id].code,
+                            existing_plan_sources[package.source_id].plan_id,
+                            existing_plan_sources[package.source_id].source_name,
+                        ]
+                        if package.source_id in existing_plan_sources
+                        else None
+                    ),
+                }
+            )
+
+        incoming_profile_codes = {}
+        existing_profiles = {
+            row.legacy_source_id: row
+            for row in session.scalars(select(SubscriptionProfileModel)).all()
+            if row.legacy_source_id is not None
+        }
+        existing_profile_codes = {
+            value.casefold(): row.legacy_source_id
+            for row in session.scalars(select(SubscriptionProfileModel)).all()
+            for value in (row.legacy_file_short_code, row.legacy_custom_short_code)
+            if value
+        }
+        for entry in bundle.subscription_profiles:
+            profile = existing_profiles.get(entry.source_id)
+            target.append(
+                {
+                    "profile": entry.source_id,
+                    "target": (
+                        [
+                            profile.id,
+                            profile.owner_username,
+                            profile.legacy_file_short_code,
+                            profile.legacy_custom_short_code,
+                            self.inventory._aware_datetime(profile.updated_at).isoformat(),
+                        ]
+                        if profile
+                        else None
+                    ),
+                }
+            )
+            if profile is None:
+                totals["imported_profiles"] += 1
+            elif payload.replace_existing:
+                totals["replaced_profiles"] += 1
+            else:
+                totals["skipped_profiles"] += 1
+                warnings.append(f"{entry.name}: existing subscription profile will be preserved")
+                continue
+            for value in (entry.file_short_code, entry.custom_short_code):
+                if not value:
+                    continue
+                folded = value.casefold()
+                other = incoming_profile_codes.get(folded)
+                if other is not None and other != entry.source_id:
+                    blockers.append(f"{entry.name}: legacy file short code collides")
+                incoming_profile_codes[folded] = entry.source_id
+                owner = existing_profile_codes.get(folded)
+                if owner is not None and owner != entry.source_id:
+                    blockers.append(f"{entry.name}: file short code is already in use")
+            totals["imported_profile_assignments"] += len(entry.assigned_usernames)
+            if entry.raw_output:
+                warnings.append(f"{entry.name}: raw output is imported disabled until reconfigured")
+            if entry.template_filename:
+                warnings.append(
+                    f"{entry.name}: legacy template {entry.template_filename} "
+                    "must be mapped manually"
+                )
+            if entry.selected_custom_rule_ids or entry.selected_override_script_ids:
+                warnings.append(
+                    f"{entry.name}: legacy rules or scripts are not executed by Open Node"
+                )
+
         for entry in bundle.users:
             user = session.get(ProductUserModel, entry.username)
             account = session.get(SubscriberAccount, entry.username)
@@ -124,6 +253,14 @@ class LegacyMMWXMigration:
                     blockers.append(f"{entry.username}: user removal is pending")
             else:
                 totals["new_users"] += 1
+            mapped_plan = mapped_plans.get(entry.source_package_id)
+            if mapped_plan is not None:
+                if user and user.current_plan_id and user.current_plan_id != mapped_plan.id:
+                    blockers.append(
+                        f"{entry.username}: current plan differs from the selected legacy mapping"
+                    )
+                else:
+                    totals["assigned_plans"] += 1
             if entry.source_role == "admin":
                 warnings.append(f"{entry.username}: source administrator will import as subscriber")
 
@@ -182,6 +319,9 @@ class LegacyMMWXMigration:
             {
                 "source": self.source_fingerprint(bundle),
                 "replace_existing": payload.replace_existing,
+                "package_mappings": {
+                    str(key): str(value) for key, value in payload.package_mappings.items()
+                },
                 "target": target,
             }
         )
@@ -232,6 +372,15 @@ class LegacyMMWXMigration:
                         session.add(user)
                         session.flush()
 
+                    mapped_plan_id = payload.package_mappings.get(entry.source_package_id)
+                    if mapped_plan_id is not None:
+                        user.current_plan_id = str(mapped_plan_id)
+                        user.plan_started_at = entry.package_started_at or now
+                        user.plan_expires_at = entry.package_expires_at
+                        user.is_reset = entry.is_reset
+                        user.reset_day = entry.reset_day if entry.is_reset else 0
+                        user.updated_at = now
+
                     account = session.get(SubscriberAccount, entry.username)
                     if account is None or payload.replace_existing:
                         if account is not None:
@@ -271,6 +420,88 @@ class LegacyMMWXMigration:
                         token.short_code = secret(entry.generated_short_code)
                         token.custom_short_code = secret(entry.custom_short_code)
                         token.updated_at = now
+
+                for package in payload.bundle.packages:
+                    mapped_plan_id = payload.package_mappings.get(package.source_id)
+                    if mapped_plan_id is None or package.short_code is None:
+                        continue
+                    alias = session.scalar(
+                        select(LegacySubscriptionPlanCodeModel).where(
+                            LegacySubscriptionPlanCodeModel.source_package_id == package.source_id
+                        )
+                    )
+                    if alias is None:
+                        alias = LegacySubscriptionPlanCodeModel(
+                            code=package.short_code,
+                            source_package_id=package.source_id,
+                            created_at=now,
+                        )
+                        session.add(alias)
+                    alias.code = package.short_code
+                    alias.plan_id = str(mapped_plan_id)
+                    alias.source_name = package.name
+                    alias.updated_at = now
+
+                for entry in payload.bundle.subscription_profiles:
+                    profile = session.scalar(
+                        select(SubscriptionProfileModel).where(
+                            SubscriptionProfileModel.legacy_source_id == entry.source_id
+                        )
+                    )
+                    if profile is not None and not payload.replace_existing:
+                        continue
+                    created_at = entry.created_at or now
+                    if profile is None:
+                        profile = SubscriptionProfileModel(
+                            id=str(uuid4()),
+                            legacy_source_id=entry.source_id,
+                            created_at=created_at,
+                        )
+                        session.add(profile)
+                    migration_warnings = []
+                    if entry.raw_output:
+                        migration_warnings.append(
+                            "Legacy raw output needs an Open Node managed profile before use"
+                        )
+                    if entry.template_filename:
+                        migration_warnings.append(
+                            f"Legacy template not mapped: {entry.template_filename}"
+                        )
+                    if entry.selected_custom_rule_ids or entry.selected_override_script_ids:
+                        migration_warnings.append(
+                            "Legacy rules and override scripts were not imported"
+                        )
+                    profile.owner_username = entry.owner_username
+                    profile.name = entry.name
+                    profile.description = entry.description
+                    profile.node_ids = []
+                    profile.clash_template_id = profile.surge_template_id = None
+                    profile.enabled = not entry.raw_output
+                    profile.sort_order = entry.sort_order
+                    profile.source_type = entry.source_type
+                    profile.source_filename = entry.filename
+                    profile.source_template_filename = entry.template_filename
+                    profile.legacy_file_short_code = entry.file_short_code
+                    profile.legacy_custom_short_code = entry.custom_short_code
+                    profile.legacy_selected_node_ids = entry.selected_node_ids
+                    profile.legacy_selected_tags = entry.selected_tags
+                    profile.migration_warnings = migration_warnings
+                    profile.expires_at = entry.expires_at
+                    profile.updated_at = entry.updated_at or now
+                    session.flush()
+                    session.execute(
+                        delete(SubscriptionProfileAssignmentModel).where(
+                            SubscriptionProfileAssignmentModel.profile_id == profile.id
+                        )
+                    )
+                    for username in entry.assigned_usernames:
+                        session.add(
+                            SubscriptionProfileAssignmentModel(
+                                profile_id=profile.id,
+                                username=username,
+                                created_at=now,
+                            )
+                        )
                 session.flush()
                 session.commit()
             except IntegrityError as exc:

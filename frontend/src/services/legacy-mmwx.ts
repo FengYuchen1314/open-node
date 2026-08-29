@@ -32,10 +32,11 @@ export function previewLegacyMMWXIdentities(
   bundle: LegacyMMWXIdentityBundle,
   replaceExisting: boolean,
   fetcher?: typeof fetch,
+  packageMappings: Record<number, string> = {},
 ) {
   return request<LegacyMMWXImportPreview>(
     "/preview",
-    { bundle, replace_existing: replaceExisting },
+    { bundle, replace_existing: replaceExisting, package_mappings: packageMappings },
     fetcher ?? authenticatedFetch,
   );
 }
@@ -46,6 +47,7 @@ export function importLegacyMMWXIdentities(
   preview: LegacyMMWXImportPreview,
   confirmedUserCount: number,
   fetcher?: typeof fetch,
+  packageMappings: Record<number, string> = {},
 ) {
   return request<LegacyMMWXImportResponse>(
     "/import",
@@ -54,6 +56,7 @@ export function importLegacyMMWXIdentities(
       replace_existing: replaceExisting,
       expected_revision: preview.revision,
       confirm_user_count: confirmedUserCount,
+      package_mappings: packageMappings,
     },
     fetcher ?? authenticatedFetch,
   );

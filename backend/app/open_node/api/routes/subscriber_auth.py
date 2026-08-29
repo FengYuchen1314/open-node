@@ -22,6 +22,7 @@ from open_node.domain.subscriber_auth import (
     SubscriberSessionRead,
     SubscriberShortCodeUpdate,
 )
+from open_node.domain.subscription_profiles import SubscriberSubscriptionProfilesResponse
 from open_node.domain.subscriptions import ProductUserSubscriptionTokenResponse
 from open_node.services.inventory import ProductUserConflict, ProductUserNotFoundError
 from open_node.services.subscriber_auth import (
@@ -171,6 +172,14 @@ def change_password(
 def subscription_token(request: Request, identity: Identity):
     token = invoke(request.app.state.subscriber_auth.subscription_token, identity)
     return _subscription_token_response(request, token)
+
+
+@router.get("/subscription-profiles", response_model=SubscriberSubscriptionProfilesResponse)
+def subscription_profiles(request: Request, identity: Identity):
+    profiles = request.app.state.inventory._subscription_profiles().subscriber_profiles(
+        identity.username, request.url_for
+    )
+    return SubscriberSubscriptionProfilesResponse(profiles=profiles)
 
 
 @router.post("/subscription-token/reset", response_model=ProductUserSubscriptionTokenResponse)

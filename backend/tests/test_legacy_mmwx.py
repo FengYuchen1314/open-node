@@ -90,6 +90,12 @@ def test_import_preserves_login_totp_recovery_and_subscription_token(tmp_path):
         "replaced_tokens": 0,
         "skipped_tokens": 0,
         "imported_totp": 1,
+        "mapped_packages": 0,
+        "assigned_plans": 0,
+        "imported_profiles": 0,
+        "replaced_profiles": 0,
+        "skipped_profiles": 0,
+        "imported_profile_assignments": 0,
         "blockers": [],
         "warnings": ["alice: source administrator will import as subscriber"],
         "license_required": False,
@@ -208,3 +214,127 @@ def test_secret_validation_errors_are_redacted_and_routes_require_admin(tmp_path
     anonymous = TestClient(application, base_url="https://testserver")
     denied = anonymous.post(BASE + "/preview", json={"bundle": source})
     assert denied.status_code == 401 and denied.headers["Cache-Control"] == "no-store"
+
+
+def test_import_maps_packages_profiles_assignments_and_legacy_x_links(tmp_path):
+    application, operator = app(tmp_path)
+    _, _, node_id, plan_id = create_catalog_fixture(operator)
+    operator.post("/api/v1/users/alice/plan", json={"plan_id": plan_id}).raise_for_status()
+    source, _ = bundle(
+        source_role="user",
+        totp_enabled=False,
+        totp_secret=None,
+        recovery_code_hashes=[],
+        source_package_id=7,
+        package_started_at="2026-08-01T00:00:00Z",
+        package_expires_at="2027-08-01T00:00:00Z",
+        is_reset=True,
+        reset_day=1,
+    )
+    source["packages"] = [{"source_id": 7, "name": "Legacy Premium", "short_code": "pkg"}]
+    source["subscription_profiles"] = [
+        {
+            "source_id": 11,
+            "owner_username": "alice",
+            "name": "Mobile",
+            "description": "Phone profile",
+            "source_type": "create",
+            "filename": "mobile.yaml",
+            "template_filename": "mobile-template.yaml",
+            "file_short_code": "mob",
+            "custom_short_code": "phone",
+            "selected_tags": ["mobile"],
+            "selected_node_ids": [101],
+            "selected_custom_rule_ids": [],
+            "selected_override_script_ids": [],
+            "raw_output": False,
+            "sort_order": 1,
+            "expires_at": None,
+            "assigned_usernames": ["alice"],
+            "created_at": "2026-08-01T00:00:00Z",
+            "updated_at": "2026-08-02T00:00:00Z",
+        },
+        {
+            "source_id": 12,
+            "owner_username": "alice",
+            "name": "Raw backup",
+            "description": "",
+            "source_type": "upload",
+            "filename": "raw.yaml",
+            "template_filename": "",
+            "file_short_code": "raw",
+            "custom_short_code": None,
+            "selected_tags": [],
+            "selected_node_ids": [],
+            "selected_custom_rule_ids": [],
+            "selected_override_script_ids": [],
+            "raw_output": True,
+            "sort_order": 2,
+            "expires_at": None,
+            "assigned_usernames": ["alice"],
+            "created_at": None,
+            "updated_at": None,
+        },
+    ]
+    missing = preview(operator, source)
+    assert not missing["ready"] and "Map every in-use legacy package" in missing["blockers"][0]
+
+    mappings = {"package_mappings": {"7": plan_id}}
+    response = operator.post(
+        BASE + "/preview",
+        json={"bundle": source, "replace_existing": False, **mappings},
+    )
+    assert response.status_code == 200
+    state = response.json()
+    assert state["ready"] and state["mapped_packages"] == 1
+    assert state["imported_profiles"] == 2 and state["imported_profile_assignments"] == 2
+    apply(operator, source, state, **mappings).raise_for_status()
+
+    for code in ("mob" + "lga", "phone", "pkg" + "lga"):
+        rendered = operator.get(f"/x/{code}?format=xray")
+        assert rendered.status_code == 200, rendered.text
+        assert rendered.json()["outbounds"][0]["protocol"] == "vless"
+    assert operator.get("/x/rawlga?format=xray").status_code == 404
+
+    profiles = operator.get("/api/v1/subscription-profiles").json()["profiles"]
+    assert [item["name"] for item in profiles] == ["Mobile", "Raw backup"]
+    assert profiles[0]["assigned_usernames"] == ["alice"]
+    configured = operator.put(
+        f"/api/v1/subscription-profiles/{profiles[1]['id']}",
+        json={
+            "name": "Raw managed",
+            "description": "Rebuilt in Open Node",
+            "node_ids": [node_id],
+            "clash_template_id": None,
+            "surge_template_id": None,
+            "assigned_usernames": ["alice"],
+            "enabled": True,
+            "expected_revision": profiles[1]["revision"],
+        },
+    )
+    assert configured.status_code == 200, configured.text
+    assert configured.json()["enabled"]
+    assert operator.get("/x/rawlegacy_link?format=xray").status_code == 200
+    assert (
+        operator.put(
+            f"/api/v1/subscription-profiles/{profiles[1]['id']}",
+            json={
+                "name": "Stale",
+                "description": "",
+                "node_ids": [],
+                "assigned_usernames": ["alice"],
+                "enabled": True,
+                "expected_revision": profiles[1]["revision"],
+            },
+        ).status_code
+        == 409
+    )
+    subscriber = TestClient(application, base_url="https://testserver")
+    assert login(subscriber, password=PASSWORD).status_code == 200
+    assigned = subscriber.get("/api/v1/account/subscription-profiles")
+    assert assigned.status_code == 200
+    assert [item["name"] for item in assigned.json()["profiles"]] == [
+        "Mobile",
+        "Raw managed",
+    ]
+    assert "/x/moblegacy_link" in assigned.json()["profiles"][0]["subscription_url"]

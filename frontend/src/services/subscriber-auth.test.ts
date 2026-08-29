@@ -3,7 +3,7 @@ import { authState } from "./auth";
 import {
   accountRequest, clearSubscriberSession, loadSubscriberSession, subscriberAccount,
   subscriberChangePassword, subscriberFormatUrl, subscriberSignIn, subscriberSignOut,
-  subscriberState, verifySubscriberLogin,
+  subscriberProfiles, subscriberState, verifySubscriberLogin,
 } from "./subscriber-auth";
 import type { ProductUserSubscriptionToken } from "../domain/subscriptions";
 
@@ -96,5 +96,12 @@ describe("subscriber authentication", () => {
     for (const format of ["clash", "surge", "sing-box", "xray", "uri-list", "base64"] as const) {
       expect(subscriberFormatUrl(subscription, format)).toBe(`https://panel.example/api/v1/subscribe/private-token?format=${format}`);
     }
+  });
+
+  it("loads assigned subscription profiles from the subscriber realm", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({ profiles: [], license_required: false }));
+    expect((await subscriberProfiles(fetcher)).profiles).toEqual([]);
+    expect(fetcher.mock.calls[0][0]).toBe("/api/v1/account/subscription-profiles");
+    expect(fetcher.mock.calls[0][1]?.credentials).toBe("include");
   });
 });

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from open_node.api.router import api_router
 from open_node.api.routes.agents import agent_websocket
 from open_node.api.routes.public import router as public_router
+from open_node.api.routes.subscription_profiles import legacy_router
 from open_node.api.routes.system import healthz
 from open_node.core.config import Settings, get_settings
 from open_node.domain.inventory import AgentCommandPayloadError
@@ -159,6 +160,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api_router, prefix=active_settings.api_prefix)
     app.add_api_websocket_route("/api/remote/ws", agent_websocket)
     app.include_router(public_router, prefix="/api")
+    app.include_router(legacy_router)
     app.add_api_route("/healthz", healthz, methods=["GET"], include_in_schema=False)
     if active_settings.frontend_dir:
         app.mount(

@@ -71,11 +71,13 @@ PYTHONPATH=backend/app backend/.venv/bin/python \
 
 The isolated fixture creates an active-main-shaped MMWX SQLite database, runs the
 mode-0600 exporter, uploads the result through the Vue preview/confirmation dialog
-and verifies secret clearing. It then checks bcrypt-to-Argon2id upgrade, original
-TOTP, one-use legacy recovery, source-admin demotion, all three imported user keys
-and real VLESS forwarding. Screenshots and overflow checks cover 1440px, 390px and
-320px. See [legacy-mmwx-identities.md](legacy-mmwx-identities.md) for the deliberate
-multi-file and `/x` boundary.
+and explicit package mapping, then verifies secret clearing. It checks imported
+multi-file assignments, administrator profile editing, subscriber profile selection,
+bcrypt-to-Argon2id upgrade, original TOTP, one-use legacy recovery and source-admin
+demotion. Long/generated/custom keys and direct file, file+user and package+user
+`/x` links all render the same valid profile; one `/x` result forwards real VLESS
+traffic. Screenshots and overflow checks cover 1440px, 390px and 320px. See
+[legacy-mmwx-identities.md](legacy-mmwx-identities.md) for raw/template/rule limits.
 
 ## Subscriber Limit Smoke
 

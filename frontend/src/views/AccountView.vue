@@ -4,8 +4,9 @@ import SubscriberSecurityPanel from "../components/SubscriberSecurityPanel.vue";
 import TemplatesWorkspace from "../components/TemplatesWorkspace.vue";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog.vue";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat } from "../domain/subscriptions";
+import type { SubscriberSubscriptionProfile } from "../domain/subscription-profiles";
 import {
-  loadSubscriberSession, subscriberFormatUrl, subscriberProfile, subscriberSignIn, subscriberSignOut,
+  loadSubscriberSession, subscriberFormatUrl, subscriberProfile, subscriberProfiles, subscriberSignIn, subscriberSignOut,
   subscriberState, subscriberToken, verifySubscriberLogin, type SubscriberProfile,
 } from "../services/subscriber-auth";
 
@@ -20,6 +21,8 @@ const loading = ref(false);
 const tab = ref("subscription");
 const profile = ref<SubscriberProfile | null>(null);
 const subscription = ref<ProductUserSubscriptionToken | null>(null);
+const subscriptionProfiles = ref<SubscriberSubscriptionProfile[]>([]);
+const configuration = ref("default");
 const format = ref<SubscriptionClientFormat>("clash");
 const copied = ref(false);
 const shortCodeOpen = ref(false);
@@ -30,7 +33,19 @@ const formats = [
   { title: "URI list", value: "uri-list" }, { title: "Base64", value: "base64" },
 ];
 let version = 0;
-const url = computed(() => subscription.value ? subscriberFormatUrl(subscription.value, format.value, linkType.value === "short") : "");
+const selectedProfile = computed(() => subscriptionProfiles.value.find(item => item.id === configuration.value) ?? null);
+const configurationOptions = computed(() => [
+  { title: "Default subscription", value: "default" },
+  ...subscriptionProfiles.value.map(item => ({ title: item.name, value: item.id })),
+]);
+const url = computed(() => {
+  if (selectedProfile.value) {
+    const value = new URL(selectedProfile.value.subscription_url);
+    value.searchParams.set("format", format.value);
+    return value.toString();
+  }
+  return subscription.value ? subscriberFormatUrl(subscription.value, format.value, linkType.value === "short") : "";
+});
 const quota = computed(() => profile.value?.quota);
 const status = computed(() => !quota.value?.has_plan ? "No plan" : quota.value.expired ? "Expired" : quota.value.over_quota ? "Quota reached" : "Active");
 const date = (value?: string | null) => value ? new Date(value).toLocaleDateString() : "None";
@@ -53,8 +68,15 @@ async function load() {
   const current = ++version;
   loading.value = true; error.value = "";
   try {
-    const [account, token] = await Promise.all([subscriberProfile(), subscriberToken()]);
-    if (current === version) { profile.value = account; subscription.value = token; }
+    const [account, token, extraProfiles] = await Promise.all([
+      subscriberProfile(), subscriberToken(), subscriberProfiles(),
+    ]);
+    if (current === version) {
+      profile.value = account;
+      subscription.value = token;
+      subscriptionProfiles.value = extraProfiles.profiles;
+      if (!configurationOptions.value.some(item => item.value === configuration.value)) configuration.value = "default";
+    }
   } catch (failure) {
     if (current === version) error.value = failure instanceof Error ? failure.message : "Account unavailable";
   } finally { if (current === version) loading.value = false; }
@@ -71,7 +93,7 @@ async function copyLink() {
 watch(url, () => { copied.value = false; });
 watch(() => subscriberState.ready && subscriberState.session?.authenticated, (authenticated) => {
   shortCodeOpen.value = false; linkType.value = "full";
-  ++version; profile.value = null; subscription.value = null; error.value = "";
+  ++version; profile.value = null; subscription.value = null; subscriptionProfiles.value = []; configuration.value = "default"; error.value = "";
   if (authenticated) { tab.value = "subscription"; void load(); }
   else restartSignIn();
 });
@@ -111,8 +133,10 @@ onBeforeUnmount(() => { ++version; password.value = ""; code.value = ""; challen
         </section>
         <section class="account-links" aria-label="Subscription links">
           <h3>Subscription</h3>
-          <div class="account-link-mode"><v-btn-toggle v-model="linkType" mandatory density="compact" color="primary" variant="outlined" aria-label="Subscription link type"><v-btn value="full">Full</v-btn><v-btn value="short">Short</v-btn></v-btn-toggle><v-tooltip text="Edit subscription short code"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-link-edit" aria-label="Edit subscription short code" variant="text" :disabled="loading || !subscription" @click="shortCodeOpen = true" /></template></v-tooltip></div>
-          <div class="account-link-controls"><v-select v-model="format" :items="formats" label="Client format" variant="outlined" density="compact" hide-details /><div class="account-link-actions"><v-tooltip :text="copied ? 'Copied' : 'Copy subscription link'"><template #activator="{ props: tip }"><v-btn v-bind="tip" :icon="copied ? 'mdi-check' : 'mdi-content-copy'" aria-label="Copy subscription link" variant="text" :disabled="!url" @click="copyLink" /></template></v-tooltip><v-tooltip text="Download subscription"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-download" aria-label="Download subscription" variant="text" :href="url" :disabled="!url || !quota.available" rel="noreferrer" download /></template></v-tooltip></div></div>
+          <v-select v-if="subscriptionProfiles.length" v-model="configuration" :items="configurationOptions" label="Configuration" variant="outlined" density="compact" hide-details prepend-inner-icon="mdi-file-tree-outline" />
+          <div class="account-link-mode"><v-btn-toggle v-if="!selectedProfile" v-model="linkType" mandatory density="compact" color="primary" variant="outlined" aria-label="Subscription link type"><v-btn value="full">Full</v-btn><v-btn value="short">Short</v-btn></v-btn-toggle><v-chip v-else size="small" variant="tonal" prepend-icon="mdi-link-variant">MMWX profile</v-chip><v-tooltip text="Edit subscription short code"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-link-edit" aria-label="Edit subscription short code" variant="text" :disabled="loading || !subscription || Boolean(selectedProfile)" @click="shortCodeOpen = true" /></template></v-tooltip></div>
+          <v-alert v-if="selectedProfile && (!selectedProfile.enabled || selectedProfile.warnings.length)" :type="selectedProfile.enabled ? 'warning' : 'error'" variant="tonal" density="compact">{{ selectedProfile.enabled ? selectedProfile.warnings.join('; ') : 'This profile needs administrator configuration.' }}</v-alert>
+          <div class="account-link-controls"><v-select v-model="format" :items="formats" label="Client format" variant="outlined" density="compact" hide-details /><div class="account-link-actions"><v-tooltip :text="copied ? 'Copied' : 'Copy subscription link'"><template #activator="{ props: tip }"><v-btn v-bind="tip" :icon="copied ? 'mdi-check' : 'mdi-content-copy'" aria-label="Copy subscription link" variant="text" :disabled="!url" @click="copyLink" /></template></v-tooltip><v-tooltip text="Download subscription"><template #activator="{ props: tip }"><v-btn v-bind="tip" icon="mdi-download" aria-label="Download subscription" variant="text" :href="url" :disabled="!url || !quota.available || selectedProfile?.enabled === false" rel="noreferrer" download /></template></v-tooltip></div></div>
           <v-text-field :model-value="url" label="Subscription URL" variant="outlined" density="compact" readonly hide-details />
           <v-alert v-if="!quota.available" type="warning" variant="tonal" class="mt-4">{{ !quota.has_plan ? 'No subscription plan assigned' : quota.expired ? 'Your plan has expired' : 'Your traffic quota has been reached' }}</v-alert>
         </section>

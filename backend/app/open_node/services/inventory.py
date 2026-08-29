@@ -1198,6 +1198,86 @@ class ProductUserSubscriptionTokenModel(Base):
     )
 
 
+class SubscriptionProfileModel(Base):
+    __tablename__ = "subscription_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_username: Mapped[str] = mapped_column(
+        String(80), ForeignKey("product_users.username", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text, default="")
+    node_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    clash_template_id: Mapped[str | None] = mapped_column(
+        ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
+    )
+    surge_template_id: Mapped[str | None] = mapped_column(
+        ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    source_type: Mapped[str] = mapped_column(String(24), default="managed")
+    source_filename: Mapped[str] = mapped_column(String(255), default="")
+    source_template_filename: Mapped[str] = mapped_column(String(255), default="")
+    legacy_source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    legacy_file_short_code: Mapped[str | None] = mapped_column(
+        String(24), nullable=True, index=True
+    )
+    legacy_custom_short_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    legacy_selected_node_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    legacy_selected_tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    migration_warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        UniqueConstraint("legacy_source_id", name="uq_subscription_profile_legacy_source"),
+        Index(
+            "uq_subscription_profile_file_short_code",
+            func.lower(legacy_file_short_code),
+            unique=True,
+        ),
+        Index(
+            "uq_subscription_profile_custom_short_code",
+            func.lower(legacy_custom_short_code),
+            unique=True,
+        ),
+    )
+
+
+class SubscriptionProfileAssignmentModel(Base):
+    __tablename__ = "subscription_profile_assignments"
+
+    profile_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("subscription_profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    username: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("product_users.username", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class LegacySubscriptionPlanCodeModel(Base):
+    __tablename__ = "legacy_subscription_plan_codes"
+
+    code: Mapped[str] = mapped_column(String(24), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("subscription_plans.id", ondelete="CASCADE"), index=True
+    )
+    source_package_id: Mapped[int] = mapped_column(Integer, unique=True)
+    source_name: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (Index("uq_legacy_subscription_plan_code", func.lower(code), unique=True),)
+
+
 class SubscriptionCredentialModel(Base):
     __tablename__ = "subscription_credentials"
     __table_args__ = (
@@ -3679,8 +3759,11 @@ class InventoryStore:
         plan: SubscriptionPlanModel,
         client_format: SubscriptionClientFormat,
         template_override: str | None = None,
+        selected_node_ids: set[str] | None = None,
     ) -> tuple[list[dict[str, Any]], SubscriptionFormatPreview]:
-        candidates, warnings = self._subscription_proxy_configs(session, user, plan)
+        candidates, warnings = self._subscription_proxy_configs(
+            session, user, plan, selected_node_ids
+        )
         proxies, nodes = [], []
         used_names = {
             "Proxy",
@@ -5625,18 +5708,24 @@ class InventoryStore:
         session: Session,
         user: ProductUserModel,
         plan: SubscriptionPlanModel,
+        selected_node_ids: set[str] | None = None,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
         warnings: list[str] = []
-        if not plan.node_ids:
+        plan_node_ids = [
+            node_id
+            for node_id in plan.node_ids
+            if selected_node_ids is None or node_id in selected_node_ids
+        ]
+        if not plan_node_ids:
             return [], warnings
 
         nodes = session.scalars(
-            select(ManagedNodeModel).where(ManagedNodeModel.id.in_(plan.node_ids))
+            select(ManagedNodeModel).where(ManagedNodeModel.id.in_(plan_node_ids))
         ).all()
         nodes_by_id = {node.id: node for node in nodes}
         proxies: list[tuple[str, dict[str, Any]]] = []
 
-        for node_id in plan.node_ids:
+        for node_id in plan_node_ids:
             node = nodes_by_id.get(node_id)
             if not node:
                 warnings.append(f"node {node_id} no longer exists")
@@ -6813,6 +6902,11 @@ class InventoryStore:
         from open_node.services.subscription_access import SubscriptionAccessCoordinator
 
         return SubscriptionAccessCoordinator(self)
+
+    def _subscription_profiles(self):
+        from open_node.services.subscription_profiles import SubscriptionProfiles
+
+        return SubscriptionProfiles(self)
 
     def _server_traffic(self):
         from open_node.services.server_traffic import ServerTrafficCoordinator

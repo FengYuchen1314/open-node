@@ -285,8 +285,9 @@ These passing command and snapshot checks do not prove a complete replacement:
   direct-parent inheritance and shared credentials. Catalog remapping, node/server
   removal and subscriber displays use these settings. [Custom user short codes](subscription-links.md)
   now support operator/self-service editing, clearing and complete reset with
-  collision and revision guards. Legacy combined-URL migration and privately
-  owned routed-node cleanup still require migration.
+  collision and revision guards. Active-main direct and combined `/x` URLs now
+  resolve through imported profiles and explicit package mappings. Privately owned
+  routed-node cleanup still requires migration.
 - [Subscriber accounts](subscriber-accounts.md) now have a separate login and
   session realm, password provisioning/recovery, own-plan usage and downloads,
   device revocation, encrypted TOTP enrollment and one-use recovery codes.
@@ -295,9 +296,12 @@ These passing command and snapshot checks do not prove a complete replacement:
   subscriber UI is available at `/account`. [Legacy identity migration](legacy-mmwx-identities.md)
   now exports/imports active-main bcrypt hashes, TOTP seeds, recovery hashes and
   current long/generated/custom user keys with transactional preview, collision
-  checks and Argon2id upgrade on login. Source administrators are demoted and old
-  sessions/API tokens are not imported. Multi-file assignment, combined `/x`
-  links, public registration and third-party identity providers remain unimplemented.
+  checks and Argon2id upgrade on login. Package assignments and dates are mapped
+  explicitly to existing plans; multi-file assignments become editable subscriber
+  profiles and legacy `/x` file/package combinations remain usable. Source
+  administrators are demoted and old sessions/API tokens are not imported. Raw
+  uploads and legacy templates/rules/scripts require managed reconfiguration;
+  public registration and third-party identity providers remain unimplemented.
 - Central DNS-01 issuance/renewal, EAB, private credentials, PEM imports,
   version activation and Agent deployment are implemented and verified with
   real lego/Pebble, short-lived automatic renewal and trusted TLS on both
