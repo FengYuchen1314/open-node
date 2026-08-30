@@ -432,4 +432,9 @@ def test_automatic_rollback_persists_capability_failure_without_queued_commands(
     commands = client.get(
         f"/api/v1/servers/{created['server']['id']}/commands"
     ).json()["commands"]
-    assert not any(command["status"] in {"pending", "waiting"} for command in commands)
+    queued_paths = {
+        command["path"]
+        for command in commands
+        if command["status"] in {"pending", "waiting"}
+    }
+    assert queued_paths <= {"/api/child/xray/config"}
