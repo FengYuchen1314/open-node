@@ -160,8 +160,10 @@ Agents, or claim support for the upstream MMWX native binary, PostgreSQL,
 embedded Nginx, Windows, rootless Docker, multi-host or multi-worker operation.
 
 The maintainer-only installer smoke is destructive and must run as root on the
-disposable project VPS from a Git checkout. It requires `bash`, Git, a running
-Docker daemon and Docker Compose v2; builds several real images and creates a
+disposable project VPS from a Git checkout. It disables the installer's automatic
+package installation, so the host must already provide the commands checked by
+`install.sh` (including `curl`, `jq`, GNU core utilities, Git and `flock`) plus a running
+Docker daemon and Docker Compose v2. It builds several real images and creates a
 private temporary Git remote under `/root`. Every source/configuration/backup
 directory, loopback port, image repository, Compose project, network and named
 volume receives a random fixture identity. It exercises fresh install, real

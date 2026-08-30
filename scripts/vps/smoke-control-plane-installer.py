@@ -1792,7 +1792,28 @@ print(json.dumps({
 def assert_fixture_prerequisites(repository: Path) -> None:
     if os.geteuid() != 0:
         raise SmokeFailure("installer smoke must run as root on the disposable VPS")
-    for executable in ("bash", "docker", "git"):
+    for executable in (
+        "awk",
+        "bash",
+        "curl",
+        "date",
+        "dirname",
+        "docker",
+        "find",
+        "flock",
+        "git",
+        "grep",
+        "install",
+        "jq",
+        "mktemp",
+        "mv",
+        "realpath",
+        "sed",
+        "sha256sum",
+        "stat",
+        "sync",
+        "tar",
+    ):
         if shutil.which(executable) is None:
             raise SmokeFailure(f"required executable is missing: {executable}")
     if not (repository / "install.sh").is_file():
