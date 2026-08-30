@@ -6,8 +6,8 @@ from hashlib import sha256
 from pathlib import Path
 from threading import Event
 
-import pytest
 import pyotp
+import pytest
 from conftest import ADMIN_PASSWORD, authenticated_client
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
