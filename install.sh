@@ -731,14 +731,25 @@ runtime_container_is_safe() {
       and $container.Mounts[0].RW == true
       and (($container.NetworkSettings.Networks | keys) == [$expected_network])
       and $container.NetworkSettings.Networks[$expected_network].NetworkID == $expected_network_id
-      and (($container.NetworkSettings.Ports | keys) == ["8080/tcp"])
-      and ($container.NetworkSettings.Ports["8080/tcp"] | length) == 1
-      and $container.NetworkSettings.Ports["8080/tcp"][0].HostIp == $bind
-      and $container.NetworkSettings.Ports["8080/tcp"][0].HostPort == $port
-      and (($require_running == 0) or (
-        $container.State.Running == true
-        and $container.State.Health.Status == "healthy"
-      ))
+      and (
+        (
+          $container.State.Running == true
+          and (($container.NetworkSettings.Ports | keys) == ["8080/tcp"])
+          and ($container.NetworkSettings.Ports["8080/tcp"] | length) == 1
+          and $container.NetworkSettings.Ports["8080/tcp"][0].HostIp == $bind
+          and $container.NetworkSettings.Ports["8080/tcp"][0].HostPort == $port
+        )
+        or (
+          $require_running == 0
+          and $container.State.Status == "exited"
+          and $container.State.Running == false
+          and $container.State.Paused == false
+          and $container.State.Restarting == false
+          and $container.State.Dead == false
+          and (($container.NetworkSettings.Ports // {}) | length) == 0
+        )
+      )
+      and (($require_running == 0) or $container.State.Health.Status == "healthy")
     )
   ' >/dev/null
 }
