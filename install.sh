@@ -863,12 +863,14 @@ validate_candidate_compose() {
       "labels", "name"
     ]) | length == 0)
     and (
-      (($service | keys) - [
-        "build", "cap_drop", "environment", "image", "init", "logging",
+      ((($service | keys) - [
+        "build", "cap_drop", "command", "entrypoint", "environment", "image", "init", "logging",
         "networks", "ports", "pull_policy", "read_only", "restart",
         "security_opt", "stop_grace_period", "tmpfs", "volumes"
-      ]) | length) == 0
+      ]) | length) == 0)
     )
+    and ($service.command == null)
+    and ($service.entrypoint == null)
     and ($service.image == $expected_image)
     and ($service.pull_policy == "never")
     and ($service.build.context == $context)
