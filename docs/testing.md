@@ -19,6 +19,56 @@ VPS.
 
 ## Remote Test Command
 
+### Committed Agent bootstrap and hosted-runner fixture fix (2026-08-31)
+
+The feature commit is `1515a7bd56a2dbf257d861fe8760038a9329bae4`; its
+host-fixture correction is `a677280ece64a71d7ee4e8c4f0720cd819bcf584`. Both are
+published on `main`. The following results are separate from the in-progress
+React/Ant Design rewrite; the frontend counts here still describe the Vue
+baseline.
+
+- Clean-checkout [GitHub run 33325869097](https://github.com/FengYuchen1314/open-node/actions/runs/33325869097)
+  passed all four jobs at `a677280`: backend **1,253 passed** (640.48 s), Agent
+  **605 passed** (10.31 s), frontend **268 tests in 37 files** and both production
+  bundles, and Probe Worker **5 tests** plus type checking. The backend emitted
+  only the known Starlette/httpx warning.
+- The earlier `1515a7b` hosted run failed during the installer fixture's parent
+  ownership/mode precheck because it depended on the runner's real `/opt`.
+  The correction makes that fixture use its owned temporary install base and
+  explicit private directory modes. The actual installer still defaults to
+  `/opt`, with unchanged rejection of unsafe parents; regression cases reject
+  both `0775` and `0777` before creating a job directory.
+- An independent VPS reproduction runs all **124 host-installer tests** as the
+  existing unprivileged `nobody` account with `umask 0002`. It passed, along
+  with Ruff, in `/tmp/open-node-ci-owner.wVwaXkVt`. No production paths or
+  service accounts were adopted by those fixtures.
+- The exact clean `a677280` checkout at
+  `/tmp/open-node-bootstrap-owner-fix.ZBzZ9ILY/source` passed backend Ruff and
+  **323 focused tests** (76.60 s): 75 API, 98 store, 124 installer and 26
+  authentication cases. Log: the parent directory's `backend-focused.log`.
+- The same checkout's real-systemd smoke reran the actual installer bytes,
+  SHA-256 `00e18bc0c4c55a461b1b811c4e4faa636f558590325e3a2e26827e15cb468913`,
+  against the unchanged public Agent 0.3.0a0 assets and official Xray v26.3.27.
+  Forced WebSocket and HTTP both reached non-root Agent/runtime readiness and
+  forwarded **1,223,915** and **1,102,535** downlink bytes. Wrong-nonce replay,
+  redemption after registration and repeated installation were refused; no
+  secret leaks or cleanup errors were reported. Evidence:
+  `/tmp/open-node-bootstrap-owner-fix.ZBzZ9ILY/real-bootstrap/report.json`.
+
+The feature-only `1515a7b` verification also checked all 142 tracked backend
+files (2,201,738 bytes) against Git and the complete 1,250-test VPS source tree.
+Its exact frontend/Worker/browser rerun is retained under
+`/tmp/open-node-bootstrap-exact-ui-1515a7b`; 53 Compose preflight checks and
+two isolation negative controls are at
+`/root/open-node-bootstrap-committed-check.OmEteOtb/results/report.json`.
+These counts are not added to the later CI or focused totals.
+
+Production remained on container `c2594ea5b436950a92e310f320b072bfe5bbeda15b178672b4d14008e6e841aa`,
+image `open-node:cb1eb0c`, start time `2026-08-29T12:59:02.442246035Z`, with
+zero restarts. The shared candidate remained clean at `6ca84e2`. This is a
+source publication, not a production upgrade or proof of public DNS/TLS,
+reverse-proxy subpaths, or automatic transport fallback.
+
 ### Panel-issued Agent installation (2026-08-31)
 
 The feature was tested in private VPS source snapshots based on `6ca84e2` with

@@ -7,8 +7,11 @@
 当前已从受限 Preview 首发转入四个固定官方仓库的功能对等工作。Mieru UDP、
 首发安全加固、持久 Compose 和 Agent 0.2.0 发布不要重做；后续补齐的 GitHub
 控制面安装器、套餐计费、Agent 设置和管理员 MFA 已进入公开主线。管理员 MFA
-已通过后端和浏览器验收，公共探针 Worker 的匿名浏览器门槛也已通过。生产实例保持
-原镜像，本轮没有升级生产。建议在新聊天中直接说明：
+已通过后端和浏览器验收，公共探针 Worker 的匿名浏览器门槛也已通过。本轮面板远程
+Agent 安装已完成 VPS 验收，Agent 0.3.0a0 已公开发布；功能代码 `1515a7b` 和
+托管 CI 夹具修正 `a677280` 已进入主线。用户随后明确要求前端重写为标准 Ant Design，
+目前正在将 Vue/Vuetify 迁移到 React，尚未发布重写版。生产实例保持原镜像，本轮没有
+升级生产。建议在新聊天中直接说明：
 
 > 请先阅读 `docs/refactor-handoff.md`、`docs/mmwx-source-parity.md` 和 `docs/testing.md`，核对公开主线、候选分支、VPS 隔离测试 checkout 和生产镜像四者的实际 revision。继续参考用户提供的四个固定官方仓库，不要把受限 Preview 首发等同于完整 MMWX 替代。测试、构建、浏览器和真实流量验收都在 `185.99.135.224` 的隔离候选环境运行，不动生产服务和数据库。公开 HTTPS、Cloudflare 账户部署与异地加密备份需操作者的实际输入，不能用本地通过替代外部验证。
 
@@ -16,7 +19,8 @@
 
 - 项目名为 `open-node`，GitHub 仓库为 <https://github.com/FengYuchen1314/open-node>。
 - 只使用一个仓库，后端、Agent、前端、探针、运行时补丁、文档和测试脚本都在本仓库。
-- 后端使用 FastAPI，前端使用 Vue 3、Vuetify、Vite 和 TypeScript。
+- 后端保留 FastAPI。公开基线的前端仍是 Vue 3/Vuetify；当前优先任务是按用户要求
+  重写为 React、官方 Ant Design、Vite 和 TypeScript，不改已有 API 和部署架构。
 - 软件对所有人免费，不需要许可证、激活码、付费权限检查或商业许可证服务器。
 - `tajiaoyezi/miaomiaowuX` 固定提交
   `c12ce653bc07fe30426b7dfcb85076974b7be0e0` 是控制面业务的主要参考。
@@ -27,8 +31,10 @@
 
 旧的百分比估算已经作废。当前状态必须以
 [`mmwx-source-parity.md`](mmwx-source-parity.md) 的固定源码矩阵和可执行发布门槛为准；
-套餐计费已按官方语义修正并验证；外部订阅、通知、完整迁移、应用内备份恢复和
-面板生成远程 Agent 安装命令仍有明确缺口。
+套餐计费已按官方语义修正并验证，面板生成远程 Agent 安装命令也已实现。
+外部订阅、通知、完整迁移和应用内备份恢复仍有缺口。先完成 Ant Design 重写及全量
+回归，再继续功能补齐。外部订阅的官方源码接点和首期范围见
+[`external-subscriptions-plan.md`](external-subscriptions-plan.md)，该文件只是待实现方案。
 这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
 单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
 Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 MMWX，但它们不应
@@ -38,9 +44,9 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 | 项目 | 当前状态 |
 | --- | --- |
-| GitHub `main` | 已发布 `6ca84e21202950bf5ee4754a8ae20e28dbde42ed`，含管理员 MFA 与公开 Probe 验收；匿名 Raw 控制面安装脚本的完整隔离安装链路已通过 |
-| 当前候选 | `codex/mmwx-parity-release-candidate`；最近完整 GitHub 四项检查通过的代码提交为 `6ca84e21202950bf5ee4754a8ae20e28dbde42ed`。面板远程 Agent 安装正在实现，未提交改动以 `git status` 为准 |
-| VPS 隔离候选 | `/opt/open-node/mmwx-parity-candidate`，公开 Probe 的精确提交验收为 `6ca84e2`；测试不得复用生产数据库或服务 |
+| GitHub `main` | 已快进至 `a677280ece64a71d7ee4e8c4f0720cd819bcf584`，含面板 Agent 安装和托管 CI 夹具修正；后续只含文档的提交不改变该功能基线 |
+| 当前候选 | `codex/mmwx-parity-release-candidate`；`a677280` 的 GitHub run `33325869097` 四个 job 全部成功。React/Ant Design 工作树尚未提交，不属于该 CI 结果 |
+| VPS 隔离候选 | 共享 `/opt/open-node/mmwx-parity-candidate` 保留 clean `6ca84e2`；安装器修正版独立 clean clone 为 `/tmp/open-node-bootstrap-owner-fix.ZBzZ9ILY/source`，精确 `a677280`。React 重写在 `/tmp/open-node-react-migration.FKBP3cm0` 验证，不能混用两者的结果或生产数据库 |
 | VPS 生产源码 | `/opt/open-node`，`27ad431dd97670076d532efa461745ac9576ee2a`；源码、公开主线和运行镜像不是同一个 revision，不要混为一谈 |
 | 持久控制面 | Compose 服务 `open-node-open-node-1` healthy，绑定 `127.0.0.1:8000 -> 8080`；数据卷为 `open-node_data` |
 | 精确部署镜像 | `open-node:cb1eb0c`；image ID `sha256:2d5f340b6c84eedf2d0f0aa64938d5560ee11da444b9e5e917748a575ecfb0d3`；OCI revision label 为完整 `cb1eb0c` SHA |
@@ -48,8 +54,9 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 | 最近部署备份 | `/var/backups/open-node/20260829T123138Z-cb1eb0c`，目录及文件均为 root 私有权限；含状态、配置、源码和精确新旧镜像 |
 | 隔离恢复验收 | 独立 project `open-node-restore-cb1eb0c`、独立 volume、`127.0.0.1:18081`；健康、管理员认证、数据库完整性/计数和 identity seed 连续性通过，验收资源已按 project label 清理 |
 | Agent 0.2.0 发布 | annotated tag `agent-v0.2.0` 指向 `3bf30c0b488efe6575927d01acca07f6dc0b3662`；GitHub prerelease 恰好包含四项制品，匿名校验及 WebSocket/HTTP 实下载、升级、流量和回滚烟测均通过 |
+| Agent 0.3.0a0 发布 | annotated tag `agent-v0.3.0a0` 指向 `6ca84e21202950bf5ee4754a8ae20e28dbde42ed`；release `379344539` 为非 latest 的 alpha。四项公开制品、匿名下载、双通道升级/流量/回滚已验证；面板安装器在更新的控制面提交 `1515a7b`/`a677280` 中，发布资产没有改动 |
 
-VPS 已不再使用 `/tmp` Uvicorn 进程。控制面由持久 Compose 和 systemd 管理，已经
+生产服务已不再使用 `/tmp` Uvicorn 进程。控制面由持久 Compose 和 systemd 管理，已经
 通过备份、服务重启、Compose down/up 和隔离恢复验收。当前访问方式仍是 SSH 隧道
 下的 loopback Preview，不是公开 HTTPS 部署。
 
@@ -79,6 +86,9 @@ VPS 已不再使用 `/tmp` Uvicorn 进程。控制面由持久 Compose 和 syste
 - 独立 Python Agent 支持 HTTP 与 WebSocket、命令租约、去重、重连、结果和流式帧。
 - 兼容旧 `securechan-v1` WebSocket，并已用未修改的固定版本旧 Agent 做过真实验证。
 - 非 root systemd 安装、升级、回滚、卸载、数据保留和故障恢复已完成。
+- 面板可为从未连接的新服务器签发十分钟安装命令，下载并校验固定的 Agent 和
+  官方 Xray，安装为独立非 root systemd 服务。票据首次领取后不能再次签发；
+  领取、注册和安装就绪分别判断，已有目录、账户或服务不会被自动接管。
 - Xray、Nginx、WARP、日志、诊断、NextTrace、配置文件和 Agent 生命周期操作已有原生实现或明确的兼容包装。
 
 ### Xray 运行时和协议
@@ -123,6 +133,33 @@ VPS 已不再使用 `/tmp` Uvicorn 进程。控制面由持久 Compose 和 syste
 更细的功能清单在 [`migration-map.md`](migration-map.md)，各功能的安全边界和复现方式在同目录专题文档中。
 
 ## 最新候选验证（2026-08-30/31）
+
+`a677280` 已通过独立 clean-checkout GitHub CI：后端 **1,253 passed**、Agent
+**605 passed**、前端 **268 tests / 37 files**、Worker **5 tests** 及双产物构建。
+首个功能提交的 CI 在 host 安装夹具中误用 runner 的 `/opt`，导致权限预检失败；
+修正只将测试安装基目录隔离并明确 fixture 权限，生产默认仍为 `/opt`，路径安全
+检查未放宽。VPS 另有 **323** 项专项测试、`nobody`/`umask 0002` 下 **124** 项
+安装器测试，以及精确修正版安装字节的真实 WebSocket/HTTP 安装复验通过。
+
+以上前端数量对应已发布的 Vue 基线，不是正在重写的 React 界面。新界面的页面迁移、
+类型检查、真实 Ant Design DOM 测试和双产物/浏览器验收单独记录，尚不能据旧结果
+宣称重写完成。
+
+本轮安装功能的完整后端回归为 **1,250 passed**（694.29 秒）。提交后核对了
+`1515a7b` 的全部 142 个后端 tracked 文件，共 2,201,738 字节，与该回归源树和
+Git blob 一致。精确提交又通过前端 **268** 项、Worker **5** 项、两种前端构建、
+桌面/手机浏览器、53 项 Compose 预检和两项测试隔离负控。
+
+安装链路另外使用公开 Agent 0.3.0a0 资产，分别完成 WebSocket、HTTP 真正安装、
+非 root 进程与运行时就绪、VLESS/HTTP 转发、流量上报、重放拒绝和重复安装拒绝。
+根安装脚本完成同 SHA 的启用、关闭与无变化更新，保留管理员、库存及两份不可变
+备份；镜像内资源和 HTTP 接口在三种状态下均通过。真实安装验证使用根 HTTPS URL
+和逐项指定的 transport，不能据此宣称反代子路径或 Auto 降级已端到端实测。
+
+生产容器 `c2594ea5…`、镜像、启动时间 `2026-08-29T12:59:02.442246035Z`、
+重启次数 0、环境摘要、网络和数据卷均未改变。临时服务、账户、容器、卷和依赖
+链接已按所属测试清理，脱敏报告保留。复现与精确路径见 [`testing.md`](testing.md)。
+以下 MFA 和公共探针记录保留为前一批验收证据，不能与新安装功能的测试计数相加。
 
 - 管理员 MFA：TOTP、一次性恢复码、登录 challenge、强制绑定、会话撤销、
   本地恢复和跨 IP/新 challenge 的持久账号级限流已实现。默认安装不自动启用；
@@ -263,7 +300,7 @@ wheel metadata 和 bootstrap 结构校验通过。下载 wheel 随后在 WebSock
 git status --short
 git rev-parse HEAD
 git ls-remote origin refs/heads/main
-git ls-remote --tags origin "refs/tags/agent-v0.2.0*"
+git ls-remote --tags origin "refs/tags/agent-v0.3.0a0*"
 ssh root@185.99.135.224 "git -C /opt/open-node status --short; git -C /opt/open-node rev-parse HEAD; systemctl is-enabled open-node-compose.service; systemctl is-active open-node-compose.service; curl -fsS http://127.0.0.1:8000/healthz"
 ```
 
@@ -275,6 +312,8 @@ ssh root@185.99.135.224 "git -C /opt/open-node status --short; git -C /opt/open-
 - [`subscriptions.md`](subscriptions.md)
 - [`native-limits.md`](native-limits.md)
 - [`deployment.md`](deployment.md)
+- [`agent-bootstrap.md`](agent-bootstrap.md)
+- [`external-subscriptions-plan.md`](external-subscriptions-plan.md)
 
 工作约束：
 
@@ -291,6 +330,10 @@ ssh root@185.99.135.224 "git -C /opt/open-node status --short; git -C /opt/open-
 从新到旧的主要里程碑：
 
 ```text
+a677280 Isolate Agent bootstrap ownership fixtures from hosted runner paths
+1515a7b Add pinned panel-issued Agent bootstrap with single-host tickets
+4749a12 Record verified MFA and Probe publication in project handoff
+6ca84e2 Verify public Probe browser gate with native Cloudflare runtime
 cb1eb0c fix: harden preview release deployment
 66b6319 feat: add Mieru UDP target forwarding
 b6267f8 docs: distinguish deployed feature baseline
