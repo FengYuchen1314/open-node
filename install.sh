@@ -684,7 +684,6 @@ runtime_container_is_safe() {
       and $container.HostConfig.SecurityOpt == ["no-new-privileges:true"]
       and (($container.HostConfig.Devices // []) | length == 0)
       and (($container.HostConfig.DeviceRequests // []) | length == 0)
-      and (($container.HostConfig.Binds // []) | length == 0)
       and (($container.HostConfig.Links // []) | length == 0)
       and (($container.HostConfig.ExtraHosts // []) | length == 0)
       and (($container.HostConfig.Dns // []) | length == 0)
@@ -711,11 +710,20 @@ runtime_container_is_safe() {
         $container.HostConfig.Tmpfs["/tmp"] == "rw,nosuid,noexec,size=64m,mode=1777"
         or $container.HostConfig.Tmpfs["/tmp"] == "rw,nosuid,noexec,size=67108864,mode=1777"
       )
-      and ($container.HostConfig.Mounts | length) == 1
-      and $container.HostConfig.Mounts[0].Type == "volume"
-      and $container.HostConfig.Mounts[0].Source == $expected_volume
-      and $container.HostConfig.Mounts[0].Target == "/var/lib/open-node"
-      and ($container.HostConfig.Mounts[0].ReadOnly // false) == false
+      and (
+        (
+          (($container.HostConfig.Binds // []) | length) == 0
+          and ($container.HostConfig.Mounts | length) == 1
+          and $container.HostConfig.Mounts[0].Type == "volume"
+          and $container.HostConfig.Mounts[0].Source == $expected_volume
+          and $container.HostConfig.Mounts[0].Target == "/var/lib/open-node"
+          and ($container.HostConfig.Mounts[0].ReadOnly // false) == false
+        )
+        or (
+          $container.HostConfig.Binds == [($expected_volume + ":/var/lib/open-node:rw")]
+          and (($container.HostConfig.Mounts // []) | length) == 0
+        )
+      )
       and (($container.Mounts | length) == 1)
       and $container.Mounts[0].Type == "volume"
       and $container.Mounts[0].Name == $expected_volume
