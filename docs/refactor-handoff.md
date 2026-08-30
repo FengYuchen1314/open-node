@@ -1,14 +1,16 @@
 # Open Node 重构交接记录
 
-更新时间：2026-08-29
+更新时间：2026-08-31
 
 这份文件供后续聊天直接接手。开始工作前，以当前 Git、GitHub 和 VPS 状态为准，先核对本文件中的快照，不要只依赖聊天记录。
 
-Mieru UDP 目标转发、首发安全加固、持久 Compose 切换和 Agent 0.2.0 GitHub
-公开发布闭环已经完成。受限 Preview 范围内没有剩余代码 P0，不应把更广的完整
-MMWX 对等范围误写成这个首发的未完成项。建议在新聊天中直接说明：
+当前已从受限 Preview 首发转入四个固定官方仓库的功能对等工作。Mieru UDP、
+首发安全加固、持久 Compose 和 Agent 0.2.0 发布不要重做；后续补齐的 GitHub
+控制面安装器、套餐计费和 Agent 设置已进入公开主线。管理员 MFA 已在候选分支
+通过后端和浏览器验收，公共探针 Worker 的匿名浏览器门槛也已通过。生产实例保持
+原镜像，本轮没有升级生产。建议在新聊天中直接说明：
 
-> 请先阅读 `docs/refactor-handoff.md`、`docs/migration-map.md` 和 `docs/releases/agent-0.2.0.md`，核对 `cb1eb0c` 安全代码基线、`agent-v0.2.0` 标签及公开四项制品，不要重做已经验收的安全加固、持久 Compose 切换和 GitHub 实下载烟测。公开 HTTPS 与异地加密备份只有在操作者提供域名、证书、远端存储和密钥后才继续。只处理 `open-node` 主仓库和 `miaomiaowuX` 默认主线，所有测试都放在 `185.99.135.224` 上运行。
+> 请先阅读 `docs/refactor-handoff.md`、`docs/mmwx-source-parity.md` 和 `docs/testing.md`，核对公开主线、候选分支、VPS 隔离测试 checkout 和生产镜像四者的实际 revision。继续参考用户提供的四个固定官方仓库，不要把受限 Preview 首发等同于完整 MMWX 替代。测试、构建、浏览器和真实流量验收都在 `185.99.135.224` 的隔离候选环境运行，不动生产服务和数据库。公开 HTTPS、Cloudflare 账户部署与异地加密备份需操作者的实际输入，不能用本地通过替代外部验证。
 
 ## 固定目标和边界
 
@@ -25,7 +27,8 @@ MMWX 对等范围误写成这个首发的未完成项。建议在新聊天中直
 
 旧的百分比估算已经作废。当前状态必须以
 [`mmwx-source-parity.md`](mmwx-source-parity.md) 的固定源码矩阵和可执行发布门槛为准；
-控制面仍有计费语义、外部订阅、通知、完整迁移和远程 Agent 安装等明确缺口。
+套餐计费已按官方语义修正并验证；外部订阅、通知、完整迁移、应用内备份恢复和
+面板生成远程 Agent 安装命令仍有明确缺口。
 这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
 单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
 Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 MMWX，但它们不应
@@ -35,8 +38,10 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 本地与 GitHub `main` | 包含 `cb1eb0ca936bcb46099ac972d4d7b46d800e9a54` 安全代码基线；最终发布提交还包含状态文档收尾，接手时以 `git status`、`git rev-parse HEAD` 和远端引用为准 |
-| VPS 源码 | `/opt/open-node`，使用干净的 `main` checkout；文档提交可前移，但部署镜像仍须保持下述已经验证的精确代码 revision |
+| GitHub `main` | 已发布 `8ba641e51db797d858c040f625226adf88ed60aa`；匿名 Raw 安装脚本的完整隔离安装链路已通过 |
+| 当前候选 | `codex/mmwx-parity-release-candidate`；最近完整 GitHub 四项检查通过的提交为 `58b33af815ca01e1bf3e079e6038d4de178f6e85`，含管理员 MFA 与探针验收脚本。未提交改动以 `git status` 为准 |
+| VPS 隔离候选 | `/opt/open-node/mmwx-parity-candidate`，验证时为 `58b33af`；测试不得复用生产数据库或服务 |
+| VPS 生产源码 | `/opt/open-node`，`27ad431dd97670076d532efa461745ac9576ee2a`；源码、公开主线和运行镜像不是同一个 revision，不要混为一谈 |
 | 持久控制面 | Compose 服务 `open-node-open-node-1` healthy，绑定 `127.0.0.1:8000 -> 8080`；数据卷为 `open-node_data` |
 | 精确部署镜像 | `open-node:cb1eb0c`；image ID `sha256:2d5f340b6c84eedf2d0f0aa64938d5560ee11da444b9e5e917748a575ecfb0d3`；OCI revision label 为完整 `cb1eb0c` SHA |
 | 开机管理 | `open-node-compose.service` 为 `enabled`、`active`，从 `/opt/open-node/deploy/.env` 启动持久 Compose |
@@ -117,9 +122,32 @@ VPS 已不再使用 `/tmp` Uvicorn 进程。控制面由持久 Compose 和 syste
 
 更细的功能清单在 [`migration-map.md`](migration-map.md)，各功能的安全边界和复现方式在同目录专题文档中。
 
-## 最近一次完整验证
+## 最新候选验证（2026-08-30/31）
 
-最终安全基线 `cb1eb0ca936bcb46099ac972d4d7b46d800e9a54` 已在 Debian 12
+- 管理员 MFA：TOTP、一次性恢复码、登录 challenge、强制绑定、会话撤销、
+  本地恢复和跨 IP/新 challenge 的持久账号级限流已实现。默认安装不自动启用；
+  必须先保存稳定的 `OPEN_NODE_SUBSCRIBER_TOTP_KEY`。与官方恢复码登录和强制
+  绑定来源的差异见 [`administrator-security.md`](administrator-security.md)。
+- VPS 在 `45515b6` 的完整后端 **955 passed**；`58b33af` 新增并发预算边界后，
+  认证专项 **26 passed**。GitHub 同一 `58b33af` 的完整后端 **956 passed**，
+  四个独立 CI job 均通过。不要把不同提交、不同环境的计数写成同一次执行。
+- VPS 的 Agent **605 passed**、前端 **239 passed**、主应用和探针产物构建、
+  Worker **3 tests** 及类型检查通过。CI 的 Agent 测试使用独立托管 runner 的
+  `sudo` 权限验证真实 `chown`，不是放宽断言或在生产执行测试。
+- MFA 真实生产前端浏览器脚本在 `fb1aaaf` 和 `45515b6` 都通过：绑定、恢复码
+  确认、强制策略、密码后验证、替换/禁用及 CLI 恢复后的重新绑定；1440/390px
+  截图已经逐张检查，秘密被遮罩，临时数据库和监听进程已清理。
+- 公共探针 Worker 的真实产物、匿名 API/WebSocket、双向凭据隔离、静默 socket
+  下的持续轮询、断线重连与桌面/手机图表均已通过。验收使用 Wrangler dry-run
+  的真实 bundle 和官方 Miniflare/workerd，绕过已记录故障的 Wrangler 开发代理；
+  没有修改应用轮询或替换为 mock fetch。截图已检查，Cloudflare 实际账户部署
+  和公网 HTTPS 仍未验证，不能混同于这次本地运行时门槛。
+
+复现命令、证据范围和后续结果以 [`testing.md`](testing.md) 为准。
+
+## 受限 Preview 历史基线验证（2026-08-29）
+
+当时的安全基线 `cb1eb0ca936bcb46099ac972d4d7b46d800e9a54` 已在 Debian 12
 x86-64 VPS 的精确 clean worktree 上完成门禁和持久部署验收：
 
 - 本地、GitHub `main`、VPS checkout、镜像 OCI revision label 和部署环境中的
@@ -255,7 +283,8 @@ ssh root@185.99.135.224 "git -C /opt/open-node status --short; git -C /opt/open-
 - 测试与构建只在 VPS 运行。
 - 每个运行时能力都要有真实 Agent、真实 Xray 和真实流量证据。
 - 部署前备份数据库、源码、前端产物和环境；部署后核对 Git 提交、数据库升级、进程、日志和健康检查。
-- 只推送 `open-node/main`，不要处理已排除的旁支。
+- 只修改 `open-node` 主仓库。候选分支通过隔离验收后再进入公开 `main`；不要
+  修改四个只读参考仓库，也不要处理已排除的旧项目旁支。
 
 ## 最近主线提交
 

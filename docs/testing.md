@@ -13,31 +13,44 @@ uses the configured Python interpreter under `sudo` for the Agent tests because
 host-policy fixtures exercise real file ownership changes to a service UID.
 Dependency installation, linting and wheel building remain unprivileged. The
 privilege applies only to GitHub's disposable hosted test runner, not deployment.
-Hosted CI
-does not replace the root-only Docker installer smoke, systemd lifecycle
+Hosted CI does not replace the root-only Docker installer smoke, systemd lifecycle
 smokes, protocol-runtime builds, or real forwarding checks on the designated
 VPS.
 
 ## Remote Test Command
 
-### Administrator MFA acceptance (2026-08-30)
+### Administrator MFA acceptance (2026-08-30/31)
 
 All commands below target the isolated `/opt/open-node/mmwx-parity-candidate`
 checkout, never the production service or database.
 
-- At `ee16ed3`, the complete backend suite passed: **948 tests**.
-- At `fb1aaaf`, the expanded authentication suite passed: **25 tests**,
-  including a persisted cross-IP/cross-challenge verification budget, independent
-  store concurrency, key-loss recovery and local/password-change invalidation.
+- At `45515b6`, the complete backend suite passed: **955 tests** (621.28 s),
+  with one known Starlette/httpx deprecation warning. This supersedes the earlier
+  948-test result at `ee16ed3`.
+- At `58b33af`, the expanded authentication suite passed: **26 tests** (23.68 s),
+  including a persisted cross-IP/cross-challenge verification budget, two-store
+  contention at the final allowed attempt, key-loss recovery and
+  local/password-change invalidation. The concurrent-budget regression was
+  added after the complete 955-test run; the two counts are separate evidence.
+- The subsequent clean-checkout GitHub backend job at `58b33af` passed
+  **956 tests** (561.06 s), including that added regression. This is separate
+  hosted-CI evidence, not a claim that the earlier VPS run contained 956 tests.
 - At `fb1aaaf`, frontend **239 tests**, main production build and probe-only
   production build passed. The remaining build messages are chunk-size warnings.
-- The real production-frontend browser smoke passed enrollment, recovery-code
+- The real production-frontend browser smoke passed at both `fb1aaaf` and
+  `45515b6`: enrollment, recovery-code
   acknowledgement, mandatory policy, password-only challenge denial, recovery
   login, code replacement, policy removal, disablement and local reset followed
   by mandatory enrollment. Desktop (1440 px) and mobile (390 px) screenshots
   were inspected; authenticator secrets and QR codes are masked in artifacts.
   The script also checks horizontal overflow and absence of secrets from browser
   storage, and disposes its private SQLite database and loopback process.
+- The independent Agent suite passed **605 tests** and Ruff on the VPS;
+  the Probe Worker passed **3 behavior tests** and TypeScript checks. At
+  `58b33af`, all four GitHub clean-checkout jobs passed. The Agent job now
+  exercises real ownership changes with its installed
+  interpreter under `sudo`, instead of failing on the hosted runner's missing
+  `chown` privilege.
 
 Run after building the frontend on the VPS:
 
@@ -53,6 +66,59 @@ The smoke creates random fixture credentials and an encryption key; it does not
 read deployment secrets. Its CLI reset is performed only against the disposable
 database. It is not evidence of public HTTPS deployment, multi-administrator
 support, or automatic recovery backups. See [administrator security](administrator-security.md).
+
+### Public Probe Worker acceptance (2026-08-31)
+
+With the candidate's dependencies and Playwright Chromium installed, run on the
+isolated VPS checkout:
+
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run build:probe
+npm --prefix probe-worker ci
+backend/.venv/bin/python scripts/vps/smoke-public-probe-worker.py \
+  --output /tmp/open-node-public-probe-worker-reviewed-revision
+```
+
+The gate uses `wrangler deploy --dry-run` to compile the actual Worker, then
+executes it in Cloudflare's Miniflare/workerd with the real production
+`frontend/dist-probe` assets. It retains the repository's compatibility settings,
+SPA fallback and `run_worker_first` policy. It neither deploys nor logs into a
+Cloudflare account. All listeners are ephemeral loopback ports; the upstream is
+a disposable fixture, not the production control plane or its database.
+
+Passed using Wrangler **4.127.0**, Miniflare **5.20260826.0-alpha** and workerd
+**1.20260826.1**, as locked by `probe-worker/package-lock.json`:
+
+- Production HTML, JS and CSS byte/hash checks, nine HTTP aliases and three real
+  WebSocket aliases; token replacement, bidirectional credential stripping,
+  security headers, private-route 404, write-method 405 and no followed redirects.
+- Anonymous Chromium requests use only the public API surface. Complete headers,
+  HTTP bodies, WebSocket frames, DOM and browser storage are checked for leaked
+  Worker credentials; cookies remain absent and there are no page errors.
+- Both status and target polling continue while an established WebSocket sends
+  no frames. Malformed frames do not break subsequent live updates. Polling
+  continues through a forced disconnect and rejected reconnect, then automatic
+  reconnect applies a new live snapshot.
+- Target ranges, ping/system series, public-only deep links and 1440/390px
+  layouts passed. Desktop/mobile screenshots were visually checked. The report
+  records runtime versions, asset/bundle hashes and observed requests, without
+  retaining the generated secret. Private runtime files and processes are removed.
+
+The earlier `wrangler dev --local` attempts failed because its development
+ProxyWorker exited on a connection error. The official SDK tracker describes
+the same fatal error handling in [issue 15317](https://github.com/cloudflare/workers-sdk/issues/15317)
+and a related five-second connection-reuse race in
+[issue 14641](https://github.com/cloudflare/workers-sdk/issues/14641).
+The gate uses the [official dry-run bundle](https://developers.cloudflare.com/workers/wrangler/bundling/)
+with direct Miniflare instead; it does not patch dependencies, change application
+polling intervals or mock the Worker's fetch implementation to bypass the failure.
+The adapter targets the locked Miniflare v5 API and must be reviewed when updating
+those dependencies. Build/runtime failures retain a stage report and redacted logs.
+
+This closes the local anonymous Worker/browser gate, not a real Cloudflare
+deployment, custom-domain/TLS setup, production-origin connectivity or all visual
+themes from the reference probe. Those remain distinct operational/parity checks.
 
 ### Repository-wide runner
 

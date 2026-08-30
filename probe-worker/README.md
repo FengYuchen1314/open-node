@@ -40,7 +40,7 @@ target-comparison, and stream routes listed above.
 
 ```bash
 cd probe-worker
-npm install
+npm ci
 cp .dev.vars.example .dev.vars
 npm test
 npm run typecheck
@@ -48,12 +48,14 @@ npm run typecheck
 
 ## Deploy
 
-`deploy` builds the dedicated Vue public app before invoking Wrangler:
+From the repository root, with your own Cloudflare account and a reachable HTTPS
+Open Node origin. `deploy` builds the dedicated Vue public app before invoking
+Wrangler:
 
 ```bash
-npm --prefix ../frontend install
-cd ../probe-worker
-npm install
+npm --prefix frontend ci
+npm --prefix probe-worker ci
+cd probe-worker
 npx wrangler secret put MMWX_ORIGIN
 npx wrangler secret put PROBE_TOKEN
 npm run deploy
@@ -62,8 +64,18 @@ npm run deploy
 To build only the static bundle without deploying it, run `npm run
 build:assets`; the output is `frontend/dist-probe`.
 
-Generate `PROBE_TOKEN` from the Open Node Probe settings panel or with:
+Generate `PROBE_TOKEN` from the signed-in Open Node Probe settings panel, enable
+Worker-token access and store that token as a Worker secret. Never put it into
+the public Vue bundle. The underlying `POST /api/v1/probe/access-token` endpoint
+requires administrator authentication and CSRF proof; it is not an anonymous
+token-creation API.
 
-```bash
-curl -X POST https://your-origin.example/api/v1/probe/access-token
-```
+## Browser Acceptance
+
+The isolated VPS gate in `scripts/vps/smoke-public-probe-worker.py` compiles the
+real Worker with Wrangler's dry-run mode and runs it directly in the locked
+Miniflare/workerd runtime. It tests production assets, anonymous API/WebSocket
+access, credential isolation, polling/reconnect and desktop/mobile layouts.
+See [testing](../docs/testing.md#public-probe-worker-acceptance-2026-08-31) for
+commands and the documented Wrangler development-proxy workaround. This is not
+proof of a deployment into your Cloudflare account.

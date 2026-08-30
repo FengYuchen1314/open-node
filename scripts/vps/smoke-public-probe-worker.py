@@ -6,10 +6,10 @@ Run only on the isolated Linux VPS candidate, after building the probe bundle::
     backend/.venv/bin/python scripts/vps/smoke-public-probe-worker.py \
         --output /tmp/open-node-public-probe-worker-smoke
 
-Requires the candidate's installed probe-worker Wrangler dependencies and the
+Requires the candidate's locked probe-worker Wrangler/Miniflare dependencies and the
 backend browser extra with Playwright Chromium. No Cloudflare login, deploy,
 real backend, database, production container, or public listener is used. The
-fixture and Wrangler bind only ephemeral loopback ports; generated configuration,
+fixture and Miniflare bind only ephemeral loopback ports; generated configuration,
 credentials, runtime state, and logs live in a private temporary directory.
 """
 
@@ -19,7 +19,6 @@ import argparse
 import asyncio
 import base64
 import hashlib
-import http.client
 import json
 import os
 import secrets
@@ -40,7 +39,9 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, expect, sync_playwright
+from websockets.sync.client import connect
 
 ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM_PREFIX = "/fixture-control"
@@ -398,6 +399,8 @@ def http_boundary(url: str, origin: str, assets: Path, state: Fixture) -> dict:
             )
             assert response.status_code == 200, (path, response.status_code)
             hardened(response.headers)
+            assert state.token not in response.text, "Worker exposed its token in API data"
+            assert state.token not in json.dumps(dict(response.headers)), "Token in response headers"
             assert response.json()["license_required"] is False
             observed = [item for item in state.snapshot()["events"]
                         if item["query"].get("case") == [case]]
@@ -440,42 +443,34 @@ def http_boundary(url: str, origin: str, assets: Path, state: Fixture) -> dict:
 
 
 def websocket_boundary(url: str, state: Fixture):
-    address = urlparse(url)
     for index, path in enumerate(WS_ROUTES):
         case = f"ws-alias-{index}"
-        key = base64.b64encode(secrets.token_bytes(16)).decode()
-        connection = http.client.HTTPConnection(address.hostname, address.port, timeout=10)
-        response = None
-        try:
-            connection.request("GET", path + "/?case=" + case, headers={
-                "Upgrade": "websocket", "Connection": "Upgrade",
-                "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13",
+        with connect(
+            url.replace("http://", "ws://", 1) + path + "/?case=" + case,
+            additional_headers={
                 "Authorization": "Bearer fixture-browser-authorization",
                 "Cookie": "open_node_session=fixture-browser-cookie",
                 "X-MMwx-Probe-Token": "fixture-wrong-caller-token",
                 "X-Forwarded-Host": "caller.invalid",
-            })
-            response = connection.getresponse()
-            assert response.status == 101, (path, response.status)
-            hardened(dict(response.getheaders()))
+            },
+            proxy=None, open_timeout=10, close_timeout=3, ping_interval=None,
+        ) as connection:
+            response = connection.response
+            assert response.status_code == 101, (path, response.status_code)
+            hardened(dict(response.headers))
+            key = connection.request.headers["Sec-WebSocket-Key"]
             expected = base64.b64encode(hashlib.sha1(
                 (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
             ).digest()).decode()
-            assert response.getheader("Sec-WebSocket-Accept") == expected
+            assert response.headers["Sec-WebSocket-Accept"] == expected
+            frame = connection.recv(timeout=10)
+            assert state.token not in frame, "Worker exposed its token in a WebSocket frame"
+            assert state.token not in json.dumps(dict(response.headers)), "Token in upgrade headers"
+            assert json.loads(frame)["enabled"] is True
             observed = [item for item in state.snapshot()["events"]
                         if item["query"].get("case") == [case]]
             assert len(observed) == 1 and state.authorized(observed[0]), observed
             assert observed[0]["path"] == UPSTREAM_PREFIX + PUBLIC_PREFIX + "probe-ws"
-            if connection.sock:
-                mask = secrets.token_bytes(4)
-                payload = (1000).to_bytes(2, "big")
-                connection.sock.sendall(b"\x88\x82" + mask + bytes(
-                    value ^ mask[index % 4] for index, value in enumerate(payload)
-                ))
-        finally:
-            if response:
-                response.close()
-            connection.close()
     wait_until(lambda: state.snapshot()["active_ws"] == 0, "fixture handshake clients close")
     print(
         "PASS real WebSocket upgrades, aliases and bidirectional credential stripping",
@@ -492,6 +487,15 @@ def screenshot_pair(page: Page, output: Path, name: str):
         page.set_viewport_size({"width": width, "height": height})
         check_layout(page)
         page.screenshot(path=output / f"{name}-{suffix}.png", full_page=True, animations="disabled")
+        if width == 390 and name == "public-probe-series":
+            drawer = page.locator(".probe-detail-drawer")
+            last_chart = drawer.locator(".probe-trend-grid svg").last
+            last_chart.scroll_into_view_if_needed()
+            expect(last_chart).to_be_in_viewport(ratio=1)
+            page.screenshot(
+                path=output / f"{name}-mobile-scrolled.png", animations="disabled",
+            )
+            drawer.get_by_role("heading", name="worker-edge", exact=True).scroll_into_view_if_needed()
     page.set_viewport_size({"width": 1440, "height": 1000})
 
 
@@ -531,13 +535,20 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on("request", lambda request: requests.append({
             "url": request.url, "method": request.method,
-            "credential_present": any(key in request.headers for key in (
+            "credential_present": any(key in (
                 "authorization", "cookie", "x-mmwx-probe-token",
-            )),
+            ) for key in request.all_headers()),
         }))
-        page.on("response", lambda response: responses.append({
-            "url": response.url, "status": response.status, "headers": response.headers,
-        }))
+        def observe_response(response):
+            path = urlparse(response.url).path
+            responses.append({
+                "url": response.url, "status": response.status, "headers": response.all_headers(),
+                "token_in_body": (
+                    state.token.encode() in response.body()
+                    if path.startswith("/api/") and not path.endswith("/probe-ws") else False
+                ),
+            })
+        page.on("response", observe_response)
         page.on("websocket", lambda stream: stream.on(
             "framereceived", lambda frame: frames.append(frame)
         ))
@@ -667,7 +678,16 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 assert state.token not in request["url"], "Worker token exposed in browser URL"
             for response in responses:
                 path = urlparse(response["url"]).path
-                allowed_statuses = {101, 403} if path.endswith("/probe-ws") else {200}
+                assert not response["token_in_body"], "Worker token exposed in an HTTP body"
+                assert state.token not in json.dumps(response["headers"]), "Token in response headers"
+                if path.endswith("/probe-ws"):
+                    allowed_statuses = {101, 403}
+                elif path.startswith("/api/"):
+                    allowed_statuses = {200}
+                else:
+                    # The real asset service may revalidate cached JS/CSS after
+                    # the deep-link navigation. Dynamic APIs must never use 304.
+                    allowed_statuses = {200, 304}
                 assert response["status"] in allowed_statuses, (
                     response["url"], response["status"],
                 )
@@ -676,7 +696,12 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
             assert len(accepted_upgrades) >= 2, "No browser-level reconnect handshake evidence"
             for response in accepted_upgrades:
                 hardened(response["headers"])
+                assert state.token not in json.dumps(response["headers"]), "Token in upgrade headers"
             assert len(frames) >= 4
+            assert all(
+                state.token not in frame if isinstance(frame, str)
+                else state.token.encode() not in frame for frame in frames
+            ), "Worker token exposed in a browser WebSocket frame"
             result = {
                 "browser_requests": [{"path": urlparse(item["url"]).path,
                                       "method": item["method"]} for item in requests],
@@ -686,12 +711,15 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 "browser_cookies": [],
             }
         except BaseException:
+            (output / "browser-errors.json").write_text(json.dumps(errors, indent=2))
+            if errors:
+                print("Browser errors: " + json.dumps(errors), file=sys.stderr)
             try:
                 page.screenshot(
                     path=output / "public-probe-failure.png", full_page=True, timeout=5000,
                 )
-            except Exception:
-                pass
+            except (PlaywrightError, OSError):
+                print("Could not capture the failure screenshot", file=sys.stderr)
             raise
         finally:
             with state.lock:
@@ -751,13 +779,40 @@ def stop_process_group(process: subprocess.Popen):
             pass
 
 
+@contextmanager
+def smoke_evidence(output: Path, work: Path, report: dict, state: Fixture):
+    """Keep diagnostics even if dry-run fails, times out, or cleanup fails."""
+    try:
+        yield
+    except BaseException as error:
+        report["status"] = "failed"
+        report["failure_type"] = type(error).__name__
+        for name in ("runtime.log", "debug.log"):
+            source = work / name
+            if source.is_file():
+                contents = source.read_text(errors="replace")[-30_000:].replace(
+                    state.token, "[redacted]"
+                )
+                (output / name).write_text(contents)
+                if name == "runtime.log":
+                    print(contents, file=sys.stderr)
+        raise
+    else:
+        report["status"] = "passed"
+        report["stage"] = "complete"
+    finally:
+        report["fixture"] = state.snapshot()
+        (output / "report.json").write_text(json.dumps(report, indent=2))
+
+
 def run(output: Path, assets_override: Path | None, repository: Path):
     if sys.platform != "linux":
         raise SystemExit("Run this smoke on the isolated Linux VPS candidate, not locally.")
     worker = repository.resolve() / "probe-worker"
     wrangler = worker / "node_modules" / "wrangler" / "bin" / "wrangler.js"
+    runner = Path(__file__).with_name("run-probe-worker-runtime.mjs")
     node = shutil.which("node")
-    if not wrangler.is_file() or not node:
+    if not wrangler.is_file() or not node or not runner.is_file():
         raise SystemExit("Install candidate probe-worker dependencies with npm ci first.")
     source_config = json.loads((worker / "wrangler.jsonc").read_text())
     assets = (assets_override or worker / source_config["assets"]["directory"]).resolve()
@@ -777,10 +832,18 @@ def run(output: Path, assets_override: Path | None, repository: Path):
     url = f"http://127.0.0.1:{worker_port}"
     token = secrets.token_urlsafe(32)
     state = Fixture(token, urlparse(url).netloc)
-    report = {"status": "failed", "runtime": "wrangler dev --local", "assets": str(assets)}
+    report = {
+        "status": "failed", "stage": "configuration",
+        "runtime": "Miniflare/workerd (Wrangler dry-run bundle)",
+        "assets": str(assets),
+        "versions": {
+            name: json.loads((worker / "node_modules" / name / "package.json").read_text())["version"]
+            for name in ("wrangler", "miniflare", "workerd")
+        },
+    }
     with tempfile.TemporaryDirectory(prefix="open-node-probe-worker-") as temporary:
         work = Path(temporary)
-        with origin_runtime(state) as origin:
+        with smoke_evidence(output, work, report, state), origin_runtime(state) as origin:
             # Carry the repository's entry point, compatibility date and complete
             # asset-routing configuration into a private, local-only config. Do
             # not copy account identifiers, remote bindings or real .dev.vars.
@@ -797,9 +860,6 @@ def run(output: Path, assets_override: Path | None, repository: Path):
             config_path = work / "wrangler.json"
             config_path.write_text(json.dumps(config))
             config_path.chmod(0o600)
-            secret_path = work / ".dev.vars"
-            secret_path.write_text("PROBE_TOKEN=" + token + "\n")
-            secret_path.chmod(0o600)
             env = {key: value for key, value in os.environ.items()
                    if not key.startswith(("CLOUDFLARE_", "CF_", "WRANGLER_", "OPEN_NODE_"))}
             env.update({
@@ -808,38 +868,60 @@ def run(output: Path, assets_override: Path | None, repository: Path):
                 "XDG_CONFIG_HOME": str(work / "config"), "XDG_CACHE_HOME": str(work / "cache"),
             })
             with (work / "runtime.log").open("w+") as log:
+                compiled = work / "compiled"
+                # Use the deployment CLI only for its official offline build.
+                # Its development ProxyController has a known fatal transient-
+                # connection regression; it is not part of a deployed Worker.
+                report["stage"] = "wrangler_dry_run"
+                build = subprocess.Popen([
+                    node, str(wrangler), "deploy", "--dry-run", "--outdir", str(compiled),
+                    "--config", str(config_path),
+                ], cwd=work, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                    start_new_session=True)
+                try:
+                    build.wait(timeout=60)
+                finally:
+                    stop_process_group(build)
+                bundle = compiled / "index.js"
+                if build.returncode or not bundle.is_file():
+                    raise AssertionError("Wrangler dry-run did not produce the Worker bundle")
+                report["worker_bundle_sha256"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
+                runtime_config = work / "runtime.json"
+                runtime_config.write_text(json.dumps({
+                    "workerDirectory": str(worker), "bundlePath": str(bundle),
+                    "workDirectory": str(work), "port": worker_port, "wrangler": config,
+                    "bindings": {"MMWX_ORIGIN": config["vars"]["MMWX_ORIGIN"],
+                                 "PROBE_TOKEN": token},
+                }))
+                runtime_config.chmod(0o600)
+                report["stage"] = "runtime_start"
                 process = subprocess.Popen([
-                    node, str(wrangler), "dev", "--local", "--no-latest",
-                    "--config", str(config_path), "--ip", "127.0.0.1", "--port", str(worker_port),
-                    "--inspector-ip", "127.0.0.1", "--inspector-port", "0",
-                    "--no-live-reload", "--no-show-interactive-dev-session", "--no-types",
-                    "--persist-to", str(work / "state"), "--log-level", "warn",
+                    node, str(runner), str(runtime_config),
                 ], cwd=work, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                     start_new_session=True)
                 try:
                     with httpx.Client(timeout=1, trust_env=False) as client:
                         def ready():
                             if process.poll() is not None:
-                                raise AssertionError("Local Wrangler exited before readiness")
+                                raise AssertionError("Local Miniflare exited before readiness")
                             try:
                                 return client.get(url).status_code == 200
                             except httpx.HTTPError:
                                 return False
-                        wait_until(ready, "local Wrangler serves built assets", timeout=45)
+                        wait_until(ready, "local Miniflare serves built assets", timeout=45)
+                    report["stage"] = "http_boundary"
                     report["asset_sha256"] = http_boundary(url, origin, assets, state)
+                    report["stage"] = "websocket_boundary"
                     websocket_boundary(url, state)
+                    report["stage"] = "browser"
                     report.update(browser_surface(url, state, output))
                     wait_until(lambda: state.snapshot()["active_ws"] == 0, "browser sockets close")
-                    report["status"] = "passed"
+                    report["stage"] = "cleanup"
                 except BaseException:
-                    log.flush()
-                    log.seek(0)
-                    print(log.read()[-20_000:].replace(token, "[redacted]"), file=sys.stderr)
+                    report["runtime_exit_code"] = process.poll()
                     raise
                 finally:
                     stop_process_group(process)
-                    report["fixture"] = state.snapshot()
-                    (output / "report.json").write_text(json.dumps(report, indent=2))
     print(
         f"PASS public Probe Worker production-bundle browser gate; evidence: {output}",
         flush=True,
