@@ -625,14 +625,21 @@ actual traffic coverage and limits.
 Open Node records subscription traffic in a durable ledger when agent telemetry
 contains `stats.user` counters for known credential emails. The first observed
 counter value is counted, later telemetry only adds positive deltas, and
-counter resets are treated as a new epoch. The ledger backs both
-`subscription-userinfo` and `GET /api/v1/users/{username}/traffic`; old
-databases without ledger entries still fall back to the latest telemetry
-snapshot until new telemetry arrives.
+counter resets are treated as a new epoch. Each delta retains raw upload and
+download counters plus weighted upload and download values. The weight is the
+current package traffic factor multiplied by the reporting node's package
+multiplier, and is frozen when the delta is ingested. Later plan edits only
+affect later deltas. The ledger backs both `subscription-userinfo` and
+`GET /api/v1/users/{username}/traffic`; old databases without ledger entries
+still fall back to the latest telemetry snapshot until new telemetry arrives.
 
-Quota status compares ledger usage against the assigned plan using the plan's
-traffic mode: `oneway` charges download traffic only, while `twoway` charges
-upload plus download. Expired, inactive, unassigned, and over-quota users are
+Quota status compares frozen weighted usage against the assigned plan.
+Reference-compatible `oneway` charges `(upload + download) x 1`, while `twoway`
+charges `(upload + download) x 2`; both are then multiplied by the reporting
+node's package multiplier. The standard `subscription-userinfo` header exposes
+that billable total as `upload=0; download=<charged bytes>`. The traffic API
+continues to expose raw directions alongside weighted directions and charged
+usage for auditability. Expired, inactive, unassigned, and over-quota users are
 reported as unavailable, and over-quota users cannot render public
 subscriptions until usage is reset or the plan changes.
 
@@ -641,8 +648,11 @@ the next telemetry report only counts post-reset deltas. Operators can reset a
 single user's ledger or run `POST /api/v1/traffic/reset-due` from an external
 cron/automation job. Due resets use each user's monthly `reset_day` and
 `last_traffic_reset_at` so repeated automation calls in the same reset window
-are idempotent. SQLite databases created before this field existed are
-upgraded in place during schema creation.
+are idempotent. SQLite databases created before weighted attribution are
+upgraded once during schema creation. Existing live ledgers are backfilled with
+the current plan and credential node. Legacy archived rows no longer identify
+their former node, so their one-time backfill applies only the current package
+traffic factor; all fresh deltas preserve full node attribution.
 
 The frontend exposes this in `/subscriptions`, where operators can create users,
 catalog nodes, plans, assignments, public links, generated credentials, format

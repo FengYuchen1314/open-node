@@ -10,6 +10,11 @@ from conftest import authenticated_client
 from fastapi.testclient import TestClient
 from open_node.core.config import Settings
 from open_node.main import create_app
+from open_node.services.inventory import (
+    SubscriptionArchivedTrafficModel,
+    SubscriptionPlanModel,
+)
+from sqlalchemy import inspect, text
 
 
 def sqlite_url(path: Path) -> str:
@@ -206,7 +211,7 @@ def test_subscription_token_renders_clash_yaml_and_traffic_header(tmp_path: Path
     assert response.headers["profile-title"].startswith("base64:")
     expire = int(datetime(2026, 9, 30, tzinfo=UTC).timestamp())
     assert response.headers["subscription-userinfo"] == (
-        f"upload=1024; download=2048; total={128 * 1024 * 1024 * 1024}; expire={expire}"
+        f"upload=0; download=9216; total={128 * 1024 * 1024 * 1024}; expire={expire}"
     )
     doc = yaml.safe_load(response.text)
     proxy = doc["proxies"][0]
@@ -285,13 +290,137 @@ def test_subscription_traffic_ledger_tracks_deltas_and_counter_resets(tmp_path: 
     assert payload["upload"] == 170
     assert payload["download"] == 300
     assert payload["total"] == 470
+    assert payload["weighted_upload"] == 510
+    assert payload["weighted_download"] == 900
+    assert payload["charged_usage_bytes"] == 1410
     assert payload["entries"][0]["email"] == client_email
+    assert payload["entries"][0]["attributed_node_id"] == node_id
+    assert payload["entries"][0]["charged_usage_bytes"] == 1410
     assert payload["entries"][0]["last_reported_at"] == "2026-08-27T00:10:00Z"
 
     token = client.post("/api/v1/users/alice/subscription-token").json()["subscription"]["token"]
     header = client.get(f"/api/v1/subscribe/{token}").headers["subscription-userinfo"]
     expire = int(datetime(2026, 9, 30, tzinfo=UTC).timestamp())
-    assert header == f"upload=170; download=300; total={128 * 1024 * 1024 * 1024}; expire={expire}"
+    assert header == f"upload=0; download=1410; total={128 * 1024 * 1024 * 1024}; expire={expire}"
+
+
+def test_subscription_billing_freezes_weight_for_each_telemetry_delta(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    agent_token, _server_id, node_id, plan_id = create_catalog_fixture(client)
+    assigned = client.post(
+        "/api/v1/users/alice/plan",
+        json={"plan_id": plan_id, "start_date": "2026-08-27", "expire_date": "2026-09-30"},
+    ).json()
+    client_email = assigned["provisioning_batches"][0]["body"]["inbound_clients"][0][
+        "client"
+    ]["email"]
+
+    first = client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": agent_token,
+            "reported_at": "2026-08-27T00:00:00Z",
+            "stats": {"user": {client_email: {"uplink": 100, "downlink": 200}}},
+        },
+    )
+    assert first.status_code == 200
+    assert client.get("/api/v1/users/alice/quota").json()["quota"]["charged_usage_bytes"] == 900
+
+    store = client.app.state.inventory
+    with store._session() as session:
+        plan = session.get(SubscriptionPlanModel, plan_id)
+        assert plan is not None
+        plan.traffic_mode = "oneway"
+        plan.node_multipliers = {node_id: 0.5}
+        session.commit()
+
+    # A plan edit never reweights traffic that was already ingested.
+    assert client.get("/api/v1/users/alice/quota").json()["quota"]["charged_usage_bytes"] == 900
+    second = client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": agent_token,
+            "reported_at": "2026-08-27T00:05:00Z",
+            "stats": {"user": {client_email: {"uplink": 140, "downlink": 260}}},
+        },
+    )
+    assert second.status_code == 200
+    traffic = client.get("/api/v1/users/alice/traffic").json()
+    assert (traffic["upload"], traffic["download"]) == (140, 260)
+    assert (traffic["weighted_upload"], traffic["weighted_download"]) == (320, 630)
+    assert traffic["charged_usage_bytes"] == 950
+    token = client.post("/api/v1/users/alice/subscription-token").json()["subscription"]["token"]
+    assert "upload=0; download=950;" in client.get(f"/api/v1/subscribe/{token}").headers[
+        "subscription-userinfo"
+    ]
+
+
+def test_existing_sqlite_traffic_rows_receive_one_time_billing_backfill(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    database_url = sqlite_url(tmp_path / "open-node-test.db")
+    agent_token, server_id, node_id, plan_id = create_catalog_fixture(client)
+    assigned = client.post(
+        "/api/v1/users/alice/plan",
+        json={"plan_id": plan_id, "start_date": "2026-08-27"},
+    ).json()
+    client_email = assigned["provisioning_batches"][0]["body"]["inbound_clients"][0][
+        "client"
+    ]["email"]
+    response = client.post(
+        "/api/v1/agents/telemetry",
+        json={
+            "token": agent_token,
+            "reported_at": "2026-08-27T00:00:00Z",
+            "stats": {"user": {client_email: {"uplink": 100, "downlink": 200}}},
+        },
+    )
+    assert response.status_code == 200
+    store = client.app.state.inventory
+    with store._session() as session:
+        session.add(
+            SubscriptionArchivedTrafficModel(
+                username="alice",
+                server_id=server_id,
+                server_name="Removed legacy server",
+                upload=10,
+                download=20,
+                weighted_upload=0,
+                weighted_download=0,
+                updated_at=datetime.now(tz=UTC),
+            )
+        )
+        session.commit()
+    client.close()
+
+    with store._engine.begin() as connection:
+        for column in ("attributed_node_id", "weighted_upload", "weighted_download"):
+            connection.execute(
+                text(f"ALTER TABLE subscription_traffic_ledger DROP COLUMN {column}")
+            )
+        for column in ("weighted_upload", "weighted_download"):
+            connection.execute(
+                text(f"ALTER TABLE subscription_archived_traffic DROP COLUMN {column}")
+            )
+
+    upgraded = authenticated_client(
+        create_app(Settings(database_url=database_url, short_links_enabled=True))
+    )
+    columns = {
+        column["name"]
+        for column in inspect(upgraded.app.state.inventory._engine).get_columns(
+            "subscription_traffic_ledger"
+        )
+    }
+    assert {"attributed_node_id", "weighted_upload", "weighted_download"} <= columns
+    traffic = upgraded.get("/api/v1/users/alice/traffic").json()
+    live = next(entry for entry in traffic["entries"] if not entry["archived"])
+    archived = next(entry for entry in traffic["entries"] if entry["archived"])
+    assert live["attributed_node_id"] == node_id
+    assert (live["weighted_upload"], live["weighted_download"]) == (300, 600)
+    # The legacy archive has no node identity, so only the twoway package factor is recoverable.
+    assert (archived["weighted_upload"], archived["weighted_download"]) == (20, 40)
+    assert traffic["charged_usage_bytes"] == 960
+    assert traffic["entries"][0]["server_id"] == server_id
 
 
 def test_subscription_quota_blocks_over_limit_and_resets_ledger(tmp_path: Path) -> None:
@@ -335,7 +464,7 @@ def test_subscription_quota_blocks_over_limit_and_resets_ledger(tmp_path: Path) 
     assert quota_response["license_required"] is False
     quota = quota_response["quota"]
     assert quota["traffic_limit_bytes"] == tiny_plan["traffic_limit_bytes"]
-    assert quota["charged_usage_bytes"] == 160
+    assert quota["charged_usage_bytes"] == 320
     assert quota["remaining_bytes"] == 0
     assert quota["over_quota"] is True
     assert quota["available"] is False
@@ -366,6 +495,7 @@ def test_subscription_quota_blocks_over_limit_and_resets_ledger(tmp_path: Path) 
     traffic = client.get("/api/v1/users/alice/traffic").json()
     assert traffic["upload"] == 20
     assert traffic["download"] == 20
+    assert traffic["charged_usage_bytes"] == 80
 
 
 def test_subscription_due_reset_runs_once_per_reset_window(tmp_path: Path) -> None:

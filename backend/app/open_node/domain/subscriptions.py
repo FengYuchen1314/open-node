@@ -542,9 +542,13 @@ class SubscriptionTrafficEntryRead(BaseModel):
     username: str
     server_id: UUID
     email: str
+    attributed_node_id: UUID | None = None
     upload: int
     download: int
     total: int
+    weighted_upload: float
+    weighted_download: float
+    charged_usage_bytes: int
     last_reported_at: datetime | None = None
     updated_at: datetime
 
@@ -554,6 +558,9 @@ class ProductUserTrafficResponse(BaseModel):
     upload: int
     download: int
     total: int
+    weighted_upload: float
+    weighted_download: float
+    charged_usage_bytes: int
     entries: list[SubscriptionTrafficEntryRead]
     license_required: Literal[False] = False
 
@@ -569,6 +576,8 @@ class SubscriptionQuotaStatusRead(BaseModel):
     reset_due: bool
     upload: int
     download: int
+    weighted_upload: float
+    weighted_download: float
     charged_usage_bytes: int
     traffic_limit_bytes: int
     remaining_bytes: int

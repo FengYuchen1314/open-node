@@ -186,9 +186,13 @@ export interface SubscriptionTrafficEntry {
   username: string;
   server_id: string;
   email: string;
+  attributed_node_id?: string | null;
   upload: number;
   download: number;
   total: number;
+  weighted_upload: number;
+  weighted_download: number;
+  charged_usage_bytes: number;
   last_reported_at?: string | null;
   updated_at: string;
 }
@@ -219,6 +223,9 @@ export interface ProductUserTrafficResponse {
   upload: number;
   download: number;
   total: number;
+  weighted_upload: number;
+  weighted_download: number;
+  charged_usage_bytes: number;
   entries: SubscriptionTrafficEntry[];
   license_required: false;
 }
@@ -234,6 +241,8 @@ export interface SubscriptionQuotaStatus {
   reset_due: boolean;
   upload: number;
   download: number;
+  weighted_upload: number;
+  weighted_download: number;
   charged_usage_bytes: number;
   traffic_limit_bytes: number;
   remaining_bytes: number;

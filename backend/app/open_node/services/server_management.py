@@ -287,7 +287,13 @@ class ServerManagement:
             if preview.blockers:
                 raise ServerManagementConflict("; ".join(preview.blockers))
             now = datetime.now(UTC)
-            before = {name: self.store._subscription_user_traffic(session, name) for name in users}
+            before = {
+                name: (
+                    self.store._subscription_user_traffic(session, name),
+                    self.store._subscription_user_weighted_traffic(session, name),
+                )
+                for name in users
+            }
             node_ids = {node.id for node in nodes}
             for plan in plans:
                 plan.node_ids = [
@@ -349,8 +355,11 @@ class ServerManagement:
             session.delete(server)
             session.flush()
             # Keep already charged usage while the server-bound ledgers are removed.
-            for name, (up, down) in before.items():
+            for name, ((up, down), (weighted_up, weighted_down)) in before.items():
                 after_up, after_down = self.store._subscription_user_traffic(session, name)
+                after_weighted_up, after_weighted_down = (
+                    self.store._subscription_user_weighted_traffic(session, name)
+                )
                 session.add(
                     SubscriptionArchivedTrafficModel(
                         username=name,
@@ -358,6 +367,8 @@ class ServerManagement:
                         server_name=server_name,
                         upload=max(0, up - after_up),
                         download=max(0, down - after_down),
+                        weighted_upload=max(0, weighted_up - after_weighted_up),
+                        weighted_download=max(0, weighted_down - after_weighted_down),
                         updated_at=now,
                     )
                 )

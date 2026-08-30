@@ -220,8 +220,8 @@ const nodeTypeOptions: Array<{ title: string; value: ManagedNodeType }> = [
   { title: "Routed", value: "routed" },
 ];
 const trafficModeOptions: Array<{ title: string; value: SubscriptionTrafficMode }> = [
-  { title: "One way", value: "oneway" },
-  { title: "Two way", value: "twoway" },
+  { title: "One-way billing (x1)", value: "oneway" },
+  { title: "Two-way billing (x2)", value: "twoway" },
 ];
 const subscriptionFormatOptions: Array<{ title: string; value: SubscriptionClientFormat }> = [
   { title: "Clash YAML", value: "clash" },
@@ -624,7 +624,7 @@ async function loadSubscriptionTraffic(showSuccess = true) {
   try {
     subscriptionTraffic.value = await getProductUserTraffic(assignForm.username);
     if (showSuccess) {
-      successMessage.value = `Loaded ${formatBytes(subscriptionTraffic.value.total)} traffic.`;
+      successMessage.value = `Loaded ${formatBytes(subscriptionTraffic.value.total)} raw / ${formatBytes(subscriptionTraffic.value.charged_usage_bytes)} billed traffic.`;
     }
   } catch (error) {
     errorMessage.value = readableError(error);
@@ -1630,10 +1630,10 @@ function formatBytes(value: number) {
             />
             <div class="catalog-import-grid">
               <v-chip color="info" prepend-icon="mdi-download-network-outline" variant="tonal">
-                Down {{ formatBytes(subscriptionQuota.download) }}
+                Raw down {{ formatBytes(subscriptionQuota.download) }}
               </v-chip>
               <v-chip color="secondary" prepend-icon="mdi-upload-network-outline" variant="tonal">
-                Up {{ formatBytes(subscriptionQuota.upload) }}
+                Raw up {{ formatBytes(subscriptionQuota.upload) }}
               </v-chip>
               <v-chip color="primary" prepend-icon="mdi-database-arrow-down" variant="tonal">
                 Left {{ formatBytes(subscriptionQuota.remaining_bytes) }}
@@ -1666,14 +1666,14 @@ function formatBytes(value: number) {
           <div v-if="subscriptionTraffic" class="assignment-summary">
             <div class="catalog-item">
               <div>
-                <div class="server-name">Traffic ledger</div>
+                <div class="server-name">Traffic ledger (raw counters)</div>
                 <div class="server-subline">
                   Up {{ formatBytes(subscriptionTraffic.upload) }} / Down
                   {{ formatBytes(subscriptionTraffic.download) }}
                 </div>
               </div>
               <v-chip color="info" size="small" variant="tonal">
-                {{ formatBytes(subscriptionTraffic.total) }}
+                Billed {{ formatBytes(subscriptionTraffic.charged_usage_bytes) }}
               </v-chip>
             </div>
             <div
@@ -1688,7 +1688,7 @@ function formatBytes(value: number) {
                 </div>
               </div>
               <v-chip color="secondary" size="small" variant="tonal">
-                {{ formatBytes(entry.total) }}
+                Raw {{ formatBytes(entry.total) }} / Billed {{ formatBytes(entry.charged_usage_bytes) }}
               </v-chip>
             </div>
           </div>

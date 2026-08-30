@@ -792,6 +792,8 @@ describe("subscriptions API client", () => {
           reset_due: false,
           upload: 20,
           download: 30,
+          weighted_upload: 20,
+          weighted_download: 30,
           charged_usage_bytes: 50,
           traffic_limit_bytes: 137_438_953_472,
           remaining_bytes: 137_438_953_422,
@@ -881,14 +883,21 @@ describe("subscriptions API client", () => {
           upload: 170,
           download: 300,
           total: 470,
+          weighted_upload: 510,
+          weighted_download: 900,
+          charged_usage_bytes: 1410,
           entries: [
             {
               username: "alice@example.com",
               server_id: "srv_1",
               email: "alice@example.com__vless-443",
+              attributed_node_id: "node_1",
               upload: 170,
               download: 300,
               total: 470,
+              weighted_upload: 510,
+              weighted_download: 900,
+              charged_usage_bytes: 1410,
               last_reported_at: timestamp,
               updated_at: timestamp,
             },
@@ -910,6 +919,7 @@ describe("subscriptions API client", () => {
     expect(resetResponse.subscription.subscription_url).toContain("/subscribe/token_1");
     expect(credentialsResponse.credentials[0].email).toBe("alice@example.com__vless-443");
     expect(trafficResponse.total).toBe(470);
+    expect(trafficResponse.charged_usage_bytes).toBe(1410);
     expect(calls).toEqual([
       {
         url: "/api/v1/users/alice%40example.com/subscription-token",
