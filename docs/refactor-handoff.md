@@ -6,8 +6,8 @@
 
 当前已从受限 Preview 首发转入四个固定官方仓库的功能对等工作。Mieru UDP、
 首发安全加固、持久 Compose 和 Agent 0.2.0 发布不要重做；后续补齐的 GitHub
-控制面安装器、套餐计费和 Agent 设置已进入公开主线。管理员 MFA 已在候选分支
-通过后端和浏览器验收，公共探针 Worker 的匿名浏览器门槛也已通过。生产实例保持
+控制面安装器、套餐计费、Agent 设置和管理员 MFA 已进入公开主线。管理员 MFA
+已通过后端和浏览器验收，公共探针 Worker 的匿名浏览器门槛也已通过。生产实例保持
 原镜像，本轮没有升级生产。建议在新聊天中直接说明：
 
 > 请先阅读 `docs/refactor-handoff.md`、`docs/mmwx-source-parity.md` 和 `docs/testing.md`，核对公开主线、候选分支、VPS 隔离测试 checkout 和生产镜像四者的实际 revision。继续参考用户提供的四个固定官方仓库，不要把受限 Preview 首发等同于完整 MMWX 替代。测试、构建、浏览器和真实流量验收都在 `185.99.135.224` 的隔离候选环境运行，不动生产服务和数据库。公开 HTTPS、Cloudflare 账户部署与异地加密备份需操作者的实际输入，不能用本地通过替代外部验证。
@@ -38,9 +38,9 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 | 项目 | 当前状态 |
 | --- | --- |
-| GitHub `main` | 已发布 `8ba641e51db797d858c040f625226adf88ed60aa`；匿名 Raw 安装脚本的完整隔离安装链路已通过 |
-| 当前候选 | `codex/mmwx-parity-release-candidate`；最近完整 GitHub 四项检查通过的提交为 `58b33af815ca01e1bf3e079e6038d4de178f6e85`，含管理员 MFA 与探针验收脚本。未提交改动以 `git status` 为准 |
-| VPS 隔离候选 | `/opt/open-node/mmwx-parity-candidate`，验证时为 `58b33af`；测试不得复用生产数据库或服务 |
+| GitHub `main` | 已发布 `6ca84e21202950bf5ee4754a8ae20e28dbde42ed`，含管理员 MFA 与公开 Probe 验收；匿名 Raw 控制面安装脚本的完整隔离安装链路已通过 |
+| 当前候选 | `codex/mmwx-parity-release-candidate`；最近完整 GitHub 四项检查通过的代码提交为 `6ca84e21202950bf5ee4754a8ae20e28dbde42ed`。面板远程 Agent 安装正在实现，未提交改动以 `git status` 为准 |
+| VPS 隔离候选 | `/opt/open-node/mmwx-parity-candidate`，公开 Probe 的精确提交验收为 `6ca84e2`；测试不得复用生产数据库或服务 |
 | VPS 生产源码 | `/opt/open-node`，`27ad431dd97670076d532efa461745ac9576ee2a`；源码、公开主线和运行镜像不是同一个 revision，不要混为一谈 |
 | 持久控制面 | Compose 服务 `open-node-open-node-1` healthy，绑定 `127.0.0.1:8000 -> 8080`；数据卷为 `open-node_data` |
 | 精确部署镜像 | `open-node:cb1eb0c`；image ID `sha256:2d5f340b6c84eedf2d0f0aa64938d5560ee11da444b9e5e917748a575ecfb0d3`；OCI revision label 为完整 `cb1eb0c` SHA |
