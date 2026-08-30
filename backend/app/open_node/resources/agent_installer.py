@@ -57,6 +57,7 @@ BOOTSTRAP_LIMIT = 8 * 1024 * 1024
 XRAY_LIMIT = 128 * 1024 * 1024
 CA_LIMIT = 1024 * 1024
 JOB_BASE = Path("/var/lib/open-node-agent-bootstrap")
+INSTALL_BASE = Path("/opt")
 SYSTEM_CA = Path("/etc/ssl/certs/ca-certificates.crt")
 TOKEN_PATTERN = r"[A-Za-z0-9_-]{43}"
 VERSION_PATTERN = r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?"
@@ -383,7 +384,7 @@ def prepare_job(*, control_url, ticket, server_id, ca_data=None, test_directory=
     suffix = identifier[:12]
     unit = f"open-node-agent-{suffix}.service"
     base = JOB_BASE
-    root = Path(f"/opt/open-node-agent-{suffix}")
+    root = INSTALL_BASE / f"open-node-agent-{suffix}"
     if test_directory is not None:
         require(
             re.fullmatch(r"/opt/open-node-bootstrap-smoke-[a-zA-Z0-9]{12}", str(test_directory)),

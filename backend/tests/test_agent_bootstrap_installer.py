@@ -20,14 +20,33 @@ TICKET = "T" * 42 + "Q"
 SECRET = "private-agent-token-which-must-never-be-printed"
 CONTROL = "https://control.example.test/panel"
 SERVER = "8a829d3b-65bc-471a-97a7-ec36c0e7477d"
+DEFAULT_INSTALL_BASE = installer.INSTALL_BASE
 
 
 @pytest.fixture(autouse=True)
 def private_fixture_owner(monkeypatch, tmp_path):
     # Production is strictly root-only. Hosted backend CI is deliberately
     # unprivileged; fixtures own only their temporary files and never chown.
+    # A hosted runner's /opt is not a production installation directory and
+    # may be writable by other accounts. Exercise the same parent checks in
+    # our own private tree instead of depending on host directory permissions.
     monkeypatch.setattr(installer, "ROOT_UID", os.geteuid())
     monkeypatch.setattr(installer, "JOB_BASE", tmp_path / "jobs")
+    install_base = tmp_path / "managed"
+    install_base.mkdir(mode=0o700)
+    monkeypatch.setattr(installer, "INSTALL_BASE", install_base)
+
+
+def test_bootstrap_default_installation_base_remains_opt():
+    assert DEFAULT_INSTALL_BASE == Path("/opt")
+
+
+@pytest.mark.parametrize("mode", [0o775, 0o777])
+def test_bootstrap_rejects_writable_installation_parent(mode):
+    installer.INSTALL_BASE.chmod(mode)
+    with pytest.raises(installer.BootstrapError, match="Unsafe directory component"):
+        installer.prepare_job(control_url=CONTROL, ticket=TICKET, server_id=SERVER)
+    assert not installer.JOB_BASE.exists()
 
 
 def digest(data):
@@ -273,7 +292,7 @@ def test_bootstrap_job_persists_original_nonce_without_raw_ticket(job):
     assert stat.S_IMODE(job.directory.stat().st_mode) == 0o700
     assert stat.S_IMODE((job.directory / "request.json").stat().st_mode) == 0o600
     assert job.nonce not in repr(job)
-    assert job.root == Path("/opt/open-node-agent-8a829d3b65bc")
+    assert job.root == installer.INSTALL_BASE / "open-node-agent-8a829d3b65bc"
     assert job.unit == "open-node-agent-8a829d3b65bc.service"
 
 
@@ -624,7 +643,7 @@ def test_bootstrap_installer_arguments_never_include_long_lived_token(job, tmp_p
 
     def simulated_host_install(arguments, **kwargs):
         calls.append(list(map(str, arguments)))
-        job.root.mkdir()
+        job.root.mkdir(mode=0o700)
         private_file(job.root / "installation.json", installer.json_bytes({
             "root": str(job.root), "unit": job.unit, "user": job.unit.removesuffix(".service"),
             "uid": 12345, "gid": 12345, "status": "installed", "current": "release",
