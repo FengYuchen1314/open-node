@@ -129,7 +129,7 @@ class AgentConfig(BaseModel):
         if url.scheme not in {"http", "https"} or not url.hostname:
             raise ValueError(f"{field} must be an HTTP(S) URL")
         try:
-            url.port
+            _ = url.port
         except ValueError:
             raise ValueError(f"{field} contains an invalid port") from None
         if url.username or url.password or url.query or url.fragment:

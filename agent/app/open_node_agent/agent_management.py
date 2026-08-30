@@ -84,7 +84,9 @@ class AgentManagement:
         path, data, raw = self._read_source_config()
         current = self._source_url(data, "master_url")
         if current != self.config.master_url:
-            raise RuntimeFailure("Agent configuration changed since startup; restart before editing")
+            raise RuntimeFailure(
+                "Agent configuration changed since startup; restart before editing"
+            )
 
         if body.get("only_if_recovery"):
             recovery = self._optional_source_url(data, "recovery_url")
