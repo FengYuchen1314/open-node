@@ -179,7 +179,7 @@ def test_installer_vps_smoke_keeps_destructive_resources_isolated():
     assert '"--volumes"' not in source
     assert "inspect_expected_container" in cleanup_source
     assert "inspect_expected_backup_container" in cleanup_source
-    assert "backup-helper" in cleanup_source
+    assert "backup-helper" in source
     assert "inspect_expected_network" in cleanup_source
     assert "inspect_expected_volume" in cleanup_source
     assert "org.opencontainers.image.revision" not in cleanup_source

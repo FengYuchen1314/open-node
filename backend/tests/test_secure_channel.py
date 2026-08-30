@@ -153,9 +153,9 @@ def test_legacy_oversized_work_is_not_claimed_or_falsely_completed(setup, transp
     rows = client.get(f"/api/v1/servers/{edge['server']['id']}/commands").json()["commands"]
     indexed = {row["id"]: row for row in rows}
     first, second = [indexed[str(command.id)] for command in commands]
-    assert first["status"] == ("leased" if inflight else "skipped")
+    assert first["status"] == ("failed" if inflight else "skipped")
     assert first["attempts"] == int(inflight) and "wire limit" in first["result_error"]
-    assert second["status"] == ("waiting" if inflight else "skipped")
+    assert second["status"] == "skipped"
 
 
 def test_identity_is_persistent_private_and_never_silently_replaced(tmp_path):

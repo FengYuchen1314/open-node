@@ -4381,6 +4381,7 @@ def test_agent_websocket_auth_registers_agent_and_acks_heartbeat(tmp_path: Path)
         assert auth["payload"]["license_required"] is False
         assert auth["payload"]["server_id"] == created["server"]["id"]
         assert websocket.receive_json()["payload"]["path"] == "/api/child/xray/config"
+        assert client.get("/api/v1/agents").json()[0]["listen_port"] == 0
 
         websocket.send_json(
             {
@@ -4396,7 +4397,7 @@ def test_agent_websocket_auth_registers_agent_and_acks_heartbeat(tmp_path: Path)
     agents = client.get("/api/v1/agents").json()
     servers = client.get("/api/v1/servers").json()
     assert agents[0]["hostname"] == "edge-ws-host"
-    assert agents[0]["listen_port"] == 0
+    assert agents[0]["listen_port"] == 28888
     assert agents[0]["capabilities"]["rpc"] is True
     assert servers[0]["status"] == "connected"
     assert servers[0]["ip_address"] == "198.51.100.89"

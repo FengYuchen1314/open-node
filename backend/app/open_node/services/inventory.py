@@ -7590,7 +7590,16 @@ class InventoryStore:
         server: ServerModel,
         payload: AgentCommandCreate,
     ) -> None:
-        required = required_command_capabilities(payload.path, payload.body)
+        # Limiter and cleanup commands historically enter the durable queue and
+        # are terminalized at lease time when an Agent cannot execute them. Keep
+        # that observable workflow while preflighting newly introduced surfaces
+        # whose schemas older Agents cannot safely interpret.
+        required = tuple(
+            capability
+            for capability in required_command_capabilities(payload.path, payload.body)
+            if capability == "xray_config_workspace"
+            or capability in _AGENT_SETTINGS_CAPABILITIES.values()
+        )
         if required:
             agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
             missing = [

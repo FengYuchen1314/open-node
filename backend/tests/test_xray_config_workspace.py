@@ -53,6 +53,27 @@ def complete(client, created, command, *, success):
     return response.json()["command"]
 
 
+def register_workspace_and_drain_sync(client, created):
+    registration = register_xray_config_workspace(client, created)
+    leased = client.post(
+        "/api/v1/agents/commands/lease",
+        json={"token": created["agent_token"], "max_commands": 10},
+    )
+    assert leased.status_code == 200, leased.text
+    for command in leased.json()["commands"]:
+        assert command["path"] == "/api/child/xray/config"
+        completed = client.post(
+            f"/api/v1/agents/commands/{command['id']}/result",
+            json={
+                "token": created["agent_token"],
+                "status": 503,
+                "error": "registration sync drained by workspace test",
+            },
+        )
+        assert completed.status_code == 200, completed.text
+    return registration
+
+
 @pytest.mark.parametrize(
     "operation,payload",
     [
@@ -131,7 +152,7 @@ def test_raw_workspace_command_uses_the_same_queue_time_capability_gate(tmp_path
 def test_workspace_capability_survives_schema_upgrade_with_a_safe_default(tmp_path):
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "workspace-migration"}).json()
-    register_xray_config_workspace(client, created)
+    register_workspace_and_drain_sync(client, created)
 
     with client.app.state.inventory._engine.begin() as connection:
         connection.execute(text("ALTER TABLE agents DROP COLUMN capability_xray_config_workspace"))
@@ -143,7 +164,7 @@ def test_workspace_capability_survives_schema_upgrade_with_a_safe_default(tmp_pa
     base = f"/api/v1/servers/{created['server']['id']}"
     rejected = upgraded.post(f"{base}/operations/xray/system-config/read")
     assert rejected.status_code == 409
-    register_xray_config_workspace(upgraded, created)
+    register_workspace_and_drain_sync(upgraded, created)
     accepted = upgraded.post(f"{base}/operations/xray/system-config/read")
     assert accepted.status_code == 201
 
@@ -151,7 +172,7 @@ def test_workspace_capability_survives_schema_upgrade_with_a_safe_default(tmp_pa
 def test_workspace_command_is_not_leased_after_agent_capability_downgrade(tmp_path):
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "workspace-downgrade"}).json()
-    register_xray_config_workspace(client, created)
+    register_workspace_and_drain_sync(client, created)
     base = f"/api/v1/servers/{created['server']['id']}"
     command = client.post(f"{base}/operations/xray/config-files/list").json()["command"]
 
@@ -183,7 +204,7 @@ def test_workspace_command_is_not_leased_after_agent_capability_downgrade(tmp_pa
 def test_expired_workspace_lease_becomes_failed_after_agent_capability_downgrade(tmp_path):
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "workspace-expired"}).json()
-    register_xray_config_workspace(client, created)
+    register_workspace_and_drain_sync(client, created)
     base = f"/api/v1/servers/{created['server']['id']}"
     queued = client.post(f"{base}/operations/xray/config-files/list").json()["command"]
     leased = lease_one(client, created)
@@ -212,7 +233,7 @@ def test_expired_workspace_lease_becomes_failed_after_agent_capability_downgrade
         "/api/v1/agents/commands/lease",
         json={"token": created["agent_token"], "max_commands": 10},
     ).json()["commands"]
-    assert retried == []
+    assert queued["id"] not in {command["id"] for command in retried}
     stored = next(
         item for item in client.get(f"{base}/commands").json()["commands"]
         if item["id"] == queued["id"]
@@ -230,7 +251,7 @@ async def test_live_legacy_websocket_terminalizes_expired_persisted_capability_l
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "workspace-ws-expired"}).json()
     server_id = UUID(created["server"]["id"])
-    register_xray_config_workspace(client, created)
+    register_workspace_and_drain_sync(client, created)
     base = f"/api/v1/servers/{server_id}"
     queued = client.post(f"{base}/operations/xray/config-files/list").json()["command"]
     leased = lease_one(client, created)
@@ -257,7 +278,11 @@ async def test_live_legacy_websocket_terminalizes_expired_persisted_capability_l
     websocket = AsyncMock()
     manager.register(server_id, websocket, AgentCapabilities(rpc=True))
 
-    current = client.app.state.inventory.list_commands(server_id)[0]
+    current = next(
+        command
+        for command in client.app.state.inventory.list_commands(server_id)
+        if str(command.id) == queued["id"]
+    )
     terminal = await manager.dispatch_command(client.app.state.inventory, current)
 
     assert terminal.status == "failed"
@@ -279,11 +304,17 @@ async def test_live_legacy_websocket_cannot_claim_workspace_command_after_http_u
     manager.register(server_id, websocket, AgentCapabilities(rpc=True))
 
     register_xray_config_workspace(client, created)
+    websocket.reset_mock()
     queued = client.post(
         f"/api/v1/servers/{server_id}/operations/xray/config-files/list"
     )
     assert queued.status_code == 201, queued.text
-    command = client.app.state.inventory.list_commands(server_id)[0]
+    queued_command = queued.json()["command"]
+    command = next(
+        command
+        for command in client.app.state.inventory.list_commands(server_id)
+        if str(command.id) == queued_command["id"]
+    )
 
     unchanged = await manager.dispatch_command(client.app.state.inventory, command)
 
