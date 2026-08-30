@@ -6,8 +6,10 @@ import LimiterPanel from "../components/LimiterPanel.vue";
 import type {
   AgentCommand,
   AgentCommandStreamFrame,
+  AgentRead,
   AgentOperationKind,
   AgentOperationPayload,
+  AgentXraySystemConfigOperationRequest,
   ServerSummary,
   XrayConfigSnapshot,
   XrayConfigSnapshotStatus,
@@ -26,6 +28,12 @@ import type {
   XrayRuntimeNodeReconciliationRuntimeEntry,
 } from "../domain/subscriptions";
 import {
+  isJsoncFilename,
+  isWritableXrayFileResult,
+  latestSuccessfulGetResult,
+  parseJsonObjectText,
+} from "../domain/xray-config-workspace";
+import {
   acceptXrayConfigPendingRecovery,
   applyXrayConfigRecovery,
   createXrayRuntimeTunnelChain,
@@ -34,6 +42,7 @@ import {
   getXrayRuntimeInventory,
   getXrayRuntimeTunnelInventory,
   listCommandStreamFrames,
+  listAgents,
   listServerCommands,
   listServers,
   listXrayConfigSnapshots,
@@ -52,6 +61,7 @@ import {
 } from "../services/subscriptions";
 
 const servers = ref<ServerSummary[]>([]);
+const agentsByServer = ref<Record<string, AgentRead>>({});
 const selectedServerId = ref("");
 const commandsByServer = ref<Record<string, AgentCommand[]>>({});
 const streamFramesByCommand = ref<Record<string, AgentCommandStreamFrame[]>>({});
@@ -93,16 +103,36 @@ const xrayConfigForm = reactive({
   force: false,
 });
 const xraySystemForm = reactive({
+  log_level: "warning" as AgentXraySystemConfigOperationRequest["log_level"],
   metrics_enabled: false,
   metrics_listen: "127.0.0.1:11111",
   stats_enabled: true,
   grpc_enabled: true,
   grpc_port: 46736,
 });
+const xraySystemDnsText = ref("{}\n");
+const xraySystemPolicyText = ref("{}\n");
+const xrayLogLevelOptions: Array<AgentXraySystemConfigOperationRequest["log_level"]> = [
+  "none",
+  "error",
+  "warning",
+  "info",
+  "debug",
+];
+const xraySystemRevision = ref<{ serverId: string; sha256: string } | null>(null);
+const xraySystemWritable = ref(false);
+const xraySystemReadOnlyReason = ref("Read the current Xray system configuration first.");
+const xraySystemApiMode = ref("unknown");
+const xraySystemGrpcDisableSupported = ref(false);
+const xraySystemGrpcPortWritable = ref(false);
+const xraySystemFixedStatsAddress = ref("");
 const xrayFileForm = reactive({
-  file: "config.json",
-  content: "{\n}\n",
+  file: "xray.json",
+  content: "",
 });
+const xrayFileRevision = ref<{ serverId: string; file: string; sha256: string } | null>(null);
+const xrayFileWritable = ref(false);
+const xrayFileReadOnlyReason = ref("Read the exact Xray file before editing it.");
 const nginxConfigForm = reactive({
   path: "",
   configText: "events {}\nhttp {}\n",
@@ -175,6 +205,48 @@ const serverOptions = computed(() =>
 );
 const selectedServer = computed(
   () => servers.value.find((server) => server.id === selectedServerId.value) ?? null,
+);
+const selectedAgent = computed(() => agentsByServer.value[selectedServerId.value] ?? null);
+const xrayConfigWorkspaceSupported = computed(
+  () => selectedAgent.value?.capabilities.xray_config_workspace === true,
+);
+const xrayConfigWorkspaceUpgradeMessage = computed(() => {
+  if (!selectedServerId.value) return "Select a server to manage its Xray configuration.";
+  if (!selectedAgent.value) {
+    return "Install and connect an upgraded Open Node Agent before using Xray system configuration or config files.";
+  }
+  return `Upgrade Open Node Agent ${selectedAgent.value.agent_version ?? "(version unknown)"} on this server; it does not advertise the xray_config_workspace capability.`;
+});
+const xrayConfigWorkspaceOperations = new Set<AgentOperationKind>([
+  "xray_system_config_read",
+  "xray_system_config_write",
+  "xray_config_files_list",
+  "xray_config_file_read",
+  "xray_config_file_write",
+]);
+const xraySystemEditReady = computed(
+  () =>
+    xraySystemWritable.value &&
+    xraySystemRevision.value?.serverId === selectedServerId.value,
+);
+const xraySystemDnsError = computed(() =>
+  jsonObjectValidationError(xraySystemDnsText.value, "DNS"),
+);
+const xraySystemPolicyError = computed(() =>
+  jsonObjectValidationError(xraySystemPolicyText.value, "Policy"),
+);
+const xraySystemWriteReady = computed(
+  () =>
+    xraySystemEditReady.value &&
+    !xraySystemDnsError.value &&
+    !xraySystemPolicyError.value,
+);
+const xrayFileWriteReady = computed(
+  () =>
+    xrayFileWritable.value &&
+    !isJsoncFilename(xrayFileForm.file) &&
+    xrayFileRevision.value?.serverId === selectedServerId.value &&
+    xrayFileRevision.value.file === xrayFileForm.file.trim(),
 );
 const selectedCommands = computed(() => commandsByServer.value[selectedServerId.value] ?? []);
 const selectedCurrentSnapshot = computed(() =>
@@ -304,11 +376,34 @@ onMounted(() => {
 watch(selectedServerId, () => {
   takeoverDialog.value = false;
   successMessage.value = "";
+  xraySystemRevision.value = null;
+  xraySystemWritable.value = false;
+  xraySystemReadOnlyReason.value = "Read the current Xray system configuration first.";
+  xraySystemApiMode.value = "unknown";
+  xraySystemGrpcDisableSupported.value = false;
+  xraySystemGrpcPortWritable.value = false;
+  xraySystemFixedStatsAddress.value = "";
+  xraySystemDnsText.value = "{}\n";
+  xraySystemPolicyText.value = "{}\n";
+  xrayFileRevision.value = null;
+  xrayFileWritable.value = false;
+  xrayFileReadOnlyReason.value = "Read the exact Xray file before editing it.";
   syncRuntimeTunnelChainServerDefaults();
   syncRuntimeTunnelDeployDefaults();
   void refreshXraySnapshots();
   void refreshXrayRuntimeInventory();
 });
+
+watch(
+  () => xrayFileForm.file,
+  (file) => {
+    if (xrayFileRevision.value?.file !== file.trim()) {
+      xrayFileRevision.value = null;
+      xrayFileWritable.value = false;
+      xrayFileReadOnlyReason.value = "Read this exact Xray file before editing it.";
+    }
+  },
+);
 
 watch(takeoverDialog, (open) => {
   if (!open) {
@@ -365,7 +460,9 @@ async function refresh() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    servers.value = await listServers();
+    const [nextServers, agents] = await Promise.all([listServers(), listAgents()]);
+    servers.value = nextServers;
+    agentsByServer.value = Object.fromEntries(agents.map((agent) => [agent.server_id, agent]));
     const selectedStillExists = servers.value.some(
       (server) => server.id === selectedServerId.value,
     );
@@ -495,6 +592,10 @@ async function queueOperation(kind: AgentOperationKind, payload?: AgentOperation
     errorMessage.value = "Target server is required.";
     return false;
   }
+  if (xrayConfigWorkspaceOperations.has(kind) && !xrayConfigWorkspaceSupported.value) {
+    errorMessage.value = xrayConfigWorkspaceUpgradeMessage.value;
+    return false;
+  }
 
   savingOperation.value = kind;
   errorMessage.value = "";
@@ -523,20 +624,70 @@ async function writeXrayConfig() {
 }
 
 async function writeXraySystemConfig() {
-  await queueOperation("xray_system_config_write", {
+  const revision = xraySystemRevision.value;
+  if (!xraySystemEditReady.value || !revision) {
+    errorMessage.value = xraySystemReadOnlyReason.value;
+    return;
+  }
+  let dns: Record<string, unknown>;
+  let policy: Record<string, unknown>;
+  try {
+    dns = parseJsonObjectText(xraySystemDnsText.value, "DNS");
+    policy = parseJsonObjectText(xraySystemPolicyText.value, "Policy");
+  } catch (error) {
+    errorMessage.value = readableError(error);
+    return;
+  }
+  const queued = await queueOperation("xray_system_config_write", {
     ...xraySystemForm,
+    dns,
+    policy,
+    expected_sha256: revision.sha256,
   });
+  if (queued) {
+    xraySystemRevision.value = null;
+    xraySystemWritable.value = false;
+    xraySystemReadOnlyReason.value = "Read the current Xray system configuration again before another write.";
+  }
+}
+
+async function readXraySystemConfig() {
+  xraySystemRevision.value = null;
+  xraySystemWritable.value = false;
+  xraySystemReadOnlyReason.value = "Wait for the read command, then use its latest result.";
+  await queueOperation("xray_system_config_read");
+}
+
+async function listXrayFiles() {
+  xrayFileRevision.value = null;
+  xrayFileWritable.value = false;
+  xrayFileReadOnlyReason.value = "Wait for the list command, then use its latest result.";
+  await queueOperation("xray_config_files_list");
 }
 
 async function readXrayFile() {
+  xrayFileRevision.value = null;
+  xrayFileWritable.value = false;
+  xrayFileReadOnlyReason.value = "Wait for the read command, then use its latest result.";
   await queueOperation("xray_config_file_read", { file: xrayFileForm.file.trim() });
 }
 
 async function writeXrayFile() {
-  await queueOperation("xray_config_file_write", {
+  const revision = xrayFileRevision.value;
+  if (!xrayFileWriteReady.value || !revision) {
+    errorMessage.value = xrayFileReadOnlyReason.value;
+    return;
+  }
+  const queued = await queueOperation("xray_config_file_write", {
     file: xrayFileForm.file.trim(),
     content: xrayFileForm.content,
+    expected_sha256: revision.sha256,
   });
+  if (queued) {
+    xrayFileRevision.value = null;
+    xrayFileWritable.value = false;
+    xrayFileReadOnlyReason.value = "Read the file again before another write.";
+  }
 }
 
 async function takeoverExternalXray() {
@@ -751,10 +902,35 @@ function useLatestXrayConfig() {
 }
 
 function useLatestXraySystemConfig() {
-  const body = latestResultRecord("/api/child/xray/system-config");
+  const body = latestSuccessfulGetResult(
+    selectedCommands.value,
+    "/api/child/xray/system-config",
+  )?.body;
   const config = asRecord(body?.config);
-  if (!config) {
+  const sha256 = body?.sha256;
+  if (!config || typeof sha256 !== "string" || !/^[0-9a-f]{64}$/.test(sha256)) {
+    xraySystemRevision.value = null;
+    xraySystemWritable.value = false;
+    xraySystemReadOnlyReason.value = "No complete Xray system configuration read is available.";
     errorMessage.value = "No completed Xray system config result.";
+    return;
+  }
+  const logLevel = config.log_level;
+  const dns = asRecord(config.dns);
+  const policy = asRecord(config.policy);
+  if (
+    typeof logLevel !== "string" ||
+    !xrayLogLevelOptions.includes(
+      logLevel as AgentXraySystemConfigOperationRequest["log_level"],
+    ) ||
+    !dns ||
+    !policy
+  ) {
+    xraySystemRevision.value = null;
+    xraySystemWritable.value = false;
+    xraySystemReadOnlyReason.value =
+      "The Xray system read did not include valid log, DNS and policy objects.";
+    errorMessage.value = xraySystemReadOnlyReason.value;
     return;
   }
   if (typeof config.metrics_enabled === "boolean") {
@@ -772,18 +948,76 @@ function useLatestXraySystemConfig() {
   if (typeof config.grpc_port === "number") {
     xraySystemForm.grpc_port = config.grpc_port;
   }
+  xraySystemForm.log_level =
+    logLevel as AgentXraySystemConfigOperationRequest["log_level"];
+  xraySystemDnsText.value = `${JSON.stringify(dns, null, 2)}\n`;
+  xraySystemPolicyText.value = `${JSON.stringify(policy, null, 2)}\n`;
+  xraySystemApiMode.value =
+    typeof config.api_mode === "string" ? config.api_mode : "unknown";
+  xraySystemGrpcDisableSupported.value = config.grpc_disable_supported === true;
+  xraySystemGrpcPortWritable.value = config.grpc_port_writable === true;
+  xraySystemFixedStatsAddress.value =
+    typeof config.fixed_stats_address === "string" ? config.fixed_stats_address : "";
+  xraySystemWritable.value = config.writable === true;
+  xraySystemReadOnlyReason.value =
+    typeof config.read_only_reason === "string" && config.read_only_reason
+      ? config.read_only_reason
+      : xraySystemWritable.value
+        ? ""
+        : "This Xray system configuration shape is read-only in the form.";
+  xraySystemRevision.value = xraySystemWritable.value
+    ? { serverId: selectedServerId.value, sha256 }
+    : null;
 }
 
 function useLatestXrayFile() {
-  const body = latestResultRecordWithContent("/api/child/xray/config-files");
-  if (!body || typeof body.content !== "string") {
-    errorMessage.value = "No completed Xray file result.";
+  const body = latestSuccessfulGetResult(
+    selectedCommands.value,
+    "/api/child/xray/config-files",
+  )?.body;
+  xrayFileRevision.value = null;
+  xrayFileWritable.value = false;
+  if (!body) {
+    xrayFileReadOnlyReason.value = "No successful Xray file read or list is available.";
+    errorMessage.value = "No completed Xray file read or list result.";
+    return;
+  }
+  if (typeof body.content !== "string") {
+    const files = asRecord(body.files);
+    const main = files?.main;
+    const entry = Array.isArray(main) ? asRecord(main[0]) : null;
+    if (typeof entry?.name === "string") {
+      xrayFileForm.file = entry.name;
+      xrayFileReadOnlyReason.value =
+        typeof entry.read_only_reason === "string" && entry.read_only_reason
+          ? entry.read_only_reason
+          : "The latest result is a file list. Read the primary file before editing it.";
+      return;
+    }
+    xrayFileReadOnlyReason.value = "The latest Xray config-files result is incomplete.";
+    errorMessage.value = "No completed Xray file read or list result.";
     return;
   }
   xrayFileForm.content = body.content;
+  let file = xrayFileForm.file;
   if (typeof body.path === "string") {
-    xrayFileForm.file = body.path.split(/[\\/]/).pop() ?? xrayFileForm.file;
+    file = body.path.split(/[\\/]/).pop() ?? file;
   }
+  xrayFileForm.file = file;
+  xrayFileWritable.value = isWritableXrayFileResult(body, file);
+  xrayFileReadOnlyReason.value = xrayFileWritable.value
+    ? ""
+    : typeof body.read_only_reason === "string" && body.read_only_reason
+      ? body.read_only_reason
+      : "This Xray primary file is read-only.";
+  if (!xrayFileWritable.value) return;
+  if (typeof body.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(body.sha256)) {
+    xrayFileWritable.value = false;
+    xrayFileReadOnlyReason.value = "The Xray file read did not include a valid revision.";
+    errorMessage.value = xrayFileReadOnlyReason.value;
+    return;
+  }
+  xrayFileRevision.value = { serverId: selectedServerId.value, file, sha256: body.sha256 };
 }
 
 function useLatestNginxConfig() {
@@ -811,9 +1045,13 @@ function useLatestNginxFile() {
   }
 }
 
-function latestResultRecord(path: string) {
+function latestResultRecord(path: string, method?: string) {
   const command = selectedCommands.value.find(
-    (item) => item.path === path && item.result_body !== null && item.result_body !== undefined,
+    (item) =>
+      item.path === path &&
+      (!method || item.method === method) &&
+      item.result_body !== null &&
+      item.result_body !== undefined,
   );
   return asRecord(command?.result_body);
 }
@@ -821,7 +1059,7 @@ function latestResultRecord(path: string) {
 function latestResultRecordWithContent(path: string) {
   const command = selectedCommands.value.find((item) => {
     const body = asRecord(item.result_body);
-    return item.path === path && typeof body?.content === "string";
+    return item.path === path && item.method === "GET" && typeof body?.content === "string";
   });
   return asRecord(command?.result_body);
 }
@@ -835,6 +1073,15 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function blankToNull(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function jsonObjectValidationError(value: string, label: string) {
+  try {
+    parseJsonObjectText(value, label);
+    return "";
+  } catch (error) {
+    return readableError(error);
+  }
 }
 
 function parseOperationPayload(value: string): AgentOperationPayload | undefined {
@@ -1898,16 +2145,65 @@ function formatDateTime(value: string) {
           </v-window-item>
 
           <v-window-item value="system">
+            <v-alert
+              v-if="!xrayConfigWorkspaceSupported"
+              class="mb-4"
+              color="warning"
+              density="comfortable"
+              icon="mdi-update"
+              variant="tonal"
+            >
+              {{ xrayConfigWorkspaceUpgradeMessage }}
+            </v-alert>
+            <v-alert
+              v-else-if="xraySystemReadOnlyReason"
+              class="mb-4"
+              color="warning"
+              density="comfortable"
+              icon="mdi-lock-alert-outline"
+              variant="tonal"
+            >
+              {{ xraySystemReadOnlyReason }}
+            </v-alert>
+            <v-alert
+              v-if="xraySystemApiMode === 'routed' && xraySystemEditReady"
+              class="mb-4"
+              color="info"
+              density="comfortable"
+              icon="mdi-transit-connection-variant"
+              variant="tonal"
+            >
+              This server uses the verified routed Xray gRPC API shape.
+              <template v-if="xraySystemGrpcPortWritable">
+                Its loopback port can be changed, but the API cannot be disabled from this form.
+              </template>
+              <template v-else>
+                Its endpoint is fixed at {{ xraySystemFixedStatsAddress }} by the Agent's
+                stats_address, and the API cannot be disabled from this form.
+              </template>
+            </v-alert>
+            <v-alert
+              v-else-if="xraySystemFixedStatsAddress && xraySystemEditReady"
+              class="mb-4"
+              color="info"
+              density="comfortable"
+              icon="mdi-lock-outline"
+              variant="tonal"
+            >
+              The Xray gRPC API endpoint is fixed at {{ xraySystemFixedStatsAddress }} by the
+              Agent's stats_address. Other supported system fields remain editable.
+            </v-alert>
             <v-form class="config-form" @submit.prevent="writeXraySystemConfig">
               <div class="config-action-row">
                 <v-btn
-                  :disabled="serverOptions.length === 0"
+                  :disabled="serverOptions.length === 0 || !xrayConfigWorkspaceSupported"
                   :loading="savingOperation === 'xray_system_config_read'"
+                  :title="!xrayConfigWorkspaceSupported ? xrayConfigWorkspaceUpgradeMessage : undefined"
                   color="secondary"
                   prepend-icon="mdi-file-search-outline"
                   size="small"
                   variant="tonal"
-                  @click="queueOperation('xray_system_config_read')"
+                  @click="readXraySystemConfig"
                 >
                   Read
                 </v-btn>
@@ -1921,8 +2217,13 @@ function formatDateTime(value: string) {
                   Use latest
                 </v-btn>
                 <v-btn
-                  :disabled="serverOptions.length === 0"
+                  :disabled="
+                    serverOptions.length === 0 ||
+                    !xrayConfigWorkspaceSupported ||
+                    !xraySystemWriteReady
+                  "
                   :loading="savingOperation === 'xray_system_config_write'"
+                  :title="!xrayConfigWorkspaceSupported ? xrayConfigWorkspaceUpgradeMessage : undefined"
                   color="primary"
                   prepend-icon="mdi-content-save-outline"
                   size="small"
@@ -1932,9 +2233,18 @@ function formatDateTime(value: string) {
                   Write
                 </v-btn>
               </div>
+              <v-select
+                v-model="xraySystemForm.log_level"
+                :disabled="!xraySystemEditReady"
+                :items="xrayLogLevelOptions"
+                density="comfortable"
+                label="Xray log level"
+                variant="outlined"
+              />
               <div class="system-config-grid">
                 <v-switch
                   v-model="xraySystemForm.metrics_enabled"
+                  :disabled="!xraySystemEditReady"
                   color="primary"
                   density="comfortable"
                   hide-details
@@ -1942,6 +2252,7 @@ function formatDateTime(value: string) {
                 />
                 <v-switch
                   v-model="xraySystemForm.stats_enabled"
+                  :disabled="!xraySystemEditReady"
                   color="primary"
                   density="comfortable"
                   hide-details
@@ -1949,26 +2260,53 @@ function formatDateTime(value: string) {
                 />
                 <v-switch
                   v-model="xraySystemForm.grpc_enabled"
+                  :disabled="!xraySystemEditReady || !xraySystemGrpcDisableSupported"
                   color="primary"
                   density="comfortable"
                   hide-details
-                  label="gRPC"
+                  label="Xray gRPC API"
                 />
               </div>
               <div class="form-row">
                 <v-text-field
                   v-model="xraySystemForm.metrics_listen"
+                  :disabled="!xraySystemEditReady"
                   density="comfortable"
                   label="Metrics listen"
                   variant="outlined"
                 />
                 <v-text-field
                   v-model.number="xraySystemForm.grpc_port"
+                  :disabled="!xraySystemEditReady || !xraySystemGrpcPortWritable"
                   density="comfortable"
-                  label="gRPC port"
+                  label="Xray gRPC API port"
                   min="1"
                   max="65535"
                   type="number"
+                  variant="outlined"
+                />
+              </div>
+              <div class="config-file-grid">
+                <v-textarea
+                  v-model="xraySystemDnsText"
+                  class="config-editor"
+                  :disabled="!xraySystemEditReady"
+                  density="comfortable"
+                  :error-messages="xraySystemDnsError ? [xraySystemDnsError] : []"
+                  label="DNS JSON"
+                  rows="10"
+                  variant="outlined"
+                />
+                <v-textarea
+                  v-model="xraySystemPolicyText"
+                  class="config-editor"
+                  :disabled="!xraySystemEditReady"
+                  density="comfortable"
+                  :error-messages="xraySystemPolicyError ? [xraySystemPolicyError] : []"
+                  hint="Changing Stats normalizes its counters; otherwise existing stats, policy and API service state is preserved."
+                  label="Policy JSON"
+                  persistent-hint
+                  rows="10"
                   variant="outlined"
                 />
               </div>
@@ -2961,24 +3299,46 @@ function formatDateTime(value: string) {
           </v-window-item>
 
           <v-window-item value="files">
+            <v-alert
+              v-if="!xrayConfigWorkspaceSupported"
+              class="mb-4"
+              color="warning"
+              density="comfortable"
+              icon="mdi-update"
+              variant="tonal"
+            >
+              {{ xrayConfigWorkspaceUpgradeMessage }}
+            </v-alert>
+            <v-alert
+              v-else-if="xrayFileReadOnlyReason"
+              class="mb-4"
+              color="warning"
+              density="comfortable"
+              icon="mdi-lock-alert-outline"
+              variant="tonal"
+            >
+              {{ xrayFileReadOnlyReason }}
+            </v-alert>
             <div class="config-file-grid">
               <v-form class="config-form" @submit.prevent="writeXrayFile">
                 <div class="section-title compact-title">Xray file</div>
                 <div class="config-action-row">
                   <v-btn
-                    :disabled="serverOptions.length === 0"
+                    :disabled="serverOptions.length === 0 || !xrayConfigWorkspaceSupported"
                     :loading="savingOperation === 'xray_config_files_list'"
+                    :title="!xrayConfigWorkspaceSupported ? xrayConfigWorkspaceUpgradeMessage : undefined"
                     color="secondary"
                     prepend-icon="mdi-folder-search-outline"
                     size="small"
                     variant="tonal"
-                    @click="queueOperation('xray_config_files_list')"
+                    @click="listXrayFiles"
                   >
                     List
                   </v-btn>
                   <v-btn
-                    :disabled="serverOptions.length === 0"
+                    :disabled="serverOptions.length === 0 || !xrayConfigWorkspaceSupported"
                     :loading="savingOperation === 'xray_config_file_read'"
+                    :title="!xrayConfigWorkspaceSupported ? xrayConfigWorkspaceUpgradeMessage : undefined"
                     color="secondary"
                     prepend-icon="mdi-file-search-outline"
                     size="small"
@@ -2997,8 +3357,13 @@ function formatDateTime(value: string) {
                     Use latest
                   </v-btn>
                   <v-btn
-                    :disabled="serverOptions.length === 0"
+                    :disabled="
+                      serverOptions.length === 0 ||
+                      !xrayConfigWorkspaceSupported ||
+                      !xrayFileWriteReady
+                    "
                     :loading="savingOperation === 'xray_config_file_write'"
+                    :title="!xrayConfigWorkspaceSupported ? xrayConfigWorkspaceUpgradeMessage : undefined"
                     color="primary"
                     prepend-icon="mdi-content-save-outline"
                     size="small"
@@ -3019,7 +3384,13 @@ function formatDateTime(value: string) {
                   v-model="xrayFileForm.content"
                   class="config-editor"
                   density="comfortable"
+                  :disabled="!xrayFileWriteReady"
                   label="Content"
+                  :placeholder="
+                    xrayFileWriteReady
+                      ? undefined
+                      : 'Read this exact file and use the latest result before editing.'
+                  "
                   rows="12"
                   variant="outlined"
                 />

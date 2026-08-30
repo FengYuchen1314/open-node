@@ -7,13 +7,24 @@ from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
+    _source_path: Path | None = PrivateAttr(default=None)
+
     master_url: str
+    recovery_url: str | None = None
     token: SecretStr = Field(min_length=1)
     connection_mode: Literal["auto", "websocket", "http"] = "auto"
     allow_insecure_http: bool = False
@@ -103,17 +114,35 @@ class AgentConfig(BaseModel):
     def validate_master(self):
         if self.nginx_modules and self.nginx_binary is None:
             raise ValueError("nginx_modules requires nginx_binary")
-        url = urlsplit(self.master_url)
+        self.master_url = self.validate_control_url(self.master_url, field="master_url")
+        if self.recovery_url is not None:
+            self.recovery_url = self.validate_control_url(
+                self.recovery_url, field="recovery_url"
+            )
+        return self
+
+    def validate_control_url(self, value: str, *, field: str = "master_url") -> str:
+        normalized = value.strip().rstrip("/")
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in normalized):
+            raise ValueError(f"{field} cannot contain control characters")
+        url = urlsplit(normalized)
         if url.scheme not in {"http", "https"} or not url.hostname:
-            raise ValueError("master_url must be an HTTP(S) URL")
+            raise ValueError(f"{field} must be an HTTP(S) URL")
+        try:
+            url.port
+        except ValueError:
+            raise ValueError(f"{field} contains an invalid port") from None
         if url.username or url.password or url.query or url.fragment:
             raise ValueError(
-                "master_url cannot contain credentials, query parameters, or fragments"
+                f"{field} cannot contain credentials, query parameters, or fragments"
             )
         if url.scheme == "http" and not self.allow_insecure_http:
             raise ValueError("Use HTTPS; allow_insecure_http is only for a trusted test network")
-        self.master_url = self.master_url.rstrip("/")
-        return self
+        return normalized
+
+    @property
+    def source_path(self) -> Path | None:
+        return self._source_path
 
     def websocket_url(self) -> str:
         parts = urlsplit(self.master_url)
@@ -138,4 +167,6 @@ def load_config(path: Path) -> AgentConfig:
         data = yaml.safe_load(path.read_text())
     except yaml.YAMLError:
         raise ValueError("Invalid YAML configuration syntax") from None
-    return AgentConfig.model_validate(data)
+    config = AgentConfig.model_validate(data)
+    config._source_path = path.resolve()
+    return config

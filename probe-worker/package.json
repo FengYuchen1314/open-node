@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "build:assets": "npm --prefix ../frontend run build:probe",
+    "dev": "npm run build:assets && wrangler dev",
+    "deploy": "npm run build:assets && wrangler deploy",
+    "test": "node --experimental-strip-types --test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

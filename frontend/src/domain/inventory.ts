@@ -96,6 +96,38 @@ export type AgentOperationKind =
   | "agent_rollback"
   | "agent_lifecycle";
 
+export interface AgentCapabilities {
+  rpc: boolean;
+  stream: boolean;
+  return_route_test: boolean;
+  native_limiter: boolean;
+  user_auto_speed_rules: boolean;
+  subscription_access: boolean;
+  node_cleanup: boolean;
+  xray_config_workspace: boolean;
+  agent_switch_xray_mode: boolean;
+  agent_switch_listen_port: boolean;
+  agent_probe_master_url: boolean;
+  agent_update_master_url: boolean;
+}
+
+export interface AgentRead {
+  id: string;
+  server_id: string;
+  hostname: string;
+  agent_version?: string | null;
+  connection_mode: ConnectionMode;
+  listen_port: number;
+  public_ipv4?: string | null;
+  public_ipv6?: string | null;
+  xray_mode: XrayMode;
+  capabilities: AgentCapabilities;
+  warp_installed: boolean;
+  same_host_as_master?: boolean | null;
+  registered_at: string;
+  last_seen_at: string;
+}
+
 export interface ServerCreateRequest {
   name: string;
   ip_address?: string | null;
@@ -752,11 +784,15 @@ export interface AgentXrayConfigOperationRequest {
 }
 
 export interface AgentXraySystemConfigOperationRequest {
-  metrics_enabled?: boolean;
-  metrics_listen?: string;
-  stats_enabled?: boolean;
-  grpc_enabled?: boolean;
-  grpc_port?: number;
+  log_level: "none" | "error" | "warning" | "info" | "debug";
+  dns: Record<string, unknown>;
+  policy: Record<string, unknown>;
+  metrics_enabled: boolean;
+  metrics_listen: string;
+  stats_enabled: boolean;
+  grpc_enabled: boolean;
+  grpc_port: number;
+  expected_sha256: string;
   command_timeout_ms?: number;
 }
 
@@ -767,6 +803,7 @@ export interface AgentXrayConfigFileReadOperationRequest {
 export interface AgentXrayConfigFileWriteOperationRequest {
   file: string;
   content: unknown;
+  expected_sha256: string;
   command_timeout_ms?: number;
 }
 

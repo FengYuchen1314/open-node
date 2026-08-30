@@ -8,7 +8,7 @@ that every MMWX migration gate is complete. See [migration-map.md](migration-map
 
 ## Requirements
 
-- A Linux Docker host with Compose, Git, and outbound access to
+- A Linux Docker host with Docker Compose v2, Git, and outbound access to
   Docker Hub, npm, PyPI, GitHub, and the selected ACME/DNS services.
 - For public access: a hostname, an existing host HTTPS reverse proxy, and a
   certificate trusted by clients. Bootstrap the panel certificate outside the
@@ -21,7 +21,161 @@ the active Agent connections and public streams are process-local. Multi-host
 operation is not supported. Linux amd64 is tested; the lego downloader also
 has an arm64 checksum, but an arm64 image has not been validated.
 
-## Install
+## GitHub One-Command Install
+
+On a new Debian or Ubuntu Docker host, run:
+
+```bash
+(
+  installer="$(mktemp)" || exit 1
+  trap 'rm -f -- "$installer"' EXIT
+  trap 'exit 1' HUP INT TERM
+  curl -fsSL https://raw.githubusercontent.com/FengYuchen1314/open-node/main/install.sh -o "$installer" || exit 1
+  sudo bash "$installer"
+)
+```
+
+Downloading to a temporary file first prevents a partial transfer from being
+executed as a shell program and leaves the terminal on standard input. It does
+not authenticate the download. The URL follows mutable `main`, and the script
+then resolves the requested repository ref in a separate Git operation; those
+two inputs are not cryptographically bound. For a controlled rollout, review a
+commit-specific `install.sh` URL and set `OPEN_NODE_REF` to a reviewed release
+branch or tag that identifies the intended source. Retain the tested image; a
+remote branch or tag can later move, and the installer does not verify Git
+signatures or release attestations.
+
+The installer performs these bounded actions:
+
+1. verifies root-owned, non-symlink install/configuration/backup paths and
+   installs Git, curl, Docker and Compose v2 through `apt-get` when missing;
+2. clones the configured ref into a temporary candidate checkout and refuses a
+   pre-existing unmanaged Compose project, data volume, environment or source;
+3. creates mode-`0600` environment and manifest files. The manifest records the
+   repository/ref, directory and Compose identities, deployed revision, unique
+   image tag, and immutable image ID;
+4. validates the candidate Compose image and data volume, builds a
+   transaction-unique `source-<revision>-<transaction>` image, starts it without
+   rebuilding, and verifies that the container uses the recorded image ID, has
+   the requested published binding, and passes `/healthz`; and
+5. when a usable controlling terminal is present, prompts through `/dev/tty`
+   for the initial administrator without putting the password in command-line
+   arguments or environment variables. Otherwise automatic account creation is
+   skipped unless unattended creation was explicitly required.
+
+The default listener is `127.0.0.1:8080` and the initial loopback/SSH-tunnel
+cookie setting is HTTP-compatible. From your workstation, open a tunnel and
+then visit `http://127.0.0.1:8080`:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 root@SERVER_IP
+```
+
+For unattended installation, put the administrator password in a root-owned
+file with no group/other permissions and pass its absolute canonical path. The
+first line must contain 12-1024 characters. Use a trap so the delivered secret
+is removed on success, error, or interruption:
+
+```bash
+(
+  installer=""
+  password_file=""
+  cleanup() {
+    [[ -z "$installer" ]] || rm -f -- "$installer"
+    [[ -z "$password_file" ]] || sudo rm -f -- "$password_file"
+  }
+  trap cleanup EXIT
+  trap 'exit 1' HUP INT TERM
+  installer="$(mktemp)" || exit 1
+  password_file="$(sudo mktemp /root/open-node-admin-password.XXXXXX)" || exit 1
+  curl -fsSL https://raw.githubusercontent.com/FengYuchen1314/open-node/main/install.sh -o "$installer" || exit 1
+  sudo bash -c '
+    umask 077
+    printf "Administrator password: " >/dev/tty
+    IFS= read -r -s password </dev/tty
+    printf "\nConfirm administrator password: " >/dev/tty
+    IFS= read -r -s confirmation </dev/tty
+    printf "\n" >/dev/tty
+    [[ "$password" == "$confirmation" ]] || exit 1
+    printf "%s\n" "$password" > "$1"
+    chmod 0600 "$1"
+  ' _ "$password_file" || exit 1
+  sudo env OPEN_NODE_CREATE_ADMIN=1 \
+    OPEN_NODE_ADMIN_PASSWORD_FILE="$password_file" \
+    bash "$installer"
+)
+```
+
+Both reads above use the controlling terminal, so the password is not included
+in shell history. Secret-manager users can deliver the same private root-owned
+file without using `/dev/tty`. The installer reads the secret but deliberately
+does not delete an operator-owned file; the caller's trap owns that cleanup.
+
+Common lifecycle commands can use the same completely downloaded, reviewed
+script. The explicit `create-admin` action is also available after installation:
+
+```bash
+(
+  action=status # Change to update, uninstall, or create-admin as required.
+  installer="$(mktemp)" || exit 1
+  trap 'rm -f -- "$installer"' EXIT
+  trap 'exit 1' HUP INT TERM
+  curl -fsSL https://raw.githubusercontent.com/FengYuchen1314/open-node/main/install.sh -o "$installer" || exit 1
+  sudo bash "$installer" "$action"
+)
+```
+
+On the first successful install, `/etc/open-node/installer.manifest` becomes the
+installer's source of identity. Later invocations load the saved repository,
+ref, install directory, backup directory, project name and image repository
+unless the operator explicitly supplies them; an explicit conflicting value is
+rejected. `OPEN_NODE_CONFIG_DIR` is the lookup key and cannot be discovered from
+the manifest itself. If the first install used a custom configuration directory,
+set that same `OPEN_NODE_CONFIG_DIR` on every later action. Do not move, copy or
+hand-edit the checkout, environment, manifest or named volume as an adoption
+mechanism; the installer fails closed on identity, ownership or cleanliness
+mismatches.
+
+For example, an installation whose manifest is under `/srv/open-node-config`
+must be addressed this way even though its other saved overrides are loaded:
+
+```bash
+sudo env OPEN_NODE_CONFIG_DIR=/srv/open-node-config bash /path/to/reviewed/install.sh status
+```
+
+Useful unattended overrides include `OPEN_NODE_REF`,
+`OPEN_NODE_HTTP_PORT`, `OPEN_NODE_INSTALL_DIR`, `OPEN_NODE_CONFIG_DIR`,
+`OPEN_NODE_BACKUP_DIR`, and `OPEN_NODE_PROJECT_NAME`. A public plain-HTTP bind
+requires both `OPEN_NODE_BIND_ADDRESS=0.0.0.0` and the explicit
+`OPEN_NODE_ALLOW_PUBLIC_HTTP=1` opt-in; it is not the recommended production
+topology. Before putting the loopback listener behind HTTPS, set
+`OPEN_NODE_SESSION_COOKIE_SECURE=true` and configure the exact trusted proxy as
+described below.
+
+This installer deliberately targets a new or already installer-managed,
+single-host Docker/SQLite deployment. It does not adopt an existing manual
+Compose installation, merge data, configure a reverse proxy or public DNS/TLS,
+restore a backup, prune retained images/backups, install or migrate remote
+Agents, or claim support for the upstream MMWX native binary, PostgreSQL,
+embedded Nginx, Windows, rootless Docker, multi-host or multi-worker operation.
+
+The maintainer-only installer smoke is destructive and must run as root on the
+disposable project VPS from a Git checkout. It requires `bash`, Git, a running
+Docker daemon and Docker Compose v2; builds several real images and creates a
+private temporary Git remote under `/root`. Every source/configuration/backup
+directory, loopback port, image repository, Compose project, network and named
+volume receives a random fixture identity. It exercises fresh install, real
+administrator login, same-revision no-op, locking, stopped and volume-only
+updates, backup and interruption failures, unhealthy-candidate recovery,
+data-preserving uninstall/reinstall, and missing-volume refusal. Do not run it
+on a production host, and inspect/remove its uniquely named resources manually
+if mandatory cleanup reports a failure:
+
+```bash
+sudo python3 scripts/vps/smoke-control-plane-installer.py
+```
+
+## Manual Install
 
 On the deployment host:
 
@@ -190,6 +344,57 @@ traffic to the restored instance; configure its new trusted proxy address.
 Remote host files and Agent state are not in the control-plane backup.
 
 ## Upgrade And Roll Back
+
+### Installer-managed updates
+
+`install.sh update` requires the installed checkout, manifest, private
+environment, named volume and recorded image ID to agree exactly. It fetches the
+saved ref and accepts only a fast-forward descendant of the deployed revision.
+Each real update builds and inspects a transaction-unique image while the old
+container can continue running. If the fetched revision is already deployed,
+the command is a no-op: it does not rebuild an image, stop a container, create a
+backup, or replace the previously retained recovery artifacts. It checks health
+only when the current container is running.
+
+Before a candidate is started, the installer records the old container state,
+stops it if necessary, and creates a new private bundle under
+`OPEN_NODE_BACKUP_DIR`. The bundle contains:
+
+- `volume.tar.gz`, a validated archive of the stopped data volume;
+- `open-node.env`, `installer.manifest`, and the deployed `compose.yaml`; and
+- `deployment.meta`, including the old revision, tag, immutable image ID,
+  Compose project/volume identity, creation time and a transaction-specific
+  local rollback-image tag.
+
+The old image is tagged in the local Docker store; its bytes are not embedded
+in the bundle. Export that image separately for off-host or Docker-store-loss
+recovery. Bundles are never silently overwritten or pruned.
+
+Failure handling depends on how far the transaction progressed:
+
+- A checkout, Compose-validation or image-build failure occurs before the old
+  container is stopped and cleans up the temporary candidate.
+- If stopped-volume backup creation or validation fails, no candidate is
+  started. A previously running old container is restarted and health-checked;
+  a deployment that was already stopped remains stopped.
+- Once the candidate has started against the real volume, it may have migrated
+  persistent data. If candidate startup/health or the later source/environment
+  commit fails, the candidate is stopped, the old source/environment/manifest
+  identity remains recorded, and a private `installer.recovery` marker names the
+  candidate and backup. The installer deliberately does **not** restart the old
+  image against the possibly migrated volume.
+- An interrupt during a state-changing phase also attempts to stop the
+  candidate, remove temporary worktrees/files, and record the interrupted phase
+  and available backup in `installer.recovery`.
+
+While that marker exists, `install`, `update`, and `create-admin` fail closed;
+`status` displays it. Restore the named bundle into a fresh, uniquely named
+Compose project and verify the old image and data together using the procedure
+above. Only after recovery has been completed and recorded state reconciled
+should an operator remove the marker. The installer does not automate that
+restore decision. A failed fresh candidate is stopped and no installation is
+committed, though its recovery marker can remain if failure occurred after
+candidate activation began.
 
 Legacy MMWX Agents that require a signing identity need the explicit setup in
 [legacy-agent-migration.md](legacy-agent-migration.md). Keep that private seed

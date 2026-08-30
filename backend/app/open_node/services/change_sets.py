@@ -6,6 +6,7 @@ from sqlalchemy import delete, or_, select
 
 from open_node.domain.changes import AgentChangeSetStatus as State
 from open_node.services.inventory import (
+    AgentCapabilityUnavailableError,
     AgentChangeSetModel,
     AgentChangeSetStepModel,
     ChangeSetServerLockModel,
@@ -46,6 +47,45 @@ class ChangeSetCoordinator:
 
     def steps(self, session, change):
         return self.store._change_set_steps(session, change.id)
+
+    def capability_error(self, session, commands):
+        for server_id, payload in commands:
+            server = session.get(ServerModel, server_id)
+            if server is None:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            try:
+                self.store._validate_command_capabilities(session, server, payload)
+            except AgentCapabilityUnavailableError as exc:
+                return str(exc)
+        return None
+
+    def preflight_capabilities(self, session, commands):
+        if error := self.capability_error(session, commands):
+            raise ChangeSetConflict(error)
+
+    def rollback_creations(self, session, steps, *, retry_failed=False):
+        commands = []
+        for step in reversed(steps):
+            forward = (
+                session.get(CommandModel, step.forward_command_id)
+                if step.forward_command_id
+                else None
+            )
+            if not attempted(forward):
+                continue
+            payload = self.store._step_rollback_command(step)
+            if payload is None:
+                continue
+            rollback = (
+                session.get(CommandModel, step.rollback_command_id)
+                if step.rollback_command_id
+                else None
+            )
+            if rollback is None or (
+                retry_failed and rollback.status in {"failed", "skipped"}
+            ):
+                commands.append((step.server_id, payload))
+        return commands
 
     @staticmethod
     def owner(session, command):
@@ -236,6 +276,13 @@ class ChangeSetCoordinator:
         commands = []
         if change.status == State.PLANNED:
             steps = self.steps(session, change)
+            self.preflight_capabilities(
+                session,
+                [
+                    (step.server_id, self.store._step_forward_command(step))
+                    for step in steps
+                ],
+            )
             self.reserve(session, change, steps)
             previous = None
             for step in steps:
@@ -312,6 +359,14 @@ class ChangeSetCoordinator:
                     "An accepted change set cannot be rolled back; create a new plan"
                 )
             else:
+                self.preflight_capabilities(
+                    session,
+                    self.rollback_creations(
+                        session,
+                        steps,
+                        retry_failed=change.status == State.ROLLBACK_FAILED,
+                    ),
+                )
                 self.reserve(session, change, steps)
                 if change.status == State.SUCCEEDED:
                     self.guard_late_rollback(session, steps)
@@ -385,6 +440,15 @@ class ChangeSetCoordinator:
             if any(in_flight(command) for command in forwards):
                 change.updated_at = now
                 return
+            capability_error = self.capability_error(
+                session,
+                self.rollback_creations(session, steps),
+            )
+            automatic_skip_error = (
+                f"Automatic rollback not queued: {capability_error}"
+                if capability_error
+                else None
+            )
             previous = None
             rollbacks = []
             missing = False
@@ -401,17 +465,37 @@ class ChangeSetCoordinator:
                     else None
                 )
                 if command is None:
-                    command = self.store._create_command_model(
-                        session,
-                        session.get(ServerModel, step.server_id),
-                        payload,
-                        now,
-                        depends_on=previous,
-                    )
+                    server = session.get(ServerModel, step.server_id)
+                    if automatic_skip_error:
+                        command = self.store._create_skipped_command_model(
+                            session,
+                            server,
+                            payload,
+                            now,
+                            automatic_skip_error,
+                            depends_on=previous,
+                        )
+                    else:
+                        command = self.store._create_command_model(
+                            session,
+                            server,
+                            payload,
+                            now,
+                            depends_on=previous,
+                        )
                     # As with forward dispatch, make the command row durable inside the
                     # transaction before the step starts referencing it.
                     session.flush()
                     step.rollback_command_id = command.id
+                elif (
+                    automatic_skip_error
+                    and command.status in {"waiting", "pending"}
+                    and command.attempts == 0
+                ):
+                    command.status = "skipped"
+                    command.result_status = 501
+                    command.result_error = automatic_skip_error
+                    command.completed_at = command.updated_at = now
                 rollbacks.append(command)
                 previous = command
             if any(command.status in {"failed", "skipped"} for command in rollbacks):

@@ -2,6 +2,11 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import RouteProbeFields from "../components/RouteProbeFields.vue";
 import { latencyCommandTimeout, routeTargets, selectedRouteTargets } from "../domain/diagnostics";
+import {
+  allowsProbeAdministratorAccess,
+  browserProbeAccessToken,
+  startProbeSurface,
+} from "../domain/probe-surface";
 
 import type {
   ProbeMetricPoint,
@@ -59,6 +64,11 @@ import { listServers } from "../services/inventory";
 
 type ProbeSeriesRange = "1h" | "6h" | "24h";
 type ProbeSeriesMetric = "ping" | "system";
+
+const props = withDefaults(defineProps<{ publicOnly?: boolean }>(), {
+  publicOnly: false,
+});
+const publicOnly = computed(() => __OPEN_NODE_PUBLIC_PROBE__ || props.publicOnly);
 
 interface ProbeTrendCard {
   key: string;
@@ -133,6 +143,9 @@ const taskForm = reactive({
 let selectedSeriesRequest = 0;
 let targetComparisonRequest = 0;
 let probeStream: WebSocket | undefined;
+let probeRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+let probeReconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let probeDisposed = false;
 
 const settingsForm = reactive({
   enabled: true,
@@ -402,15 +415,32 @@ watch(targetComparisonRange, () => {
 });
 
 onMounted(() => {
-  void refreshProbe();
-  void refreshProbeTargetComparisons();
-  void refreshProbeTasks();
-  openProbeStream();
+  probeDisposed = false;
+  startProbeSurface(publicOnly.value, {
+    refreshPublicProbe: () => void refreshProbe(),
+    refreshPublicTargets: () => void refreshProbeTargetComparisons(),
+    refreshAdministratorTasks: () => void refreshProbeTasks(),
+    openPublicStream: openProbeStream,
+  });
+  scheduleProbeRefresh();
 });
 
 onUnmounted(() => {
+  probeDisposed = true;
+  clearTimeout(probeRefreshTimer);
+  clearTimeout(probeReconnectTimer);
   closeProbeStream();
 });
+
+function scheduleProbeRefresh() {
+  clearTimeout(probeRefreshTimer);
+  if (probeDisposed) return;
+  const delay = Math.max(1, Math.min(60, settingsForm.refresh_interval_sec || 5)) * 1_000;
+  probeRefreshTimer = setTimeout(async () => {
+    await Promise.allSettled([refreshProbe(), refreshProbeTargetComparisons()]);
+    scheduleProbeRefresh();
+  }, delay);
+}
 
 async function refreshProbe() {
   loading.value = true;
@@ -419,11 +449,14 @@ async function refreshProbe() {
     acceptProbe(await getPublicProbePayload(fetch, activeProbeAccessToken()));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Probe request failed.";
-    await refreshProbeSettingsAfterDenied();
-    errorMessage.value =
-      settingsForm.require_access_token && !activeProbeAccessToken()
-        ? "Worker token required."
-        : message;
+    if (allowsProbeAdministratorAccess(publicOnly.value)) {
+      await refreshProbeSettingsAfterDenied();
+    }
+    const missingAccessToken =
+      allowsProbeAdministratorAccess(publicOnly.value) &&
+      settingsForm.require_access_token &&
+      !activeProbeAccessToken();
+    errorMessage.value = missingAccessToken ? "Worker token required." : message;
   } finally {
     loading.value = false;
   }
@@ -481,7 +514,7 @@ function acceptProbe(nextPayload: ProbePayload) {
   errorMessage.value = "";
   syncSettingsForm(nextPayload);
   syncFilters(nextPayload.servers ?? []);
-  if (settingsForm.require_access_token) {
+  if (allowsProbeAdministratorAccess(publicOnly.value) && settingsForm.require_access_token) {
     closeProbeStream();
   }
 }
@@ -490,7 +523,7 @@ function probeEndpointNote() {
   if (streamActive.value) {
     return "Live stream connected";
   }
-  if (settingsForm.require_access_token) {
+  if (allowsProbeAdministratorAccess(publicOnly.value) && settingsForm.require_access_token) {
     return "Worker token required";
   }
   return payload.value?.enabled ? "Probe endpoint enabled" : "Probe endpoint disabled";
@@ -500,10 +533,14 @@ function openProbeStream() {
   if (typeof WebSocket === "undefined") {
     return;
   }
-  if (settingsForm.require_access_token) {
+  if (allowsProbeAdministratorAccess(publicOnly.value) && settingsForm.require_access_token) {
     closeProbeStream();
     return;
   }
+  if (probeStream && probeStream.readyState < WebSocket.CLOSING) {
+    return;
+  }
+  clearTimeout(probeReconnectTimer);
   try {
     probeStream = new WebSocket(getPublicProbeStreamUrl(window.location));
     probeStream.onopen = () => {
@@ -525,20 +562,31 @@ function openProbeStream() {
     probeStream.onclose = () => {
       streamActive.value = false;
       probeStream = undefined;
+      if (!probeDisposed) {
+        probeReconnectTimer = setTimeout(openProbeStream, 2_000);
+      }
     };
   } catch {
     streamActive.value = false;
+    if (!probeDisposed) {
+      probeReconnectTimer = setTimeout(openProbeStream, 2_000);
+    }
   }
 }
 
 function closeProbeStream() {
-  probeStream?.close();
+  clearTimeout(probeReconnectTimer);
+  const stream = probeStream;
   probeStream = undefined;
+  if (stream) {
+    stream.onclose = null;
+    stream.close();
+  }
   streamActive.value = false;
 }
 
 function activeProbeAccessToken() {
-  return generatedProbeAccessToken.value.trim() || undefined;
+  return browserProbeAccessToken(publicOnly.value, generatedProbeAccessToken.value);
 }
 
 async function refreshProbeSettingsAfterDenied() {
@@ -1327,7 +1375,7 @@ function formatBytes(value: number) {
       </div>
     </v-sheet>
 
-    <v-sheet class="section-surface" border>
+    <v-sheet v-if="!publicOnly" class="section-surface" border>
       <div class="section-head">
         <div>
           <div class="section-title">Probe settings</div>
@@ -1537,7 +1585,7 @@ function formatBytes(value: number) {
       </v-form>
     </v-sheet>
 
-    <v-sheet class="section-surface probe-task-surface" border>
+    <v-sheet v-if="!publicOnly" class="section-surface probe-task-surface" border>
       <div class="section-head">
         <div>
           <div class="section-title">Scheduled probes</div>

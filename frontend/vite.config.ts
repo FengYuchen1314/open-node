@@ -3,6 +3,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [vue()],
+  define: {
+    __OPEN_NODE_PUBLIC_PROBE__: JSON.stringify(false),
+  },
   // Transform Vuetify's CSS imports for server-rendered component tests.
   test: {
     server: { deps: { inline: ["vuetify"] } },

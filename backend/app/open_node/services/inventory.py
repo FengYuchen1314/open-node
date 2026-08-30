@@ -209,6 +209,10 @@ class CommandNotReadyError(ValueError):
     """Raised when a result arrives before a command's prerequisite succeeds."""
 
 
+class AgentCapabilityUnavailableError(ValueError):
+    """Raised before queueing a command that the registered Agent cannot execute."""
+
+
 class XrayConfigSnapshotNotFoundError(ValueError):
     """Raised when an Xray config snapshot lookup targets an unknown snapshot."""
 
@@ -452,6 +456,54 @@ _XRAY_METRICS_PORT = 38_889
 _XRAY_SNAPSHOT_REFRESH_QUERY = "snapshot_source=master_write"
 _XRAY_SNAPSHOT_REFRESH_TIMEOUT_MS = 60_000
 _XRAY_RECONNECT_SYNC_TIMEOUT_MS = 60_000
+_XRAY_CONFIG_WORKSPACE_PATHS = frozenset(
+    {
+        "/api/child/xray/config-files",
+        "/api/child/xray/system-config",
+    }
+)
+_AGENT_SETTINGS_CAPABILITIES = {
+    "/api/child/agent/switch-xray-mode": "agent_switch_xray_mode",
+    "/api/child/agent/switch-listen-port": "agent_switch_listen_port",
+    "/api/child/agent/probe-master-url": "agent_probe_master_url",
+    "/api/child/agent/update-master-url": "agent_update_master_url",
+}
+
+
+def required_command_capabilities(path: str, body: Any) -> tuple[str, ...]:
+    """Return persisted/live Agent capabilities required to execute a command."""
+
+    payload = body if isinstance(body, dict) else {}
+    needs_limiter = path == "/api/child/limiter" or (
+        path == "/api/child/batch-apply" and bool(payload.get("limiter_users"))
+    )
+    raw_users = (
+        payload.get("users", [])
+        if path == "/api/child/limiter"
+        else payload.get("limiter_users", [])
+        if path == "/api/child/batch-apply"
+        else []
+    )
+    rule_users = raw_users if isinstance(raw_users, list) else []
+    if path == "/api/child/batch-apply":
+        rule_users = [item.get("user", {}) for item in rule_users if isinstance(item, dict)]
+    needs_user_rules = any(
+        isinstance(user, dict) and user.get("auto_speed_rules") for user in rule_users
+    )
+    return tuple(
+        capability
+        for capability, needed in (
+            ("native_limiter", needs_limiter),
+            ("user_auto_speed_rules", needs_user_rules),
+            ("node_cleanup", path == "/api/child/node-cleanup"),
+            ("xray_config_workspace", path in _XRAY_CONFIG_WORKSPACE_PATHS),
+            (
+                _AGENT_SETTINGS_CAPABILITIES.get(path, ""),
+                path in _AGENT_SETTINGS_CAPABILITIES,
+            ),
+        )
+        if needed and capability
+    )
 _XRAY_MUTATING_PATH_PREFIXES = (
     "/api/child/xray/install",
     "/api/child/xray/install-stream",
@@ -831,6 +883,11 @@ class AgentModel(Base):
     capability_user_auto_speed_rules: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_subscription_access: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_node_cleanup: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_xray_config_workspace: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_agent_switch_xray_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_agent_switch_listen_port: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_agent_probe_master_url: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_agent_update_master_url: Mapped[bool] = mapped_column(Boolean, default=False)
     warp_installed: Mapped[bool] = mapped_column(Boolean, default=False)
     same_host_as_master: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -1620,6 +1677,11 @@ class InventoryStore:
                     "capability_user_auto_speed_rules": "BOOLEAN NOT NULL DEFAULT 0",
                     "capability_subscription_access": "BOOLEAN NOT NULL DEFAULT 0",
                     "capability_node_cleanup": "BOOLEAN NOT NULL DEFAULT 0",
+                    "capability_xray_config_workspace": "BOOLEAN NOT NULL DEFAULT 0",
+                    "capability_agent_switch_xray_mode": "BOOLEAN NOT NULL DEFAULT 0",
+                    "capability_agent_switch_listen_port": "BOOLEAN NOT NULL DEFAULT 0",
+                    "capability_agent_probe_master_url": "BOOLEAN NOT NULL DEFAULT 0",
+                    "capability_agent_update_master_url": "BOOLEAN NOT NULL DEFAULT 0",
                 },
             )
         if "agent_change_sets" in table_names:
@@ -1879,6 +1941,21 @@ class InventoryStore:
             agent.capability_user_auto_speed_rules = payload.capabilities.user_auto_speed_rules
             agent.capability_subscription_access = payload.capabilities.subscription_access
             agent.capability_node_cleanup = payload.capabilities.node_cleanup
+            agent.capability_xray_config_workspace = (
+                payload.capabilities.xray_config_workspace
+            )
+            agent.capability_agent_switch_xray_mode = (
+                payload.capabilities.agent_switch_xray_mode
+            )
+            agent.capability_agent_switch_listen_port = (
+                payload.capabilities.agent_switch_listen_port
+            )
+            agent.capability_agent_probe_master_url = (
+                payload.capabilities.agent_probe_master_url
+            )
+            agent.capability_agent_update_master_url = (
+                payload.capabilities.agent_update_master_url
+            )
             agent.warp_installed = payload.warp_installed
             agent.same_host_as_master = payload.same_host_as_master
             agent.last_seen_at = now
@@ -4659,6 +4736,33 @@ class InventoryStore:
             session.refresh(command)
             return self._command_read(command)
 
+    def reconcile_command_capability_loss(self, command_id: UUID) -> AgentCommandRead:
+        """Stop an eligible command when its persisted Agent lost a required capability.
+
+        A live WebSocket connection can advertise fewer capabilities than the latest
+        persisted Agent registration.  In that case the command must stay available
+        for another transport.  Only the persisted capability loss is authoritative,
+        and an unexpired lease is left alone so a late result can still complete it.
+        """
+
+        with self._coordinated_session() as session:
+            command = session.get(CommandModel, str(command_id))
+            if not command:
+                raise CommandNotFoundError(f"command not found: {command_id}")
+            now = datetime.now(tz=UTC)
+            if self._command_is_lease_candidate(command, now):
+                if error := self._required_capability_error(session, command):
+                    self._terminalize_unleaseable_command(
+                        session,
+                        command,
+                        now,
+                        error=error,
+                        result_status=501,
+                    )
+            session.commit()
+            session.refresh(command)
+            return self._command_read(command)
+
     def release_command_lease(self, command_id: UUID, attempts: int) -> AgentCommandRead:
         with self._coordinated_session() as session:
             command = session.get(CommandModel, str(command_id))
@@ -7332,6 +7436,11 @@ class InventoryStore:
                 user_auto_speed_rules=agent.capability_user_auto_speed_rules,
                 subscription_access=agent.capability_subscription_access,
                 node_cleanup=agent.capability_node_cleanup,
+                xray_config_workspace=agent.capability_xray_config_workspace,
+                agent_switch_xray_mode=agent.capability_agent_switch_xray_mode,
+                agent_switch_listen_port=agent.capability_agent_switch_listen_port,
+                agent_probe_master_url=agent.capability_agent_probe_master_url,
+                agent_update_master_url=agent.capability_agent_update_master_url,
             ),
             warp_installed=agent.warp_installed,
             same_host_as_master=agent.same_host_as_master,
@@ -7466,6 +7575,71 @@ class InventoryStore:
         depends_on: CommandModel | None = None,
     ) -> CommandModel:
         payload.validate_wire_payload()
+        InventoryStore._validate_command_capabilities(session, server, payload)
+        return InventoryStore._new_command_model(
+            session,
+            server,
+            payload,
+            now,
+            depends_on=depends_on,
+        )
+
+    @staticmethod
+    def _validate_command_capabilities(
+        session: Session,
+        server: ServerModel,
+        payload: AgentCommandCreate,
+    ) -> None:
+        required = required_command_capabilities(payload.path, payload.body)
+        if required:
+            agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
+            missing = [
+                capability
+                for capability in required
+                if not agent or not getattr(agent, "capability_" + capability)
+            ]
+            if missing:
+                capability = missing[0]
+                if capability == "xray_config_workspace":
+                    raise AgentCapabilityUnavailableError(
+                        "Upgrade the Open Node Agent on this server before using Xray system "
+                        "configuration or config files (missing xray_config_workspace capability)"
+                    )
+                raise AgentCapabilityUnavailableError(
+                    "This Agent cannot execute the requested operation "
+                    f"(missing {capability} capability)"
+                )
+
+    @staticmethod
+    def _create_skipped_command_model(
+        session: Session,
+        server: ServerModel,
+        payload: AgentCommandCreate,
+        now: datetime,
+        result_error: str,
+        *,
+        depends_on: CommandModel | None = None,
+    ) -> CommandModel:
+        payload.validate_wire_payload()
+        return InventoryStore._new_command_model(
+            session,
+            server,
+            payload,
+            now,
+            depends_on=depends_on,
+            skipped_error=result_error,
+        )
+
+    @staticmethod
+    def _new_command_model(
+        session: Session,
+        server: ServerModel,
+        payload: AgentCommandCreate,
+        now: datetime | None = None,
+        *,
+        depends_on: CommandModel | None = None,
+        skipped_error: str | None = None,
+    ) -> CommandModel:
         active_now = now or datetime.now(tz=UTC)
         command = CommandModel(
             id=str(uuid4()),
@@ -7478,12 +7652,17 @@ class InventoryStore:
             timeout_ms=payload.timeout_ms,
             stream=payload.stream,
             status=(
-                AgentCommandStatus.WAITING.value
+                AgentCommandStatus.SKIPPED.value
+                if skipped_error
+                else AgentCommandStatus.WAITING.value
                 if depends_on and depends_on.status != AgentCommandStatus.SUCCEEDED.value
                 else AgentCommandStatus.PENDING.value
             ),
             depends_on_command_id=depends_on.id if depends_on else None,
             attempts=0,
+            result_status=501 if skipped_error else None,
+            result_error=skipped_error,
+            completed_at=active_now if skipped_error else None,
             created_at=active_now,
             updated_at=active_now,
         )
@@ -9523,62 +9702,70 @@ class InventoryStore:
         elapsed_ms = (now - leased_at).total_seconds() * 1000
         return elapsed_ms >= command.timeout_ms
 
+    @staticmethod
+    def _command_is_lease_candidate(command: CommandModel, now: datetime) -> bool:
+        return command.status == AgentCommandStatus.PENDING.value or (
+            command.status == AgentCommandStatus.LEASED.value
+            and InventoryStore._lease_expired(command, now)
+        )
+
+    @staticmethod
+    def _required_capability_error(session: Session, command: CommandModel) -> str | None:
+        agent = session.scalar(select(AgentModel).where(AgentModel.server_id == command.server_id))
+        for required_capability in required_command_capabilities(command.path, command.body):
+            if not agent or not getattr(agent, "capability_" + required_capability):
+                return (
+                    "Not sent: this command requires an Open Node Agent with "
+                    + required_capability.replace("_", " ")
+                    + " support"
+                )
+        return None
+
+    def _terminalize_unleaseable_command(
+        self,
+        session: Session,
+        command: CommandModel,
+        now: datetime,
+        *,
+        error: str,
+        result_status: int,
+    ) -> None:
+        previously_dispatched = command.attempts > 0
+        command.status = (
+            AgentCommandStatus.FAILED.value
+            if previously_dispatched
+            else AgentCommandStatus.SKIPPED.value
+        )
+        command.result_status = result_status
+        command.result_error = (
+            "Not retried after an earlier dispatch because its outcome is unknown. "
+            + error.removeprefix("Not sent: ")
+            if previously_dispatched
+            else error
+        )
+        command.leased_at = None
+        command.completed_at = now
+        command.updated_at = now
+        self._advance_command_dependents(session, command, now)
+        self._change_sets().advance_after_result(session, command, now)
+        self._subscription_access().after_result(session, command, now)
+
     def _claim_command_lease(self, session: Session, command: CommandModel, now: datetime) -> bool:
-        if command.status != AgentCommandStatus.PENDING.value and (
-            command.status != AgentCommandStatus.LEASED.value
-            or not InventoryStore._lease_expired(command, now)
-        ):
+        if not self._command_is_lease_candidate(command, now):
             return False
         if not self._change_sets().can_lease(session, command):
             return False
         if not self._subscription_access().can_lease(session, command, now):
             return False
-        needs_limiter = command.path == "/api/child/limiter" or (
-            command.path == "/api/child/batch-apply"
-            and isinstance(command.body, dict)
-            and command.body.get("limiter_users")
-        )
-        body = command.body if isinstance(command.body, dict) else {}
-        raw_users = (
-            body.get("users", [])
-            if command.path == "/api/child/limiter"
-            else body.get("limiter_users", [])
-            if command.path == "/api/child/batch-apply"
-            else []
-        )
-        rule_users = raw_users if isinstance(raw_users, list) else []
-        if command.path == "/api/child/batch-apply":
-            rule_users = [item.get("user", {}) for item in rule_users if isinstance(item, dict)]
-        needs_user_rules = any(
-            isinstance(user, dict) and user.get("auto_speed_rules") for user in rule_users
-        )
-        required_capabilities = [
-            capability
-            for capability, needed in (
-                ("native_limiter", needs_limiter),
-                ("user_auto_speed_rules", needs_user_rules),
-                ("node_cleanup", command.path == "/api/child/node-cleanup"),
+        if error := self._required_capability_error(session, command):
+            self._terminalize_unleaseable_command(
+                session,
+                command,
+                now,
+                error=error,
+                result_status=501,
             )
-            if needed
-        ]
-        for required_capability in required_capabilities:
-            agent = session.scalar(
-                select(AgentModel).where(AgentModel.server_id == command.server_id)
-            )
-            if not agent or not getattr(agent, "capability_" + required_capability):
-                command.result_error = (
-                    "Not sent: this command requires an Open Node Agent with "
-                    + required_capability.replace("_", " ")
-                    + " support"
-                )
-                command.updated_at = now
-                if command.attempts == 0:
-                    command.status = AgentCommandStatus.SKIPPED.value
-                    command.result_status = 501
-                    command.completed_at = now
-                    self._advance_command_dependents(session, command, now)
-                    self._change_sets().advance_after_result(session, command, now)
-                return False
+            return False
         try:
             AgentCommandCreate(
                 method=command.method,
@@ -9589,13 +9776,13 @@ class InventoryStore:
                 stream=command.stream,
             ).validate_wire_payload()
         except AgentCommandPayloadError as exc:
-            command.result_error = f"Not sent: {exc}"
-            command.updated_at = now
-            if command.attempts == 0:
-                command.status = AgentCommandStatus.SKIPPED.value
-                command.completed_at = now
-                self._advance_command_dependents(session, command, now)
-                self._change_sets().advance_after_result(session, command, now)
+            self._terminalize_unleaseable_command(
+                session,
+                command,
+                now,
+                error=f"Not sent: {exc}",
+                result_status=422,
+            )
             return False
         # Both transports must claim the same persisted version before dispatching.
         result = session.execute(

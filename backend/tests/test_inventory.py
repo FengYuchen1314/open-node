@@ -28,6 +28,41 @@ def make_client(tmp_path: Path) -> TestClient:
     return authenticated_client(create_app(settings))
 
 
+def register_xray_config_workspace(client: TestClient, created: dict) -> dict:
+    response = client.post(
+        "/api/v1/agents/register",
+        json={
+            "token": created["agent_token"],
+            "hostname": "xray-config-workspace",
+            "agent_version": "open-node/0.3.0a0",
+            "capabilities": {"rpc": True, "xray_config_workspace": True},
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["agent"]["capabilities"]["xray_config_workspace"] is True
+    return response.json()
+
+
+def register_agent_settings_capabilities(client: TestClient, created: dict) -> dict:
+    response = client.post(
+        "/api/v1/agents/register",
+        json={
+            "token": created["agent_token"],
+            "hostname": "agent-settings",
+            "agent_version": "mmw-agent/v0.4.7",
+            "capabilities": {
+                "rpc": True,
+                "agent_switch_xray_mode": True,
+                "agent_switch_listen_port": True,
+                "agent_probe_master_url": True,
+                "agent_update_master_url": True,
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
 def test_sqlite_connections_enforce_foreign_keys(tmp_path: Path) -> None:
     engine = create_inventory_engine(sqlite_url(tmp_path / "foreign-keys.db"))
     try:
@@ -2424,6 +2459,7 @@ def test_config_read_operations_queue_mmwx_child_commands(tmp_path: Path) -> Non
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-config-read"}).json()
     server_id = created["server"]["id"]
+    register_xray_config_workspace(client, created)
 
     operations = [
         ("xray/config/read", "/api/child/xray/config"),
@@ -3814,15 +3850,20 @@ def test_xray_config_snapshots_ignore_empty_and_failed_results(tmp_path: Path) -
 def test_xray_system_config_write_queues_agent_schema(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-xray-system"}).json()
+    register_xray_config_workspace(client, created)
 
     response = client.post(
         f"/api/v1/servers/{created['server']['id']}/operations/xray/system-config/write",
         json={
+            "log_level": "info",
+            "dns": {"servers": ["1.1.1.1"]},
+            "policy": {"levels": {"0": {"bufferSize": 0}}},
             "metrics_enabled": True,
             "metrics_listen": "127.0.0.1:11111",
             "stats_enabled": True,
             "grpc_enabled": True,
             "grpc_port": 46736,
+            "expected_sha256": "a" * 64,
         },
     )
 
@@ -3831,18 +3872,59 @@ def test_xray_system_config_write_queues_agent_schema(tmp_path: Path) -> None:
     assert command["method"] == "POST"
     assert command["path"] == "/api/child/xray/system-config"
     assert command["body"] == {
+        "log_level": "info",
+        "dns": {"servers": ["1.1.1.1"]},
+        "policy": {"levels": {"0": {"bufferSize": 0}}},
         "metrics_enabled": True,
         "metrics_listen": "127.0.0.1:11111",
         "stats_enabled": True,
         "grpc_enabled": True,
         "grpc_port": 46736,
+        "expected_sha256": "a" * 64,
     }
+
+    base = f"/api/v1/servers/{created['server']['id']}/operations/xray/system-config/write"
+    invalid_log = client.post(
+        base,
+        json={**command["body"], "log_level": "trace"},
+    )
+    invalid_dns = client.post(
+        base,
+        json={**command["body"], "dns": []},
+    )
+    invalid_policy = client.post(
+        base,
+        json={**command["body"], "policy": None},
+    )
+    missing_dns = client.post(
+        base,
+        json={key: value for key, value in command["body"].items() if key != "dns"},
+    )
+    missing_runtime_fields = {
+        field: client.post(
+            base,
+            json={key: value for key, value in command["body"].items() if key != field},
+        )
+        for field in (
+            "metrics_enabled",
+            "metrics_listen",
+            "stats_enabled",
+            "grpc_enabled",
+            "grpc_port",
+        )
+    }
+    assert invalid_log.status_code == 422
+    assert invalid_dns.status_code == 422
+    assert invalid_policy.status_code == 422
+    assert missing_dns.status_code == 422
+    assert all(response.status_code == 422 for response in missing_runtime_fields.values())
 
 
 def test_config_file_operations_build_queries_and_bodies(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-config-files"}).json()
     server_id = created["server"]["id"]
+    register_xray_config_workspace(client, created)
 
     xray_read = client.post(
         f"/api/v1/servers/{server_id}/operations/xray/config-files/read",
@@ -3850,7 +3932,11 @@ def test_config_file_operations_build_queries_and_bodies(tmp_path: Path) -> None
     )
     xray_write = client.post(
         f"/api/v1/servers/{server_id}/operations/xray/config-files/write",
-        json={"file": "routing.json", "content": {"routing": {"rules": []}}},
+        json={
+            "file": "routing.json",
+            "content": {"routing": {"rules": []}},
+            "expected_sha256": "b" * 64,
+        },
     )
     nginx_read = client.post(
         f"/api/v1/servers/{server_id}/operations/nginx/config-files/read",
@@ -3872,6 +3958,7 @@ def test_config_file_operations_build_queries_and_bodies(tmp_path: Path) -> None
     assert invalid_xray_file.status_code == 422
     assert xray_read.json()["command"]["query"] == "file=routing.json"
     assert xray_write.json()["command"]["body"]["file"] == "routing.json"
+    assert xray_write.json()["command"]["body"]["expected_sha256"] == "b" * 64
     assert json.loads(xray_write.json()["command"]["body"]["content"]) == {
         "routing": {"rules": []}
     }
@@ -3949,6 +4036,7 @@ def test_warp_license_and_agent_settings_operations_queue_agent_commands(
     client = make_client(tmp_path)
     created = client.post("/api/v1/servers", json={"name": "edge-agent-settings"}).json()
     server_id = created["server"]["id"]
+    register_agent_settings_capabilities(client, created)
 
     warp = client.post(
         f"/api/v1/servers/{server_id}/operations/warp/license",
@@ -3998,6 +4086,76 @@ def test_warp_license_and_agent_settings_operations_queue_agent_commands(
         "master_url": "https://panel.example.com",
         "only_if_recovery": True,
     }
+
+
+@pytest.mark.parametrize(
+    ("operation", "payload", "capability"),
+    [
+        ("switch-xray-mode", {"xray_mode": "external"}, "agent_switch_xray_mode"),
+        ("switch-listen-port", {"listen_port": 24889}, "agent_switch_listen_port"),
+        (
+            "probe-master-url",
+            {"master_url": "https://panel.example.com"},
+            "agent_probe_master_url",
+        ),
+        (
+            "update-master-url",
+            {"master_url": "https://panel.example.com", "only_if_recovery": False},
+            "agent_update_master_url",
+        ),
+    ],
+)
+def test_agent_settings_operations_require_explicit_capabilities(
+    tmp_path: Path,
+    operation: str,
+    payload: dict,
+    capability: str,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post(
+        "/api/v1/servers", json={"name": f"edge-missing-{operation}"}
+    ).json()
+    client.post(
+        "/api/v1/agents/register",
+        json={
+            "token": created["agent_token"],
+            "hostname": "outbound-open-node-agent",
+            "agent_version": "open-node/0.3.0a0",
+            "capabilities": {"rpc": True},
+        },
+    )
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/agent/{operation}",
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    assert capability in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "master_url",
+    [
+        "https://user:secret@panel.example.com",
+        "https://panel.example.com?token=secret",
+        "https://panel.example.com/#fragment",
+        "https://panel.example.com:invalid",
+        "https://panel.example.com/path\nrecovery_url:https://evil.example",
+    ],
+)
+def test_agent_master_url_operations_reject_unsafe_urls(
+    tmp_path: Path, master_url: str
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-unsafe-master"}).json()
+
+    response = client.post(
+        f"/api/v1/servers/{created['server']['id']}/operations/agent/probe-master-url",
+        json={"master_url": master_url},
+    )
+
+    assert response.status_code == 422
 
 
 def test_stream_maintenance_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
@@ -4209,6 +4367,7 @@ def test_agent_websocket_auth_registers_agent_and_acks_heartbeat(tmp_path: Path)
                     "token": created["agent_token"],
                     "hostname": "edge-ws-host",
                     "agent_version": "0.5.0",
+                    "listen_port": 0,
                     "public_ipv4": "198.51.100.88",
                     "capabilities": {"rpc": True, "stream": True},
                     "xray_mode": "embedded",
@@ -4237,9 +4396,46 @@ def test_agent_websocket_auth_registers_agent_and_acks_heartbeat(tmp_path: Path)
     agents = client.get("/api/v1/agents").json()
     servers = client.get("/api/v1/servers").json()
     assert agents[0]["hostname"] == "edge-ws-host"
+    assert agents[0]["listen_port"] == 0
     assert agents[0]["capabilities"]["rpc"] is True
     assert servers[0]["status"] == "connected"
     assert servers[0]["ip_address"] == "198.51.100.89"
+
+
+def test_pinned_legacy_agent_infers_settings_capabilities_only_on_legacy_transport(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    legacy = client.post("/api/v1/servers", json={"name": "legacy-agent"}).json()
+    native = client.post("/api/v1/servers", json={"name": "native-agent"}).json()
+
+    for ws_path, created in (
+        ("/api/remote/ws", legacy),
+        ("/api/v1/agents/ws", native),
+    ):
+        with client.websocket_connect(ws_path) as websocket:
+            websocket.send_json(
+                {
+                    "type": "auth",
+                    "payload": {
+                        "token": created["agent_token"],
+                        "hostname": created["server"]["name"],
+                        "agent_version": "0.4.7",
+                        "capabilities": {"rpc": True},
+                    },
+                }
+            )
+            assert websocket.receive_json()["payload"]["success"] is True
+
+    agents = {agent["hostname"]: agent for agent in client.get("/api/v1/agents").json()}
+    for capability in (
+        "agent_switch_xray_mode",
+        "agent_switch_listen_port",
+        "agent_probe_master_url",
+        "agent_update_master_url",
+    ):
+        assert agents["legacy-agent"]["capabilities"][capability] is True
+        assert agents["native-agent"]["capabilities"][capability] is False
 
 
 def test_agent_websocket_scan_result_updates_latest_without_license(tmp_path: Path) -> None:
@@ -4403,7 +4599,10 @@ def test_online_agent_websocket_receives_agent_setting_operation(tmp_path: Path)
                 "payload": {
                     "token": created["agent_token"],
                     "hostname": "edge-ws-agent-setting-host",
-                    "capabilities": {"rpc": True},
+                    "capabilities": {
+                        "rpc": True,
+                        "agent_update_master_url": True,
+                    },
                 },
             }
         )

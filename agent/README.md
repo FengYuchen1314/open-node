@@ -105,6 +105,33 @@ batch client provisioning, host metrics/NICs, network speed, Xray stats, and
 bounded Agent/Xray/Nginx logs. Network speed is bytes per second between successive speed
 requests; the first sample returns zero and counter resets never produce
 negative rates.
+The Xray system-config endpoint manages the official log level, complete DNS
+and policy JSON objects, loopback-only metrics, the statistics object, and
+either the simplified direct or one verified traditional routed Xray gRPC API
+shape. Log access/error targets, DNS logging/masking, non-statistics policy
+fields, and unrelated protocol settings are preserved. Changing the Stats
+switch normalizes every numeric user level and the system traffic counters to
+one complete all-true or all-false state. Leaving it unchanged preserves valid
+uncoupled stats, policy, and API service state. An explicit Agent
+`stats_address` fixes that API endpoint: the form
+locks its switch and port, and an invalid or drifted runtime endpoint makes the
+whole form read-only with an explanation. A write requires the SHA-256 revision
+from a successful read, validates the complete candidate, and restarts only a
+runtime that was already running; a concurrent change, validation failure, or
+restart failure leaves or restores the previous file.
+The config-files endpoint lists and reads only the configured primary JSON or
+JSONC file without path traversal. It likewise requires a prior-read SHA-256
+revision before writing. JSONC is always read-only so comments cannot be
+silently discarded; plain JSON is the only writable primary format. The
+managed runtime does not silently adopt arbitrary fragments, so external
+multi-file services must first use the explicit consolidation/takeover
+workflow.
+These two endpoints are guarded by the Agent-level
+`xray_config_workspace` capability. Source builds now identify themselves as
+`0.3.0a0` and advertise that flag; the control plane rejects the command with
+HTTP 409 before queueing when no Agent or a published 0.2.0 Agent is registered,
+and checks the capability again before lease delivery. No 0.3.0 tag or release
+is implied by this source-version bump.
 Native [diagnostics](../docs/agent-diagnostics.md) include concurrent TCP latency,
 optional ICMP fallback, NextTrace return-route evidence, and ownership-scoped
 log file listing/clearing. Raw network probes require explicit host permissions;
@@ -124,8 +151,10 @@ control, configuration/site files, HTTP/TLS sites, reverse proxies, stream-port
 cleanup, logs, and supplied certificate deployment/rotation with rollback.
 Native tunnel deployment combines owned Nginx and official Xray configuration,
 validates the current snapshot hash, and restores files and service intentions
-after failures or interruption. The Agent can discover statistics from a
-loopback Xray `api.listen`; explicit `stats_address` takes precedence.
+after failures or interruption. The Agent can discover statistics from the
+same verified direct or traditional routed loopback Xray API binding used by
+the system-config form; an explicit `stats_address` takes precedence and fixes
+that endpoint.
 ACME issuance and renewal are handled by the
 [control plane](../docs/certificates.md), which sends certificate deployment
 commands to this Agent. Host-opted-in HTTP-01 validation serves short-lived

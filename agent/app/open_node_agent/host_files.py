@@ -26,9 +26,11 @@ def guarded_path(root: Path, value: str | Path) -> Path:
 
 
 def read_private(path: Path) -> bytes:
-    if not stat.S_ISREG(path.stat().st_mode):
-        raise RuntimeFailure("Expected a regular file")
-    with path.open("rb") as stream:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise RuntimeFailure("Expected one regular non-hard-linked file")
         data = stream.read(MAX_CONFIG_BYTES + 1)
     if len(data) > MAX_CONFIG_BYTES:
         raise RuntimeFailure("Host file exceeds 2 MiB")

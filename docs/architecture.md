@@ -19,10 +19,14 @@ open-node
 
 The refactor tracks the active MMWX product line only:
 
-- Control plane: `FengYuchen1314/miaomiaowuX`
-- Agent: `FengYuchen1314/mmw-agent`
-- Probe: `FengYuchen1314/mmwx-probe`
-- Xray integration fork: `FengYuchen1314/Xray-core-mmwx`
+- Control plane: `tajiaoyezi/miaomiaowuX` at `c12ce653bc07fe30426b7dfcb85076974b7be0e0`
+- Agent: `tajiaoyezi/mmw-agent` at `f2ba522b08d8839b3eaea94f0745e3ab2af71b84`
+- Probe: `tajiaoyezi/mmwx-probe` at `8d82a8bc344ab3e6a1b08478f05cf653158a2b65`
+- Xray integration fork: `tajiaoyezi/Xray-core-mmwx` at `d3fdae5833a92070414db588ee9893264147b789`
+
+The source-level status and known non-parity areas are tracked in
+[`mmwx-source-parity.md`](mmwx-source-parity.md); percentage estimates are not
+used as release evidence.
 
 The older `miaomiaowu` project and archived `NodeControll` rebuild are not
 inputs for this implementation.
@@ -729,11 +733,18 @@ structure as the HTTP list endpoint, drops any client messages, limits
 concurrent connections in memory, follows the configured refresh interval, and
 keeps the no-license response contract.
 
-The `probe-worker/` package is a small Cloudflare Worker that hosts the built
-Vue app from `frontend/dist` with Workers Static Assets and proxies only the
-MMWX-compatible probe routes to the origin. It maps `/api/probe`,
-`/api/series`, `/api/targets`, `/api/stream`, `/api/public/*`, and
-`/api/v1/public/*` paths onto the Open Node v1 public probe endpoints, strips
+The `probe-worker/` package is a small Cloudflare Worker that hosts the dedicated
+read-only Vue build from `frontend/dist-probe` with Workers Static Assets. That
+bundle mounts the shared `ProbeView` in `publicOnly` mode without the control
+plane's router or authentication shell. Public mode neither renders nor calls
+the settings, token, private server-list, or scheduled-task management APIs.
+The Worker proxies only the MMWX-compatible probe data routes to the origin. It
+maps `/api/probe`, `/api/series`, `/api/targets`, `/api/stream`, and the
+allowlisted server, series, targets, and WebSocket paths below `/api/public/`
+and `/api/v1/public/` onto the Open Node v1 public probe endpoints. It strips
 cookies and authorization headers, sets `X-Forwarded-Host`, adds
 `X-MMwx-Probe-Token` from its `PROBE_TOKEN` secret, and returns all proxy
-responses with `Cache-Control: no-store`.
+responses with `Cache-Control: no-store`. It also removes upstream `Set-Cookie`
+headers, adds `X-Content-Type-Options: nosniff` to assets and API responses, and
+returns JSON `404` for unknown `/api/*` paths instead of applying the SPA
+fallback.

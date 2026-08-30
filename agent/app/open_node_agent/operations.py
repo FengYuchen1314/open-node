@@ -1,14 +1,19 @@
 import copy
+import hashlib
 import json
 import platform
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 from time import monotonic
 from urllib.parse import parse_qs
 
 import psutil
 
 from open_node_agent import __version__
+from open_node_agent.agent_management import AgentManagement
 from open_node_agent.diagnostics import Diagnostics
+from open_node_agent.host_files import guarded_path, read_private
 from open_node_agent.http01 import ENDPOINT as HTTP01_ENDPOINT
 from open_node_agent.http01 import HttpChallenges
 from open_node_agent.journal import CommandJournal
@@ -17,13 +22,39 @@ from open_node_agent.logs import OwnedLogs
 from open_node_agent.nginx import NginxRuntime
 from open_node_agent.node_cleanup import ENDPOINT as CLEANUP_ENDPOINT
 from open_node_agent.node_cleanup import NodeCleanup
-from open_node_agent.runtime import RuntimeFailure, XrayRuntime
+from open_node_agent.runtime import (
+    RuntimeFailure,
+    XrayRuntime,
+    decode_config,
+    format_endpoint,
+    loopback_endpoint,
+    xray_api_binding,
+)
 from open_node_agent.subscription_access import ENDPOINT as ACCESS_ENDPOINT
 from open_node_agent.subscription_access import SubscriptionAccess
 from open_node_agent.warp import Warp
 from open_node_agent.xray_releases import XrayReleases
 from open_node_agent.xray_takeover import ENDPOINT as TAKEOVER_ENDPOINT
 from open_node_agent.xray_takeover import XrayTakeover
+
+SYSTEM_CONFIG_KEYS = {
+    "log_level",
+    "dns",
+    "policy",
+    "metrics_enabled",
+    "metrics_listen",
+    "stats_enabled",
+    "grpc_enabled",
+    "grpc_port",
+}
+LOG_LEVELS = {"none", "error", "warning", "info", "debug"}
+USER_STATS_COUNTERS = ("statsUserUplink", "statsUserDownlink")
+SYSTEM_STATS_COUNTERS = (
+    "statsInboundUplink",
+    "statsInboundDownlink",
+    "statsOutboundUplink",
+    "statsOutboundDownlink",
+)
 
 
 def telemetry() -> dict:
@@ -257,6 +288,349 @@ def edit_routing(config: dict, payload: dict) -> None:
         raise RuntimeFailure("Unsupported routing action")
 
 
+def numeric_policy_levels(policy: dict) -> list[dict]:
+    levels = policy.get("levels", {})
+    if not isinstance(levels, dict):
+        raise RuntimeFailure("Xray stats policy levels must be an object")
+    numeric = []
+    for name, level in levels.items():
+        if isinstance(name, str) and name.isascii() and name.isdecimal():
+            if not isinstance(level, dict):
+                raise RuntimeFailure("Numeric Xray stats policy levels must be objects")
+            numeric.append(level)
+    return numeric
+
+
+def complete_stats_policy_state(config: dict) -> bool | None:
+    if "policy" not in config:
+        return None
+    policy = config["policy"]
+    if not isinstance(policy, dict):
+        raise RuntimeFailure("Xray stats policy must be an object")
+    system = policy.get("system", {})
+    if not isinstance(system, dict):
+        raise RuntimeFailure("Xray stats system policy must be an object")
+    groups = [
+        (system, SYSTEM_STATS_COUNTERS),
+        *((level, USER_STATS_COUNTERS) for level in numeric_policy_levels(policy)),
+    ]
+    tracked: list[bool | None] = []
+    for container, counters in groups:
+        present = [counter in container for counter in counters]
+        if not any(present):
+            tracked.append(None)
+            continue
+        values = [container[counter] for counter in counters if counter in container]
+        if not all(present) or any(type(value) is not bool for value in values):
+            raise RuntimeFailure(
+                "Partial Xray stats policy cannot be edited by the system-config form"
+            )
+        if len(set(values)) != 1:
+            raise RuntimeFailure(
+                "Mixed Xray stats policy cannot be edited by the system-config form"
+            )
+        tracked.append(values[0])
+    explicit = [value for value in tracked if value is not None]
+    if explicit and (len(explicit) != len(tracked) or len(set(explicit)) != 1):
+        raise RuntimeFailure(
+            "Partial Xray stats policy cannot be edited by the system-config form"
+        )
+    return explicit[0] if explicit else None
+
+
+def require_editable_system_config(config: dict) -> dict:
+    if "log" in config:
+        log = config["log"]
+        if not isinstance(log, dict):
+            raise RuntimeFailure("Xray log configuration must be an object")
+        log_level = log.get("loglevel", "warning")
+        if not isinstance(log_level, str) or log_level not in LOG_LEVELS:
+            raise RuntimeFailure("Existing Xray loglevel is not supported by this form")
+
+    if "dns" in config and not isinstance(config["dns"], dict):
+        raise RuntimeFailure("Xray DNS configuration must be an object")
+
+    if "metrics" in config:
+        metrics = config["metrics"]
+        if not isinstance(metrics, dict) or "listen" not in metrics:
+            raise RuntimeFailure(
+                "Routed or tag-only metrics cannot be edited by the system-config form"
+            )
+        if loopback_endpoint(metrics["listen"]) is None:
+            raise RuntimeFailure("Existing metrics must use a literal loopback listener")
+
+    if "stats" in config and not isinstance(config["stats"], dict):
+        raise RuntimeFailure("Xray stats must be an object")
+    complete_stats_policy_state(config)
+    return xray_api_binding(config)
+
+
+def fixed_stats_address_error(api_binding: dict, stats_address: str | None) -> str | None:
+    if stats_address is None:
+        return None
+    required = loopback_endpoint(stats_address)
+    if required is None:
+        return "Configured stats_address must be a literal loopback IP and port"
+    if api_binding["mode"] not in {"direct", "routed"}:
+        return "Xray API endpoint is missing and does not match the configured stats_address"
+    actual = (api_binding["host"], api_binding["port"])
+    if actual != required:
+        return (
+            f"Xray API endpoint {format_endpoint(*actual)} does not match the configured "
+            f"stats_address {format_endpoint(*required)}"
+        )
+    return None
+
+
+def xray_system_config(config: dict, *, stats_address: str | None = None) -> dict:
+    log = config.get("log")
+    dns = config.get("dns")
+    policy = config.get("policy")
+    metrics = config.get("metrics")
+    metrics_listen = metrics.get("listen") if isinstance(metrics, dict) else None
+    reason = None
+    try:
+        api_binding = require_editable_system_config(config)
+    except RuntimeFailure as exc:
+        reason = str(exc)
+        try:
+            api_binding = xray_api_binding(config)
+        except RuntimeFailure:
+            api_binding = {
+                "mode": "unsupported",
+                "host": "127.0.0.1",
+                "port": 46_736,
+                "inbound_index": None,
+            }
+    if reason is None:
+        reason = fixed_stats_address_error(api_binding, stats_address)
+    try:
+        policy_state = complete_stats_policy_state(config)
+    except RuntimeFailure:
+        policy_state = None
+    api = config.get("api")
+    return {
+        "log_level": (
+            log.get("loglevel", "warning")
+            if isinstance(log, dict)
+            and isinstance(log.get("loglevel", "warning"), str)
+            and log.get("loglevel", "warning") in LOG_LEVELS
+            else "warning"
+        ),
+        "dns": copy.deepcopy(dns) if isinstance(dns, dict) else {},
+        "policy": copy.deepcopy(policy) if isinstance(policy, dict) else {},
+        "metrics_enabled": isinstance(metrics, dict),
+        "metrics_listen": metrics_listen
+        if isinstance(metrics_listen, str)
+        else "127.0.0.1:11111",
+        "stats_enabled": isinstance(config.get("stats"), dict) and policy_state is True,
+        "grpc_enabled": isinstance(api, dict),
+        "grpc_port": api_binding["port"],
+        "api_mode": api_binding["mode"],
+        "grpc_disable_supported": (
+            reason is None
+            and stats_address is None
+            and api_binding["mode"] in {"absent", "direct"}
+        ),
+        "grpc_port_writable": (
+            reason is None
+            and stats_address is None
+            and api_binding["mode"] in {"absent", "direct", "routed"}
+        ),
+        "fixed_stats_address": stats_address,
+        "writable": reason is None,
+        "read_only_reason": reason,
+    }
+
+
+def apply_xray_system_config(
+    config: dict, payload: dict, *, stats_address: str | None = None
+) -> dict:
+    if set(payload) != SYSTEM_CONFIG_KEYS:
+        raise RuntimeFailure("Xray system config requires the complete supported field set")
+    for key in ("metrics_enabled", "stats_enabled", "grpc_enabled"):
+        if type(payload[key]) is not bool:
+            raise RuntimeFailure(f"{key} must be a boolean")
+    if not isinstance(payload["log_level"], str) or payload["log_level"] not in LOG_LEVELS:
+        raise RuntimeFailure("log_level must be none, error, warning, info or debug")
+    if not isinstance(payload["dns"], dict):
+        raise RuntimeFailure("dns must be a JSON object")
+    if not isinstance(payload["policy"], dict):
+        raise RuntimeFailure("policy must be a JSON object")
+    submitted_policy = copy.deepcopy(payload["policy"])
+    submitted_levels = submitted_policy.get("levels", {})
+    if not isinstance(submitted_levels, dict):
+        raise RuntimeFailure("Xray stats policy levels must be an object")
+    numeric_levels = numeric_policy_levels(submitted_policy)
+    submitted_system = submitted_policy.get("system", {})
+    if not isinstance(submitted_system, dict):
+        raise RuntimeFailure("Xray stats system policy must be an object")
+    port = payload["grpc_port"]
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise RuntimeFailure("grpc_port must be between 1 and 65535")
+    api_binding = require_editable_system_config(config)
+    if reason := fixed_stats_address_error(api_binding, stats_address):
+        raise RuntimeFailure(reason)
+    current_stats_enabled = (
+        isinstance(config.get("stats"), dict)
+        and complete_stats_policy_state(config) is True
+    )
+    current_grpc_enabled = isinstance(config.get("api"), dict)
+    stats_changed = payload["stats_enabled"] != current_stats_enabled
+    grpc_changed = payload["grpc_enabled"] != current_grpc_enabled
+    grpc_enabled_now = payload["grpc_enabled"] and grpc_changed
+
+    candidate = copy.deepcopy(config)
+    log = candidate.get("log")
+    current_log_level = log.get("loglevel", "warning") if isinstance(log, dict) else "warning"
+    if payload["log_level"] != current_log_level:
+        if not isinstance(log, dict):
+            log = {}
+        log["loglevel"] = payload["log_level"]
+        candidate["log"] = log
+    if "dns" in config or payload["dns"]:
+        candidate["dns"] = copy.deepcopy(payload["dns"])
+
+    if stats_changed:
+        if not numeric_levels:
+            level = {}
+            submitted_levels["0"] = level
+            numeric_levels = [level]
+        for level in numeric_levels:
+            level.update(
+                statsUserUplink=payload["stats_enabled"],
+                statsUserDownlink=payload["stats_enabled"],
+            )
+        submitted_system.update(
+            statsInboundUplink=payload["stats_enabled"],
+            statsInboundDownlink=payload["stats_enabled"],
+            statsOutboundUplink=payload["stats_enabled"],
+            statsOutboundDownlink=payload["stats_enabled"],
+        )
+        submitted_policy.update(levels=submitted_levels, system=submitted_system)
+    if "policy" in config or submitted_policy:
+        candidate["policy"] = submitted_policy
+
+    if payload["metrics_enabled"]:
+        endpoint = loopback_endpoint(payload["metrics_listen"])
+        if endpoint is None:
+            raise RuntimeFailure("Metrics must listen on a literal loopback IP and port")
+        metrics = candidate.get("metrics")
+        if not isinstance(metrics, dict):
+            metrics = {}
+        metrics["listen"] = format_endpoint(*endpoint)
+        candidate["metrics"] = metrics
+    else:
+        candidate.pop("metrics", None)
+
+    if stats_changed:
+        if payload["stats_enabled"]:
+            stats = candidate.get("stats")
+            candidate["stats"] = stats if isinstance(stats, dict) else {}
+        else:
+            candidate.pop("stats", None)
+
+    api = candidate.get("api")
+    if not isinstance(api, dict):
+        api = {}
+    services = list(api.get("services", []))
+    if stats_changed or grpc_enabled_now:
+        if payload["stats_enabled"] and payload["grpc_enabled"]:
+            if "StatsService" not in services:
+                services.append("StatsService")
+        elif stats_changed:
+            services = [item for item in services if item != "StatsService"]
+    if api_binding["mode"] == "routed" and not payload["grpc_enabled"]:
+        raise RuntimeFailure(
+            "Traditional routed Xray API cannot be disabled by the system-config form"
+        )
+    if not payload["grpc_enabled"]:
+        candidate.pop("api", None)
+    elif grpc_enabled_now:
+        api.setdefault("tag", "api")
+        api["services"] = services
+        candidate["api"] = api
+        api["listen"] = format_endpoint(api_binding["host"], port)
+    else:
+        if stats_changed:
+            api["services"] = services
+        if api_binding["mode"] == "routed" and port != api_binding["port"]:
+            candidate["inbounds"][api_binding["inbound_index"]]["port"] = port
+        elif api_binding["mode"] == "direct" and port != api_binding["port"]:
+            api["listen"] = format_endpoint(api_binding["host"], port)
+    if stats_address is not None:
+        required_endpoint = loopback_endpoint(stats_address)
+        candidate_binding = xray_api_binding(candidate)
+        candidate_endpoint = (
+            (candidate_binding["host"], candidate_binding["port"])
+            if candidate_binding["mode"] in {"direct", "routed"}
+            else None
+        )
+        if required_endpoint is None or candidate_endpoint != required_endpoint:
+            raise RuntimeFailure(
+                "Xray API listener must match the operator's stats_address"
+            )
+    return candidate
+
+
+def direct_filename(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 255
+        or value in {".", ".."}
+        or "/" in value
+        or "\\" in value
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise RuntimeFailure("Xray config file must be one direct filename")
+    return value
+
+
+def xray_primary_path(primary: Path, name: object | None = None) -> Path:
+    direct_filename(primary.name)
+    target = guarded_path(primary.parent, primary)
+    if not target.exists():
+        raise RuntimeFailure("Xray primary config file not found")
+    if name is not None:
+        requested = guarded_path(primary.parent, direct_filename(name))
+        if requested != target:
+            raise RuntimeFailure("Only the configured primary Xray file may be accessed")
+    return target
+
+
+def read_xray_primary(runtime: XrayRuntime, target: Path) -> bytes:
+    return runtime.systemd.read_private(target) if runtime.systemd else read_private(target)
+
+
+def decode_xray_primary(content: bytes) -> str:
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeFailure("Xray primary config must use valid UTF-8") from exc
+
+
+def xray_file_write_metadata(target: Path) -> dict:
+    if target.suffix.lower() == ".jsonc":
+        return {
+            "writable": False,
+            "read_only_reason": (
+                "JSONC primary configs are read-only; consolidate to plain JSON first"
+            ),
+        }
+    return {"writable": True, "read_only_reason": None}
+
+
+def require_sha256(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise RuntimeFailure("A lowercase expected_sha256 from a successful read is required")
+    return value
+
+
 class Operations:
     def __init__(self, runtime: XrayRuntime, journal: CommandJournal):
         self.runtime = runtime
@@ -271,6 +645,7 @@ class Operations:
         self.takeover = XrayTakeover(runtime, journal)
         self.subscription_access = SubscriptionAccess(runtime, journal)
         self.node_cleanup = NodeCleanup(runtime, journal, self.subscription_access)
+        self.agent_management = AgentManagement(runtime.config)
         self.previous_network: dict | None = None
         self.previous_sample: float | None = None
 
@@ -324,6 +699,19 @@ class Operations:
                 return self.logs.list()
             if method == "DELETE":
                 return self.logs.delete(query)
+        if path == "/api/child/agent/probe-master-url" and method == "POST":
+            return await self.agent_management.probe_master_url(body)
+        if path == "/api/child/agent/update-master-url" and method == "POST":
+            return self.agent_management.update_master_url(body)
+        if path == "/api/child/agent/switch-xray-mode" and method == "POST":
+            raise RuntimeFailure(
+                "Open Node runtime mode is selected during host deployment; remote switching "
+                "is not supported"
+            )
+        if path == "/api/child/agent/switch-listen-port" and method == "POST":
+            raise RuntimeFailure(
+                "Open Node Agent uses outbound control connections and has no inbound listen port"
+            )
         async with self.runtime.lock:
             if path == CLEANUP_ENDPOINT and method == "POST":
                 return await self.node_cleanup.handle(body)
@@ -368,6 +756,109 @@ class Operations:
                 "/api/child/validate-site",
             }:
                 return await self.nginx.handle(method, path, body, query)
+            if path == "/api/child/xray/system-config":
+                await self.runtime.binding()
+                raw = self.runtime.read_raw()
+                config = decode_config(raw.decode())
+                current_sha256 = hashlib.sha256(raw).hexdigest()
+                if method == "GET":
+                    return {
+                        "success": True,
+                        "config": xray_system_config(
+                            config, stats_address=self.runtime.config.stats_address
+                        ),
+                        "sha256": current_sha256,
+                    }
+                if method == "POST":
+                    if set(body) != SYSTEM_CONFIG_KEYS | {"expected_sha256"}:
+                        raise RuntimeFailure(
+                            "Xray system config requires a prior-read expected_sha256"
+                        )
+                    expected_sha256 = require_sha256(body["expected_sha256"])
+                    if expected_sha256 != current_sha256:
+                        raise RuntimeFailure("Xray configuration changed since it was read")
+                    candidate = apply_xray_system_config(
+                        config,
+                        {key: body[key] for key in SYSTEM_CONFIG_KEYS},
+                        stats_address=self.runtime.config.stats_address,
+                    )
+                    result = await self.runtime.write(
+                        candidate,
+                        restart=True,
+                        expected=config,
+                        expected_sha256=expected_sha256,
+                    )
+                    written = self.runtime.read_raw()
+                    return {
+                        **result,
+                        "config": xray_system_config(
+                            decode_config(written.decode()),
+                            stats_address=self.runtime.config.stats_address,
+                        ),
+                        "sha256": hashlib.sha256(written).hexdigest(),
+                    }
+            if path == "/api/child/xray/config-files":
+                await self.runtime.binding()
+                primary = xray_primary_path(self.runtime.config.xray_config)
+                if method == "GET" and query.get("file"):
+                    if len(query["file"]) != 1:
+                        raise RuntimeFailure("Specify exactly one Xray config filename")
+                    target = xray_primary_path(primary, query["file"][0])
+                    content = read_xray_primary(self.runtime, target)
+                    return {
+                        "success": True,
+                        "path": str(target),
+                        "content": decode_xray_primary(content),
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                        "active": True,
+                        **xray_file_write_metadata(target),
+                    }
+                if method == "GET":
+                    content = read_xray_primary(self.runtime, primary)
+                    info = primary.stat()
+                    return {
+                        "success": True,
+                        "files": {
+                            "main": [
+                                {
+                                    "name": primary.name,
+                                    "path": str(primary),
+                                    "size": len(content),
+                                    "sha256": hashlib.sha256(content).hexdigest(),
+                                    "mod_time": datetime.fromtimestamp(
+                                        info.st_mtime, UTC
+                                    ).isoformat(),
+                                    "active": True,
+                                    **xray_file_write_metadata(primary),
+                                }
+                            ]
+                        },
+                    }
+                if method == "POST":
+                    target = xray_primary_path(primary, direct_filename(body.get("file")))
+                    if target.suffix.lower() == ".jsonc":
+                        raise RuntimeFailure(
+                            "JSONC primary configs are read-only; consolidate to plain JSON first"
+                        )
+                    expected_sha256 = require_sha256(body.get("expected_sha256"))
+                    current = read_xray_primary(self.runtime, target)
+                    if hashlib.sha256(current).hexdigest() != expected_sha256:
+                        raise RuntimeFailure("Xray configuration changed since it was read")
+                    expected = decode_config(decode_xray_primary(current))
+                    result = await self.runtime.write(
+                        body.get("content"),
+                        restart=True,
+                        expected=expected,
+                        expected_sha256=expected_sha256,
+                    )
+                    written = read_xray_primary(self.runtime, target)
+                    return {
+                        **result,
+                        "path": str(target),
+                        "sha256": hashlib.sha256(written).hexdigest(),
+                        "active": True,
+                        **xray_file_write_metadata(target),
+                    }
             if path == "/api/child/xray/config":
                 supplied_path = body.get("path") or query.get("path", [None])[0]
                 if supplied_path and supplied_path != str(self.runtime.config.xray_config):

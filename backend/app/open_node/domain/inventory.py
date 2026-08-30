@@ -7,7 +7,14 @@ from typing import Any, Literal, Self
 from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from open_node.domain.auto_speed import AutoSpeedRule
 
@@ -69,9 +76,19 @@ def _validate_log_file_name(value: str) -> str:
 
 def _validate_agent_url(value: str) -> str:
     normalized = _strip_required_text(value, "master_url").rstrip("/")
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in normalized):
+        raise ValueError("master_url cannot contain control characters")
     parsed = urlparse(normalized)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("master_url must be a valid HTTP(S) URL")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError(
+            "master_url cannot contain credentials, query parameters, or fragments"
+        )
+    try:
+        parsed.port
+    except ValueError:
+        raise ValueError("master_url contains an invalid port") from None
     return normalized
 
 
@@ -231,6 +248,11 @@ class AgentCapabilities(BaseModel):
     user_auto_speed_rules: bool = False
     subscription_access: bool = False
     node_cleanup: bool = False
+    xray_config_workspace: bool = False
+    agent_switch_xray_mode: bool = False
+    agent_switch_listen_port: bool = False
+    agent_probe_master_url: bool = False
+    agent_update_master_url: bool = False
 
 
 class ServerCreate(BaseModel):
@@ -1497,17 +1519,30 @@ class AgentXrayConfigOperationRequest(BaseModel):
 
 
 class AgentXraySystemConfigOperationRequest(BaseModel):
-    metrics_enabled: bool = False
-    metrics_listen: str = Field(default="127.0.0.1:11111", max_length=255)
-    stats_enabled: bool = True
-    grpc_enabled: bool = True
-    grpc_port: int = Field(default=46_736, ge=1, le=65_535)
+    model_config = {"extra": "forbid"}
+
+    log_level: Literal["none", "error", "warning", "info", "debug"]
+    dns: dict[str, Any]
+    policy: dict[str, Any]
+    metrics_enabled: bool
+    metrics_listen: str = Field(max_length=255)
+    stats_enabled: bool
+    grpc_enabled: bool
+    grpc_port: int = Field(ge=1, le=65_535)
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
 
     @field_validator("metrics_listen")
     @classmethod
     def validate_metrics_listen(cls, value: str) -> str:
         return _strip_required_text(value, "metrics_listen")
+
+    @field_validator("dns", "policy")
+    @classmethod
+    def validate_json_object(
+        cls, value: dict[str, Any], info: ValidationInfo
+    ) -> dict[str, Any]:
+        return _ensure_json_serializable_config(value, info.field_name)
 
 
 class AgentXrayConfigFileReadOperationRequest(BaseModel):
@@ -1522,6 +1557,7 @@ class AgentXrayConfigFileReadOperationRequest(BaseModel):
 class AgentXrayConfigFileWriteOperationRequest(BaseModel):
     file: str = Field(min_length=1, max_length=255)
     content: Any
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     command_timeout_ms: int = Field(default=30_000, ge=1_000, le=300_000)
 
     @field_validator("file")

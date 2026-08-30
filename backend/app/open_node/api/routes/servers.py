@@ -86,6 +86,7 @@ from open_node.domain.subscriptions import (
 )
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.inventory import (
+    AgentCapabilityUnavailableError,
     CommandNotFoundError,
     DuplicateServerNameError,
     InventoryStore,
@@ -1576,7 +1577,11 @@ async def queue_xray_config_file_write_operation(
         AgentCommandCreate(
             method="POST",
             path="/api/child/xray/config-files",
-            body={"file": payload.file, "content": _config_to_text(payload.content)},
+            body={
+                "file": payload.file,
+                "content": _config_to_text(payload.content),
+                "expected_sha256": payload.expected_sha256,
+            },
             timeout_ms=payload.command_timeout_ms,
         ),
         store,
@@ -2242,6 +2247,8 @@ async def _queue_server_command_sequence(
         commands = store.create_command_sequence(server_id, payloads)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AgentCapabilityUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return [await connections.dispatch_command(store, command) for command in commands]
 
 
@@ -2255,6 +2262,8 @@ async def _queue_server_command(
         command = store.create_command(server_id, payload)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AgentCapabilityUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     command = await connections.dispatch_command(store, command)
     return AgentCommandCreateResponse(command=command)
 

@@ -3,6 +3,16 @@
 All tests for Open Node run on the VPS at `185.99.135.224` over SSH. Local work
 is limited to editing and static inspection.
 
+GitHub also runs the same repository-level language gates on every push and
+pull request through `.github/workflows/ci.yml`: backend Ruff/pytest, Agent
+Ruff/pytest/wheel build, frontend Vitest plus both the administrator and public
+Probe production bundles, and Probe Worker behavior tests/type checking.
+Actions are pinned to immutable revisions and receive only read access to
+repository contents. This hosted CI is an independent clean checkout check; it
+does not replace the root-only Docker installer smoke, systemd lifecycle
+smokes, protocol-runtime builds, or real forwarding checks on the designated
+VPS.
+
 ## Remote Test Command
 
 From Windows PowerShell in the repository root:
@@ -58,6 +68,20 @@ cd /opt/open-node
 bash scripts/vps/run-tests.sh
 ```
 
+The runner removes stale local Agent wheels before building. In the same shell,
+resolve the single artifact once and reuse it in the smoke commands below:
+
+```bash
+mapfile -t AGENT_WHEELS < <(
+  find "$PWD/agent/dist" -maxdepth 1 -type f -name 'open_node_agent-*.whl' -print | sort
+)
+if (( ${#AGENT_WHEELS[@]} != 1 )); then
+  printf 'expected exactly one built Agent wheel, found %s\n' "${#AGENT_WHEELS[@]}" >&2
+  exit 1
+fi
+AGENT_WHEEL="${AGENT_WHEELS[0]}"
+```
+
 ## Legacy MMWX Identity Smoke
 
 With the frontend built and an Xray binary available on the VPS:
@@ -87,7 +111,7 @@ and free native-limiter Xray binary available:
 ```bash
 python scripts/vps/smoke-user-limits.py \
   --xray /absolute/path/to/xray \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /absolute/path/to/nginx \
   --output /tmp/open-node-user-limits-screenshots \
   --transport websocket
@@ -108,7 +132,7 @@ binary as the subscriber-limit fixture:
 ```bash
 python scripts/vps/smoke-subscription-links.py \
   --xray /absolute/path/to/xray \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /absolute/path/to/nginx \
   --output /tmp/open-node-subscription-link-screenshots \
   --transport websocket
@@ -132,7 +156,7 @@ With the same VPS prerequisites and built frontend:
 ```bash
 python scripts/vps/smoke-plan-node-aliases.py \
   --xray /absolute/path/to/xray \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /absolute/path/to/nginx \
   --output /tmp/open-node-plan-alias-screenshots \
   --transport websocket
@@ -153,7 +177,7 @@ Use the current Agent wheel, built frontend and a free Xray binary reporting
 ```bash
 python scripts/vps/smoke-plan-speed-rules.py \
   --xray /absolute/path/to/xray \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /absolute/path/to/nginx \
   --output /tmp/open-node-plan-rule-screenshots \
   --transport websocket
@@ -179,7 +203,7 @@ python scripts/vps/smoke-subscription-clients.py \
   --xray /tmp/open-node-runtime-build/xray \
   --mihomo /absolute/path/to/mihomo \
   --sing-box /absolute/path/to/sing-box \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /absolute/path/to/nginx \
   --output /tmp/open-node-subscription-screenshots
 ```
@@ -250,7 +274,7 @@ python scripts/vps/smoke-protocol-runtime.py \
   --xray /tmp/open-node-runtime-build/xray \
   --reference /tmp/open-node-runtime-build/xray-reference \
   --mihomo /absolute/path/to/mihomo \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /absolute/path/to/nginx
 ```
 
@@ -320,7 +344,7 @@ NextTrace binary from [agent-diagnostics.md](agent-diagnostics.md):
 
 ```bash
 python scripts/vps/smoke-host-policy.py \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nexttrace /path/to/verified/nexttrace \
   --nginx /path/to/nginx \
   --previous-bootstrap /path/to/previous-checkout/agent/app/open_node_agent/service.py
@@ -366,7 +390,7 @@ environment with Playwright/Chromium and a trusted Debian Nginx executable:
 
 ```bash
 python scripts/vps/smoke-warp.py \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /path/to/nginx \
   --output /tmp/open-node-warp-shots
 ```
@@ -409,7 +433,7 @@ binary, and the pinned NextTrace Tiny executable documented in
 
 ```bash
 python scripts/vps/smoke-diagnostics.py \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nexttrace /path/to/verified/nexttrace \
   --nginx /path/to/nginx \
   --output /tmp/open-node-diagnostic-shots
@@ -450,7 +474,7 @@ backend/.venv/bin/pip install -e 'backend[dev,browser]'
 backend/.venv/bin/playwright install --with-deps chromium
 AGENT_ENV="$(mktemp -d /tmp/open-node-package-agent.XXXXXX)"
 python3 -m venv "$AGENT_ENV"
-"$AGENT_ENV/bin/pip" install agent/dist/open_node_agent-0.2.0-py3-none-any.whl
+"$AGENT_ENV/bin/pip" install "$AGENT_WHEEL"
 OPEN_NODE_IMAGE_TAG=local OPEN_NODE_REVISION="$(git rev-parse HEAD)" \
   docker compose --env-file /dev/null -f deploy/compose.yaml build
 backend/.venv/bin/python scripts/vps/smoke-control-plane.py \
@@ -498,7 +522,7 @@ and run the real-runtime smoke on the VPS (Linux x86-64, Python 3.11+, and curl)
 ```bash
 AGENT_ENV="$(mktemp -d /tmp/open-node-agent-wheel.XXXXXX)"
 python3 -m venv "$AGENT_ENV"
-"$AGENT_ENV/bin/pip" install agent/dist/open_node_agent-0.2.0-py3-none-any.whl
+"$AGENT_ENV/bin/pip" install "$AGENT_WHEEL"
 backend/.venv/bin/python scripts/vps/smoke-open-node-agent.py --agent-python "$AGENT_ENV/bin/python"
 ```
 
@@ -535,7 +559,7 @@ With the backend development environment, Chromium and a verified Mihomo binary:
 backend/.venv/bin/python scripts/vps/smoke-native-limiter.py \
   --xray /absolute/path/to/free-runtime/xray \
   --mihomo /absolute/path/to/mihomo \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /absolute/path/to/nginx \
   --output /tmp/open-node-native-limits
 ```
@@ -573,7 +597,7 @@ After building the Agent wheel, run the following on the designated VPS as root:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-agent-service.py \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl
+  --wheel "$AGENT_WHEEL"
 ```
 
 This requires a running systemd manager plus `useradd`, `runuser`, and curl.
@@ -605,7 +629,7 @@ development environment, Playwright Chromium, systemd, polkit and trusted Nginx:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-xray-takeover.py \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /absolute/path/to/nginx \
   --output /tmp/open-node-takeover-screenshots
 ```
@@ -664,7 +688,7 @@ systemd/polkit VPS, with the existing smoke dependencies and trusted Nginx:
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-external-systemd.py \
   --agent-python /path/to/installed-agent/bin/python \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /path/to/nginx
 ```
 
@@ -697,7 +721,7 @@ with the browser/cryptography dependencies and a trusted Nginx binary:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-agent-lifecycle.py \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /path/to/extracted/usr/sbin/nginx \
   --output /tmp/open-node-agent-lifecycle-shots
 ```
@@ -730,8 +754,9 @@ After publishing the matching wheel, verify the actual default GitHub release
 source separately, using that exact release artifact on the designated VPS:
 
 ```bash
+PUBLISHED_AGENT_WHEEL=/absolute/path/to/published/open_node_agent-wheel.whl
 backend/.venv/bin/python scripts/vps/smoke-agent-release.py \
-  --wheel /path/to/published/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$PUBLISHED_AGENT_WHEEL" \
   --nginx /path/to/extracted/usr/sbin/nginx
 ```
 
@@ -749,7 +774,7 @@ service. Install `cryptography` in the smoke runner environment, then run:
 ```bash
 backend/.venv/bin/pip install cryptography
 backend/.venv/bin/python scripts/vps/smoke-nginx.py \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /path/to/extracted/usr/sbin/nginx \
   --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so
 ```
@@ -770,7 +795,7 @@ Use the same binary/module fixtures and built Agent wheel as the Nginx smoke:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-tunnel.py \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /path/to/extracted/usr/sbin/nginx \
   --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so
 ```
@@ -809,7 +834,7 @@ Verify before extraction; the Pebble binary needs executable permission.
 backend/.venv/bin/python scripts/vps/smoke-certificates.py \
   --lego /path/to/lego-4.35.2/lego \
   --pebble /path/to/pebble-linux-amd64/linux/amd64/pebble \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /path/to/extracted/usr/sbin/nginx \
   --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so
 ```
@@ -842,7 +867,7 @@ non-root Nginx:
 backend/.venv/bin/python scripts/vps/smoke-certificate-http.py \
   --lego /path/to/lego-4.35.2/lego \
   --pebble /path/to/pebble-linux-amd64/linux/amd64/pebble \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /path/to/extracted/usr/sbin/nginx \
   --nginx-stream-module /path/to/extracted/usr/lib/nginx/modules/ngx_stream_module.so \
   --screenshots /tmp/open-node-http01-screenshots
@@ -891,7 +916,7 @@ official Xray artifacts as the existing ACME and Agent smokes:
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-certificate-remote.py \
   --pebble /path/to/pebble-linux-amd64/linux/amd64/pebble \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --nginx /path/to/nginx \
   --nginx-stream-module /path/to/ngx_stream_module.so \
   --screenshots /tmp/open-node-remote-http01-screenshots
@@ -1054,7 +1079,7 @@ With the backend's browser extra/Chromium and a built Agent wheel on the VPS:
 
 ```bash
 backend/.venv/bin/python scripts/vps/smoke-xray-releases.py \
-  --wheel agent/dist/open_node_agent-0.2.0-py3-none-any.whl \
+  --wheel "$AGENT_WHEEL" \
   --output /tmp/open-node-xray-release-shots < /dev/null
 ```
 

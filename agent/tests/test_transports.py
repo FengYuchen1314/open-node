@@ -14,6 +14,53 @@ async def wait_until(predicate):
             await asyncio.sleep(0.01)
 
 
+def test_registration_advertises_versioned_xray_config_workspace(config):
+    registration = Agent(config).registration()
+
+    assert registration["agent_version"] == "open-node/0.3.0a0"
+    assert registration["xray_mode"] == "external"
+    assert registration["capabilities"]["xray_config_workspace"] is True
+    assert registration["capabilities"]["agent_switch_xray_mode"] is False
+    assert registration["capabilities"]["agent_switch_listen_port"] is False
+    assert registration["capabilities"]["agent_probe_master_url"] is True
+    assert registration["capabilities"]["agent_update_master_url"] is False
+
+
+async def test_agent_probes_candidate_master_with_existing_token(config):
+    received = []
+
+    async def controller(connection):
+        received.append(json.loads(await connection.recv()))
+        await connection.send(
+            json.dumps({"type": "auth_result", "payload": {"success": True}})
+        )
+
+    async with serve(controller, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        agent = Agent(config.model_copy(update={"allow_insecure_http": True}))
+        try:
+            result = await agent.execute(
+                {
+                    "request_id": "probe-master",
+                    "method": "POST",
+                    "path": "/api/child/agent/probe-master-url",
+                    "body": {"master_url": f"http://127.0.0.1:{port}"},
+                }
+            )
+        finally:
+            await agent.close()
+
+    assert result["status"] == 200
+    assert result["body"]["success"] is True
+    assert result["body"]["latency_ms"] >= 0
+    assert received == [
+        {
+            "type": "auth",
+            "payload": {"token": config.token.get_secret_value(), "probe": True},
+        }
+    ]
+
+
 async def test_websocket_resends_unacknowledged_result_without_execution(config):
     agent = Agent(config)
     agent.operations.handle = AsyncMock(return_value={"success": True})

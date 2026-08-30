@@ -100,7 +100,7 @@ for eliminating the old runtime implementation entirely.
 
 The compatibility layer uses `cryptography` for X25519, Ed25519, HKDF-SHA256
 and directional AES-256-GCM. It matches the inspected
-[Agent wire implementation](https://github.com/FengYuchen1314/mmw-agent/blob/f2ba522b08d8839b3eaea94f0745e3ab2af71b84/internal/securechan/securechan.go):
+[Agent wire implementation](https://github.com/tajiaoyezi/mmw-agent/blob/f2ba522b08d8839b3eaea94f0745e3ab2af71b84/internal/securechan/securechan.go):
 the master signs its ephemeral public key, then the Agent authenticates with
 its node token inside the encrypted channel. This is compatibility with that
 wire format, not a newly designed cryptographic protocol or a security audit

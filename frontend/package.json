@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vue-tsc -b && vite build",
+    "build:probe": "vue-tsc -b && vite build --config vite.probe.config.ts",
     "preview": "vite preview --host 0.0.0.0",
+    "preview:probe": "vite preview --config vite.probe.config.ts --host 0.0.0.0",
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit"
   },

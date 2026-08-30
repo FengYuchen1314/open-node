@@ -54,6 +54,7 @@ class Agent:
         self.tasks: list[asyncio.Task] = []
         self.connected = False
         self.last_contact: float | None = None
+        self.reconnect_after_reply: set[str] = set()
 
     def control_contact(self) -> None:
         self.connected = True
@@ -97,6 +98,8 @@ class Agent:
             "hostname": self.config.hostname or socket.gethostname()[:255],
             "agent_version": "open-node/" + __version__,
             "connection_mode": self.config.connection_mode,
+            # Open Node launches a separate Xray process in both runtime modes; it
+            # never embeds the upstream fork into the Agent binary.
             "xray_mode": "external",
             "listen_port": 0,
             "warp_installed": self.operations.warp.snapshot()["installed"],
@@ -108,6 +111,11 @@ class Agent:
                 "user_auto_speed_rules": True,
                 "subscription_access": True,
                 "node_cleanup": True,
+                "xray_config_workspace": True,
+                "agent_switch_xray_mode": False,
+                "agent_switch_listen_port": False,
+                "agent_probe_master_url": True,
+                "agent_update_master_url": self.config.source_path is not None,
             },
         }
 
@@ -135,6 +143,8 @@ class Agent:
                 else:
                     async with asyncio.timeout(command["timeout_ms"] / 1000):
                         result["body"] = await self.operations.handle(command)
+                    if self.operations.agent_management.consume_master_url_changed():
+                        self.reconnect_after_reply.add(command["request_id"])
             except DeferredCommand:
                 return None
             except TimeoutError:
@@ -178,6 +188,7 @@ class Agent:
                         },
                     )
                 await self.send("rpc_reply", result)
+                await self._reconnect_if_requested(command["request_id"])
             finally:
                 self.queue.task_done()
 
@@ -315,6 +326,9 @@ class Agent:
                             {"token": token, **result},
                         )
                         self.journal.acknowledge(result["request_id"])
+                        if result["request_id"] in self.reconnect_after_reply:
+                            self.reconnect_after_reply.discard(result["request_id"])
+                            return
                     await asyncio.sleep(self.config.poll_seconds)
             finally:
                 self.connected = False
@@ -349,6 +363,15 @@ class Agent:
         response = await client.post(url, json=payload)
         response.raise_for_status()
         return response
+
+    async def _reconnect_if_requested(self, request_id: str) -> None:
+        if request_id not in self.reconnect_after_reply:
+            return
+        self.reconnect_after_reply.discard(request_id)
+        connection = self.websocket
+        if connection is not None:
+            with contextlib.suppress(OSError, WebSocketException):
+                await connection.close(code=1000, reason="master URL updated")
 
     async def monitor_runtime(self) -> None:
         while True:

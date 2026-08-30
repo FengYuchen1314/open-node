@@ -15,6 +15,7 @@ import {
   getXrayRuntimeInventory,
   getXrayRuntimeTunnelInventory,
   listCommandStreamFrames,
+  listAgents,
   listServerCommands,
   listServers,
   listXrayConfigSnapshots,
@@ -92,6 +93,34 @@ describe("inventory API client", () => {
     expect((await queueAgentOperation("srv_1", operation, payload, fetcher)).command.id).toBe("release-command");
   });
 
+  it("queues the complete Xray system configuration contract", async () => {
+    const payload = {
+      log_level: "debug" as const,
+      dns: { servers: ["1.1.1.1"] },
+      policy: { levels: { "0": { bufferSize: 0 } } },
+      metrics_enabled: true,
+      metrics_listen: "127.0.0.1:11111",
+      stats_enabled: true,
+      grpc_enabled: true,
+      grpc_port: 46736,
+      expected_sha256: "a".repeat(64),
+    };
+    const fetcher: typeof fetch = async (input, init) => {
+      expect(input.toString()).toBe(
+        "/api/v1/servers/srv_1/operations/xray/system-config/write",
+      );
+      expect(init?.body ? JSON.parse(init.body.toString()) : undefined).toEqual(payload);
+      return new Response(JSON.stringify({ command: { id: "system-config-command" } }), {
+        status: 201,
+      });
+    };
+
+    expect(
+      (await queueAgentOperation("srv_1", "xray_system_config_write", payload, fetcher))
+        .command.id,
+    ).toBe("system-config-command");
+  });
+
   it("reads only public Agent identity metadata", async () => {
     const identity = { enabled: true, protocol: "securechan-v1", public_key: "public-key",
       fingerprint: "fingerprint", license_required: false };
@@ -100,6 +129,27 @@ describe("inventory API client", () => {
       return new Response(JSON.stringify(identity));
     };
     expect(await getAgentIdentity(fetcher)).toEqual(identity);
+  });
+
+  it("lists registered Agent capabilities for feature gating", async () => {
+    const agents = [{
+      id: "agent-1",
+      server_id: "server-1",
+      hostname: "edge",
+      connection_mode: "websocket",
+      listen_port: 0,
+      xray_mode: "external",
+      capabilities: { xray_config_workspace: true },
+      warp_installed: false,
+      registered_at: "2026-08-29T00:00:00Z",
+      last_seen_at: "2026-08-29T00:00:00Z",
+    }];
+    const fetcher: typeof fetch = async (input) => {
+      expect(input.toString()).toBe("/api/v1/agents");
+      return new Response(JSON.stringify(agents));
+    };
+
+    expect((await listAgents(fetcher))[0].capabilities.xray_config_workspace).toBe(true);
   });
 
   it("preserves identity access failures", async () => {

@@ -1,5 +1,6 @@
 import { authenticatedFetch } from "./auth";
 import type {
+  AgentRead,
   AgentIdentityInfo,
   AgentCommandCreateRequest,
   AgentCommandCreateResponse,
@@ -109,6 +110,12 @@ export async function getAgentIdentity(fetcher = authenticatedFetch): Promise<Ag
   const response = await fetcher(`${apiBaseUrl}/api/v1/agents/identity`);
   if (!response.ok) throw await apiError(response, "Agent identity request failed");
   return response.json() as Promise<AgentIdentityInfo>;
+}
+
+export async function listAgents(fetcher = authenticatedFetch): Promise<AgentRead[]> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/agents`);
+  if (!response.ok) throw await apiError(response, "Agent list request failed");
+  return response.json() as Promise<AgentRead[]>;
 }
 
 export async function listServers(fetcher = authenticatedFetch): Promise<ServerSummary[]> {

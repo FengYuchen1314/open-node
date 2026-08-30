@@ -16,13 +16,16 @@ MMWX 对等范围误写成这个首发的未完成项。建议在新聊天中直
 - 只使用一个仓库，后端、Agent、前端、探针、运行时补丁、文档和测试脚本都在本仓库。
 - 后端使用 FastAPI，前端使用 Vue 3、Vuetify、Vite 和 TypeScript。
 - 软件对所有人免费，不需要许可证、激活码、付费权限检查或商业许可证服务器。
-- `FengYuchen1314/miaomiaowuX` 默认分支是控制面业务的主要参考。
+- `tajiaoyezi/miaomiaowuX` 固定提交
+  `c12ce653bc07fe30426b7dfcb85076974b7be0e0` 是控制面业务的主要参考。
 - `mmw-agent`、`mmwx-probe`、`Xray-core-mmwx` 只作为 Agent、探针和运行时兼容参考。
 - `miaomiaowu` 和 `NodeControll` 是无用旁支，明确不处理。
 - 所有测试、构建和真实流量烟测都在 VPS `185.99.135.224` 上完成，通过 SSH key 连接。不要在本机运行测试。
 - 不复制旧项目的许可证校验，也不依赖旧许可证服务。
 
-按完整 MMWX 替代功能面和实机验证门槛粗略估算，当前约完成 **93%**。
+旧的百分比估算已经作废。当前状态必须以
+[`mmwx-source-parity.md`](mmwx-source-parity.md) 的固定源码矩阵和可执行发布门槛为准；
+控制面仍有计费语义、外部订阅、通知、完整迁移和远程 Agent 安装等明确缺口。
 这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
 单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
 Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 MMWX，但它们不应

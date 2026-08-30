@@ -6,10 +6,10 @@ This document records the starting source map for the Open Node refactor.
 
 | Source repository | Role in Open Node |
 | --- | --- |
-| `FengYuchen1314/miaomiaowuX` | Control plane behavior and product workflows |
-| `FengYuchen1314/mmw-agent` | Remote agent protocol and host-management workflows |
-| `FengYuchen1314/mmwx-probe` | Public probe API and UI behavior |
-| `FengYuchen1314/Xray-core-mmwx` | Runtime integration details used by the agent |
+| `tajiaoyezi/miaomiaowuX` | Control plane behavior and product workflows |
+| `tajiaoyezi/mmw-agent` | Remote agent protocol and host-management workflows |
+| `tajiaoyezi/mmwx-probe` | Public probe API and UI behavior |
+| `tajiaoyezi/Xray-core-mmwx` | Runtime integration details used by the agent |
 
 ## Excluded Sources
 

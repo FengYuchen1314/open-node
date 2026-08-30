@@ -7,7 +7,11 @@ from uuid import UUID
 from fastapi import WebSocketDisconnect
 
 from open_node.domain.inventory import AgentCapabilities, AgentCommandRead
-from open_node.services.inventory import CommandNotFoundError, InventoryStore
+from open_node.services.inventory import (
+    CommandNotFoundError,
+    InventoryStore,
+    required_command_capabilities,
+)
 
 
 class AgentTransport(Protocol):
@@ -76,6 +80,14 @@ class AgentConnectionManager:
             return command
         if command.stream and not connection.capabilities.stream:
             return command
+        if any(
+            not getattr(connection.capabilities, capability)
+            for capability in required_command_capabilities(command.path, command.body)
+        ):
+            try:
+                return store.reconcile_command_capability_loss(command.id)
+            except CommandNotFoundError:
+                return command
 
         try:
             leased = store.lease_command_for_push(command.id)

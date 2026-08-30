@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import re
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -199,7 +200,12 @@ async def agent_websocket(websocket: WebSocket) -> None:
                 await _send_auth_result(channel, True, "authenticated", server.id)
                 await channel.close(code=1000)
                 return
-            agent, server = store.register_agent(_registration_from_ws_payload(auth_payload))
+            agent, server = store.register_agent(
+                _registration_from_ws_payload(
+                    auth_payload,
+                    legacy_transport=websocket.url.path == "/api/remote/ws",
+                )
+            )
         except (InvalidAgentTokenError, ValidationError) as exc:
             await _send_auth_result(channel, False, str(exc))
             await channel.close(code=1008)
@@ -234,21 +240,49 @@ def _message_payload(message: object) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _registration_from_ws_payload(payload: dict[str, Any]) -> AgentRegistrationRequest:
+def _registration_from_ws_payload(
+    payload: dict[str, Any], *, legacy_transport: bool = False
+) -> AgentRegistrationRequest:
     token = str(payload.get("token") or "")
+    agent_version = payload.get("agent_version")
+    raw_capabilities = payload.get("capabilities") or {}
+    capabilities = (
+        dict(raw_capabilities) if isinstance(raw_capabilities, dict) else raw_capabilities
+    )
+    if (
+        isinstance(capabilities, dict)
+        and legacy_transport
+        and _legacy_agent_settings_supported(agent_version)
+    ):
+        for capability in (
+            "agent_switch_xray_mode",
+            "agent_switch_listen_port",
+            "agent_probe_master_url",
+            "agent_update_master_url",
+        ):
+            capabilities.setdefault(capability, True)
     return AgentRegistrationRequest(
         token=token,
         hostname=str(payload.get("hostname") or "websocket-agent"),
-        agent_version=payload.get("agent_version"),
+        agent_version=agent_version,
         connection_mode=payload.get("connection_mode") or "websocket",
-        listen_port=payload.get("listen_port") or 23889,
+        listen_port=(
+            23889 if payload.get("listen_port") is None else payload.get("listen_port")
+        ),
         public_ipv4=payload.get("public_ipv4"),
         public_ipv6=payload.get("public_ipv6"),
         xray_mode=payload.get("xray_mode") or "external",
-        capabilities=payload.get("capabilities") or {},
+        capabilities=capabilities,
         warp_installed=bool(payload.get("warp_installed", False)),
         same_host_as_master=payload.get("same_host_as_master"),
     )
+
+
+def _legacy_agent_settings_supported(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", value.strip())
+    return bool(match and tuple(map(int, match.groups())) >= (0, 4, 7))
 
 
 async def _handle_agent_ws_message(

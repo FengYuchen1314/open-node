@@ -6,6 +6,8 @@ paid entitlement checks, commercial license server calls, or feature gates.
 
 The current implementation status, deployment snapshot, remaining work, and
 next-task handoff are recorded in [the refactor handoff](docs/refactor-handoff.md).
+Source-confirmed compatibility against the four pinned upstream repositories is
+tracked separately in the [MMWX source parity matrix](docs/mmwx-source-parity.md).
 
 ## Scope
 
@@ -66,11 +68,53 @@ deployment: the production hostname, DNS, trusted certificate, and public
 reverse-proxy configuration still require operator input. Remaining migration
 boundaries still apply; this is not yet full MMWX parity.
 
+The root installer is still a release candidate: at the parity audit recorded in
+the source matrix, public `main` did not contain `install.sh`, and the Raw GitHub
+URL below returned 404. Do not treat it as a working one-click deployment until
+the script is published and the anonymous-URL installer smoke passes.
+
+After that release gate passes, a new Debian/Ubuntu Docker host can use the root
+installer. It uses Docker Compose v2,
+clones the requested clean ref, builds a transaction-unique image, creates a
+private environment and installer manifest, starts the service, verifies the
+exact image, binding and `/healthz`, and can create the first administrator.
+The intended public command downloads the script completely before running it:
+
+```bash
+(
+  installer="$(mktemp)" || exit 1
+  trap 'rm -f -- "$installer"' EXIT
+  trap 'exit 1' HUP INT TERM
+  curl -fsSL https://raw.githubusercontent.com/FengYuchen1314/open-node/main/install.sh -o "$installer" || exit 1
+  sudo bash "$installer"
+)
+```
+
+The secure default binds the panel to `127.0.0.1:8080`; use an SSH tunnel for
+the first login. Interactive account creation reads from the controlling
+`/dev/tty`; unattended installs use a root-owned private password file. The
+same script accepts `update`, `status`, `uninstall`, and `create-admin`.
+Updates create a stopped-volume recovery bundle before starting a candidate;
+an unhealthy candidate can leave recovery explicitly required rather than
+restart an older image against possibly migrated data. Uninstall preserves the
+named data volume, source, configuration, installer state, images, and backups.
+
+The convenience URL above follows mutable `main`: it neither pins the bootstrap
+script nor cryptographically binds it to the subsequently cloned ref. Review
+and pin both inputs (for example, a commit-specific raw script URL and a reviewed
+release ref) when that supply-chain property matters. Public HTTPS still
+requires an operator-owned hostname, certificate, and edge proxy. See
+[control-plane deployment](docs/deployment.md) for the exact commands, manifest
+rules, non-interactive secret cleanup, update/recovery semantics, maintainer VPS
+smoke prerequisites, and installer support boundary.
+
 ## Current Milestone
 
-The current milestone is the hardened `cb1eb0c` control-plane Preview baseline
-and a bounded Agent 0.2.0 release candidate, not another parity expansion. Its
-supported scope is a new installation or controlled migration on Debian 12
+The last published Agent milestone is the hardened `cb1eb0c` control-plane
+Preview baseline and the bounded Agent 0.2.0 prerelease. The current `main`
+source identifies as unreleased `0.3.0a0` while post-0.2.0 Agent contracts are
+being implemented; it is not a published wheel or release tag. The supported
+scope is a new installation or controlled migration on Debian 12
 amd64, one control-plane process and worker, and non-root managed Agents/Xray.
 Historical discovery of unrecorded private MMWX ownership and dependencies
 remains important for a full replacement, but it is not a blocker for this

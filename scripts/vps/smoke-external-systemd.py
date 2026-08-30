@@ -66,7 +66,7 @@ class Fixture:
         runtime.write_private(path, value)
         os.chown(path, self.uid, self.gid)
 
-    def initialize(self, xray, config, agent_config):
+    def initialize(self, xray, config, agent_config, *, config_name="xray.json"):
         capabilities = (
             "AmbientCapabilities=CAP_NET_BIND_SERVICE\n"
             "CapabilityBoundingSet=CAP_NET_BIND_SERVICE\n"
@@ -95,7 +95,7 @@ class Fixture:
         self.binary = self.root / "xray"
         shutil.copyfile(xray, self.binary)
         self.binary.chmod(0o755)
-        self.xray_config = self.root / "config/xray.json"
+        self.xray_config = self.root / "config" / config_name
         self.private(self.xray_config, config)
         self.private(self.root / "config/other.json", config)
         self.agent_config = self.root / "config/agent.json"
@@ -216,22 +216,73 @@ class Fixture:
             shutil.rmtree(self.root)
 
 
+def queue_operation(client, base, operation, body=None, *, expected="succeeded"):
+    request = {} if body is None else {"json": body}
+    command = (
+        client.post(base + "/operations/" + operation, **request)
+        .raise_for_status()
+        .json()["command"]
+    )
+    return lifecycle.wait_command(client, base, command, expected=expected)
+
+
 def exercise_mode(work, fixture, xray, client, echo_port, mode, endpoint, ca):
     created = client.post("/api/v1/servers", json={"name": "external-systemd-" + mode})
     created.raise_for_status()
     base = "/api/v1/servers/" + created.json()["server"]["id"]
     user_id, new_id = str(uuid4()), str(uuid4())
     port, stats_port = runtime.free_port(), runtime.free_port()
+    api_mode = "direct" if mode == "websocket" else "routed"
+    api = {
+        "listen": f"127.0.0.1:{stats_port}",
+        "services": ["StatsService"],
+        "tag": "api",
+    }
+    api_inbounds = []
+    routing = None
+    if api_mode == "routed":
+        api.pop("listen")
+        api_inbounds = [
+            {
+                "tag": "api",
+                "listen": "127.0.0.1",
+                "port": stats_port,
+                "protocol": "dokodemo-door",
+                "settings": {"address": "127.0.0.1"},
+            }
+        ]
+        routing = {
+            "domainStrategy": "AsIs",
+            "rules": [
+                {
+                    "type": "field",
+                    "inboundTag": ["api"],
+                    "outboundTag": "api",
+                }
+            ],
+        }
     config = {
-        "log": {"loglevel": "warning"},
-        "api": {
-            "listen": f"127.0.0.1:{stats_port}",
-            "services": ["StatsService"],
-            "tag": "api",
+        "log": {"access": "none", "loglevel": "warning"},
+        "dns": {
+            "hosts": {"preserved.invalid": "127.0.0.1"},
+            "servers": ["localhost"],
         },
+        "api": api,
         "stats": {},
         "policy": {
-            "levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}}
+            "levels": {
+                "0": {
+                    "connIdle": 300,
+                    "statsUserUplink": True,
+                    "statsUserDownlink": True,
+                }
+            },
+            "system": {
+                "statsInboundUplink": True,
+                "statsInboundDownlink": True,
+                "statsOutboundUplink": True,
+                "statsOutboundDownlink": True,
+            },
         },
         "inbounds": [
             {
@@ -243,10 +294,13 @@ def exercise_mode(work, fixture, xray, client, echo_port, mode, endpoint, ca):
                     "decryption": "none",
                     "clients": [{"id": user_id, "email": "external", "level": 0}],
                 },
-            }
+            },
+            *api_inbounds,
         ],
         "outbounds": [{"tag": "direct", "protocol": "freedom"}],
     }
+    if routing is not None:
+        config["routing"] = routing
     fixture.initialize(
         xray,
         config,
@@ -339,7 +393,7 @@ def exercise_mode(work, fixture, xray, client, echo_port, mode, endpoint, ca):
             lambda: runtime.forwards(socks, echo_port),
         )
         runtime.poll(
-            mode + " external user stats reach control plane",
+            mode + " " + api_mode + " API user stats reach control plane",
             lambda: client.get(base + "/telemetry/latest").json().get("latest"),
             lambda row: (
                 row
@@ -350,6 +404,151 @@ def exercise_mode(work, fixture, xray, client, echo_port, mode, endpoint, ca):
                 >= len(runtime.RESPONSE_BODY)
             ),
         )
+        system_read = queue_operation(
+            client, base, "xray/system-config/read"
+        )["result_body"]
+        description = system_read["config"]
+        assert description["api_mode"] == api_mode
+        assert description["grpc_enabled"] is True
+        assert description["grpc_port"] == stats_port
+        assert description["stats_enabled"] is True
+        assert description["fixed_stats_address"] is None
+        assert description["writable"] is True
+        assert description["read_only_reason"] is None
+        assert description["log_level"] == "warning"
+        assert description["dns"] == config["dns"]
+        assert description["policy"] == config["policy"]
+
+        system_payload = {
+            key: description[key]
+            for key in (
+                "log_level",
+                "dns",
+                "policy",
+                "metrics_enabled",
+                "metrics_listen",
+                "stats_enabled",
+                "grpc_enabled",
+                "grpc_port",
+            )
+        }
+        system_payload["log_level"] = "info"
+        system_payload["dns"] = json.loads(json.dumps(description["dns"]))
+        system_payload["dns"]["queryStrategy"] = "UseIPv4"
+        expected_policy = json.loads(json.dumps(description["policy"]))
+        expected_policy["levels"]["0"]["connIdle"] = 301
+        system_payload["policy"] = expected_policy
+        system_payload["expected_sha256"] = system_read["sha256"]
+        before_system_pid = fixture.pid()
+        system_written = queue_operation(
+            client, base, "xray/system-config/write", system_payload
+        )["result_body"]
+        assert fixture.pid() != before_system_pid
+        saved = json.loads(fixture.xray_config.read_text())
+        assert saved["log"] == {"access": "none", "loglevel": "info"}
+        assert saved["dns"]["hosts"] == config["dns"]["hosts"]
+        assert saved["dns"]["servers"] == config["dns"]["servers"]
+        assert saved["dns"]["queryStrategy"] == "UseIPv4"
+        assert saved["policy"] == expected_policy
+        assert saved["policy"]["levels"]["0"]["statsUserUplink"] is True
+        assert saved["policy"]["system"]["statsInboundDownlink"] is True
+        assert saved["api"] == config["api"]
+        assert saved["inbounds"] == config["inbounds"]
+        assert saved["outbounds"] == config["outbounds"]
+        if api_mode == "routed":
+            assert saved["routing"] == config["routing"]
+        assert system_written["config"]["log_level"] == "info"
+        assert system_written["config"]["api_mode"] == api_mode
+        runtime.poll(
+            mode + " system-config write restarts Xray and preserves forwarding",
+            lambda: runtime.forwards(socks, echo_port),
+        )
+
+        files = queue_operation(
+            client, base, "xray/config-files/list"
+        )["result_body"]["files"]["main"]
+        assert len(files) == 1
+        assert files[0]["name"] == fixture.xray_config.name
+        assert files[0]["active"] is True
+        assert files[0]["writable"] is True
+        assert files[0]["read_only_reason"] is None
+        file_read = queue_operation(
+            client,
+            base,
+            "xray/config-files/read",
+            {"file": fixture.xray_config.name},
+        )["result_body"]
+        assert file_read["sha256"] == files[0]["sha256"]
+        assert json.loads(file_read["content"]) == saved
+        assert file_read["active"] is True
+        assert file_read["writable"] is True
+
+        stale_bytes = fixture.xray_config.read_bytes() + b"\n"
+        fixture.xray_config.write_bytes(stale_bytes)
+        stale = queue_operation(
+            client,
+            base,
+            "xray/config-files/write",
+            {
+                "file": fixture.xray_config.name,
+                "content": json.loads(file_read["content"]),
+                "expected_sha256": file_read["sha256"],
+            },
+            expected="failed",
+        )
+        assert "changed since it was read" in stale["result_error"]
+        assert fixture.xray_config.read_bytes() == stale_bytes
+
+        fresh_file = queue_operation(
+            client,
+            base,
+            "xray/config-files/read",
+            {"file": fixture.xray_config.name},
+        )["result_body"]
+        assert fresh_file["sha256"] != file_read["sha256"]
+        replacement = json.loads(fresh_file["content"])
+        replacement["outbounds"][0]["settings"] = {"domainStrategy": "UseIP"}
+        telemetry_before_write = (
+            client.get(base + "/telemetry/latest")
+            .raise_for_status()
+            .json()["latest"]["id"]
+        )
+        before_file_pid = fixture.pid()
+        file_written = queue_operation(
+            client,
+            base,
+            "xray/config-files/write",
+            {
+                "file": fixture.xray_config.name,
+                "content": replacement,
+                "expected_sha256": fresh_file["sha256"],
+            },
+        )["result_body"]
+        assert fixture.pid() != before_file_pid
+        assert file_written["active"] is True and file_written["writable"] is True
+        assert json.loads(fixture.xray_config.read_text()) == replacement
+        runtime.poll(
+            mode + " config-file write restarts Xray and preserves forwarding",
+            lambda: runtime.forwards(socks, echo_port),
+        )
+        runtime.poll(
+            mode + " " + api_mode + " stats survive workspace restarts",
+            lambda: client.get(base + "/telemetry/latest").json().get("latest"),
+            lambda row: (
+                row
+                and row["id"] != telemetry_before_write
+                and (row.get("stats") or {})
+                .get("user", {})
+                .get("external", {})
+                .get("downlink", 0)
+                >= len(runtime.RESPONSE_BODY)
+            ),
+        )
+        print(
+            f"PASS {mode} {api_mode} system config, config files and live restart",
+            flush=True,
+        )
+
         added = (
             client.post(
                 base + "/operations/batch-apply",
@@ -476,6 +675,109 @@ def exercise_mode(work, fixture, xray, client, echo_port, mode, endpoint, ca):
     )
 
 
+def exercise_jsonc_read_only(
+    work, fixture, xray, client, echo_port, mode, endpoint, ca
+):
+    created = (
+        client.post(
+            "/api/v1/servers", json={"name": "external-jsonc-" + mode}
+        )
+        .raise_for_status()
+        .json()
+    )
+    base = "/api/v1/servers/" + created["server"]["id"]
+    user_id, port = str(uuid4()), runtime.free_port()
+    config = {
+        "log": {"loglevel": "warning"},
+        "inbounds": [
+            {
+                "tag": "vless",
+                "listen": "127.0.0.1",
+                "port": port,
+                "protocol": "vless",
+                "settings": {
+                    "decryption": "none",
+                    "clients": [
+                        {"id": user_id, "email": "external-jsonc", "level": 0}
+                    ],
+                },
+            }
+        ],
+        "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+    }
+    fixture.initialize(
+        xray,
+        config,
+        {
+            "master_url": endpoint,
+            "token": created["agent_token"],
+            "ca_file": ca,
+            "connection_mode": mode,
+            "auto_start": True,
+            "heartbeat_seconds": 1,
+            "telemetry_seconds": 1,
+            "poll_seconds": 0.2,
+        },
+        config_name="xray.jsonc",
+    )
+    fixture.xray_config.write_text(
+        "// comments must survive a read-only workspace\n"
+        + fixture.xray_config.read_text()
+        + "\n"
+    )
+    original = fixture.xray_config.read_bytes()
+    run_command("systemctl", "start", fixture.xray_unit)
+    runtime.poll(mode + " JSONC Xray starts", lambda: runtime.port_open(port))
+    fixture.access("grant")
+    run_command("systemctl", "start", fixture.agent_unit)
+    runtime.poll(mode + " JSONC Agent connects", fixture.ready)
+
+    with runtime.proxy_client(work, xray, port, user_id) as socks:
+        runtime.poll(
+            mode + " JSONC primary forwards real VLESS",
+            lambda: runtime.forwards(socks, echo_port),
+        )
+        files = queue_operation(
+            client, base, "xray/config-files/list"
+        )["result_body"]["files"]["main"]
+        assert len(files) == 1 and files[0]["name"] == "xray.jsonc"
+        assert files[0]["active"] is True
+        assert files[0]["writable"] is False
+        assert "JSONC" in files[0]["read_only_reason"]
+        read = queue_operation(
+            client,
+            base,
+            "xray/config-files/read",
+            {"file": "xray.jsonc"},
+        )["result_body"]
+        assert read["content"].startswith("// comments must survive")
+        assert read["writable"] is False
+        assert "JSONC" in read["read_only_reason"]
+        before_pid = fixture.pid()
+        rejected = queue_operation(
+            client,
+            base,
+            "xray/config-files/write",
+            {
+                "file": "xray.jsonc",
+                "content": config,
+                "expected_sha256": read["sha256"],
+            },
+            expected="failed",
+        )
+        assert "read-only" in rejected["result_error"]
+        assert fixture.xray_config.read_bytes() == original
+        assert fixture.pid() == before_pid
+        runtime.poll(
+            mode + " rejected JSONC write leaves forwarding untouched",
+            lambda: runtime.forwards(socks, echo_port),
+        )
+
+    run_command("systemctl", "stop", fixture.agent_unit)
+    fixture.access("revoke")
+    print(f"PASS {mode} JSONC primary is visible and read-only", flush=True)
+
+
 def run(args):
     def exercise(work, unused, wheel, xray, client, backend, echo_port):
         with lifecycle.gateway(work, args.nginx, backend) as (endpoint, ca, _):
@@ -503,6 +805,36 @@ def run(args):
                     raise
                 finally:
                     fixture.cleanup()
+                jsonc_fixture = Fixture(args.agent_python)
+                try:
+                    exercise_jsonc_read_only(
+                        work,
+                        jsonc_fixture,
+                        xray,
+                        client,
+                        echo_port,
+                        mode,
+                        endpoint,
+                        ca,
+                    )
+                except BaseException:
+                    for unit in jsonc_fixture.units:
+                        print(
+                            run_command(
+                                "journalctl",
+                                "-u",
+                                unit.name,
+                                "-n",
+                                "50",
+                                "--no-pager",
+                                check=False,
+                            ).stdout,
+                            flush=True,
+                        )
+                    print("HEALTH", jsonc_fixture.health(), flush=True)
+                    raise
+                finally:
+                    jsonc_fixture.cleanup()
 
     service.exercise = exercise
     service.run(args.wheel, args.xray_archive)

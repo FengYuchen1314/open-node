@@ -28,7 +28,13 @@ export default {
       if (requestUrl.pathname === "/login") {
         return redirectToOriginLogin(env.MMWX_ORIGIN);
       }
-      return env.ASSETS?.fetch(request) ?? jsonError("not found", 404);
+      if (requestUrl.pathname === "/api" || requestUrl.pathname.startsWith("/api/")) {
+        return jsonError("not found", 404);
+      }
+      if (!env.ASSETS) {
+        return jsonError("not found", 404);
+      }
+      return secureResponse(await env.ASSETS.fetch(request));
     }
 
     if (request.method !== "GET") {
@@ -49,13 +55,7 @@ export default {
       redirect: "manual",
     });
 
-    if (response.status === 101) {
-      return response;
-    }
-
-    const proxied = new Response(response.body, response);
-    proxied.headers.set("Cache-Control", "no-store");
-    return proxied;
+    return proxiedResponse(response);
   },
 } satisfies ExportedHandler<Env>;
 
@@ -103,7 +103,7 @@ function redirectToOriginLogin(origin: string | undefined): Response {
   const basePath = url.pathname.replace(/\/+$/, "");
   url.pathname = `${basePath}/login`;
   url.search = "";
-  return Response.redirect(url.toString(), 302);
+  return secureResponse(Response.redirect(url.toString(), 302));
 }
 
 function normalizePath(pathname: string): string {
@@ -122,7 +122,7 @@ function originIsAllowed(url: URL): boolean {
 }
 
 function jsonError(message: string, status: number, headers?: HeadersInit): Response {
-  return Response.json(
+  const response = Response.json(
     {
       success: false,
       error: message,
@@ -130,4 +130,39 @@ function jsonError(message: string, status: number, headers?: HeadersInit): Resp
     },
     { status, headers },
   );
+  response.headers.set("Cache-Control", "no-store");
+  return secureResponse(response);
+}
+
+function proxiedResponse(response: Response): Response {
+  const headers = secureHeaders(response.headers);
+  headers.set("Cache-Control", "no-store");
+  if (response.status === 101) {
+    return new Response(null, {
+      status: 101,
+      headers,
+      webSocket: response.webSocket,
+    });
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function secureResponse(response: Response): Response {
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: secureHeaders(response.headers),
+  });
+}
+
+function secureHeaders(source: HeadersInit): Headers {
+  const headers = new Headers(source);
+  headers.delete("Set-Cookie");
+  headers.delete("Set-Cookie2");
+  headers.set("X-Content-Type-Options", "nosniff");
+  return headers;
 }

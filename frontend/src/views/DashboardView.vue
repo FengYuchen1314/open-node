@@ -11,6 +11,7 @@ import {
   defaultServerCreateRequest,
   type AgentCommand,
   type AgentCommandStreamFrame,
+  type AgentRead,
   type AgentLogService,
   type AgentOperationKind,
   type AgentServiceName,
@@ -31,6 +32,7 @@ import {
   getLatestScanResult,
   getLatestTelemetry,
   listCommandStreamFrames,
+  listAgents,
   listServerCommands,
   listServers,
   queueAgentOperation,
@@ -38,6 +40,7 @@ import {
 } from "../services/inventory";
 
 const servers = ref<ServerSummary[]>([]);
+const agentsByServer = ref<Record<string, AgentRead>>({});
 const management = reactive({ open: false, serverId: "", mode: "edit" as "edit" | "remove" });
 function manageServer(serverId: string, mode: "edit" | "remove") {
   Object.assign(management, { serverId, mode, open: true });
@@ -246,17 +249,20 @@ const configReadOperations: Array<{
   title: string;
   icon: string;
   kind: SimpleAgentOperation;
+  requiresXrayConfigWorkspace?: boolean;
 }> = [
   { title: "Xray config", icon: "mdi-file-code-outline", kind: "xray_config_read" },
   {
     title: "Xray system",
     icon: "mdi-tune-variant",
     kind: "xray_system_config_read",
+    requiresXrayConfigWorkspace: true,
   },
   {
     title: "Xray files",
     icon: "mdi-folder-cog-outline",
     kind: "xray_config_files_list",
+    requiresXrayConfigWorkspace: true,
   },
   { title: "Nginx config", icon: "mdi-file-cog-outline", kind: "nginx_config_read" },
   {
@@ -309,6 +315,28 @@ const serverOptions = computed(() =>
   servers.value.map((server) => ({ title: server.name, value: server.id })),
 );
 const selectedCommands = computed(() => commandsByServer.value[commandForm.server_id] ?? []);
+const selectedAgent = computed(() => agentsByServer.value[commandForm.server_id] ?? null);
+const xrayConfigWorkspaceSupported = computed(
+  () => selectedAgent.value?.capabilities.xray_config_workspace === true,
+);
+const agentSettingCapabilities = computed(() => ({
+  switchXrayMode: selectedAgent.value?.capabilities.agent_switch_xray_mode === true,
+  switchListenPort: selectedAgent.value?.capabilities.agent_switch_listen_port === true,
+  probeMasterUrl: selectedAgent.value?.capabilities.agent_probe_master_url === true,
+  updateMasterUrl: selectedAgent.value?.capabilities.agent_update_master_url === true,
+}));
+const agentSettingsUnavailableMessage = computed(() => {
+  if (!commandForm.server_id) return "Select a server to manage its Agent settings.";
+  if (!selectedAgent.value) return "Connect an Agent before managing Agent settings.";
+  return "Unsupported controls are disabled from the Agent's advertised capabilities.";
+});
+const xrayConfigWorkspaceUpgradeMessage = computed(() => {
+  if (!commandForm.server_id) return "Select a server to inspect its Xray configuration.";
+  if (!selectedAgent.value) {
+    return "Install and connect an upgraded Open Node Agent before reading Xray system configuration or config files.";
+  }
+  return `Upgrade Open Node Agent ${selectedAgent.value.agent_version ?? "(version unknown)"} on this server; it does not advertise the xray_config_workspace capability.`;
+});
 const selectedMetadataServer = computed(
   () => servers.value.find((server) => server.id === metadataForm.server_id) ?? null,
 );
@@ -321,8 +349,9 @@ async function refreshServers() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const nextServers = await listServers();
+    const [nextServers, agents] = await Promise.all([listServers(), listAgents()]);
     servers.value = nextServers;
+    agentsByServer.value = Object.fromEntries(agents.map((agent) => [agent.server_id, agent]));
     syncCommandTarget(nextServers);
     syncMetadataTarget(nextServers);
     await Promise.all([
@@ -533,6 +562,13 @@ async function submitCommand() {
 async function queueQuickOperation(kind: SimpleAgentOperation) {
   if (!commandForm.server_id) {
     errorMessage.value = "Target server is required.";
+    return;
+  }
+  if (
+    (kind === "xray_system_config_read" || kind === "xray_config_files_list") &&
+    !xrayConfigWorkspaceSupported.value
+  ) {
+    errorMessage.value = xrayConfigWorkspaceUpgradeMessage.value;
     return;
   }
 
@@ -1545,13 +1581,31 @@ function truncateText(value: string, maxLength: number) {
             density="comfortable" color="error" />
         </v-form>
         <div class="section-subtitle operation-subtitle">Config reads</div>
+        <v-alert
+          v-if="commandForm.server_id && !xrayConfigWorkspaceSupported"
+          class="mb-3"
+          color="warning"
+          density="compact"
+          icon="mdi-update"
+          variant="tonal"
+        >
+          {{ xrayConfigWorkspaceUpgradeMessage }}
+        </v-alert>
         <div class="config-command-grid">
           <v-btn
             v-for="operation in configReadOperations"
             :key="operation.kind"
-            :disabled="serverOptions.length === 0"
+            :disabled="
+              serverOptions.length === 0 ||
+              (operation.requiresXrayConfigWorkspace && !xrayConfigWorkspaceSupported)
+            "
             :loading="savingOperation === operation.kind"
             :prepend-icon="operation.icon"
+            :title="
+              operation.requiresXrayConfigWorkspace && !xrayConfigWorkspaceSupported
+                ? xrayConfigWorkspaceUpgradeMessage
+                : undefined
+            "
             color="secondary"
             size="small"
             variant="tonal"
@@ -1561,6 +1615,21 @@ function truncateText(value: string, maxLength: number) {
           </v-btn>
         </div>
         <div class="section-subtitle operation-subtitle">Agent settings</div>
+        <v-alert
+          v-if="commandForm.server_id && (
+            !agentSettingCapabilities.switchXrayMode ||
+            !agentSettingCapabilities.switchListenPort ||
+            !agentSettingCapabilities.probeMasterUrl ||
+            !agentSettingCapabilities.updateMasterUrl
+          )"
+          class="mb-3"
+          color="info"
+          density="compact"
+          icon="mdi-information-outline"
+          variant="tonal"
+        >
+          {{ agentSettingsUnavailableMessage }}
+        </v-alert>
         <v-form class="server-form compact-form" @submit.prevent="updateMasterUrl">
           <div class="form-row">
             <v-select
@@ -1571,7 +1640,7 @@ function truncateText(value: string, maxLength: number) {
               variant="outlined"
             />
             <v-btn
-              :disabled="serverOptions.length === 0"
+              :disabled="serverOptions.length === 0 || !agentSettingCapabilities.switchXrayMode"
               :loading="savingOperation === 'agent_switch_xray_mode'"
               color="warning"
               prepend-icon="mdi-swap-horizontal"
@@ -1593,7 +1662,7 @@ function truncateText(value: string, maxLength: number) {
               variant="outlined"
             />
             <v-btn
-              :disabled="serverOptions.length === 0"
+              :disabled="serverOptions.length === 0 || !agentSettingCapabilities.switchListenPort"
               :loading="savingOperation === 'agent_switch_listen_port'"
               color="warning"
               prepend-icon="mdi-lan"
@@ -1620,7 +1689,7 @@ function truncateText(value: string, maxLength: number) {
           />
           <div class="settings-action-row">
             <v-btn
-              :disabled="serverOptions.length === 0"
+              :disabled="serverOptions.length === 0 || !agentSettingCapabilities.probeMasterUrl"
               :loading="savingOperation === 'agent_probe_master_url'"
               color="info"
               prepend-icon="mdi-access-point-network"
@@ -1631,7 +1700,7 @@ function truncateText(value: string, maxLength: number) {
               Probe
             </v-btn>
             <v-btn
-              :disabled="serverOptions.length === 0"
+              :disabled="serverOptions.length === 0 || !agentSettingCapabilities.updateMasterUrl"
               :loading="savingOperation === 'agent_update_master_url'"
               color="warning"
               prepend-icon="mdi-link-lock"

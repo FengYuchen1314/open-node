@@ -8,6 +8,7 @@ python3 -m venv backend/.venv
 source backend/.venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e "backend[dev]"
+ruff check backend
 pytest backend/tests
 deactivate
 
@@ -15,6 +16,8 @@ python3 -m venv agent/.venv
 agent/.venv/bin/python -m pip install -e "agent[dev]"
 agent/.venv/bin/ruff check agent
 agent/.venv/bin/pytest agent/tests
+mkdir -p agent/dist
+find agent/dist -maxdepth 1 -type f -name 'open_node_agent-*.whl' -delete
 agent/.venv/bin/python -m build --wheel --outdir agent/dist agent
 
 if [ -f frontend/package-lock.json ]; then
@@ -25,6 +28,8 @@ fi
 
 npm --prefix frontend test
 npm --prefix frontend run build
+npm --prefix frontend run build:probe
+test -f frontend/dist-probe/index.html
 
 if [ -f probe-worker/package.json ]; then
   if [ -f probe-worker/package-lock.json ]; then
@@ -33,5 +38,6 @@ if [ -f probe-worker/package.json ]; then
     npm --prefix probe-worker install
   fi
 
+  npm --prefix probe-worker test
   npm --prefix probe-worker run typecheck
 fi
