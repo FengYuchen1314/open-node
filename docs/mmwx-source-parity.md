@@ -20,6 +20,17 @@ Audited on 2026-08-30 from the four repositories published by
 The local read-only clones live outside this repository. Future audits must
 record new commit IDs instead of silently comparing moving branches.
 
+## Requested frontend rewrite
+
+The React/official Ant Design rewrite is published in feature commit
+`50897f928226c9fef2ab7d0f68de0c3aad46156a`. It covers the administrator console,
+subscriber portal and independent public Probe bundle without changing backend
+contracts. Exact-commit CI, the 509-test frontend suite, real-browser workflows
+and a clean-source Docker gate passed; see [frontend.md](frontend.md) and
+[testing.md](testing.md). This satisfies the requested frontend architecture,
+not the remaining backend parity items below, and does not upgrade the running
+production instance.
+
 ## Release blockers
 
 | Priority | Area | Source-confirmed result | Release condition |

@@ -27,20 +27,33 @@ and single-image Docker deployment. It removes Vue, Vuetify, Pinia and their
 compiler/router dependencies. Architecture and build instructions are in
 [frontend.md](frontend.md).
 
-The first complete consolidated React run passed **509 tests in 63 files**
-(644.30 s), with no unhandled errors, in
-`/tmp/open-node-react-accessible.OTOVWliF/frontend-tests.json`. It includes the
+The published feature commit is
+`50897f928226c9fef2ab7d0f68de0c3aad46156a`. Its clean-checkout
+[GitHub run 33330624705](https://github.com/FengYuchen1314/open-node/actions/runs/33330624705)
+passed all four jobs: backend **1,253 tests** (618.73 s), Agent **605 tests**
+(10.67 s), frontend **509 tests in 63 files** (535.20 s) and Probe Worker
+**5 tests** (164.53 ms). Backend/Agent Ruff, the Agent wheel, frontend type
+checking and both production bundles, and Worker type checking also passed.
+The only backend warning was the known Starlette/httpx deprecation. Subsequent
+documentation-only commits do not change this tested product source; this run
+must not be attributed to a different commit.
+
+The final frozen working-source run passed **509 tests in 63 files**
+(638.05 s), with no unhandled errors, in
+`/tmp/open-node-react-release.xaSu8WDc/frontend-tests.json`. It includes the
 existing domain/API tests and real Ant Design DOM tests for the migrated views.
-The later Plan/Limiter layout checks passed 36 tests in three files; the user
-limit editor's seven tests also passed after its gutter correction. These are
-overlapping reruns, not additional tests to add to 509.
+An earlier consolidation passed the same 509 tests in 644.30 s at
+`/tmp/open-node-react-accessible.OTOVWliF/frontend-tests.json`. The intervening
+Plan/Limiter checks passed 36 tests in three files; the user limit editor's
+seven tests also passed after its gutter correction. These are overlapping
+reruns, not additional tests to add to 509.
 
 Final working-source builds are at
 `/tmp/open-node-react-release.xaSu8WDc/source`. Both the administrator and
 independent public Probe builds pass TypeScript and Vite. The frozen
 `browser-assets.tar.gz` SHA-256 is
 `da85b9cc62b5d78dfae10dbb2f85d3d4ff79e935514f894c67761eabfc64fb4c`.
-Relative to the 509-test snapshot, the only product-source changes are layout
+Relative to the earlier consolidation, the only product-source changes are layout
 corrections in `PlanManagementDialog`, `UserLimitEditor`, `LimiterPanel` and
 `ProbeAdministrationPanel`; no backend or shared styles changed.
 
@@ -74,12 +87,14 @@ CSS `9fd60fb31ba60054d1203f3a99a81dbb50ca9d748e34a9cd293c9b721fda4db1`.
 This is a local Cloudflare-runtime test on the VPS, not a deployment to a
 customer's Cloudflare account.
 
-The final Docker gate passed against `open-node:react-working-tree-r5`, image
+The frozen working-source Docker gate passed against
+`open-node:react-working-tree-r5`, image
 `sha256:bc17d752fab8644a9ba7fbbf69077e9387c24e5d5840c01926ede7868f5dd3c1`,
 running as UID/GID 10001 with the Compose read-only/capability restrictions.
-All 39 served files match the frozen assets and image, ten SPA deep links and
-six reserved-path 404 cases pass, and three original browser sessions plus a
-server record survive restart. Three viewport sizes and all eight administrator
+All 39 served files match the frozen assets and image. Ten SPA deep links,
+five reserved-path 404 cases and a non-HTML navigation 404 check pass; three
+original browser sessions plus a server record survive restart. Three viewport
+sizes and all eight administrator
 lazy routes pass. The private helper also passes eight ownership/cleanup safety
 controls. Its report is
 `/root/open-node-react-bootstrap-browser.gEUopOkd/r5-docker-4/report.json`,
@@ -87,6 +102,29 @@ SHA-256 `201773b8df09bf2dcce869155f44edcedb3e834969fb0ebbc0516352a6b1f26c`.
 The fixture follows Docker's newly allocated loopback port after restart while
 preserving the original cookie values; it does not treat a stale test URL as a
 product failure. The labeled container and volume were removed after verification.
+
+The final source-provenance gate then cloned the exact GitHub `50897f9` commit
+into `/root/open-node-react-commit-50897.0MDZIwd3/source`. A fresh `npm ci` and
+both builds produced the same **39 administrator + 3 public Probe files** as
+the frozen working-source bundle, with byte comparisons and sorted SHA-256
+manifests agreeing and no extra or missing files. The checkout remained clean;
+tracked Vue files and Vue dependencies in both the lockfile and installed tree
+were zero.
+
+The image was rebuilt from a pure Git archive, without local `node_modules` or
+generated assets in its build context. Archive SHA-256:
+`0d1e3b0886d3c03897a34b665d5e9f6b6a7acdadd0857978e8bb5c2a40da078b`.
+The private test tag is `open-node:react-working-tree-r50897`, image ID
+`sha256:e0dabde00261b3c4178a62dc367325a47b8bdf3736df0ed700ac99c157708d65`;
+its OCI revision is the full `50897f9` commit, not a working-tree label. The
+unchanged Docker helper repeated the full asset, route, three-viewport login,
+original-session/data restart and eight ownership-safety gates successfully.
+Its container and volume were removed; production remained unchanged. Report:
+`/root/open-node-react-commit-50897.0MDZIwd3/source-proof.json`, SHA-256
+`ff6cc9c18e7507f7311493ee94776b9489d7c1aea4357654fa48c8a7a4004a04`.
+The report proves application-file identity, not bit-identical whole images.
+The backend application Git tree remains
+`31760f22ffae9c562b3b4a9949744b6b976163bf`, identical to `a677280`.
 
 Real browser failures drove the retained regression checks: invalid numeric
 drafts must not be clamped into valid quotas/ports on blur or Enter; loading
@@ -107,9 +145,8 @@ claim follows from these isolated checks.
 
 The feature commit is `1515a7bd56a2dbf257d861fe8760038a9329bae4`; its
 host-fixture correction is `a677280ece64a71d7ee4e8c4f0720cd819bcf584`. Both are
-published on `main`. The following results are separate from the in-progress
-React/Ant Design rewrite; the frontend counts here still describe the Vue
-baseline.
+published on `main`. The following historical results precede the React/Ant
+Design rewrite; the frontend counts here describe the former Vue baseline.
 
 - Clean-checkout [GitHub run 33325869097](https://github.com/FengYuchen1314/open-node/actions/runs/33325869097)
   passed all four jobs at `a677280`: backend **1,253 passed** (640.48 s), Agent
@@ -436,7 +473,7 @@ PYTHONPATH=backend/app backend/.venv/bin/python \
 ```
 
 The isolated fixture creates an active-main-shaped MMWX SQLite database, runs the
-mode-0600 exporter, uploads the result through the Vue preview/confirmation dialog
+mode-0600 exporter, uploads the result through the preview/confirmation dialog
 and explicit package mapping, then verifies secret clearing. It checks imported
 multi-file assignments, administrator profile editing, subscriber profile selection,
 bcrypt-to-Argon2id upgrade, original TOTP, one-use legacy recovery and source-admin
@@ -1058,7 +1095,7 @@ results do not close the other [migration gates](migration-map.md).
 
 ## Remote Agent Lifecycle
 
-Build the Agent wheel and production Vue assets first. On the designated VPS,
+Build the Agent wheel and production frontend assets first. On the designated VPS,
 with the browser/cryptography dependencies and a trusted Nginx binary:
 
 ```bash
@@ -1466,7 +1503,7 @@ rollback ordering, cancellation while a forward command is executing, and
 automatic compensation after native Xray validation fails. Bootstrap and
 newly provisioned client traffic are checked before and after recovery.
 
-The mixed pair also exercises the real Vue rollback-failure/retry workflow,
+The mixed pair also exercises the real browser rollback-failure/retry workflow,
 retained command history, incomplete compensation, and explicit acceptance
 with a required reason and checkbox on desktop and mobile. Layout failures
 retain screenshots and element-bound diagnostics. Temporary processes and

@@ -1,8 +1,8 @@
 # External subscriptions: next bounded P1 slice
 
 Status: source review only; **not implemented**. This records the next work item
-after panel-issued Agent installation, not a completed feature or a claim of
-full subscription-ecosystem parity.
+after publication of the verified React/standard Ant Design rewrite, not a
+completed feature or a claim of full subscription-ecosystem parity.
 
 ## Reference and intended workflow
 
@@ -53,6 +53,48 @@ scope is the primary subscription only; named profiles and temporary links
 must not automatically gain external nodes. Upstream traffic information is
 display metadata, not a mutation of Open Node's traffic ledger or billing.
 Stopping local export cannot revoke credentials already delivered upstream.
+
+## Confirmed integration points
+
+The follow-up read-only review checked the same pinned control-plane commit;
+it did not implement these changes.
+
+- Add administrator CRUD/preview/confirm through `api/router.py`'s existing
+  private router. The administrator identity is not a ProductUser owner: require
+  an explicit existing subscriber and keep source ownership immutable.
+- Add an explicit primary-subscription opt-in to the shared rendering path.
+  `subscription_profiles.py` and `temporary_subscriptions.py` also call that
+  path; a named profile with no node subset can pass `None`, so `node_ids is
+  None` cannot distinguish a primary subscription. Default shared rendering to
+  excluding external nodes.
+- Validate upstream YAML separately from `subscription_clients.py`'s output
+  compatibility helpers. Those helpers assume trusted local configurations,
+  can preserve arbitrary fields, and normalize `hysteria` to `hysteria2`.
+  Untrusted input must distinguish protocol versions and reject cross-source
+  references such as `dialer-proxy` before conversion.
+- Use immutable source IDs and owner/source foreign keys for every node,
+  preview and confirmation receipt. Deleting a source or subscriber must
+  invalidate all of them. Reject confirmation while owner deletion is pending;
+  a late fetch or replay must not transfer credentials to a same-name recreated
+  subscriber. Do not upsert a deleted source from an old network response.
+- Use a source-specific revision/CAS transaction. The existing
+  `_coordinated_session()` coordinates Server operations, including Server locks
+  in its PostgreSQL branch; it does not serialize unrelated external-source
+  mutations. Preserve the documented SQLite deployment boundary until any
+  additional database-specific behavior has its own verification.
+
+Before implementation, settle the encryption and confirmation contracts:
+
+- Source URLs, saved upstream credentials and preview configurations need
+  encryption at rest with a defined key/backup/restore boundary. Keep this key
+  separate from subscriber TOTP secrets. Missing keys for existing ciphertext
+  must fail closed without generating a replacement or overwriting the data;
+  `certificate_vault.py` provides an existing missing-key safety pattern.
+- Preview is read-only for the usable node snapshot. Its diff must describe
+  updates to existing credentials and missing-node availability as well as new
+  nodes. Confirm applies the explicitly accepted diff atomically and stores a
+  repeatable receipt. The official refresh updates existing nodes before its
+  confirmation step; that behavior must not leak into a read-only preview here.
 
 ## Fetching and confirmation requirements
 

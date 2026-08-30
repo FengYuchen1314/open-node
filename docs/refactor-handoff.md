@@ -9,9 +9,11 @@
 控制面安装器、套餐计费、Agent 设置和管理员 MFA 已进入公开主线。管理员 MFA
 已通过后端和浏览器验收，公共探针 Worker 的匿名浏览器门槛也已通过。本轮面板远程
 Agent 安装已完成 VPS 验收，Agent 0.3.0a0 已公开发布；功能代码 `1515a7b` 和
-托管 CI 夹具修正 `a677280` 已进入主线。用户随后明确要求前端重写为标准 Ant Design，
-页面现已从 Vue/Vuetify 迁入 React，正在核验最后的布局修正和发布门槛，尚未发布重写版。生产实例保持原镜像，本轮没有
-升级生产。建议在新聊天中直接说明：
+托管 CI 夹具修正 `a677280` 已进入主线。用户要求的标准 Ant Design 前端重写
+已在 `50897f9` 进入主线：管理控制台、订阅门户和公共探针均已迁入 React，
+完整 CI、VPS 浏览器及精确提交的 Docker 验收通过。生产实例保持原镜像，本轮
+只发布源码，没有升级生产。下一项是外部订阅；通知、设置、备份与完整迁移仍未
+补齐。建议在新聊天中直接说明：
 
 > 请先阅读 `docs/refactor-handoff.md`、`docs/mmwx-source-parity.md` 和 `docs/testing.md`，核对公开主线、候选分支、VPS 隔离测试 checkout 和生产镜像四者的实际 revision。继续参考用户提供的四个固定官方仓库，不要把受限 Preview 首发等同于完整 MMWX 替代。测试、构建、浏览器和真实流量验收都在 `185.99.135.224` 的隔离候选环境运行，不动生产服务和数据库。公开 HTTPS、Cloudflare 账户部署与异地加密备份需操作者的实际输入，不能用本地通过替代外部验证。
 
@@ -19,8 +21,8 @@ Agent 安装已完成 VPS 验收，Agent 0.3.0a0 已公开发布；功能代码 
 
 - 项目名为 `open-node`，GitHub 仓库为 <https://github.com/FengYuchen1314/open-node>。
 - 只使用一个仓库，后端、Agent、前端、探针、运行时补丁、文档和测试脚本都在本仓库。
-- 后端保留 FastAPI。公开基线的前端仍是 Vue 3/Vuetify；当前优先任务是按用户要求
-  重写为 React、官方 Ant Design、Vite 和 TypeScript，不改已有 API 和部署架构。
+- 后端保留 FastAPI。前端已按用户要求重写为 React、官方 Ant Design、Vite 和
+  TypeScript；已有 API、会话契约和 Docker 部署架构不变。
 - 软件对所有人免费，不需要许可证、激活码、付费权限检查或商业许可证服务器。
 - `tajiaoyezi/miaomiaowuX` 固定提交
   `c12ce653bc07fe30426b7dfcb85076974b7be0e0` 是控制面业务的主要参考。
@@ -32,8 +34,8 @@ Agent 安装已完成 VPS 验收，Agent 0.3.0a0 已公开发布；功能代码 
 旧的百分比估算已经作废。当前状态必须以
 [`mmwx-source-parity.md`](mmwx-source-parity.md) 的固定源码矩阵和可执行发布门槛为准；
 套餐计费已按官方语义修正并验证，面板生成远程 Agent 安装命令也已实现。
-外部订阅、通知、完整迁移和应用内备份恢复仍有缺口。先完成 Ant Design 重写及全量
-回归，再继续功能补齐。外部订阅的官方源码接点和首期范围见
+外部订阅、通知、完整迁移和应用内备份恢复仍有缺口。Ant Design 重写与全量
+回归已经完成，接下来补齐外部订阅。其官方源码接点和首期范围见
 [`external-subscriptions-plan.md`](external-subscriptions-plan.md)，该文件只是待实现方案。
 这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
 单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
@@ -44,9 +46,9 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 | 项目 | 当前状态 |
 | --- | --- |
-| GitHub `main` | 已快进至 `a677280ece64a71d7ee4e8c4f0720cd819bcf584`，含面板 Agent 安装和托管 CI 夹具修正；后续只含文档的提交不改变该功能基线 |
-| 当前候选 | `codex/mmwx-parity-release-candidate`；`a677280` 的 GitHub run `33325869097` 四个 job 全部成功。React/Ant Design 工作树尚未提交，不属于该 CI 结果 |
-| VPS 隔离候选 | 共享 `/opt/open-node/mmwx-parity-candidate` 保留 clean `6ca84e2`；安装器修正版独立 clean clone 为 `/tmp/open-node-bootstrap-owner-fix.ZBzZ9ILY/source`，精确 `a677280`。React 重写在 `/tmp/open-node-react-migration.FKBP3cm0` 验证，不能混用两者的结果或生产数据库 |
+| GitHub `main` | 已包含 React/Ant Design 功能提交 `50897f928226c9fef2ab7d0f68de0c3aad46156a`，以及此前的面板 Agent 安装和托管 CI 夹具修正；后续只含文档的提交不改变该功能基线 |
+| 当前候选 | `codex/mmwx-parity-release-candidate`；精确 `50897f9` 的 GitHub run `33330624705` 四个 job 全部成功。后续文档提交与该功能测试分开记录 |
+| VPS 隔离候选 | 共享 `/opt/open-node/mmwx-parity-candidate` 保留 clean `6ca84e2`；最终 React 完整回归在 `/tmp/open-node-react-release.xaSu8WDc/source`。GitHub 精确 `50897f9` 的干净构建及 Docker 复验在 `/root/open-node-react-commit-50897.0MDZIwd3/source`，两份前端产物逐字节一致；不混用生产数据库 |
 | VPS 生产源码 | `/opt/open-node`，`27ad431dd97670076d532efa461745ac9576ee2a`；源码、公开主线和运行镜像不是同一个 revision，不要混为一谈 |
 | 持久控制面 | Compose 服务 `open-node-open-node-1` healthy，绑定 `127.0.0.1:8000 -> 8080`；数据卷为 `open-node_data` |
 | 精确部署镜像 | `open-node:cb1eb0c`；image ID `sha256:2d5f340b6c84eedf2d0f0aa64938d5560ee11da444b9e5e917748a575ecfb0d3`；OCI revision label 为完整 `cb1eb0c` SHA |
@@ -68,7 +70,8 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 ### 基础、授权和安全
 
-- 单仓库工程结构、FastAPI/Vue/Vuetify 基础、Docker 单镜像和 Compose 部署已完成。
+- 单仓库工程结构、FastAPI 后端、React/官方 Ant Design 前端、Docker 单镜像和
+  Compose 部署已完成；Vue/Vuetify 代码和依赖已经移除。
 - `cb1eb0c` 精确镜像已经切换到私有持久卷和 loopback 端口，由 enabled/active 的
   `open-node-compose.service` 托管；backup、restart、Compose down/up 和隔离恢复
   均已验收。
@@ -127,28 +130,24 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 - DNS-01、EAB、HTTP-01 standalone/webroot、远端 Agent challenge、PEM 导入、续期、吊销和 Agent 部署已完成。
 - 已用 Pebble/EAB、真实 Nginx、HTTPS/WSS 和短周期自动续期完成实机验证。
-- 公共 probe API、WebSocket、历史序列、筛选、比较、流量热点、健康评分、回程路由和 Vue 可视化已完成。
+- 公共 probe API、WebSocket、历史序列、筛选、比较、流量热点、健康评分、回程路由和 React 可视化已完成。
 - 管理控制台和订阅门户已做桌面与窄屏浏览器检查，主要工作流可用。
 
 更细的功能清单在 [`migration-map.md`](migration-map.md)，各功能的安全边界和复现方式在同目录专题文档中。
 
 ## 最新候选验证（2026-08-30/31）
 
-`a677280` 已通过独立 clean-checkout GitHub CI：后端 **1,253 passed**、Agent
-**605 passed**、前端 **268 tests / 37 files**、Worker **5 tests** 及双产物构建。
-首个功能提交的 CI 在 host 安装夹具中误用 runner 的 `/opt`，导致权限预检失败；
-修正只将测试安装基目录隔离并明确 fixture 权限，生产默认仍为 `/opt`，路径安全
-检查未放宽。VPS 另有 **323** 项专项测试、`nobody`/`umask 0002` 下 **124** 项
-安装器测试，以及精确修正版安装字节的真实 WebSocket/HTTP 安装复验通过。
+精确功能提交 `50897f928226c9fef2ab7d0f68de0c3aad46156a` 的
+[GitHub run 33330624705](https://github.com/FengYuchen1314/open-node/actions/runs/33330624705)
+四个 job 全部成功：后端 **1,253 passed**（618.73 秒）、Agent **605 passed**
+（10.67 秒）、前端 **509 tests / 63 files**（535.20 秒）、Worker **5 tests**
+（164.53 毫秒）。Ruff、Agent wheel、前端类型检查和双产物、Worker 类型检查
+均通过；只有已知的 Starlette/httpx 弃用警告。后续文档提交不是这次 CI 的运行对象。
 
-以上前端数量对应已发布的 Vue 基线，不是正在重写的 React 界面。新界面的页面迁移、
-类型检查、真实 Ant Design DOM 测试和双产物/浏览器验收单独记录，尚不能据旧结果
-宣称重写完成。
-
-### React / Ant Design 验收候选（尚未发布）
+### React / Ant Design 已发布源码
 
 所有页面已迁入 `frontend/src/react`，入口为 `src/main.tsx` 和
-`public-probe/main.tsx`。工作树已移除 Vue/Vuetify 代码及依赖，旧版可从 Git
+`public-probe/main.tsx`。主线已移除 Vue/Vuetify 代码及依赖，旧版可从 Git
 恢复；保留 FastAPI、API/会话契约和 Docker 单镜像。依赖为 React 19.2.7、
 Ant Design 6.6.2 和 icons 6.3.2，架构及验收边界见 [`frontend.md`](frontend.md)。
 
@@ -163,8 +162,10 @@ Ant Design 6.6.2 和 icons 6.3.2，架构及验收边界见 [`frontend.md`](fron
 最终工作源在 `/tmp/open-node-react-release.xaSu8WDc/source`，双产物构建通过，
 资产包 SHA-256 为
 `da85b9cc62b5d78dfae10dbb2f85d3d4ff79e935514f894c67761eabfc64fb4c`。
-相对该全量测试，产品仅追加四个组件的布局修正，分别有专项单测或实机回归；
-最终源的完整测试仍在执行，完成后应在此记录实际结果，不能推定通过。
+相对第一轮全量测试，产品仅追加四个组件的布局修正，分别有专项单测或实机回归；
+最终源随后完成第二次全量回归：同样 **509/509、63 个文件，638.05 秒**，
+无未处理错误。提交后的 GitHub CI 与 VPS 全量回归是独立运行，不能把测试数
+相加，也不能用旧 Vue CI 代替。
 
 最终源的管理员操作、MFA 和订阅账户双通道浏览器流程已通过。Docker 另验证了
 39 个文件的三方哈希、深链/404、三种屏宽登录及重启后原会话和数据保留，报告为
@@ -175,11 +176,30 @@ Ant Design 6.6.2 和 icons 6.3.2，架构及验收边界见 [`frontend.md`](fron
 26.3.27 验证标准 VLESS，不能据此将扩展协议算作官方内核支持。精确目录和
 不同构建的归属见 [`testing.md`](testing.md)，不要把分批测试数相加。
 
+随后从 GitHub 干净检出精确 `50897f9`，重新安装依赖并构建，两份产物共
+**42 个文件**与最终包逐字节一致。使用纯 Git 归档另建 Docker 镜像，完整 OCI
+revision 为 `50897f928226c9fef2ab7d0f68de0c3aad46156a`，再次通过资源、路由、
+三种屏宽登录、原会话及数据重启保留和八项清理安全负控。最终归属报告：
+`/root/open-node-react-commit-50897.0MDZIwd3/source-proof.json`，SHA-256 为
+`ff6cc9c18e7507f7311493ee94776b9489d7c1aea4357654fa48c8a7a4004a04`。
+镜像仅留作验证；测试容器和卷已清理，未用于升级生产。
+
 最终公共 Probe 的 JS/CSS 与已通过真实 Worker、匿名请求、断线重连和三种
 主题的包逐字相同，报告仍在
 `/tmp/open-node-react-browser.NyIq0V6p/public-probe-theme/report.json`。
 独立只读复核未发现本轮会话、MFA、异步 scope 或公共请求边界的新安全阻断。
-生产仍是 `open-node:cb1eb0c`，共享候选仍保留 clean `6ca84e2`；重写源码尚未进入主线。
+生产仍是 `open-node:cb1eb0c`，共享候选仍保留 clean `6ca84e2`；重写源码已进入
+主线，但这不代表四个官方仓库的全部功能已经对等。
+
+### 前一批 Agent 安装器验证（历史记录）
+
+`a677280` 已通过独立 clean-checkout GitHub CI：后端 **1,253 passed**、Agent
+**605 passed**、当时的 Vue 前端 **268 tests / 37 files**、Worker **5 tests**
+及双产物构建。首个安装功能提交的 CI 在 host 安装夹具中误用 runner 的 `/opt`，
+导致权限预检失败；修正只将测试安装基目录隔离并明确 fixture 权限，生产默认仍为
+`/opt`，路径安全检查未放宽。VPS 另有 **323** 项专项测试、
+`nobody`/`umask 0002` 下 **124** 项安装器测试，以及精确修正版安装字节的真实
+WebSocket/HTTP 安装复验通过。这些历史结果不能替代上方 React 验收。
 
 本轮安装功能的完整后端回归为 **1,250 passed**（694.29 秒）。提交后核对了
 `1515a7b` 的全部 142 个后端 tracked 文件，共 2,201,738 字节，与该回归源树和
@@ -366,6 +386,7 @@ ssh root@185.99.135.224 "git -C /opt/open-node status --short; git -C /opt/open-
 从新到旧的主要里程碑：
 
 ```text
+50897f9 feat(frontend): migrate console and portal to React and Ant Design
 a677280 Isolate Agent bootstrap ownership fixtures from hosted runner paths
 1515a7b Add pinned panel-issued Agent bootstrap with single-host tickets
 4749a12 Record verified MFA and Probe publication in project handoff
