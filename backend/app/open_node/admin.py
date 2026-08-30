@@ -23,7 +23,10 @@ def main() -> None:
     except ValidationError:
         parser.exit(1, "Use a 1-64 character username and a 12-1024 character password\n")
     try:
-        AuthStore(get_settings().database_url).set_administrator(
+        settings = get_settings()
+        AuthStore(
+            settings.database_url, settings.subscriber_totp_key, settings.app_name
+        ).set_administrator(
             credentials.username,
             credentials.password.get_secret_value(),
             reset=args.action == "reset-password",

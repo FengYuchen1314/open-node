@@ -7,6 +7,27 @@ export interface OperatorSession {
   csrf_token: string | null;
 }
 
+export interface AdministratorTotpEnrollment {
+  secret: string;
+  provisioning_uri: string;
+  expires_at: string;
+}
+
+export interface OperatorLogin extends OperatorSession {
+  requires_2fa: boolean;
+  challenge: string | null;
+  enrollment_required: boolean;
+  enrollment: AdministratorTotpEnrollment | null;
+  recovery_codes: string[];
+}
+
+export interface AdministratorSecurity {
+  totp_enabled: boolean;
+  totp_available: boolean;
+  recovery_codes_remaining: number;
+  require_totp: boolean;
+}
+
 export const authState = reactive({
   ready: false,
   error: "",
@@ -48,7 +69,29 @@ export async function signIn(username: string, password: string, fetcher = fetch
   const response = await authRequest("login", {
     method: "POST", body: JSON.stringify({ username, password }),
   }, fetcher);
-  authState.session = await response.json() as OperatorSession;
+  const result = await response.json() as OperatorLogin;
+  if (result.authenticated) acceptOperatorSession(result);
+  else clearSession();
+  return result;
+}
+
+export async function verifySignIn(challenge: string, code: string, fetcher = fetch) {
+  const response = await authRequest("login/verify", {
+    method: "POST", body: JSON.stringify({ challenge, code }),
+  }, fetcher);
+  const result = await response.json() as OperatorLogin;
+  if (result.authenticated && result.recovery_codes.length === 0) acceptOperatorSession(result);
+  return result;
+}
+
+export function acceptOperatorSession(session: OperatorLogin) {
+  if (!session.authenticated) throw new Error("Authentication is incomplete");
+  authState.session = {
+    configured: session.configured,
+    authenticated: session.authenticated,
+    username: session.username,
+    csrf_token: session.csrf_token,
+  };
 }
 
 function clearSession() {
@@ -65,6 +108,45 @@ export async function changePassword(currentPassword: string, newPassword: strin
     method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   }, fetcher);
   clearSession();
+}
+
+export async function administratorSecurity(fetcher = fetch) {
+  const response = await authRequest("security", {}, fetcher);
+  return await response.json() as AdministratorSecurity;
+}
+
+export async function beginAdministratorTotp(password: string, fetcher = fetch) {
+  const response = await authRequest("totp/setup", {
+    method: "POST", body: JSON.stringify({ password, code: "" }),
+  }, fetcher);
+  return await response.json() as AdministratorTotpEnrollment;
+}
+
+export async function confirmAdministratorTotp(code: string, fetcher = fetch) {
+  const response = await authRequest("totp/confirm", {
+    method: "POST", body: JSON.stringify({ code }),
+  }, fetcher);
+  return (await response.json() as { recovery_codes: string[] }).recovery_codes;
+}
+
+export async function disableAdministratorTotp(password: string, code: string, fetcher = fetch) {
+  await authRequest("totp/disable", {
+    method: "POST", body: JSON.stringify({ password, code }),
+  }, fetcher);
+}
+
+export async function regenerateAdministratorRecoveryCodes(password: string, code: string, fetcher = fetch) {
+  const response = await authRequest("totp/recovery-codes", {
+    method: "POST", body: JSON.stringify({ password, code }),
+  }, fetcher);
+  return (await response.json() as { recovery_codes: string[] }).recovery_codes;
+}
+
+export async function updateAdministratorTotpPolicy(required: boolean, password: string, code: string, fetcher = fetch) {
+  const response = await authRequest("security/policy", {
+    method: "PUT", body: JSON.stringify({ required, password, code }),
+  }, fetcher);
+  return await response.json() as AdministratorSecurity;
 }
 
 export const authenticatedFetch: typeof fetch = async (input, init = {}) => {

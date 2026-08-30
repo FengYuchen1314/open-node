@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import AdministratorSecurityPanel from "../components/AdministratorSecurityPanel.vue";
 import { authState, changePassword } from "../services/auth";
 import { getAgentIdentity } from "../services/inventory";
 import type { AgentIdentityInfo } from "../domain/inventory";
@@ -75,6 +76,7 @@ async function submit() {
       <v-text-field v-model="confirmation" label="Confirm new password" type="password" autocomplete="new-password" required minlength="12" maxlength="1024" :disabled="busy" />
       <v-btn type="submit" color="primary" prepend-icon="mdi-lock-reset" :loading="busy" :disabled="!currentPassword || newPassword.length < 12 || !confirmation">Change Password</v-btn>
     </form>
+    <AdministratorSecurityPanel />
     <section class="agent-identity">
       <header class="identity-heading">
         <h2 class="section-title">Legacy Agent identity</h2>

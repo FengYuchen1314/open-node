@@ -87,7 +87,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def secret_request(request):
         return subscriber_request(request) or request.url.path.startswith(
-            active_settings.api_prefix + "/migrations/mmwx/"
+            (
+                active_settings.api_prefix + "/migrations/mmwx/",
+                active_settings.api_prefix + "/auth/",
+            )
         )
 
     @app.middleware("http")
@@ -151,7 +154,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = active_settings
     app.state.agent_identity = identity
-    app.state.auth = AuthStore(active_settings.database_url)
+    app.state.auth = AuthStore(
+        active_settings.database_url,
+        active_settings.subscriber_totp_key,
+        active_settings.app_name,
+    )
     app.state.inventory = InventoryStore(
         active_settings.database_url,
         short_links_enabled=active_settings.short_links_enabled,

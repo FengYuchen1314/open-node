@@ -3,8 +3,26 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from open_node.api.auth import SESSION_COOKIE, check_request_origin, require_administrator
-from open_node.domain.auth import LoginRequest, PasswordChangeRequest, SessionResponse
-from open_node.services.auth import SessionIdentity
+from open_node.domain.auth import (
+    AdministratorCode,
+    AdministratorPolicyUpdate,
+    AdministratorProof,
+    AdministratorRecoveryCodes,
+    AdministratorSecurityRead,
+    AdministratorTotpEnrollment,
+    LoginRequest,
+    LoginResponse,
+    LoginSecondFactorRequest,
+    PasswordChangeRequest,
+    SessionResponse,
+)
+from open_node.services.auth import (
+    AdministratorAuthenticationError,
+    AdministratorFactorUnavailable,
+    AdministratorSecurityConflict,
+    AuthenticationResult,
+    SessionIdentity,
+)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -15,6 +33,65 @@ def rate_limit(request: Request) -> None:
         raise HTTPException(
             429, "Too many attempts; try again shortly", headers={"Retry-After": "60"}
         )
+
+
+def login_request(request: Request) -> None:
+    check_request_origin(request)
+    if request.headers.get("x-open-node-client") != "browser":
+        raise HTTPException(403, "Explicit login request header required")
+    rate_limit(request)
+
+
+def invoke(function, *args, login: bool = False, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except AdministratorAuthenticationError as exc:
+        raise HTTPException(401 if login else 400, str(exc)) from exc
+    except AdministratorSecurityConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except AdministratorFactorUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+def set_session_cookie(request: Request, response: Response, result: AuthenticationResult) -> None:
+    if not result.token or not result.identity:
+        raise HTTPException(500, "Authentication session was not issued")
+    previous = request.cookies.get(SESSION_COOKIE)
+    if previous:
+        request.app.state.auth.logout(previous)
+    settings = request.app.state.settings
+    response.set_cookie(
+        SESSION_COOKIE,
+        result.token,
+        max_age=settings.session_lifetime_seconds,
+        secure=settings.session_cookie_secure,
+        httponly=True,
+        samesite="strict",
+        path="/",
+    )
+
+
+def login_response(result: AuthenticationResult) -> LoginResponse:
+    enrollment = (
+        AdministratorTotpEnrollment(
+            secret=result.enrollment.secret,
+            provisioning_uri=result.enrollment.provisioning_uri,
+            expires_at=result.enrollment.expires_at,
+        )
+        if result.enrollment
+        else None
+    )
+    return LoginResponse(
+        configured=True,
+        authenticated=bool(result.token and result.identity),
+        username=result.identity.username if result.identity else None,
+        csrf_token=result.identity.csrf_token if result.identity else None,
+        requires_2fa=bool(result.challenge),
+        challenge=result.challenge,
+        enrollment_required=bool(result.enrollment),
+        enrollment=enrollment,
+        recovery_codes=list(result.recovery_codes),
+    )
 
 
 @router.get("/session", response_model=SessionResponse)
@@ -32,42 +109,42 @@ def get_session(request: Request, response: Response) -> SessionResponse:
     )
 
 
-@router.post("/login", response_model=SessionResponse)
-def login(payload: LoginRequest, request: Request, response: Response) -> SessionResponse:
-    check_request_origin(request)
-    if request.headers.get("x-open-node-client") != "browser":
-        raise HTTPException(403, "Explicit login request header required")
-    rate_limit(request)
+@router.post("/login", response_model=LoginResponse)
+def login(payload: LoginRequest, request: Request, response: Response) -> LoginResponse:
+    login_request(request)
     settings = request.app.state.settings
-    result = request.app.state.auth.login(
+    result = invoke(
+        request.app.state.auth.login,
         payload.username,
         payload.password.get_secret_value(),
         settings.session_lifetime_seconds,
+        login=True,
     )
     if not result:
         raise HTTPException(
             401, "Invalid username or password", headers={"Cache-Control": "no-store"}
         )
-    token, identity = result
-    previous = request.cookies.get(SESSION_COOKIE)
-    if previous:
-        request.app.state.auth.logout(previous)
-    response.set_cookie(
-        SESSION_COOKIE,
-        token,
-        max_age=settings.session_lifetime_seconds,
-        secure=settings.session_cookie_secure,
-        httponly=True,
-        samesite="strict",
-        path="/",
-    )
+    if result.token:
+        set_session_cookie(request, response, result)
     response.headers["Cache-Control"] = "no-store"
-    return SessionResponse(
-        configured=True,
-        authenticated=True,
-        username=identity.username,
-        csrf_token=identity.csrf_token,
+    return login_response(result)
+
+
+@router.post("/login/verify", response_model=LoginResponse)
+def verify_login(
+    payload: LoginSecondFactorRequest, request: Request, response: Response
+) -> LoginResponse:
+    login_request(request)
+    result = invoke(
+        request.app.state.auth.complete_login,
+        payload.challenge.get_secret_value(),
+        payload.code.get_secret_value(),
+        request.app.state.settings.session_lifetime_seconds,
+        login=True,
     )
+    set_session_cookie(request, response, result)
+    response.headers["Cache-Control"] = "no-store"
+    return login_response(result)
 
 
 @router.post("/logout", status_code=204, dependencies=[Depends(require_administrator)])
@@ -102,3 +179,96 @@ def change_password(
         httponly=True,
         samesite="strict",
     )
+
+
+@router.get("/security", response_model=AdministratorSecurityRead)
+def security(
+    request: Request,
+    identity: Annotated[SessionIdentity, Depends(require_administrator)],
+) -> AdministratorSecurityRead:
+    del identity
+    return AdministratorSecurityRead(**request.app.state.auth.security().__dict__)
+
+
+@router.post("/totp/setup", response_model=AdministratorTotpEnrollment)
+def setup_totp(
+    payload: AdministratorProof,
+    request: Request,
+    identity: Annotated[SessionIdentity, Depends(require_administrator)],
+) -> AdministratorTotpEnrollment:
+    del identity
+    rate_limit(request)
+    result = invoke(
+        request.app.state.auth.begin_totp,
+        request.cookies[SESSION_COOKIE],
+        payload.password.get_secret_value(),
+    )
+    return AdministratorTotpEnrollment(**result.__dict__)
+
+
+@router.post("/totp/confirm", response_model=AdministratorRecoveryCodes)
+def confirm_totp(
+    payload: AdministratorCode,
+    request: Request,
+    identity: Annotated[SessionIdentity, Depends(require_administrator)],
+) -> AdministratorRecoveryCodes:
+    del identity
+    rate_limit(request)
+    codes = invoke(
+        request.app.state.auth.confirm_totp,
+        request.cookies[SESSION_COOKIE],
+        payload.code.get_secret_value(),
+    )
+    return AdministratorRecoveryCodes(recovery_codes=list(codes))
+
+
+@router.post("/totp/disable", status_code=204)
+def disable_totp(
+    payload: AdministratorProof,
+    request: Request,
+    identity: Annotated[SessionIdentity, Depends(require_administrator)],
+) -> None:
+    del identity
+    rate_limit(request)
+    invoke(
+        request.app.state.auth.update_totp,
+        request.cookies[SESSION_COOKIE],
+        payload.password.get_secret_value(),
+        payload.code.get_secret_value(),
+        disable=True,
+    )
+
+
+@router.post("/totp/recovery-codes", response_model=AdministratorRecoveryCodes)
+def recovery_codes(
+    payload: AdministratorProof,
+    request: Request,
+    identity: Annotated[SessionIdentity, Depends(require_administrator)],
+) -> AdministratorRecoveryCodes:
+    del identity
+    rate_limit(request)
+    codes = invoke(
+        request.app.state.auth.update_totp,
+        request.cookies[SESSION_COOKIE],
+        payload.password.get_secret_value(),
+        payload.code.get_secret_value(),
+    )
+    return AdministratorRecoveryCodes(recovery_codes=list(codes))
+
+
+@router.put("/security/policy", response_model=AdministratorSecurityRead)
+def update_security_policy(
+    payload: AdministratorPolicyUpdate,
+    request: Request,
+    identity: Annotated[SessionIdentity, Depends(require_administrator)],
+) -> AdministratorSecurityRead:
+    del identity
+    rate_limit(request)
+    result = invoke(
+        request.app.state.auth.update_policy,
+        request.cookies[SESSION_COOKIE],
+        payload.password.get_secret_value(),
+        payload.code.get_secret_value(),
+        payload.required,
+    )
+    return AdministratorSecurityRead(**result.__dict__)
