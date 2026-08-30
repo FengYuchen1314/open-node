@@ -86,7 +86,7 @@ def _validate_agent_url(value: str) -> str:
             "master_url cannot contain credentials, query parameters, or fragments"
         )
     try:
-        parsed.port
+        _ = parsed.port
     except ValueError:
         raise ValueError("master_url contains an invalid port") from None
     return normalized

@@ -3,10 +3,9 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-from sqlalchemy import text, update
-
 from open_node.domain.inventory import AgentCapabilities
 from open_node.services.inventory import CommandModel
+from sqlalchemy import text, update
 from test_inventory import make_client, register_xray_config_workspace
 
 
