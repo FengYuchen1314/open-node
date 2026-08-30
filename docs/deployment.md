@@ -35,6 +35,12 @@ On a new Debian or Ubuntu Docker host, run:
 )
 ```
 
+The anonymous Raw URL and public `main` clone were validated on 2026-08-30 in an
+unused Debian 12 VPS namespace. The release check covered fresh installation,
+administrator API login, status, same-revision update, data-preserving uninstall,
+and exact fixture cleanup. The separate maintainer smoke covers rollback and
+failure injection as described below.
+
 Downloading to a temporary file first prevents a partial transfer from being
 executed as a shell program and leaves the terminal on standard input. It does
 not authenticate the download. The URL follows mutable `main`, and the script

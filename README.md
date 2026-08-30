@@ -68,17 +68,19 @@ deployment: the production hostname, DNS, trusted certificate, and public
 reverse-proxy configuration still require operator input. Remaining migration
 boundaries still apply; this is not yet full MMWX parity.
 
-The root installer is still a release candidate: at the parity audit recorded in
-the source matrix, public `main` did not contain `install.sh`, and the Raw GitHub
-URL below returned 404. Do not treat it as a working one-click deployment until
-the script is published and the anonymous-URL installer smoke passes.
+The root installer is published on `main`. On 2026-08-30, the anonymous Raw
+GitHub URL below was downloaded on the Debian 12 VPS and passed isolated fresh
+installation, administrator API login, status, same-revision update, uninstall,
+data-preservation, and cleanup checks. The maintainer smoke also passed backup
+restore, interrupted update, unhealthy candidate, rollback identity, ownership
+drift, and missing-volume scenarios.
 
-After that release gate passes, a new Debian/Ubuntu Docker host can use the root
-installer. It uses Docker Compose v2,
-clones the requested clean ref, builds a transaction-unique image, creates a
-private environment and installer manifest, starts the service, verifies the
-exact image, binding and `/healthz`, and can create the first administrator.
-The intended public command downloads the script completely before running it:
+A new Debian/Ubuntu Docker host can use the root installer. It uses Docker
+Compose v2, clones the requested clean ref, builds a transaction-unique image,
+creates a private environment and installer manifest, starts the service,
+verifies the exact image, binding and `/healthz`, and can create the first
+administrator.
+The public command downloads the script completely before running it:
 
 ```bash
 (

@@ -24,10 +24,10 @@ record new commit IDs instead of silently comparing moving branches.
 
 | Priority | Area | Source-confirmed result | Release condition |
 | --- | --- | --- | --- |
-| P0 | GitHub installer | `install.sh` is only a local candidate; the documented `raw.githubusercontent.com/.../main/install.sh` URL returns 404 at the audited public `main` commit. | Commit and publish the installer, then install from the anonymous public URL on a fresh VPS and pass rollback/uninstall checks. |
-| P0 | Public probe Worker | Published code ships the authenticated administrator SPA. This candidate adds a probe-only bundle, credential-stripping Worker boundary, interval polling and WebSocket reconnect, but it has not passed the release smoke yet. | Publish the probe-only bundle and pass anonymous Worker asset/API/WebSocket browser smoke. |
-| P0/P1 | Package accounting | Candidate now freezes each telemetry delta using the reporting node multiplier and reference-compatible package factors: `oneway` x1, `twoway` x2, both over upload plus download. Raw directions remain separately auditable. | Pass ledger epoch/reset, plan-edit freeze, SQLite backfill, archive preservation and public-header tests on the isolated VPS. |
-| P1 | Agent settings | Four high-level routes were queueable while Open Node Agent returned 501. | Capability-gate all four routes; implement authenticated master probe/update; keep unsupported inbound-port and embedded-runtime switching disabled. |
+| P0 | GitHub installer | Published on public `main`; the anonymous Raw URL passed isolated installation, administrator login, status, no-op update, data-preserving uninstall and cleanup on 2026-08-30. The maintainer smoke passed rollback and injected-failure scenarios. | Passed for the documented single-host Docker/SQLite scope. Public DNS/TLS and remote Agent installation remain separate work. |
+| P0 | Public probe Worker | Public `main` now ships a probe-only bundle, credential-stripping Worker boundary, interval polling and WebSocket reconnect. Unit tests, typecheck and the probe build pass; anonymous Worker asset/API/WebSocket browser smoke is still pending. | Pass anonymous Worker asset/API/WebSocket browser smoke. |
+| P0/P1 | Package accounting | Each telemetry delta is frozen using the reporting node multiplier and reference-compatible package factors: `oneway` x1, `twoway` x2, both over upload plus download. Raw directions remain separately auditable. | Passed ledger epoch/reset, plan-edit freeze, SQLite backfill, archive preservation and public-header tests on the isolated VPS. |
+| P1 | Agent settings | All four high-level routes are capability-gated. Authenticated master probe/update is implemented; unsupported inbound-port and embedded-runtime switching stay disabled. | Passed Agent tests and release gates for the implemented capability surface. |
 
 ## Control-plane modules
 
@@ -36,10 +36,10 @@ record new commit IDs instead of silently comparing moving branches.
 | Server/Agent inventory and telemetry | Implemented | DDNS, federation/server sharing, home speed tester and Reality sharing are absent. | P2, P1 for dependent migrations |
 | Durable Agent commands | Implemented and stronger than the reference in lease recovery, command journals, dependencies and reviewable change sets | Complete compatibility still depends on every advertised child route being executable. | P1 gate |
 | Xray/Nginx/WARP lifecycle | Implemented with explicit host ownership and rollback workflows | Remote Agent bootstrap from the panel is absent. | P1 |
-| Managed subscriptions | Users, plans, nodes, credentials, quota/reset, templates, profiles, temporary links, access reconciliation and source-compatible frozen accounting implemented in the candidate | External subscription/provider/rule/script ecosystem absent. | P1/P2 |
+| Managed subscriptions | Users, plans, nodes, credentials, quota/reset, templates, profiles, temporary links, access reconciliation and source-compatible frozen accounting implemented | External subscription/provider/rule/script ecosystem absent. | P1/P2 |
 | Subscription formats | Clash, Surge, sing-box, Xray, URI list and Base64 implemented | Loon, Quantumult X, Shadowrocket, Stash, Surfboard and Egern-specific output absent. | P2 individually, P1 as migration set |
 | Certificates | ACME account/EAB, DNS-01, HTTP-01, encrypted vault, versions, deployment and revocation implemented | One-click self-signed certificate and automatic control-plane Nginx/HTTPS takeover absent. | P2/P1 for public one-click scope |
-| Public probe data plane | Public servers/settings/series/targets/WebSocket, scheduled tasks and return routes implemented | Probe-only deployment, resilient polling/reconnect, theme/view parity and online IP data remain. | P0/P1 |
+| Public probe data plane | Public servers/settings/series/targets/WebSocket, scheduled tasks, return routes, probe-only build and resilient polling/reconnect implemented | Anonymous Worker browser smoke, theme/view parity and online IP data remain. | P0/P1 |
 | Subscriber security | Subscriber sessions, TOTP, recovery codes and device revocation implemented | Administrator MFA, multi-administrator RBAC, security events and IP-ban console absent. | P1 |
 | Setup/backup/database | CLI administrator creation and installer-level stopped-volume backup implemented | Browser setup, downloadable backup/restore, SQLite-to-PostgreSQL migration and application update UI absent. | P1 |
 | Notifications/renewals | Renewal metadata is displayed | Telegram, notification rules, renewal requests, threshold alerts and scheduler absent. | P1 |
@@ -80,7 +80,7 @@ infers missing capabilities.
 
 ## Deployment truth
 
-The candidate root installer targets a fresh Debian/Ubuntu host with Docker
+The published root installer targets a fresh Debian/Ubuntu host with Docker
 Compose and a single-node SQLite control plane. It does **not** install remote
 Agents/Xray, configure DNS, obtain a public TLS certificate, configure an edge
 reverse proxy, migrate a complete MMWX installation or provide PostgreSQL
