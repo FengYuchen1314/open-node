@@ -7,7 +7,15 @@ import { describe, expect, it } from "vitest";
 import ProbeView from "./ProbeView.vue";
 
 async function renderProbe(publicOnly: boolean) {
-  const app = createSSRApp({ render: () => h(ProbeView, { publicOnly }) });
+  const app = createSSRApp({
+    render: () =>
+      h(components.VApp, null, {
+        default: () =>
+          h(components.VMain, null, {
+            default: () => h(ProbeView, { publicOnly }),
+          }),
+      }),
+  });
   app.use(createVuetify({ components, ssr: true }));
   return renderToString(app);
 }
