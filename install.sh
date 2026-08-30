@@ -862,13 +862,11 @@ validate_candidate_compose() {
       "driver", "driver_opts", "enable_ipv4", "enable_ipv6", "external", "ipam",
       "labels", "name"
     ]) | length == 0)
-    and (
-      ((($service | keys) - [
-        "build", "cap_drop", "command", "entrypoint", "environment", "image", "init", "logging",
-        "networks", "ports", "pull_policy", "read_only", "restart",
-        "security_opt", "stop_grace_period", "tmpfs", "volumes"
-      ]) | length) == 0)
-    )
+    and ((($service | keys) - [
+      "build", "cap_drop", "command", "entrypoint", "environment", "image", "init", "logging",
+      "networks", "ports", "pull_policy", "read_only", "restart",
+      "security_opt", "stop_grace_period", "tmpfs", "volumes"
+    ]) | length == 0)
     and ($service.command == null)
     and ($service.entrypoint == null)
     and ($service.image == $expected_image)
