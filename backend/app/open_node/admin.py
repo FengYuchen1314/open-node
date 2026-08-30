@@ -33,7 +33,10 @@ def main() -> None:
         )
     except ValueError as exc:
         parser.exit(1, f"{exc}\n")
-    print("Administrator saved. Previous sessions were revoked.")
+    if args.action == "reset-password":
+        print("Administrator password reset. All sessions and two-factor settings were cleared.")
+    else:
+        print("Administrator created.")
 
 
 if __name__ == "__main__":

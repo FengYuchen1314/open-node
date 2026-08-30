@@ -19,6 +19,7 @@ from open_node.domain.auth import (
 from open_node.services.auth import (
     AdministratorAuthenticationError,
     AdministratorFactorUnavailable,
+    AdministratorRateLimited,
     AdministratorSecurityConflict,
     AuthenticationResult,
     SessionIdentity,
@@ -51,6 +52,8 @@ def invoke(function, *args, login: bool = False, **kwargs):
         raise HTTPException(409, str(exc)) from exc
     except AdministratorFactorUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
+    except AdministratorRateLimited as exc:
+        raise HTTPException(429, str(exc), headers={"Retry-After": "60"}) from exc
 
 
 def set_session_cookie(request: Request, response: Response, result: AuthenticationResult) -> None:

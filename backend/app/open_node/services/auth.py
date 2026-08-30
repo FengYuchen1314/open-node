@@ -138,6 +138,10 @@ class AdministratorSecurityConflict(ValueError):
     pass
 
 
+class AdministratorRateLimited(ValueError):
+    pass
+
+
 class AuthStore:
     def __init__(self, database_url: str, totp_key=None, app_name: str = "Open Node") -> None:
         self.engine = create_inventory_engine(database_url)
@@ -174,6 +178,7 @@ class AuthStore:
                 db.execute(delete(OperatorSession))
                 db.execute(delete(OperatorChallenge))
                 db.execute(delete(AdministratorFactor))
+                db.execute(delete(LoginWindow))
                 policy = db.get(AdministratorSecurityPolicy, 1)
                 if policy:
                     policy.require_totp = False
@@ -398,6 +403,7 @@ class AuthStore:
                 raise AdministratorAuthenticationError(
                     "Invalid or expired verification challenge"
                 )
+            self._consume_factor_attempt(db, administrator.id)
             row.attempts += 1
             recovery_codes: tuple[str, ...] = ()
             factor = self._factor_row(db, create=row.kind == "enroll")
@@ -427,6 +433,21 @@ class AuthStore:
                 identity=issued.identity,
                 recovery_codes=recovery_codes,
             )
+
+    def _consume_factor_attempt(self, db, administrator_id: int) -> None:
+        # The caller holds the administrator lock. Only a live, password-proven
+        # challenge can consume this budget; changing IP or challenge cannot reset it.
+        key = self._digest(f"administrator:second-factor:{administrator_id}")
+        now = time()
+        window = db.scalar(select(LoginWindow).where(LoginWindow.key == key).with_for_update())
+        if window is None:
+            db.add(LoginWindow(key=key, attempts=1, expires_at=now + 60))
+        elif window.expires_at <= now:
+            window.attempts, window.expires_at = 1, now + 60
+        elif window.attempts >= 10:
+            raise AdministratorRateLimited("Too many verification attempts; try again shortly")
+        else:
+            window.attempts += 1
 
     def authenticate(self, token: str | None, idle_seconds: int) -> SessionIdentity | None:
         if not token or len(token) > 128:

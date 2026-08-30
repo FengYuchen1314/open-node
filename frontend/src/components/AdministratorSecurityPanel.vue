@@ -154,7 +154,7 @@ onMounted(load);
 
     <v-dialog :model-value="!!mode" max-width="620" persistent>
       <v-card>
-        <v-card-title>{{ title }}</v-card-title>
+        <v-card-title class="security-title">{{ title }}</v-card-title>
         <v-card-text class="security-dialog">
           <v-alert v-if="error" type="error" variant="tonal">{{ error }}</v-alert>
           <template v-if="recoveryCodes.length">
@@ -176,7 +176,7 @@ onMounted(load);
             <v-alert v-if="mode === 'recovery'" type="warning" variant="tonal">Generating new codes invalidates every existing recovery code and revokes other sessions.</v-alert>
             <v-alert v-if="mode === 'policy'" type="info" variant="tonal">Confirm this policy change with the administrator password and a current authenticator or recovery code.</v-alert>
             <v-text-field v-if="!enrollment" v-model="password" label="Current password" type="password" autocomplete="current-password" required maxlength="1024" :disabled="busy" />
-            <v-text-field v-if="enrollment || mode !== 'enroll'" v-model="code" label="Authenticator or recovery code" autocomplete="one-time-code" :inputmode="enrollment ? 'numeric' : 'text'" required maxlength="64" :disabled="busy" />
+            <v-text-field v-if="enrollment || mode !== 'enroll'" v-model="code" :label="enrollment ? 'Authenticator code' : 'Authenticator or recovery code'" autocomplete="one-time-code" :inputmode="enrollment ? 'numeric' : 'text'" required maxlength="64" :disabled="busy" />
           </template>
         </v-card-text>
         <v-card-actions>
@@ -199,6 +199,7 @@ onMounted(load);
 .security-row h3 { font-size: 15px; margin: 0; }
 .security-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; }
 .security-dialog { display: grid; gap: 14px; }
+.security-title { white-space: normal; overflow-wrap: anywhere; }
 .totp-qr { justify-self: center; max-width: 100%; height: auto; aspect-ratio: 1; }
 .recovery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
 .recovery-grid code { overflow-wrap: anywhere; }

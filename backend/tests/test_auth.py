@@ -18,6 +18,8 @@ from open_node.services.auth import (
     Administrator,
     AdministratorAuthenticationError,
     AdministratorFactor,
+    AdministratorFactorUnavailable,
+    AdministratorSecurityConflict,
     AdministratorSecurityPolicy,
     OperatorChallenge,
     OperatorSession,
@@ -269,10 +271,11 @@ def test_required_administrator_totp_enrolls_before_session_issue(tmp_path: Path
 def test_administrator_factor_challenge_and_totp_are_not_replayable(tmp_path: Path, monkeypatch):
     fixed_time = 1_800_000_000
     monkeypatch.setattr(auth, "time", lambda: fixed_time)
+    key = Fernet.generate_key().decode()
     app = create_app(
         Settings(
             database_url=f"sqlite:///{tmp_path / 'auth.db'}",
-            subscriber_totp_key=Fernet.generate_key().decode(),
+            subscriber_totp_key=key,
         )
     )
     store = app.state.auth
@@ -284,14 +287,16 @@ def test_administrator_factor_challenge_and_totp_are_not_replayable(tmp_path: Pa
     with pytest.raises(AdministratorAuthenticationError, match="Invalid verification code"):
         store.complete_login(challenge, pyotp.TOTP(enrollment.secret).at(fixed_time), 43200)
 
-    def complete():
+    restarted = auth.AuthStore(f"sqlite:///{tmp_path / 'auth.db'}", key)
+
+    def complete(target):
         try:
-            return store.complete_login(challenge, codes[0], 43200)
+            return target.complete_login(challenge, codes[0], 43200)
         except AdministratorAuthenticationError:
             return None
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda _: complete(), range(2)))
+        results = list(pool.map(complete, (store, restarted)))
     assert sum(result is not None for result in results) == 1
     assert sum(result is not None and result.token is not None for result in results) == 1
 
@@ -316,6 +321,116 @@ def test_administrator_enrollment_requires_key_and_policy_requires_factor(tmp_pa
     )
     assert policy.status_code == 409
     assert client.get("/api/v1/auth/security").json()["require_totp"] is False
+
+
+def test_administrator_challenge_attempt_limit_persists_across_restart(tmp_path: Path):
+    key = Fernet.generate_key().decode()
+    url = f"sqlite:///{tmp_path / 'auth.db'}"
+    store = auth.AuthStore(url, key)
+    store.set_administrator("admin", ADMIN_PASSWORD)
+    session = store.login("admin", ADMIN_PASSWORD, 43200)
+    enrollment = store.begin_totp(session.token, ADMIN_PASSWORD)
+    codes = store.confirm_totp(session.token, pyotp.TOTP(enrollment.secret).now())
+    challenge = store.login("admin", ADMIN_PASSWORD, 43200).challenge
+    for _ in range(5):
+        with pytest.raises(AdministratorAuthenticationError, match="Invalid verification code"):
+            store.complete_login(challenge, "invalid-code", 43200)
+    restarted = auth.AuthStore(url, key)
+    with pytest.raises(AdministratorAuthenticationError, match="expired"):
+        restarted.complete_login(challenge, codes[0], 43200)
+    fresh = restarted.login("admin", ADMIN_PASSWORD, 43200).challenge
+    assert restarted.complete_login(fresh, codes[0], 43200).token
+
+
+def test_administrator_factor_budget_survives_new_challenges_and_ips(tmp_path: Path, monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(auth, "time", lambda: now)
+    app = create_app(
+        Settings(
+            database_url=f"sqlite:///{tmp_path / 'auth.db'}",
+            subscriber_totp_key=Fernet.generate_key().decode(),
+        )
+    )
+    store = app.state.auth
+    store.set_administrator("admin", ADMIN_PASSWORD)
+    session = store.login("admin", ADMIN_PASSWORD, 43200)
+    enrollment = store.begin_totp(session.token, ADMIN_PASSWORD)
+    codes = store.confirm_totp(session.token, pyotp.TOTP(enrollment.secret).at(now))
+    for _ in range(12):
+        with pytest.raises(AdministratorAuthenticationError, match="expired"):
+            store.complete_login("random-unknown-challenge", "123456", 43200)
+    for attempt in range(11):
+        client = TestClient(app, base_url="https://testserver", client=(f"192.0.2.{attempt + 1}", 1))
+        challenge = login(client).json()["challenge"]
+        response = client.post(
+            "/api/v1/auth/login/verify",
+            json={"challenge": challenge, "code": "invalid" if attempt < 10 else codes[0]},
+            headers={"X-Open-Node-Client": "browser"},
+        )
+        assert response.status_code == (401 if attempt < 10 else 429)
+        assert client.cookies.get("open_node_session") is None
+    assert response.headers["retry-after"] == "60"
+    now += 61
+    resumed = store.complete_login(challenge, codes[0], 43200)
+    assert resumed.token
+    assert store.security().recovery_codes_remaining == 9
+
+
+@pytest.mark.parametrize("key_state", ["missing", "replaced"])
+def test_administrator_recovery_survives_encryption_key_loss(tmp_path: Path, key_state: str):
+    url = f"sqlite:///{tmp_path / 'auth.db'}"
+    store = auth.AuthStore(url, Fernet.generate_key().decode())
+    store.set_administrator("admin", ADMIN_PASSWORD)
+    session = store.login("admin", ADMIN_PASSWORD, 43200)
+    enrollment = store.begin_totp(session.token, ADMIN_PASSWORD)
+    codes = store.confirm_totp(session.token, pyotp.TOTP(enrollment.secret).now())
+    restarted = auth.AuthStore(
+        url, None if key_state == "missing" else Fernet.generate_key().decode()
+    )
+    challenge = restarted.login("admin", ADMIN_PASSWORD, 43200).challenge
+    with pytest.raises(AdministratorFactorUnavailable):
+        restarted.complete_login(challenge, pyotp.TOTP(enrollment.secret).now(), 43200)
+    recovered = restarted.complete_login(challenge, codes[0], 43200)
+    assert recovered.token
+    assert restarted.security().recovery_codes_remaining == 9
+    restarted.update_totp(recovered.token, ADMIN_PASSWORD, codes[1], disable=True)
+    assert restarted.security().totp_enabled is False
+
+
+def test_administrator_pending_enrollment_is_session_bound_and_expires(tmp_path: Path):
+    store = auth.AuthStore(f"sqlite:///{tmp_path / 'auth.db'}", Fernet.generate_key().decode())
+    store.set_administrator("admin", ADMIN_PASSWORD)
+    first = store.login("admin", ADMIN_PASSWORD, 43200)
+    second = store.login("admin", ADMIN_PASSWORD, 43200)
+    enrollment = store.begin_totp(first.token, ADMIN_PASSWORD)
+    code = pyotp.TOTP(enrollment.secret).now()
+    with pytest.raises(AdministratorSecurityConflict, match="expired"):
+        store.confirm_totp(second.token, code)
+    with store.session.begin() as db:
+        db.execute(update(AdministratorFactor).values(pending_expires_at=0))
+    with pytest.raises(AdministratorSecurityConflict, match="expired"):
+        store.confirm_totp(first.token, code)
+    assert store.security().totp_enabled is False
+
+
+@pytest.mark.parametrize("local_reset", [False, True])
+def test_administrator_password_changes_invalidate_factor_challenges(
+    tmp_path: Path, local_reset: bool
+):
+    store = auth.AuthStore(f"sqlite:///{tmp_path / 'auth.db'}", Fernet.generate_key().decode())
+    store.set_administrator("admin", ADMIN_PASSWORD)
+    session = store.login("admin", ADMIN_PASSWORD, 43200)
+    enrollment = store.begin_totp(session.token, ADMIN_PASSWORD)
+    codes = store.confirm_totp(session.token, pyotp.TOTP(enrollment.secret).now())
+    challenge = store.login("admin", ADMIN_PASSWORD, 43200).challenge
+    if local_reset:
+        store.set_administrator("admin", "replacement-password", reset=True)
+    else:
+        assert store.change_password(ADMIN_PASSWORD, "replacement-password")
+    with pytest.raises(AdministratorAuthenticationError, match="expired"):
+        store.complete_login(challenge, codes[0], 43200)
+    assert store.authenticate(session.token, 1800) is None
+    assert store.security().totp_enabled is not local_reset
 
 
 def test_auth_validation_does_not_echo_password_or_factor(tmp_path: Path):
@@ -461,7 +576,12 @@ def test_cli_create_and_reset_without_exposing_password(tmp_path: Path):
     with app.state.auth.session.begin() as db:
         db.add(AdministratorFactor(administrator_id=1, totp_secret="encrypted"))
         db.add(AdministratorSecurityPolicy(id=1, require_totp=True))
-    assert invoke("reset-password", "replacement-password").returncode == 0
+    for _ in range(10):
+        app.state.auth.allow_login_attempt("testclient")
+    assert login(client).status_code == 429
+    reset = invoke("reset-password", "replacement-password")
+    assert reset.returncode == 0
+    assert "two-factor settings were cleared" in reset.stdout
     assert client.get("/api/v1/servers").status_code == 401
     reset_login = login(client, "replacement-password")
     assert reset_login.status_code == 200
