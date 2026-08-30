@@ -15,6 +15,42 @@ VPS.
 
 ## Remote Test Command
 
+### Administrator MFA acceptance (2026-08-30)
+
+All commands below target the isolated `/opt/open-node/mmwx-parity-candidate`
+checkout, never the production service or database.
+
+- At `ee16ed3`, the complete backend suite passed: **948 tests**.
+- At `fb1aaaf`, the expanded authentication suite passed: **25 tests**,
+  including a persisted cross-IP/cross-challenge verification budget, independent
+  store concurrency, key-loss recovery and local/password-change invalidation.
+- At `fb1aaaf`, frontend **239 tests**, main production build and probe-only
+  production build passed. The remaining build messages are chunk-size warnings.
+- The real production-frontend browser smoke passed enrollment, recovery-code
+  acknowledgement, mandatory policy, password-only challenge denial, recovery
+  login, code replacement, policy removal, disablement and local reset followed
+  by mandatory enrollment. Desktop (1440 px) and mobile (390 px) screenshots
+  were inspected; authenticator secrets and QR codes are masked in artifacts.
+  The script also checks horizontal overflow and absence of secrets from browser
+  storage, and disposes its private SQLite database and loopback process.
+
+Run after building the frontend on the VPS:
+
+```bash
+cd /opt/open-node/mmwx-parity-candidate
+backend/.venv/bin/python -m pip install -e './backend[browser]'
+backend/.venv/bin/python -m playwright install chromium
+backend/.venv/bin/python scripts/vps/smoke-administrator-mfa.py \
+  --output /tmp/open-node-admin-mfa-reviewed-revision
+```
+
+The smoke creates random fixture credentials and an encryption key; it does not
+read deployment secrets. Its CLI reset is performed only against the disposable
+database. It is not evidence of public HTTPS deployment, multi-administrator
+support, or automatic recovery backups. See [administrator security](administrator-security.md).
+
+### Repository-wide runner
+
 From Windows PowerShell in the repository root:
 
 ```powershell

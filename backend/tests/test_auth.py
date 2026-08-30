@@ -360,7 +360,9 @@ def test_administrator_factor_budget_survives_new_challenges_and_ips(tmp_path: P
         with pytest.raises(AdministratorAuthenticationError, match="expired"):
             store.complete_login("random-unknown-challenge", "123456", 43200)
     for attempt in range(11):
-        client = TestClient(app, base_url="https://testserver", client=(f"192.0.2.{attempt + 1}", 1))
+        client = TestClient(
+            app, base_url="https://testserver", client=(f"192.0.2.{attempt + 1}", 1)
+        )
         challenge = login(client).json()["challenge"]
         response = client.post(
             "/api/v1/auth/login/verify",

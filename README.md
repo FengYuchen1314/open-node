@@ -38,6 +38,9 @@ password or activation key. Create the account with `open-node-admin create`
 using the same database configuration as the backend, then sign in through
 the Vue interface. [Administrator setup and recovery](docs/administrator-access.md)
 also covers HTTPS cookies, local previews, session expiry, and API clients.
+[Administrator MFA](docs/administrator-security.md) adds encrypted authenticator
+enrollment, one-use recovery codes, mandatory enrollment and local recovery.
+Configure the persistent TOTP encryption key before enabling this optional feature.
 
 Subscribers use the separate `/account` portal. Administrators provision their
 login passwords directly or issue a high-entropy, single-use

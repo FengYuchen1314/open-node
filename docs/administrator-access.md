@@ -26,10 +26,19 @@ The command refuses to overwrite an existing account. To recover access:
 backend/.venv/bin/open-node-admin reset-password --username admin
 ```
 
-Resetting revokes every existing session. The signed-in administrator can
-also change their password from Access; that requires the current password
-and signs out all sessions. For noninteractive provisioning, `--password-stdin`
+Back up the database and private configuration before resetting; the CLI does
+not create a backup. Resetting revokes every administrator session and login
+challenge, removes administrator TOTP and recovery codes, clears login-limit
+records, and disables the mandatory-MFA policy. Re-enroll MFA after recovery.
+The signed-in administrator can also change their password from Access; that
+requires the current password, preserves MFA, and signs out all sessions.
+For noninteractive provisioning, `--password-stdin`
 reads one password line from standard input, never a command-line argument.
+
+The Access workspace supports authenticator enrollment, one-time recovery codes,
+and mandatory administrator MFA. See [administrator security](administrator-security.md)
+for encryption-key setup, lost-device recovery, and the documented differences
+from the reference implementation.
 
 ## HTTP and Browser Deployment
 
@@ -91,8 +100,17 @@ upgrades. A healthy process alone does not prove database integrity.
 - `GET /api/v1/auth/session`: returns initialization state and, when signed in,
   the username and session-bound CSRF token. It is never cacheable.
 - `POST /api/v1/auth/login`: accepts JSON `username` and `password`, requires
-  `X-Open-Node-Client: browser`, rotates the session cookie, and returns the
-  session metadata. Login requests with a foreign Origin are rejected.
+  `X-Open-Node-Client: browser`, and returns either authenticated session metadata
+  or a five-minute second-factor challenge. Only a completed login rotates the
+  cookie. Login requests with a foreign Origin are rejected.
+- `POST /api/v1/auth/login/verify`: accepts `challenge` and `code`, requires the
+  same explicit browser header, and issues a session only after verification.
+  Mandatory enrollment also returns recovery codes for one-time display.
+- `GET /api/v1/auth/security`: reads the current administrator MFA state.
+- `POST /api/v1/auth/totp/setup`, `/confirm`, `/disable`, `/recovery-codes`:
+  authenticated, CSRF-protected factor-management operations.
+- `PUT /api/v1/auth/security/policy`: updates the mandatory-administrator-MFA
+  policy using password and factor proof.
 - `POST /api/v1/auth/logout`: revokes the current session.
 - `POST /api/v1/auth/password`: accepts `current_password` and `new_password`,
   changes the credential, and revokes all sessions.
@@ -103,8 +121,10 @@ list; wildcards are rejected. CLI API clients retain the login cookie and send
 the CSRF token for writes. Neither an Agent bootstrap token nor a subscription
 token grants administrator access.
 
-Login and password-change attempts share a persistent limit of ten attempts
-per source IP per minute, including successful attempts. Excess attempts return
+Login, second-factor, and security-change attempts share a persistent limit of ten
+attempts per source IP per minute, including successful attempts. Live second-factor
+challenges additionally share a ten-per-minute administrator budget across IPs
+and challenge replacements, with at most five failures per challenge. Excess attempts return
 429 and `Retry-After`. The application uses the ASGI client address, not a raw
 caller-supplied forwarding header. Correct proxy trust configuration matters.
 
