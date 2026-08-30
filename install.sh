@@ -622,7 +622,7 @@ runtime_container_is_safe() {
   [[ "$expected_network_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
   container_id="$(compose_with "$source_dir" "$environment_file" ps -a -q open-node 2>/dev/null || true)"
   [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
-  project_containers="$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT_NAME" -q 2>/dev/null || true)"
+  project_containers="$(docker ps -a --no-trunc --filter "label=com.docker.compose.project=$PROJECT_NAME" -q 2>/dev/null || true)"
   [[ "$project_containers" == "$container_id" ]] || return 1
   volume_is_safe && network_is_safe || return 1
   details="$(docker inspect "$container_id" 2>/dev/null)" || return 1
