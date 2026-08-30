@@ -127,7 +127,7 @@ onBeforeUnmount(() => { ++version; resetStatus(); });
             <v-textarea v-model="form.description" label="Description" variant="outlined" density="compact" rows="2" maxlength="1000" hide-details :disabled="busy" />
             <div class="plan-fields">
               <v-text-field v-model.number="form.traffic_limit_gb" label="Traffic quota (GiB)" type="number" min="0.000001" step="any" variant="outlined" density="compact" hide-details :disabled="busy" />
-              <v-select v-model="form.traffic_mode" :items="[{ title: 'Download only', value: 'oneway' }, { title: 'Both directions', value: 'twoway' }]" label="Counted directions" variant="outlined" density="compact" hide-details :disabled="busy" />
+              <v-select v-model="form.traffic_mode" :items="[{ title: 'One-way billing (x1)', value: 'oneway' }, { title: 'Two-way billing (x2)', value: 'twoway' }]" label="Traffic billing factor" variant="outlined" density="compact" hide-details :disabled="busy" />
               <v-text-field v-model.number="form.cycle_days" label="New duration (days)" type="number" min="1" step="1" variant="outlined" density="compact" hide-details :disabled="busy" />
               <v-text-field v-model.number="form.speed_limit_mbps" label="Default speed (Mbps)" type="number" min="0" step="any" variant="outlined" density="compact" hide-details :disabled="busy" />
               <v-text-field v-model.number="form.device_limit" label="Default connections" type="number" min="0" step="1" variant="outlined" density="compact" hide-details :disabled="busy" />
@@ -142,7 +142,7 @@ onBeforeUnmount(() => { ++version; resetStatus(); });
             <PlanNodeAliases v-model:names="form.node_name_overrides" v-model:enabled="form.node_name_override_enabled" :nodes="selectedNodes" :disabled="busy" @valid="aliasesValid = $event">
               <template #default="{ node }">
               <div class="plan-overrides">
-                <v-text-field :model-value="form.node_multipliers[node.id] ?? ''" :aria-label="`${node.name}: multiplier`" label="Display multiplier" placeholder="1" type="number" min="0.000001" step="any" variant="outlined" density="compact" hide-details :disabled="busy" @update:model-value="setOverride('node_multipliers', node.id, $event)" />
+                <v-text-field :model-value="form.node_multipliers[node.id] ?? ''" :aria-label="`${node.name}: multiplier`" label="Billing multiplier" placeholder="1" type="number" min="0.000001" step="any" variant="outlined" density="compact" hide-details :disabled="busy" @update:model-value="setOverride('node_multipliers', node.id, $event)" />
                 <v-text-field :model-value="form.node_speed_limits[node.id] ?? ''" :aria-label="`${node.name}: speed`" label="Speed (Mbps)" placeholder="Inherit" type="number" min="0" step="any" variant="outlined" density="compact" hide-details :disabled="busy" @update:model-value="setOverride('node_speed_limits', node.id, $event)" />
                 <v-text-field :model-value="form.node_device_limits[node.id] ?? ''" :aria-label="`${node.name}: connections`" label="Connections" placeholder="Inherit" type="number" min="0" step="1" variant="outlined" density="compact" hide-details :disabled="busy" @update:model-value="setOverride('node_device_limits', node.id, $event)" />
               </div>

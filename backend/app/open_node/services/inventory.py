@@ -1506,8 +1506,11 @@ class SubscriptionTrafficLedgerModel(Base):
         index=True,
     )
     email: Mapped[str] = mapped_column(String(255), index=True)
+    attributed_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     upload: Mapped[int] = mapped_column(BigInteger, default=0)
     download: Mapped[int] = mapped_column(BigInteger, default=0)
+    weighted_upload: Mapped[float] = mapped_column(Float, default=0)
+    weighted_download: Mapped[float] = mapped_column(Float, default=0)
     last_uplink: Mapped[int] = mapped_column(BigInteger, default=0)
     last_downlink: Mapped[int] = mapped_column(BigInteger, default=0)
     last_reported_at: Mapped[datetime | None] = mapped_column(
@@ -1528,6 +1531,8 @@ class SubscriptionArchivedTrafficModel(Base):
     server_name: Mapped[str] = mapped_column(String(120))
     upload: Mapped[int] = mapped_column(BigInteger, default=0)
     download: Mapped[int] = mapped_column(BigInteger, default=0)
+    weighted_upload: Mapped[float] = mapped_column(Float, default=0)
+    weighted_download: Mapped[float] = mapped_column(Float, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -1627,6 +1632,8 @@ class InventoryStore:
             return
         inspector = inspect(self._engine)
         table_names = set(inspector.get_table_names())
+        ledger_columns_to_backfill: set[str] = set()
+        archive_columns_to_backfill: set[str] = set()
         if "subscription_plans" in table_names:
             self._sqlite_add_missing_columns(
                 inspector,
@@ -1743,6 +1750,37 @@ class InventoryStore:
                     "node_device_limit_overrides": "JSON NOT NULL DEFAULT '{}'",
                 },
             )
+        if "subscription_traffic_ledger" in table_names:
+            existing = {
+                column["name"]
+                for column in inspector.get_columns("subscription_traffic_ledger")
+            }
+            additions = {
+                "attributed_node_id": "VARCHAR(36)",
+                "weighted_upload": "FLOAT NOT NULL DEFAULT 0",
+                "weighted_download": "FLOAT NOT NULL DEFAULT 0",
+            }
+            ledger_columns_to_backfill = set(additions) - existing
+            self._sqlite_add_missing_columns(
+                inspector,
+                "subscription_traffic_ledger",
+                additions,
+            )
+        if "subscription_archived_traffic" in table_names:
+            existing = {
+                column["name"]
+                for column in inspector.get_columns("subscription_archived_traffic")
+            }
+            additions = {
+                "weighted_upload": "FLOAT NOT NULL DEFAULT 0",
+                "weighted_download": "FLOAT NOT NULL DEFAULT 0",
+            }
+            archive_columns_to_backfill = set(additions) - existing
+            self._sqlite_add_missing_columns(
+                inspector,
+                "subscription_archived_traffic",
+                additions,
+            )
         if "managed_nodes" in table_names:
             self._sqlite_add_missing_columns(
                 inspector,
@@ -1784,6 +1822,11 @@ class InventoryStore:
                     "require_access_token": "BOOLEAN",
                 },
             )
+        if ledger_columns_to_backfill or archive_columns_to_backfill:
+            self._backfill_subscription_billing_attribution(
+                ledger_columns_to_backfill,
+                archive_columns_to_backfill,
+            )
 
     def _sqlite_add_missing_columns(
         self,
@@ -1798,6 +1841,56 @@ class InventoryStore:
         with self._engine.begin() as connection:
             for name, kind in missing:
                 connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {kind}"))
+
+    def _backfill_subscription_billing_attribution(
+        self,
+        ledger_columns: set[str],
+        archive_columns: set[str],
+    ) -> None:
+        """Initialize billing columns once when upgrading a pre-attribution SQLite database."""
+        with self._session() as session:
+            users = {
+                user.username: user for user in session.scalars(select(ProductUserModel)).all()
+            }
+            plans = {plan.id: plan for plan in session.scalars(select(SubscriptionPlanModel)).all()}
+            credentials = session.scalars(select(SubscriptionCredentialModel)).all()
+            exact: dict[tuple[str, str, str], SubscriptionCredentialModel] = {}
+            aliases: dict[tuple[str, str, str], SubscriptionCredentialModel] = {}
+            for credential in credentials:
+                key = (credential.username, credential.server_id, credential.email)
+                exact[key] = credential
+                raw_email = (credential.credential or {}).get("email")
+                if isinstance(raw_email, str) and raw_email:
+                    aliases.setdefault(
+                        (credential.username, credential.server_id, raw_email),
+                        credential,
+                    )
+
+            for ledger in session.scalars(select(SubscriptionTrafficLedgerModel)).all():
+                key = (ledger.username, ledger.server_id, ledger.email)
+                credential = exact.get(key) or aliases.get(key)
+                node_id = credential.node_id if credential else None
+                user = users.get(ledger.username)
+                plan = plans.get(user.current_plan_id) if user and user.current_plan_id else None
+                weight = self._subscription_billing_weight_for(plan, node_id)
+                if "attributed_node_id" in ledger_columns:
+                    ledger.attributed_node_id = node_id
+                if "weighted_upload" in ledger_columns:
+                    ledger.weighted_upload = ledger.upload * weight
+                if "weighted_download" in ledger_columns:
+                    ledger.weighted_download = ledger.download * weight
+
+            for archived in session.scalars(select(SubscriptionArchivedTrafficModel)).all():
+                user = users.get(archived.username)
+                plan = plans.get(user.current_plan_id) if user and user.current_plan_id else None
+                # Archived rows from the old schema no longer identify a node. Preserve the
+                # package traffic factor; node-specific attribution starts with fresh deltas.
+                weight = self._subscription_traffic_factor(plan)
+                if "weighted_upload" in archive_columns:
+                    archived.weighted_upload = archived.upload * weight
+                if "weighted_download" in archive_columns:
+                    archived.weighted_download = archived.download * weight
+            session.commit()
 
     def _rotate_legacy_subscription_bearers(self) -> None:
         with self._coordinated_session() as session:
@@ -4137,13 +4230,20 @@ class InventoryStore:
             archived = self._archived_user_traffic(session, username)
             upload = sum(entry.upload for entry in entries)
             download = sum(entry.download for entry in entries)
+            weighted_upload = sum(entry.weighted_upload for entry in entries)
+            weighted_download = sum(entry.weighted_download for entry in entries)
             upload += sum(entry.upload for entry in archived)
             download += sum(entry.download for entry in archived)
+            weighted_upload += sum(entry.weighted_upload for entry in archived)
+            weighted_download += sum(entry.weighted_download for entry in archived)
             return ProductUserTrafficResponse(
                 username=username,
                 upload=upload,
                 download=download,
                 total=upload + download,
+                weighted_upload=weighted_upload,
+                weighted_download=weighted_download,
+                charged_usage_bytes=int(weighted_upload + weighted_download),
                 entries=[self._subscription_traffic_entry_read(entry) for entry in entries]
                 + [
                     SubscriptionTrafficEntryRead(
@@ -4155,6 +4255,11 @@ class InventoryStore:
                         upload=entry.upload,
                         download=entry.download,
                         total=entry.upload + entry.download,
+                        weighted_upload=entry.weighted_upload,
+                        weighted_download=entry.weighted_download,
+                        charged_usage_bytes=int(
+                            entry.weighted_upload + entry.weighted_download
+                        ),
                         updated_at=entry.updated_at,
                     )
                     for entry in archived
@@ -5338,16 +5443,20 @@ class InventoryStore:
         if not isinstance(user_stats, dict) or not user_stats:
             return
 
-        username_by_email = self._subscription_username_by_email(session)
-        if not username_by_email:
+        attribution_by_email = self._subscription_billing_attribution_by_email(
+            session,
+            server.id,
+        )
+        if not attribution_by_email:
             return
 
         for email, item in user_stats.items():
             if not isinstance(email, str) or not isinstance(item, dict):
                 continue
-            username = username_by_email.get(email)
-            if not username:
+            attribution = attribution_by_email.get(email)
+            if not attribution:
                 continue
+            username, node_id, weight = attribution
             uplink = self._traffic_counter_value(item.get("uplink"))
             downlink = self._traffic_counter_value(item.get("downlink"))
             ledger = session.scalar(
@@ -5364,8 +5473,11 @@ class InventoryStore:
                         username=username,
                         server_id=server.id,
                         email=email,
+                        attributed_node_id=node_id,
                         upload=uplink,
                         download=downlink,
+                        weighted_upload=uplink * weight,
+                        weighted_download=downlink * weight,
                         last_uplink=uplink,
                         last_downlink=downlink,
                         last_reported_at=reported_at,
@@ -5380,23 +5492,77 @@ class InventoryStore:
             ):
                 continue
 
-            ledger.upload += uplink - ledger.last_uplink if uplink >= ledger.last_uplink else uplink
-            ledger.download += (
+            upload_delta = uplink - ledger.last_uplink if uplink >= ledger.last_uplink else uplink
+            download_delta = (
                 downlink - ledger.last_downlink if downlink >= ledger.last_downlink else downlink
             )
+            ledger.upload += upload_delta
+            ledger.download += download_delta
+            ledger.weighted_upload += upload_delta * weight
+            ledger.weighted_download += download_delta * weight
+            ledger.attributed_node_id = node_id
             ledger.last_uplink = uplink
             ledger.last_downlink = downlink
             ledger.last_reported_at = reported_at
             ledger.updated_at = now
 
-    @staticmethod
-    def _subscription_username_by_email(session: Session) -> dict[str, str]:
-        credentials = session.scalars(select(SubscriptionCredentialModel)).all()
-        index: dict[str, str] = {}
+    def _subscription_billing_attribution_by_email(
+        self,
+        session: Session,
+        server_id: str,
+    ) -> dict[str, tuple[str, str, float]]:
+        credentials = session.scalars(
+            select(SubscriptionCredentialModel).where(
+                SubscriptionCredentialModel.server_id == server_id
+            )
+        ).all()
+        users = {
+            user.username: user
+            for user in session.scalars(
+                select(ProductUserModel).where(
+                    ProductUserModel.username.in_(
+                        {credential.username for credential in credentials}
+                    )
+                )
+            ).all()
+        }
+        plan_ids = {
+            user.current_plan_id for user in users.values() if user.current_plan_id is not None
+        }
+        plans = {
+            plan.id: plan
+            for plan in session.scalars(
+                select(SubscriptionPlanModel).where(SubscriptionPlanModel.id.in_(plan_ids))
+            ).all()
+        }
+        exact: dict[str, tuple[str, str, float]] = {}
+        aliases: dict[str, tuple[str, str, float]] = {}
         for credential in credentials:
-            for email in InventoryStore._subscription_credential_emails(credential):
-                index[email] = credential.username
-        return index
+            user = users.get(credential.username)
+            plan = plans.get(user.current_plan_id) if user and user.current_plan_id else None
+            attribution = (
+                credential.username,
+                credential.node_id,
+                self._subscription_billing_weight_for(plan, credential.node_id),
+            )
+            exact[credential.email] = attribution
+            raw_email = (credential.credential or {}).get("email")
+            if isinstance(raw_email, str) and raw_email:
+                aliases.setdefault(raw_email, attribution)
+        return aliases | exact
+
+    @staticmethod
+    def _subscription_traffic_factor(plan: SubscriptionPlanModel | None) -> float:
+        return 2.0 if plan and plan.traffic_mode == SubscriptionTrafficMode.TWOWAY.value else 1.0
+
+    @classmethod
+    def _subscription_billing_weight_for(
+        cls,
+        plan: SubscriptionPlanModel | None,
+        node_id: str | None,
+    ) -> float:
+        multiplier = float((plan.node_multipliers or {}).get(node_id, 1)) if plan else 1.0
+        return multiplier * cls._subscription_traffic_factor(plan)
 
     @staticmethod
     def _subscription_credential_emails(
@@ -6825,15 +6991,17 @@ class InventoryStore:
         total = traffic_limit(user, plan)
         if total <= 0:
             return None
-        upload, download = self._subscription_user_traffic(session, user.username)
-        if plan.traffic_mode == "oneway":
-            upload = 0
+        weighted_upload, weighted_download = self._subscription_user_weighted_traffic(
+            session,
+            user.username,
+        )
+        charged_usage_bytes = int(weighted_upload + weighted_download)
         expire = (
             int(self._aware_datetime(user.plan_expires_at).timestamp())
             if user.plan_expires_at
             else 4_102_444_800
         )
-        return f"upload={upload}; download={download}; total={total}; expire={expire}"
+        return f"upload=0; download={charged_usage_bytes}; total={total}; expire={expire}"
 
     def _subscription_quota_status(
         self,
@@ -6845,11 +7013,13 @@ class InventoryStore:
         from open_node.services.user_limits import traffic_limit
 
         upload, download = self._subscription_user_traffic(session, user.username)
+        weighted_upload, weighted_download = self._subscription_user_weighted_traffic(
+            session,
+            user.username,
+        )
         traffic_mode = SubscriptionTrafficMode(plan.traffic_mode) if plan else None
         traffic_limit_bytes = traffic_limit(user, plan)
-        charged_usage_bytes = (
-            download if traffic_mode == SubscriptionTrafficMode.ONEWAY else upload + download
-        )
+        charged_usage_bytes = int(weighted_upload + weighted_download)
         expired = bool(user.plan_expires_at and now > self._aware_datetime(user.plan_expires_at))
         over_quota = bool(
             plan and traffic_limit_bytes > 0 and charged_usage_bytes >= traffic_limit_bytes
@@ -6882,6 +7052,8 @@ class InventoryStore:
             reset_due=reset_due,
             upload=upload,
             download=download,
+            weighted_upload=weighted_upload,
+            weighted_download=weighted_download,
             charged_usage_bytes=charged_usage_bytes,
             traffic_limit_bytes=traffic_limit_bytes,
             remaining_bytes=remaining_bytes,
@@ -6928,6 +7100,8 @@ class InventoryStore:
                 ledger.last_reported_at = reported_at
             ledger.upload = 0
             ledger.download = 0
+            ledger.weighted_upload = 0
+            ledger.weighted_download = 0
             ledger.updated_at = now
 
         touched = len(ledgers)
@@ -6950,8 +7124,11 @@ class InventoryStore:
                     username=user.username,
                     server_id=credential.server_id,
                     email=email,
+                    attributed_node_id=credential.node_id,
                     upload=0,
                     download=0,
+                    weighted_upload=0,
+                    weighted_download=0,
                     last_uplink=last_uplink,
                     last_downlink=last_downlink,
                     last_reported_at=reported_at,
@@ -6965,6 +7142,7 @@ class InventoryStore:
         user.last_traffic_reset_at = now
         for entry in self._archived_user_traffic(session, user.username):
             entry.upload = entry.download = 0
+            entry.weighted_upload = entry.weighted_download = 0
             entry.updated_at = now
             touched += 1
         user.updated_at = now
@@ -7065,6 +7243,29 @@ class InventoryStore:
             download + sum(row.download for row in archived),
         )
 
+    def _subscription_user_weighted_traffic(
+        self,
+        session: Session,
+        username: str,
+    ) -> tuple[float, float]:
+        ledgers = session.scalars(
+            select(SubscriptionTrafficLedgerModel).where(
+                SubscriptionTrafficLedgerModel.username == username
+            )
+        ).all()
+        archived = self._archived_user_traffic(session, username)
+        if ledgers:
+            upload, download = (
+                sum(ledger.weighted_upload for ledger in ledgers),
+                sum(ledger.weighted_download for ledger in ledgers),
+            )
+        else:
+            upload, download = self._subscription_latest_user_weighted_traffic(session, username)
+        return (
+            upload + sum(row.weighted_upload for row in archived),
+            download + sum(row.weighted_download for row in archived),
+        )
+
     @staticmethod
     def _archived_user_traffic(session, username):
         return session.scalars(
@@ -7105,6 +7306,50 @@ class InventoryStore:
                     continue
                 upload += int(item.get("uplink") or 0)
                 download += int(item.get("downlink") or 0)
+        return upload, download
+
+    def _subscription_latest_user_weighted_traffic(
+        self,
+        session: Session,
+        username: str,
+    ) -> tuple[float, float]:
+        credentials = session.scalars(
+            select(SubscriptionCredentialModel).where(
+                SubscriptionCredentialModel.username == username
+            )
+        ).all()
+        if not credentials:
+            return 0, 0
+        user = session.get(ProductUserModel, username)
+        plan = (
+            session.get(SubscriptionPlanModel, user.current_plan_id)
+            if user and user.current_plan_id
+            else None
+        )
+        latest_by_server = {
+            server_id: self._latest_telemetry_model(session, server_id)
+            for server_id in {credential.server_id for credential in credentials}
+        }
+        upload = 0.0
+        download = 0.0
+        for credential in credentials:
+            latest = latest_by_server.get(credential.server_id)
+            user_stats = latest.stats.get("user") if latest and latest.stats else None
+            if not isinstance(user_stats, dict):
+                continue
+            item = next(
+                (
+                    user_stats[email]
+                    for email in self._subscription_credential_emails(credential)
+                    if isinstance(user_stats.get(email), dict)
+                ),
+                None,
+            )
+            if not isinstance(item, dict):
+                continue
+            weight = self._subscription_billing_weight_for(plan, credential.node_id)
+            upload += self._traffic_counter_value(item.get("uplink")) * weight
+            download += self._traffic_counter_value(item.get("downlink")) * weight
         return upload, download
 
     @staticmethod
@@ -7155,9 +7400,15 @@ class InventoryStore:
             username=entry.username,
             server_id=UUID(entry.server_id),
             email=entry.email,
+            attributed_node_id=UUID(entry.attributed_node_id)
+            if entry.attributed_node_id
+            else None,
             upload=entry.upload,
             download=entry.download,
             total=entry.upload + entry.download,
+            weighted_upload=entry.weighted_upload,
+            weighted_download=entry.weighted_download,
+            charged_usage_bytes=int(entry.weighted_upload + entry.weighted_download),
             last_reported_at=InventoryStore._aware_datetime(entry.last_reported_at)
             if entry.last_reported_at
             else None,

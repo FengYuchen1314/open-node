@@ -188,10 +188,12 @@ def test_removal_prunes_plans_preserves_user_usage_and_revokes_agent(env, tmp_pa
     assert response.json()["removed_node_count"] == 1
     quota = env[0].get("/api/v1/users/user/quota").json()["quota"]
     assert quota["upload"] == 150 and quota["download"] == 250
+    assert quota["charged_usage_bytes"] == 800
     assert quota["charged_usage_bytes"] >= before["charged_usage_bytes"]
     entries = env[0].get("/api/v1/users/user/traffic").json()["entries"]
     assert len(entries) == 1 and entries[0]["archived"]
     assert entries[0]["server_name"] == "alpha"
+    assert entries[0]["charged_usage_bytes"] == 800
     updated = env[0].get("/api/v1/plans").json()["plans"][0]
     assert updated["id"] == plan["id"] and updated["node_ids"] == [remaining["id"]]
     assert updated["node_name_overrides"] == {remaining["id"]: "Alias " + remaining["name"]}

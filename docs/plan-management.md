@@ -6,14 +6,18 @@ There is no activation service, license key, paid tier or third-party account.
 
 ## Edit
 
-Editing changes the plan name, description, quota, counted traffic directions,
-default duration/reset preferences, node membership, node aliases, display multipliers and
+Editing changes the plan name, description, quota, traffic billing factor,
+default duration/reset preferences, node membership, node aliases, billing multipliers and
 native speed/concurrent-connection limits and automatic speed rules. Per-node limits override plan
 defaults; a blank override inherits, and an explicit zero means unlimited.
 Direct-parent inheritance and [user overrides](user-limits.md) participate in
 the same resolver. User overrides survive edits and take precedence over plan
 values; changing a plan quota does not replace a user's explicit quota.
-Display multipliers affect the subscription label, not charged traffic.
+`oneway` applies a package factor of 1 and `twoway` a factor of 2 to the sum of
+upload and download. The selected node's billing multiplier is then applied.
+The combined weight is frozen for every telemetry delta, so editing either
+value never rewrites already charged usage. Multipliers remain visible in the
+subscription label as an operator-facing hint.
 Quotas must fit the database's byte counter and represent at least one byte.
 
 Existing subscribers keep their assignment dates, reset preferences, tokens,
@@ -48,11 +52,11 @@ most 128 Unicode code points without control characters. Collisions with
 original node names or reserved client tags receive deterministic numeric
 suffixes in the exported subscription.
 
-The alias is applied before the display multiplier in the shared renderer.
+The alias is applied before the billing multiplier in the shared renderer.
 Clash, sing-box, Xray, URI-list, base64 and format previews use the same name;
 generated group references point to those final names. Operational inventory,
 inbound/outbound resource identities, user credentials, subscription keys and
-traffic accounting do not change. An edit that changes only aliases or their
+traffic attribution do not change. An edit that changes only aliases or their
 switch does not provision credentials or enqueue Agent commands. Concurrent
 node/limit changes retain the ordinary deployment and acknowledgment contract.
 
