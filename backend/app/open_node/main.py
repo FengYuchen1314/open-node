@@ -16,6 +16,7 @@ from open_node.api.routes.system import healthz
 from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
 from open_node.core.config import Settings, get_settings
 from open_node.domain.inventory import AgentCommandPayloadError
+from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.auth import AuthStore
 from open_node.services.certificate_worker import CertificateWorker
@@ -86,10 +87,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     def secret_request(request):
-        return subscriber_request(request) or request.url.path.startswith(
-            (
-                active_settings.api_prefix + "/migrations/mmwx/",
-                active_settings.api_prefix + "/auth/",
+        path = request.url.path
+        return (
+            subscriber_request(request)
+            or path.startswith(
+                (
+                    active_settings.api_prefix + "/migrations/mmwx/",
+                    active_settings.api_prefix + "/auth/",
+                    active_settings.api_prefix + "/agents/bootstrap/",
+                )
+            )
+            or (
+                path.startswith(active_settings.api_prefix + "/servers/")
+                and path.rstrip("/").endswith("/bootstrap")
             )
         )
 
@@ -164,6 +174,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         short_links_enabled=active_settings.short_links_enabled,
     )
     app.state.inventory.create_schema()
+    app.state.agent_bootstrap = AgentBootstrapStore(app.state.inventory)
     app.state.subscriber_auth = SubscriberAuthStore(app.state.inventory, active_settings)
     app.state.certificates = CertificateStore(active_settings, app.state.inventory)
     app.state.agent_connections = AgentConnectionManager()

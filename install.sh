@@ -345,10 +345,65 @@ compose_with() {
     -u OPEN_NODE_SHORT_LINKS_ENABLED \
     -u OPEN_NODE_TRUSTED_PROXIES \
     -u OPEN_NODE_AGENT_IDENTITY_FILE \
+    -u OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL \
     -u OPEN_NODE_SUBSCRIBER_TOTP_KEY \
     "${COMPOSE[@]}" --env-file "$environment_file" --project-name "$PROJECT_NAME" \
       --project-directory "$source_dir/deploy" \
       --file "$source_dir/deploy/compose.yaml" "$@"
+}
+
+validate_agent_bootstrap_value() {
+  local value="$1"
+  [[ -z "$value" ]] && return 0
+  # A deliberately narrow, unquoted dotenv value. The candidate backend also
+  # validates this as its canonical HTTPS URL before it can become healthy.
+  [[ "${#value}" -le 2048 && "$value" != *'$'* && "$value" != *'`'* \
+    && "$value" != *'\'* && "$value" != *[[:space:][:cntrl:]]* ]] || return 1
+  jq -ne --arg value "$value" '
+    def ipv6:
+      ltrimstr("[") | rtrimstr("]") | split("::") as $halves
+      | ([$halves[] | select(length > 0) | split(":")[]]) as $groups
+      | (($halves | length) == 1 and ($groups | length) == 8
+         or ($halves | length) == 2 and ($groups | length) < 8)
+      and all($groups[]; test("^[0-9a-f]{1,4}$"));
+    $value
+    | capture("^https://(?<host>\\[[0-9a-f:]+\\]|[a-z0-9.-]+)(?::(?<port>[0-9]+))?(?<path>/[a-zA-Z0-9._~!&()*+,;=:@/-]*)?$")
+    | (if (.host | startswith("[")) then (.host | ipv6)
+       else (.host | length) <= 253
+         and all(.host | split(".")[]; test("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")) end)
+    and (.port == null or ((.port | tonumber) >= 1 and (.port | tonumber) <= 65535))
+    and ((.path // "") | contains("//") | not)
+    and ((.path // "") | endswith("/") | not)
+    and all((.path // "") | split("/")[]; . != "." and . != "..")
+  ' >/dev/null 2>&1
+}
+
+bootstrap_environment_from_config() {
+  local config_json="$1" value="$2"
+  validate_agent_bootstrap_value "$value" || return 1
+  printf '%s\n' "$config_json" | jq -ce --arg value "$value" '
+    .services["open-node"].environment as $environment
+    | if ($environment | type) != "object" then error("invalid environment")
+      elif ($environment | has("OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL")) then
+        if $environment.OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL == $value
+        then ["OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL=" + $value]
+        else error("bootstrap setting differs from the private environment") end
+      else [] end
+  ' 2>/dev/null
+}
+
+runtime_bootstrap_environment_matches() {
+  local expected="$1" details="$2"
+  printf '%s\n' "$details" | jq -e --argjson expected "$expected" '
+    length == 1 and ([.[0].Config.Env[]?
+      | select(startswith("OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL="))] == $expected)
+  ' >/dev/null
+}
+
+requested_bootstrap_change() {
+  [[ -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL ]] || return 1
+  [[ "$OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL" != \
+    "$(read_key "$ENV_FILE" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)" ]]
 }
 
 require_environment_file() {
@@ -608,6 +663,7 @@ runtime_container_is_safe() {
   local source_dir="$1" environment_file="$2" expected_image_id="$3" require_running="${4:-0}"
   local container_id project_containers details expected_image expected_network expected_network_id
   local port bind_address secure_cookie short_links trusted_proxies agent_identity subscriber_totp
+  local bootstrap_value bootstrap_environment rendered_compose
   expected_network="${PROJECT_NAME}_default"
   expected_image="$(read_key "$environment_file" OPEN_NODE_IMAGE_REPOSITORY || true):$(read_key "$environment_file" OPEN_NODE_IMAGE_TAG || true)"
   port="$(read_key "$environment_file" OPEN_NODE_HTTP_PORT || true)"
@@ -617,6 +673,11 @@ runtime_container_is_safe() {
   trusted_proxies="$(read_key "$environment_file" OPEN_NODE_TRUSTED_PROXIES || true)"
   agent_identity="$(read_key "$environment_file" OPEN_NODE_AGENT_IDENTITY_FILE || true)"
   subscriber_totp="$(read_key "$environment_file" OPEN_NODE_SUBSCRIBER_TOTP_KEY || true)"
+  bootstrap_value="$(read_key "$environment_file" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
+  rendered_compose="$(compose_with "$source_dir" "$environment_file" config --format json 2>/dev/null)" \
+    || return 1
+  bootstrap_environment="$(bootstrap_environment_from_config "$rendered_compose" "$bootstrap_value")" \
+    || return 1
   daemon_identity_is_current || return 1
   expected_network_id="$(docker network inspect --format '{{.Id}}' "$expected_network" 2>/dev/null || true)"
   [[ "$expected_network_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
@@ -626,6 +687,7 @@ runtime_container_is_safe() {
   [[ "$project_containers" == "$container_id" ]] || return 1
   volume_is_safe && network_is_safe || return 1
   details="$(docker inspect "$container_id" 2>/dev/null)" || return 1
+  runtime_bootstrap_environment_matches "$bootstrap_environment" "$details" || return 1
   printf '%s\n' "$details" | jq -e \
     --arg project "$PROJECT_NAME" \
     --arg source "$(realpath -m -- "$source_dir")" \
@@ -767,7 +829,7 @@ require_fresh_project() {
 
 create_candidate_environment() {
   local source_dir="$1" destination="$2" base_file="${3:-}" created=0
-  local port bind_address secure_cookie existing_bind=""
+  local port bind_address secure_cookie bootstrap_value rendered_compose existing_bind=""
   if [[ -n "$base_file" ]]; then
     validate_safe_file "active environment file" "$base_file" 1
     install -m 0600 -- "$base_file" "$destination"
@@ -797,12 +859,26 @@ create_candidate_environment() {
   esac
   [[ "$secure_cookie" == "true" || "$secure_cookie" == "false" ]] \
     || die "OPEN_NODE_SESSION_COOKIE_SECURE must be true or false"
+  bootstrap_value="$(read_key "$destination" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
+  if [[ -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL ]]; then
+    bootstrap_value="$OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL"
+  fi
+  validate_agent_bootstrap_value "$bootstrap_value" \
+    || die "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL must be empty or a safe canonical HTTPS URL"
   set_file_value "$destination" OPEN_NODE_IMAGE_REPOSITORY "$IMAGE_REPOSITORY"
   set_file_value "$destination" OPEN_NODE_BIND_ADDRESS "$bind_address"
   set_file_value "$destination" OPEN_NODE_HTTP_PORT "$port"
   set_file_value "$destination" OPEN_NODE_SESSION_COOKIE_SECURE "$secure_cookie"
   set_file_value "$destination" OPEN_NODE_SHORT_LINKS_ENABLED \
     "$(read_key "$destination" OPEN_NODE_SHORT_LINKS_ENABLED || printf 'false')"
+  set_file_value "$destination" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL "$bootstrap_value"
+  if [[ -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL && -n "$bootstrap_value" ]]; then
+    rendered_compose="$(compose_with "$source_dir" "$destination" config --format json)" \
+      || die "candidate Compose could not be inspected for Agent bootstrap support"
+    printf '%s\n' "$rendered_compose" | jq -e \
+      '.services["open-node"].environment | has("OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL")' >/dev/null \
+      || die "candidate Compose does not support configuring Agent bootstrap"
+  fi
   chmod 0600 -- "$destination"
 }
 
@@ -816,6 +892,7 @@ validate_candidate_compose() {
   local source_dir="$1" environment_file="$2" expected_image="$3"
   local images config_json context revision port bind_address secure_cookie short_links
   local trusted_proxies agent_identity subscriber_totp
+  local bootstrap_value bootstrap_environment
   context="$(realpath -m -- "$source_dir")"
   [[ -d "$context" && ! -L "$context" \
     && -f "$context/Dockerfile" && ! -L "$context/Dockerfile" \
@@ -831,6 +908,7 @@ validate_candidate_compose() {
   trusted_proxies="$(read_key "$environment_file" OPEN_NODE_TRUSTED_PROXIES || true)"
   agent_identity="$(read_key "$environment_file" OPEN_NODE_AGENT_IDENTITY_FILE || true)"
   subscriber_totp="$(read_key "$environment_file" OPEN_NODE_SUBSCRIBER_TOTP_KEY || true)"
+  bootstrap_value="$(read_key "$environment_file" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
   [[ "$revision" =~ ^[0-9a-f]{40,64}$ \
     && "$port" =~ ^[0-9]+$ \
     && ( "$bind_address" == "127.0.0.1" || "$bind_address" == "0.0.0.0" ) ]] || {
@@ -849,6 +927,10 @@ validate_candidate_compose() {
     warn "candidate Compose data mount could not be inspected"
     return 1
   fi
+  if ! bootstrap_environment="$(bootstrap_environment_from_config "$config_json" "$bootstrap_value")"; then
+    warn "candidate Agent bootstrap URL is unsafe or differs from its private environment"
+    return 1
+  fi
   if ! printf '%s\n' "$config_json" | jq -e \
     --arg project "$PROJECT_NAME" \
     --arg expected_volume "$DATA_VOLUME" \
@@ -862,7 +944,9 @@ validate_candidate_compose() {
     --arg short_links "$short_links" \
     --arg trusted_proxies "$trusted_proxies" \
     --arg agent_identity "$agent_identity" \
-    --arg subscriber_totp "$subscriber_totp" '
+    --arg subscriber_totp "$subscriber_totp" \
+    --arg bootstrap_value "$bootstrap_value" \
+    --argjson bootstrap_environment "$bootstrap_environment" '
     .services["open-node"] as $service
     | ((keys) == ["name", "networks", "services", "volumes"])
     and (.name == $project)
@@ -900,13 +984,15 @@ validate_candidate_compose() {
     and ($service.read_only == true)
     and ($service.cap_drop == ["ALL"])
     and ($service.security_opt == ["no-new-privileges:true"])
-    and ($service.environment == {
+    and ($service.environment == ({
       "FORWARDED_ALLOW_IPS": $trusted_proxies,
       "OPEN_NODE_AGENT_IDENTITY_FILE": $agent_identity,
       "OPEN_NODE_SESSION_COOKIE_SECURE": $secure_cookie,
       "OPEN_NODE_SHORT_LINKS_ENABLED": $short_links,
       "OPEN_NODE_SUBSCRIBER_TOTP_KEY": $subscriber_totp
-    })
+    } + (if ($bootstrap_environment | length) == 1 then {
+      "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL": $bootstrap_value
+    } else {} end)))
     and ($service.logging.driver == "local")
     and ($service.logging.options == {"max-file": "5", "max-size": "10m"})
     and (
@@ -1295,7 +1381,7 @@ prepare_update_candidate() {
   CANDIDATE_REVISION="$(git -C "$INSTALL_DIR" rev-parse FETCH_HEAD)"
   git -C "$INSTALL_DIR" merge-base --is-ancestor "$old_revision" "$CANDIDATE_REVISION" \
     || die "candidate ref is not a fast-forward descendant of the deployed revision"
-  if [[ "$CANDIDATE_REVISION" == "$old_revision" ]]; then
+  if [[ "$CANDIDATE_REVISION" == "$old_revision" ]] && ! requested_bootstrap_change; then
     CANDIDATE_UNCHANGED=1
     return
   fi

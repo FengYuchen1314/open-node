@@ -19,6 +19,107 @@ VPS.
 
 ## Remote Test Command
 
+### Panel-issued Agent installation (2026-08-31)
+
+The feature was tested in private VPS source snapshots based on `6ca84e2` with
+the bootstrap changes overlaid. The shared candidate stayed clean at `6ca84e2`;
+production stayed on `open-node:cb1eb0c`. These working-source checks are distinct
+from clean-checkout CI after the feature is committed.
+
+- Complete backend gate: **1,250 passed** (694.29 s), with only the known
+  Starlette/httpx deprecation warning, in
+  `/tmp/open-node-bootstrap-feature.3peB48sZ/backend-suite.log`. The SSH output
+  session disconnected near the end; the VPS process continued and wrote the
+  complete successful pytest summary. This is the retained VPS result, not an
+  inferred success from that disconnected shell.
+- Focused backend gate: **320 passed** (76.06 s), comprising 98 ticket-store,
+  75 API/release-helper, 121 host-installer and 26 authentication tests. This
+  includes concurrent claims, hash-only tickets, nonce/expiry/replay bounds,
+  post-claim reissue refusal, Origin/CSRF, bounded JSON, persistent rate limiting,
+  HTTPS/path validation, release-source/hash validation, owned paths and secret
+  redaction. Backend Ruff passed.
+- Frontend: **268 tests in 37 files** (7.65 s), administrator and probe-only
+  production builds passed. The added cases cover late request invalidation,
+  close/target change/disposal, replacement/revoke/claim, existing heartbeat,
+  registration, failures and no persistent command storage.
+- Probe Worker: **5 behavior tests** and TypeScript checks passed, including
+  GET/POST/DELETE rejection of all Agent-bootstrap endpoints without contacting
+  the origin or asset fallback, plus write rejection of public Probe routes.
+- Production browser gate passed against disposable FastAPI/SQLite: disabled
+  configuration, explicit mobile issuance/copy, close/reopen clearing, command
+  replacement, revocation, claim vs. registration, existing-heartbeat refusal,
+  installer checksum binding, cache/privacy headers and no page errors. The
+  final registration and heartbeat are explicit API fixtures, **not** proof of
+  installation. Desktop/mobile screenshots mask commands and manual tokens.
+- Separate real-systemd bootstrap passed over forced **WebSocket and HTTP**
+  using the published Agent 0.3.0a0 artifacts and official Xray v26.3.27. The
+  gate exercises the actual panel-generated HTTPS command, claim, non-root
+  process/runtime readiness, a subsequently configured VLESS inbound and live
+  HTTP forwarding. Control-plane downlink counters observed **1,223,915 bytes**
+  and **1,092,420 bytes**, respectively. Wrong-nonce replay returned 401;
+  registration blocked redemption (401) and ticket reissue (409). Re-running
+  the command was refused with PID/config/unit unchanged; logs leaked no Agent
+  token and both owned fixtures were cleaned.
+- Root installer compatibility: **53 preflight checks** passed for legacy and
+  new Compose files, exact runtime environment matching, inherited-shell
+  isolation and safe URL values. A separate real Docker fixture passed fresh
+  install, same-source enable, identical-value no-op and same-source disable,
+  keeping the administrator/inventory and two immutable stopped-volume backups.
+  The non-root image could read the bundled installer/manifest, and HTTP
+  resources plus configured state matched in all three deployment states.
+  Owned fixture cleanup completed and the production snapshot was unchanged.
+- Additional fixture safety controls passed after review: 15 injected `GIT_*`
+  variables could not change an external sentinel repository's files, index,
+  configuration, refs or objects, including through the imported Git helper.
+  A mocked pre-existing namespace caused **zero cleanup calls**. These controls
+  created no Docker resources and are reproducible with
+  `--safety-negative-controls`.
+
+The real bootstrap gate's only command deviation is appending its restricted
+`--test-directory` option. Its root-URL loopback HTTPS control plane uses a
+private trusted CA; GitHub downloads still use Debian system trust. It does not
+prove public DNS/TLS, reverse-proxy subpath operation or an actual Auto-to-HTTP
+fallback event. Those must not be inferred from running each transport
+separately. The backend and browser fixture never use the production database.
+
+From a reviewed isolated feature checkout, with the backend/browser dependencies
+and Chromium installed:
+
+```bash
+npm --prefix frontend run build
+backend/.venv/bin/python scripts/vps/smoke-agent-bootstrap-browser.py \
+  --output /tmp/open-node-bootstrap-browser-reviewed-revision
+sudo backend/.venv/bin/python scripts/vps/smoke-agent-bootstrap.py \
+  --output /tmp/open-node-bootstrap-real-reviewed-revision
+sudo python3 scripts/vps/smoke-installer-bootstrap-setting.py \
+  --safety-negative-controls --guarded-update \
+  --output /tmp/open-node-bootstrap-setting-reviewed-revision
+```
+
+The latter two require a disposable Debian 12 amd64 VPS with root, systemd,
+Docker/Compose and the documented host tools. They create and remove only
+explicitly owned test resources. Failed cleanup retains private recovery inputs;
+inspect the reported exact fixture before doing anything else.
+
+VPS evidence locations:
+
+- `/tmp/mmwx-agent-bootstrap-store.lE9RnE` — frozen backend overlay and focused gate.
+- `/tmp/open-node-bootstrap-ui.a8xVJ6VG/frontend-final.log` — final frontend gate.
+- `/tmp/open-node-bootstrap-browser-20260831-final/report.json` — browser workflow.
+- `/tmp/open-node-bootstrap-real-gate-20260831a/report.json` — real double-transport bootstrap.
+- `/tmp/open-node-bootstrap-setting-guarded-20260831b/report.json` — root installer
+  matrix, Docker setting transitions, image resource/API checks and cleanup.
+- `/tmp/open-node-bootstrap-setting-safety-20260831a/report.json` — Git environment
+  isolation and refused-namespace cleanup negative controls.
+
+The Agent release itself is independently pinned to committed source
+`6ca84e21202950bf5ee4754a8ae20e28dbde42ed`, not the newer control-plane overlay.
+Its exact four assets passed pre-upload service/lifecycle gates, fresh anonymous
+download/tag/BUILD/wheel/tar verification and default-GitHub-source WebSocket/HTTP
+upgrade, VLESS forwarding and rollback (104.95 s). See
+[the release record](releases/agent-0.3.0a0.md). The previous wheel in the upgrade
+gate is a synthetic fixture; this is not a claim of a tested 0.2-to-0.3 migration.
+
 ### Administrator MFA acceptance (2026-08-30/31)
 
 All commands below target the isolated `/opt/open-node/mmwx-parity-candidate`

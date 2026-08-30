@@ -115,11 +115,11 @@ smoke prerequisites, and installer support boundary.
 
 ## Current Milestone
 
-The last published Agent milestone is the hardened `cb1eb0c` control-plane
-Preview baseline and the bounded Agent 0.2.0 prerelease. The current `main`
-source identifies as unreleased `0.3.0a0` while post-0.2.0 Agent contracts are
-being implemented; it is not a published wheel or release tag. The supported
-scope is a new installation or controlled migration on Debian 12
+The production control-plane Preview remains on the hardened `cb1eb0c`
+baseline. The newer [Agent 0.3.0a0 alpha](https://github.com/FengYuchen1314/open-node/releases/tag/agent-v0.3.0a0)
+is published from exact `6ca84e2`, with a verified wheel, bootstrap archive,
+source manifest and checksum list. It is a prerelease, not a stable/latest
+release. The supported scope is a new installation or controlled migration on Debian 12
 amd64, one control-plane process and worker, and non-root managed Agents/Xray.
 Historical discovery of unrecorded private MMWX ownership and dependencies
 remains important for a full replacement, but it is not a blocker for this
@@ -131,9 +131,22 @@ is disabled; suppresses request-path access logs; bounds container logs; and
 enables SQLite foreign-key enforcement on every connection. These controls
 passed the complete VPS regression, exact-image inspection, and persistent
 Compose acceptance. They establish the current control-plane Preview baseline.
-The `agent-v0.2.0` GitHub prerelease is now published from final release commit
-`3bf30c0` and has passed anonymous asset verification plus the real WebSocket
-and HTTP download, upgrade, forwarding, and rollback smoke.
+Both Agent 0.2.0 and 0.3.0a0 have passed anonymous asset verification and
+WebSocket/HTTP download, pinned upgrade, forwarding and rollback gates. The
+0.3.0a0 upgrade gate uses a synthetic previous-wheel fixture; it is not proof
+of an in-place migration from every earlier release. See the
+[0.3.0a0 release record](docs/releases/agent-0.3.0a0.md).
+
+The [panel-issued Agent installer](docs/agent-bootstrap.md) follows the official
+MMWX flow: create a server, generate a command, run it on the new host, and
+observe the Agent connecting. It uses a ten-minute single-host ticket, checks
+the installer and versioned release hashes, and installs a dedicated non-root
+Agent with official Xray. Real WebSocket and HTTP installations, traffic and
+replay/reinstallation refusal have passed on the VPS. Configure the canonical
+HTTPS control-plane URL first; this does not provision DNS/TLS, migrate an
+existing host, install fork-only protocols or add public proxy inbounds.
+The root control-plane installer and the panel's remote-host command are
+separate entry points. Neither makes the whole project feature-complete.
 
 [Legacy MMWX identities](docs/legacy-mmwx-identities.md) have a mode-0600
 SQLite exporter and administrator-only preview/import. Existing bcrypt hashes are

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from open_node.api.auth import require_administrator
 from open_node.api.routes import (
+    agent_bootstrap,
     agents,
     auth,
     certificates,
@@ -28,6 +29,7 @@ from open_node.api.routes import (
 api_router = APIRouter()
 private_router = APIRouter(dependencies=[Depends(require_administrator)])
 private_router.include_router(servers.router)
+private_router.include_router(agent_bootstrap.router)
 private_router.include_router(server_management.router)
 private_router.include_router(certificates.router)
 private_router.include_router(changes.router)
@@ -51,5 +53,6 @@ api_router.include_router(subscription_templates.router, prefix="/account")
 api_router.include_router(system.router)
 api_router.include_router(license.router)
 api_router.include_router(agents.router)
+api_router.include_router(agent_bootstrap.public_router)
 api_router.include_router(public.router)
 api_router.include_router(subscriptions.public_router)

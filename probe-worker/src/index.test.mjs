@@ -81,3 +81,49 @@ test("does not expose administrator API paths through the SPA fallback", async (
   assert.equal(assetRequests, 0);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
 });
+
+test("never proxies Agent bootstrap endpoints, including public redemption", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamRequests = 0;
+  let assetRequests = 0;
+  globalThis.fetch = async () => {
+    upstreamRequests += 1;
+    throw new Error("Bootstrap must not reach the control plane through the Probe Worker");
+  };
+  const paths = [
+    "/api/v1/agents/bootstrap/manifest",
+    "/api/v1/agents/bootstrap/installer.py",
+    "/api/v1/agents/bootstrap/redeem",
+    "/api/v1/servers/8f328d00-8bed-4d9d-b7ef-c2fe43235c9c/bootstrap",
+  ];
+  try {
+    for (const path of paths) {
+      for (const method of ["GET", "POST", "DELETE"]) {
+        const response = await worker.fetch(
+          new Request(`https://probe.example${path}`, { method }),
+          {
+            MMWX_ORIGIN: "https://origin.example/control",
+            PROBE_TOKEN: "worker-secret",
+            ASSETS: { fetch: async () => { assetRequests += 1; return new Response("unexpected"); } },
+          },
+        );
+        assert.equal(response.status, 404);
+        assert.equal(response.headers.get("cache-control"), "no-store");
+      }
+    }
+    assert.equal(upstreamRequests, 0);
+    assert.equal(assetRequests, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects mutations of every public probe route", async () => {
+  for (const path of ["/api/probe", "/api/series", "/api/targets", "/api/stream"]) {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      const response = await worker.fetch(new Request(`https://probe.example${path}`, { method }), {});
+      assert.equal(response.status, 405);
+      assert.equal(response.headers.get("allow"), "GET");
+    }
+  }
+});

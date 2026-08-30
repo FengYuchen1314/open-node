@@ -33,8 +33,18 @@ class Settings(BaseSettings):
     certificate_job_timeout: int = Field(default=240, ge=5, le=600)
     frontend_dir: Path | None = None
     agent_identity_file: Path | None = None
+    agent_bootstrap_public_url: str | None = None
     subscription_access_poll_seconds: float = Field(default=10, ge=1, le=300)
     server_traffic_poll_seconds: float = Field(default=60, ge=1, le=300)
+
+    @field_validator("agent_bootstrap_public_url", mode="before")
+    @classmethod
+    def bootstrap_public_url(cls, value):
+        if value in (None, ""):
+            return None
+        from open_node.services.agent_bootstrap import normalize_control_url
+
+        return normalize_control_url(value)
 
     @field_validator("certificate_http_address")
     @classmethod
@@ -117,6 +127,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_prefix="OPEN_NODE_",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
 

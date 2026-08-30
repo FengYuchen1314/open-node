@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
 import CommandInspector from "../components/CommandInspector.vue";
 import AgentLifecycleDialog from "../components/AgentLifecycleDialog.vue";
+import AgentBootstrapDialog from "../components/AgentBootstrapDialog.vue";
 import ServerTrafficPanel from "../components/ServerTrafficPanel.vue";
 import ServerManagementDialog from "../components/ServerManagementDialog.vue";
 import RouteProbeFields from "../components/RouteProbeFields.vue";
@@ -42,6 +43,10 @@ import {
 const servers = ref<ServerSummary[]>([]);
 const agentsByServer = ref<Record<string, AgentRead>>({});
 const management = reactive({ open: false, serverId: "", mode: "edit" as "edit" | "remove" });
+const bootstrap = reactive({ open: false, serverId: "", serverName: "" });
+function installAgent(serverId: string, serverName: string) {
+  Object.assign(bootstrap, { serverId, serverName, open: true });
+}
 function manageServer(serverId: string, mode: "edit" | "remove") {
   Object.assign(management, { serverId, mode, open: true });
 }
@@ -56,7 +61,7 @@ const savingCommand = ref(false);
 const savingOperation = ref<AgentOperationKind | "">("");
 const errorMessage = ref("");
 const successMessage = ref("");
-const latestToken = ref<{ serverName: string; token: string } | null>(null);
+const latestToken = ref<{ serverId: string; serverName: string; token: string } | null>(null);
 const form = reactive<ServerCreateRequest>(defaultServerCreateRequest());
 const metadataForm = reactive({
   server_id: "",
@@ -479,6 +484,7 @@ async function submitServer() {
       telecom_paid_peer: form.telecom_paid_peer ?? null,
     });
     latestToken.value = {
+      serverId: response.server.id,
       serverName: response.server.name,
       token: response.agent_token,
     };
@@ -1035,8 +1041,8 @@ function truncateText(value: string, maxLength: number) {
         <div class="eyebrow">MMWX refactor</div>
         <h1 class="page-title">Open Node control plane</h1>
         <p class="page-copy">
-          Server inventory is now backed by SQLite and issues agent bootstrap
-          tokens without any license gate.
+          Manage servers, generate short-lived Agent installation commands and
+          monitor connected runtimes. No license or activation is required.
         </p>
       </div>
 
@@ -1126,6 +1132,9 @@ function truncateText(value: string, maxLength: number) {
               </td>
               <td>
                 <div class="d-flex">
+                  <v-tooltip :text="agentsByServer[server.id] ? 'Agent installation status' : 'Install Agent'"><template #activator="{ props: tip }">
+                    <v-btn v-bind="tip" icon="mdi-console" :aria-label="`Install Agent on ${server.name}`" variant="text" size="small" @click="installAgent(server.id, server.name)" />
+                  </template></v-tooltip>
                   <v-tooltip text="Edit server"><template #activator="{ props: tip }">
                     <v-btn v-bind="tip" icon="mdi-pencil-outline" :aria-label="`Edit ${server.name}`" variant="text" size="small" @click="manageServer(server.id, 'edit')" />
                   </template></v-tooltip>
@@ -1301,8 +1310,11 @@ function truncateText(value: string, maxLength: number) {
           icon="mdi-key-variant"
           variant="tonal"
         >
-          <div class="token-label">{{ latestToken.serverName }} agent token</div>
+          <div class="token-label">{{ latestToken.serverName }} long-lived Agent token (manual setup only)</div>
           <code class="token-code">{{ latestToken.token }}</code>
+          <p class="text-caption mt-2">Keep this credential private. Use the installation dialog to generate a short-lived command for a new host.</p>
+          <v-btn class="mt-3" variant="tonal" prepend-icon="mdi-console"
+            @click="installAgent(latestToken.serverId, latestToken.serverName)">Install Agent</v-btn>
         </v-alert>
 
         <v-divider class="command-divider" />
@@ -1890,6 +1902,8 @@ function truncateText(value: string, maxLength: number) {
         </v-card-actions>
       </v-card>
     </v-dialog>
+    <AgentBootstrapDialog v-model="bootstrap.open" :server-id="bootstrap.serverId"
+      :server-name="bootstrap.serverName" @updated="refreshServers" />
     <AgentLifecycleDialog v-model="agentLifecycleOpen" :server-id="agentLifecycleTarget"
       :server-name="servers.find(server => server.id === agentLifecycleTarget)?.name ?? ''"
       :action="agentLifecycleAction" @updated="refreshLifecycleCommands" />

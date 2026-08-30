@@ -165,6 +165,47 @@ restore a backup, prune retained images/backups, install or migrate remote
 Agents, or claim support for the upstream MMWX native binary, PostgreSQL,
 embedded Nginx, Windows, rootless Docker, multi-host or multi-worker operation.
 
+### Enable panel-issued Agent commands
+
+After configuring a trusted HTTPS reverse proxy, supply the canonical control-
+plane URL to the reviewed root installer. For an existing **installer-managed**
+deployment:
+
+```bash
+sudo env OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL=https://control.example.com \
+  bash /path/to/reviewed/install.sh update
+```
+
+Use the same `OPEN_NODE_CONFIG_DIR` override if the original installation used
+a non-default directory. For a fresh deployment, the same setting can be passed
+to `install`. It must identify the control plane, not the anonymous Probe Worker.
+The selected source ref must include the bootstrap feature. The installer
+accepts an empty value or a canonical HTTPS URL with a lowercase ASCII/punycode
+host, optional port and clean path prefix; omit a trailing slash. It rejects
+credentials, query/fragment components, whitespace and dotenv interpolation.
+The backend performs its own URL validation before becoming healthy.
+
+An explicit changed value uses the normal update transaction **even when the
+source commit is unchanged**: stopped-volume backup, a new transaction image,
+candidate health/identity checks and publication of the private environment.
+This is a service update with the usual interruption/recovery semantics, not a
+live setting toggle. An omitted or identical value retains the same-revision
+no-op behavior. To disable new commands deliberately:
+
+```bash
+sudo env OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL= \
+  bash /path/to/reviewed/install.sh update
+```
+
+Do not hand-edit the installer's environment or manifest. Manual Compose
+deployments may set the same key in their own private environment and recreate
+the reviewed service; the root installer still refuses to adopt them. The
+setting neither creates HTTPS infrastructure nor installs Agents automatically.
+See [panel-issued Agent installation](agent-bootstrap.md) for its new-host
+scope, secret handling and recovery rules.
+
+### Maintainer installer acceptance
+
 The maintainer-only installer smoke is destructive and must run as root on the
 disposable project VPS from a Git checkout. It disables the installer's automatic
 package installation, so the host must already provide the commands checked by
@@ -181,6 +222,20 @@ if mandatory cleanup reports a failure:
 
 ```bash
 sudo python3 scripts/vps/smoke-control-plane-installer.py
+```
+
+The separate bootstrap-setting gate checks the old/new Compose environment
+allowlists, inherited-shell isolation and explicit setting transitions. Its
+default mode does not start containers; `--safety-negative-controls` checks Git
+environment isolation and refusal to clean an unowned namespace, while
+`--guarded-update` adds the isolated fresh/same-source enable/no-op/disable
+transaction and cleanup. It has the same
+root-only disposable-host requirement:
+
+```bash
+sudo python3 scripts/vps/smoke-installer-bootstrap-setting.py \
+  --safety-negative-controls --guarded-update \
+  --output /tmp/open-node-installer-bootstrap-reviewed-revision
 ```
 
 ## Manual Install
