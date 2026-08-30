@@ -1484,6 +1484,7 @@ print(json.dumps({
                         str(self.real_docker),
                         "run",
                         "--rm",
+                        "-i",
                         "--network",
                         "none",
                         "--read-only",
