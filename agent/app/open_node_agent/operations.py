@@ -482,14 +482,11 @@ def apply_xray_system_config(
 
     candidate = copy.deepcopy(config)
     log = candidate.get("log")
-    current_log_level = log.get("loglevel", "warning") if isinstance(log, dict) else "warning"
-    if payload["log_level"] != current_log_level:
-        if not isinstance(log, dict):
-            log = {}
-        log["loglevel"] = payload["log_level"]
-        candidate["log"] = log
-    if "dns" in config or payload["dns"]:
-        candidate["dns"] = copy.deepcopy(payload["dns"])
+    if not isinstance(log, dict):
+        log = {}
+    log["loglevel"] = payload["log_level"]
+    candidate["log"] = log
+    candidate["dns"] = copy.deepcopy(payload["dns"])
 
     if stats_changed:
         if not numeric_levels:
