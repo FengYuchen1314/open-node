@@ -316,7 +316,9 @@ def assert_rendered_fixture_namespace(
     allowed_service_fields = {
         "build",
         "cap_drop",
+        "command",
         "environment",
+        "entrypoint",
         "image",
         "init",
         "logging",
@@ -335,6 +337,10 @@ def assert_rendered_fixture_namespace(
         raise SmokeFailure(
             f"candidate rendered unexpected service fields: {sorted(unexpected_service_fields)}"
         )
+    # Compose v5 normalizes omitted Dockerfile defaults as explicit nulls. A
+    # candidate must still never override the reviewed image entrypoint/command.
+    if service.get("command") is not None or service.get("entrypoint") is not None:
+        raise SmokeFailure("candidate overrode the image entrypoint or command")
     if service.get("image") != image:
         raise SmokeFailure(f"candidate rendered non-fixture image: {service.get('image')!r}")
     if not isinstance(build, dict) or build.get("context") != expected_context:
