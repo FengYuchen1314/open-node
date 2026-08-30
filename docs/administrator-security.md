@@ -28,7 +28,7 @@ In **Access → Administrator security**:
 Subsequent password logins return a short-lived challenge, not an authenticated
 session. Enter an authenticator code or unused recovery code to finish sign-in.
 The challenge expires after five minutes or five failed verification attempts.
-Second-factor submissions also share a persistent ten-per-minute account budget
+Login second-factor submissions also share a persistent ten-per-minute account budget
 across IP addresses and newly issued challenges. Unknown challenges do not consume
 that account budget. Password login, verification, and authenticated security
 changes additionally share the existing ten-per-minute source-IP limit.

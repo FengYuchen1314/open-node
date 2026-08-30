@@ -21,6 +21,7 @@ from open_node.services.auth import (
     AdministratorFactorUnavailable,
     AdministratorSecurityConflict,
     AdministratorSecurityPolicy,
+    LoginWindow,
     OperatorChallenge,
     OperatorSession,
 )
@@ -376,6 +377,40 @@ def test_administrator_factor_budget_survives_new_challenges_and_ips(tmp_path: P
     resumed = store.complete_login(challenge, codes[0], 43200)
     assert resumed.token
     assert store.security().recovery_codes_remaining == 9
+
+
+def test_administrator_factor_budget_is_atomic_across_stores(tmp_path: Path, monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(auth, "time", lambda: now)
+    url = f"sqlite:///{tmp_path / 'auth.db'}"
+    key = Fernet.generate_key().decode()
+    store = auth.AuthStore(url, key)
+    store.set_administrator("admin", ADMIN_PASSWORD)
+    session = store.login("admin", ADMIN_PASSWORD, 43200)
+    enrollment = store.begin_totp(session.token, ADMIN_PASSWORD)
+    codes = store.confirm_totp(session.token, pyotp.TOTP(enrollment.secret).at(now))
+    challenge = store.login("admin", ADMIN_PASSWORD, 43200).challenge
+    bucket = sha256(b"administrator:second-factor:1").hexdigest()
+    with store.session.begin() as db:
+        db.add(LoginWindow(key=bucket, attempts=9, expires_at=now + 60))
+    restarted = auth.AuthStore(url, key)
+
+    def complete(target):
+        try:
+            target.complete_login(challenge, "invalid", 43200)
+        except auth.AdministratorRateLimited:
+            return "limited"
+        except AdministratorAuthenticationError:
+            return "invalid"
+        raise AssertionError("An invalid factor must not issue a session")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(complete, (store, restarted))) == ["invalid", "limited"]
+    with store.session() as db:
+        assert db.get(LoginWindow, bucket).attempts == 10
+        assert db.get(OperatorChallenge, sha256(challenge.encode()).hexdigest()).attempts == 1
+    now += 61
+    assert store.complete_login(challenge, codes[0], 43200).token
 
 
 @pytest.mark.parametrize("key_state", ["missing", "replaced"])

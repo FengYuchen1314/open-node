@@ -47,7 +47,10 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e "agent[dev]"
       - run: ruff check agent
-      - run: pytest agent/tests
+      - name: Test Agent with real filesystem ownership
+        # Host-policy fixtures chown private files to a separate service UID.
+        # Use the installed interpreter in this disposable hosted runner.
+        run: sudo -n -- "$(command -v python)" -m pytest agent/tests
       - run: python -m build --wheel --outdir agent/dist agent
 
   frontend:

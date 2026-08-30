@@ -9,6 +9,11 @@ Ruff/pytest/wheel build, frontend Vitest plus both the administrator and public
 Probe production bundles, and Probe Worker behavior tests/type checking.
 Actions are pinned to immutable revisions and receive only read access to
 repository contents. This hosted CI is an independent clean checkout check; it
+uses the configured Python interpreter under `sudo` for the Agent tests because
+host-policy fixtures exercise real file ownership changes to a service UID.
+Dependency installation, linting and wheel building remain unprivileged. The
+privilege applies only to GitHub's disposable hosted test runner, not deployment.
+Hosted CI
 does not replace the root-only Docker installer smoke, systemd lifecycle
 smokes, protocol-runtime builds, or real forwarding checks on the designated
 VPS.
