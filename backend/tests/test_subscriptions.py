@@ -254,7 +254,7 @@ def test_subscription_formats_include_sing_box_uri_list_and_base64(tmp_path: Pat
 
 def test_subscription_traffic_ledger_tracks_deltas_and_counter_resets(tmp_path: Path) -> None:
     client = make_client(tmp_path)
-    agent_token, _server_id, _node_id, plan_id = create_catalog_fixture(client)
+    agent_token, _server_id, node_id, plan_id = create_catalog_fixture(client)
     assigned = client.post(
         "/api/v1/users/alice/plan",
         json={
