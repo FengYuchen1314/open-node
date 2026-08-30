@@ -1,6 +1,6 @@
 # Control Plane Deployment
 
-The root Dockerfile builds Vue 3/Vuetify assets and installs FastAPI in one
+The root Dockerfile builds React/Ant Design assets and installs FastAPI in one
 image. FastAPI serves both the application and API on port 8080; Node and Vite
 are build tools, not production services. No activation or paid license is
 required. This package is usable for the implemented workflows, not a claim

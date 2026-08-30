@@ -1,14 +1,10 @@
-import { renderToString } from "vue/server-renderer";
-import { createSSRApp, h } from "vue";
-import { createVuetify } from "vuetify";
-import * as components from "vuetify/components";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
-import WarpStatus from "./WarpStatus.vue";
+import WarpStatus from "../react/components/WarpStatus";
 
 async function render(body: unknown) {
-  const app = createSSRApp({ render: () => h(WarpStatus, { body }) });
-  app.use(createVuetify({ components, ssr: true }));
-  return renderToString(app);
+  return renderToStaticMarkup(createElement(WarpStatus, { body }));
 }
 
 describe("WARP status", () => {

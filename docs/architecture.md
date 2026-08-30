@@ -9,7 +9,7 @@ changed atomically.
 ```text
 open-node
 |-- backend       FastAPI application and tests
-|-- frontend      Vue 3 + Vuetify application and tests
+|-- frontend      React + Ant Design application and tests
 |-- probe-worker  Cloudflare Worker for the standalone probe surface
 |-- docs          migration notes and architecture decisions
 `-- scripts       VPS bootstrap and verification helpers
@@ -51,7 +51,7 @@ The backend serves JSON APIs under `/api/v1`. The frontend is a Vite application
 that can point to the backend with `VITE_API_BASE_URL` or use same-origin API
 paths in production.
 
-The production image serves the built Vue frontend from FastAPI using
+The production image serves the built React frontend from FastAPI using
 `OPEN_NODE_FRONTEND_DIR`. Static assets retain conditional/range responses;
 HTML is revalidated and hashed assets are immutable. Browser navigation can
 fall back to `index.html`, but missing API routes, static assets, and dotfiles
@@ -72,7 +72,7 @@ Only session-secret hashes are persisted; session-bound CSRF tokens, absolute
 expiry, idle expiry, revocation, and login-rate windows are persisted alongside
 the inventory database. Credential-version checks prevent a password-reset
 race from issuing a session with an obsolete password. Changing a password
-revokes every session. The Vue shell waits for a session before mounting
+revokes every session. The React shell waits for a session before mounting
 management views and returns to sign-in when an API request reports expiry.
 No authentication state is a paid entitlement or licensing gate.
 
@@ -269,7 +269,7 @@ can continue. HTTP errors, transport errors, and `success=false` bodies fail
 the command; failure cannot update config snapshots or trigger a success
 refresh. Results for waiting commands are rejected, and terminal results are
 accepted once using a conditional update, including concurrent replies. The
-Vue command inspector distinguishes waiting and skipped commands and shows
+React command inspector distinguishes waiting and skipped commands and shows
 their prerequisite IDs.
 
 ## Agent WebSocket RPC
@@ -717,7 +717,7 @@ generation returns the plaintext token once and stores only a SHA-256 hash in
 SQLite; clearing the token also disables the requirement. When the probe is
 disabled, `/probe-servers` still returns a no-license JSON payload with
 `enabled=false`, but the public server list is empty so node telemetry is not
-exposed. The Vue `/probe` view can edit these settings, generate or clear the
+exposed. The React `/probe` view can edit these settings, generate or clear the
 Worker token, and immediately uses the same public payload to render or hide
 table sections, status and region filters, region summaries, seven-day traffic
 bars, health chips, latency history buckets, quota meters, return-route badges,
@@ -744,7 +744,7 @@ concurrent connections in memory, follows the configured refresh interval, and
 keeps the no-license response contract.
 
 The `probe-worker/` package is a small Cloudflare Worker that hosts the dedicated
-read-only Vue build from `frontend/dist-probe` with Workers Static Assets. That
+read-only React build from `frontend/dist-probe` with Workers Static Assets. That
 bundle mounts the shared `ProbeView` in `publicOnly` mode without the control
 plane's router or authentication shell. Public mode neither renders nor calls
 the settings, token, private server-list, or scheduled-task management APIs.

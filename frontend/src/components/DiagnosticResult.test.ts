@@ -1,15 +1,11 @@
-import { renderToString } from "vue/server-renderer";
-import { createSSRApp, h } from "vue";
-import { createVuetify } from "vuetify";
-import * as components from "vuetify/components";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
-import DiagnosticResult from "./DiagnosticResult.vue";
+import DiagnosticResult from "../react/components/DiagnosticResult";
 import { latencyCommandTimeout, routeTargets, selectedRouteTargets } from "../domain/diagnostics";
 
 async function render(path: string, body: unknown) {
-  const app = createSSRApp({ render: () => h(DiagnosticResult, { path, body }) });
-  app.use(createVuetify({ components, ssr: true }));
-  return renderToString(app);
+  return renderToStaticMarkup(createElement(DiagnosticResult, { path, body }));
 }
 
 describe("diagnostic results", () => {

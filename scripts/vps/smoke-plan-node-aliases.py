@@ -5,6 +5,7 @@ import base64
 import importlib.util
 import json
 import os
+import re
 import secrets
 import sqlite3
 from pathlib import Path
@@ -37,12 +38,16 @@ def capture_aliases(page, container, output, name):
     ):
         page.set_viewport_size({"width": width, "height": height})
         page.wait_for_timeout(200)
-        field = container.get_by_label("Subscription name", exact=True)
+        field = container.get_by_role(
+            "textbox", name=re.compile(r": subscription name$")
+        )
         field.scroll_into_view_if_needed()
         expect(field).to_be_in_viewport()
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
-        assert container.locator(".plan-node-aliases").evaluate(
-            "el => el.scrollWidth <= el.clientWidth + 1"
+        aliases = container.locator(".ant-card[aria-label]")
+        assert aliases.count() > 0, "No node alias controls found"
+        assert aliases.evaluate_all(
+            "items => items.every(el => el.scrollWidth <= el.clientWidth + 1)"
         )
         page.mouse.move(0, 0)
         page.screenshot(
@@ -159,9 +164,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             page.get_by_role("button", name="Edit plan Community", exact=True).click()
             dialog = page.get_by_role("dialog")
             toggle = dialog.get_by_label("Custom subscription names", exact=True)
-            field = dialog.get_by_role(
-                "region", name=node["name"], exact=True
-            ).get_by_label("Subscription name", exact=True)
+            field = dialog.get_by_label(
+                node["name"] + ": subscription name", exact=True
+            )
             expect(field).to_be_disabled()
             toggle.check()
             field.fill("x" * 129)
@@ -203,7 +208,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert save()["commands"] == []
             expect(field).to_have_value(alias)
             capture_aliases(page, dialog, args.output, "plan-alias-saved")
-            dialog.locator(".plan-actions").get_by_role(
+            dialog.locator(".ant-modal-footer").get_by_role(
                 "button", name="Close", exact=True
             ).click()
 
@@ -231,8 +236,10 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             expect(
                 portal.get_by_role("heading", name="Alice", exact=True)
             ).to_be_visible()
-            portal.locator(".account-link-controls .v-select .v-field").click()
-            portal.get_by_role("option", name="Xray", exact=True).click()
+            portal.get_by_role("combobox", name="Client format", exact=True).click()
+            portal.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text("Xray", exact=True).click()
             with portal.expect_download() as download:
                 portal.get_by_role(
                     "link", name="Download subscription", exact=True
@@ -262,7 +269,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 ]
                 == {}
             )
-            dialog.locator(".plan-actions").get_by_role(
+            dialog.locator(".ant-modal-footer").get_by_role(
                 "button", name="Close", exact=True
             ).click()
 
@@ -271,13 +278,15 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 has=page.get_by_role("button", name="Create plan", exact=True)
             )
             form.get_by_label("Name", exact=True).fill("Created with alias")
-            form.get_by_role("combobox", name="Nodes", exact=True).press("Enter")
-            page.get_by_role(
-                "option", name=f"{node['name']} ({node['protocol']})", exact=True
-            ).click()
+            form.get_by_role("combobox", name="Nodes", exact=True).click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text(f"{node['name']} ({node['protocol']})", exact=True).click()
             form.get_by_role("combobox", name="Nodes", exact=True).press("Escape")
             form.get_by_label("Custom subscription names", exact=True).check()
-            form.get_by_label("Subscription name", exact=True).fill("New plan name")
+            form.get_by_label(node["name"] + ": subscription name", exact=True).fill(
+                "New plan name"
+            )
             capture_aliases(page, form, args.output, "plan-alias-create")
             with page.expect_response(
                 lambda response: (

@@ -127,7 +127,7 @@ def screenshot(page, output, name):
         ui.check_layout(page)
         dialog = page.get_by_role("dialog")
         if dialog.is_visible():
-            bounds = dialog.locator(".v-card-actions").bounding_box()
+            bounds = dialog.locator(".ant-modal-footer").bounding_box()
             assert (
                 bounds and bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= height
             )
@@ -324,7 +324,7 @@ def run(args):
                     page.goto(url + "/certificates")
                     page.get_by_role("button", name=name, exact=True).click()
                     expect(
-                        page.get_by_role("heading", name="Versions", exact=True)
+                        page.locator('.ant-card-head-title:text-is("Versions")')
                     ).to_be_visible()
 
                 def edit(email, *, eab=False, shots=False):
@@ -336,9 +336,9 @@ def run(args):
                     if eab:
                         dialog.get_by_label(
                             "External account binding", exact=True
-                        ).press("Enter")
-                        page.get_by_role(
-                            "option", name="Replace credentials", exact=True
+                        ).click()
+                        page.locator(".ant-select-dropdown:visible").get_by_text(
+                            "Replace credentials", exact=True
                         ).click()
                         expect(
                             dialog.get_by_role(
@@ -429,22 +429,31 @@ def run(args):
                     return response.json()["Status"]
 
                 inspect()
-                version_row = page.locator(".version-row").filter(
+                versions = page.locator(
+                    '.ant-card:has(> .ant-card-head .ant-card-head-title:text-is("Versions"))'
+                )
+                version_row = versions.get_by_role("row").filter(
                     has_text=first_data["serial"]
                 )
-                glyph = version_row.locator("i.mdi-cancel").evaluate(
-                    "(el) => getComputedStyle(el, '::before').content"
-                )
-                assert glyph not in {"none", "normal", '""'}, "Revocation icon is missing"
-                version_row.get_by_role(
+                expect(version_row).to_have_count(1)
+                revoke = version_row.get_by_role(
                     "button", name="Revoke version", exact=True
-                ).click()
+                )
+                glyph = revoke.locator("svg")
+                expect(glyph).to_be_visible()
+                assert glyph.evaluate("""el => Boolean(el.querySelector('path')?.getAttribute('d'))
+                    && el.getBBox().width > 0 && el.getBBox().height > 0"""), (
+                    "Revocation icon is missing"
+                )
+                revoke.click()
                 dialog = page.get_by_role("dialog")
                 expect(
                     dialog.get_by_role("button", name="Revoke version", exact=True)
                 ).to_be_disabled()
-                dialog.get_by_label("Revocation reason", exact=True).press("Enter")
-                page.get_by_role("option", name="Superseded", exact=True).click()
+                dialog.get_by_label("Revocation reason", exact=True).click()
+                page.locator(".ant-select-dropdown:visible").get_by_text(
+                    "Superseded", exact=True
+                ).click()
                 screenshot(page, args.screenshots, "revoke-confirm")
                 dialog.get_by_label(
                     "I confirm revocation of this version", exact=True

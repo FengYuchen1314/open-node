@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import os
+import re
 import sqlite3
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -37,24 +38,68 @@ def browser(client, backend, base, output):
                 ]
             )
             page = context.new_page()
-            errors = []
+            errors, traffic_updates = [], []
             page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("request", lambda request: traffic_updates.append(request)
+                    if request.method == "PUT" and request.url.endswith(base + "/traffic") else None)
             page.goto(backend + "/")
             panel = page.get_by_role("region", name="Server traffic", exact=True)
             expect(panel.get_by_label("Traffic source", exact=True)).to_be_visible(
                 timeout=15000
             )
-            panel.get_by_label("Traffic source", exact=True).press("Enter")
-            page.get_by_role("option", name="Xray nodes", exact=True).click()
-            panel.get_by_label("Counted direction", exact=True).press("Enter")
-            page.get_by_role("option", name="Larger direction", exact=True).click()
-            panel.get_by_label("Monthly reset day (UTC)", exact=True).press("Enter")
-            page.get_by_role("option", name="31", exact=True).click()
-            panel.get_by_label("Quota (GiB, 0 = unlimited)", exact=True).fill("-1")
-            expect(
-                panel.get_by_role("button", name="Save", exact=True)
-            ).to_be_disabled()
-            panel.get_by_label("Quota (GiB, 0 = unlimited)", exact=True).fill("2")
+            def select(label, option):
+                panel.locator(".ant-select").filter(
+                    has=page.get_by_role("combobox", name=label, exact=True)
+                ).click()
+                # Ant's virtual Select has hidden ARIA proxy options. The real
+                # pointer target is the corresponding visible popup row.
+                page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter(
+                    has_text=re.compile("^" + re.escape(option) + "$")
+                ).click()
+
+            select("Traffic source", "Xray nodes")
+            select("Counted direction", "Larger direction")
+            select("Monthly reset day (UTC)", "31")
+            quota_input = panel.get_by_label("Quota (GiB, 0 = unlimited)", exact=True)
+            baseline = client.get(base + "/traffic").raise_for_status().json()
+            settings = ("traffic_limit", "traffic_reset_day", "traffic_stats_mode", "traffic_source")
+            persisted = {key: baseline[key] for key in settings}
+            # The browser rejects invalid drafts; the independent API boundary
+            # must continue rejecting invalid byte values as well.
+            for value in (-1, 0.4, None):
+                invalid = client.put(base + "/traffic", json={**persisted, "traffic_limit": value})
+                assert invalid.status_code == 422
+            for finish in ("Tab", "Enter"):
+                for value in ("", "-1", "0.00000000001", "1e-999"):
+                    quota_input.fill("")
+                    if value == "-1":
+                        quota_input.press_sequentially("-")
+                        expect(quota_input).to_have_value("-")
+                        quota_input.press_sequentially("1")
+                        expect(quota_input).to_have_value("-1")
+                    elif value:
+                        quota_input.fill(value)
+                    quota_input.press(finish)
+                    expect(panel.get_by_role("button", name="Save", exact=True)).to_be_disabled()
+                    expect(panel).to_contain_text("Enter zero for unlimited, or a positive quota")
+                    if value == "-1":
+                        expect(quota_input).to_have_value("-1")
+                    page.wait_for_timeout(100)
+                    assert not traffic_updates, "Invalid quota caused a browser PUT"
+                    current = client.get(base + "/traffic").raise_for_status().json()
+                    assert {key: current[key] for key in settings} == persisted
+            # Fractional GiB is legitimate. Preserve it through blur and Enter,
+            # and verify the saved byte value is nonzero, never unlimited.
+            quota_input.fill("0.4")
+            quota_input.press("Tab")
+            expect(quota_input).to_have_value("0.4")
+            with page.expect_response(
+                lambda r: r.url.endswith(base + "/traffic") and r.request.method == "PUT"
+            ) as fractional:
+                quota_input.press("Enter")
+            assert fractional.value.status == 200
+            assert fractional.value.json()["traffic_limit"] == 429496730
+            quota_input.fill("2")
             with page.expect_response(
                 lambda r: (
                     r.url.endswith(base + "/traffic") and r.request.method == "PUT"
@@ -82,9 +127,12 @@ def browser(client, backend, base, output):
                     dialog.get_by_text("Reset server traffic?", exact=True)
                 ).to_be_visible()
                 dialog.get_by_role("button", name="Cancel", exact=True).click()
+                expect(dialog).not_to_be_visible()
                 assert client.get(base + "/traffic").json()["used"] > 0
                 assert panel.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
-                for field in panel.locator(".v-field").all():
+                fields = panel.locator(".ant-select, .ant-input-number")
+                expect(fields).to_have_count(5)
+                for field in fields.all():
                     box = field.bounding_box()
                     assert box and box["width"] > 120 and box["x"] >= 0
                     assert box["x"] + box["width"] <= width + 1
@@ -101,7 +149,7 @@ def browser(client, backend, base, output):
             expect(panel.get_by_test_id("server-traffic-used")).to_have_text("0 B")
             assert not errors, errors
             print(
-                "PASS browser settings, validation, reset/cancel and 1440/390/320 layouts",
+                "PASS browser settings, raw/blur/Enter validation, fractional GiB, reset/cancel and 1440/390/320 layouts",
                 flush=True,
             )
         finally:

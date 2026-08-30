@@ -5,28 +5,31 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vue-tsc -b && vite build",
-    "build:probe": "vue-tsc -b && vite build --config vite.probe.config.ts",
+    "build": "tsc -b && vite build",
+    "build:probe": "tsc -b && vite build --config vite.probe.config.ts",
     "preview": "vite preview --host 0.0.0.0",
     "preview:probe": "vite preview --config vite.probe.config.ts --host 0.0.0.0",
     "test": "vitest run",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@mdi/font": "^7.4.47",
-    "pinia": "^3.0.0",
+    "@ant-design/icons": "6.3.2",
+    "antd": "6.6.2",
     "qrcode": "^1.5.4",
-    "vue": "^3.5.0",
-    "vue-router": "^4.5.0",
-    "vuetify": "^3.7.0"
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router-dom": "7.18.3"
   },
   "devDependencies": {
+    "@testing-library/react": "16.3.3",
     "@types/node": "^24.0.0",
     "@types/qrcode": "^1.5.5",
-    "@vitejs/plugin-vue": "^6.0.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "5.2.0",
+    "jsdom": "26.1.0",
     "typescript": "^5.9.0",
     "vite": "^7.0.0",
-    "vitest": "^3.2.0",
-    "vue-tsc": "^3.0.0"
+    "vitest": "^3.2.0"
   }
 }

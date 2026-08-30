@@ -254,8 +254,13 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             acknowledgment = dialog.get_by_label(
                 "I accept the runtime restart and pending changes", exact=True
             )
-            dialog.get_by_label("Traffic quota (GiB)", exact=True).fill("-1")
+            quota = dialog.get_by_label("Traffic quota (GiB)", exact=True)
+            quota.fill("")
+            quota.press_sequentially("-1")
+            quota.press("Enter")
+            expect(quota).to_have_value("-1")
             acknowledgment.check()
+            expect(quota).to_have_value("-1")
             with page.expect_response(
                 lambda response: (
                     response.url.endswith(plan_base + "/settings")
@@ -292,18 +297,32 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             dialog.get_by_label("New duration (days)", exact=True).fill("7")
             dialog.get_by_label("Default speed (Mbps)", exact=True).fill("2")
             dialog.get_by_label("Default connections", exact=True).fill("3")
-            dialog.get_by_label("New reset day (UTC)", exact=True).press("Enter")
-            page.get_by_role("option", name="25", exact=True).click()
+            dialog.get_by_role(
+                "combobox", name="New reset day (UTC)", exact=True
+            ).click()
+            dropdown = page.locator(".ant-select-dropdown:visible")
+            dropdown.locator(".ant-select-dropdown-list-holder").evaluate(
+                "element => { element.scrollTop = element.scrollHeight; }"
+            )
+            dropdown.locator(".ant-select-item-option").get_by_text(
+                "25", exact=True
+            ).click()
             selector = dialog.get_by_role("combobox", name="Plan nodes", exact=True)
             selector.click()
-            page.get_by_role("option", name=nodes[0]["name"], exact=True).click()
-            page.get_by_role("option", name=nodes[1]["name"], exact=True).click()
+            for node in nodes:
+                page.locator(
+                    ".ant-select-dropdown:visible .ant-select-item-option"
+                ).get_by_text(node["name"], exact=True).click()
             selector.press("Escape")
-            override = dialog.get_by_role("region", name=nodes[1]["name"], exact=True)
+            override = dialog.get_by_label(nodes[1]["name"], exact=True)
             expect(override).to_be_visible()
-            override.get_by_label("Speed (Mbps)", exact=True).fill("0.5")
-            override.get_by_label("Connections", exact=True).fill("1")
-            override.get_by_label("Display multiplier", exact=True).fill("2")
+            override.get_by_label(nodes[1]["name"] + ": speed", exact=True).fill("0.5")
+            override.get_by_label(nodes[1]["name"] + ": connections", exact=True).fill(
+                "1"
+            )
+            override.get_by_label(nodes[1]["name"] + ": multiplier", exact=True).fill(
+                "2"
+            )
 
             def capture(label):
                 for width, height, suffix in [
@@ -313,21 +332,24 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 ]:
                     page.set_viewport_size({"width": width, "height": height})
                     page.wait_for_timeout(150)
-                    box = dialog.locator(".plan-management-dialog").bounding_box()
+                    box = dialog.bounding_box()
                     assert (
                         box and box["x"] >= 0 and box["x"] + box["width"] <= width + 1
                     )
                     assert box["y"] >= 0 and box["y"] + box["height"] <= height + 1
-                    assert dialog.locator(".v-card-text").evaluate(
+                    content = dialog.locator(".ant-modal-body")
+                    expect(content).to_have_count(1)
+                    assert content.evaluate(
                         "el => el.scrollWidth <= el.clientWidth + 1"
+                    ), (
+                        suffix,
+                        content.evaluate(
+                            "el => ({scroll: el.scrollWidth, client: el.clientWidth})"
+                        ),
                     )
-                    dialog.locator(".v-card-text").evaluate(
-                        "el => { el.scrollTop = 0; }"
-                    )
+                    content.evaluate("el => { el.scrollTop = 0; }")
                     page.screenshot(path=str(args.output / f"{label}-{suffix}.png"))
-                    dialog.locator(".v-card-text").evaluate(
-                        "el => { el.scrollTop = el.scrollHeight; }"
-                    )
+                    content.evaluate("el => { el.scrollTop = el.scrollHeight; }")
                     page.screenshot(
                         path=str(args.output / f"{label}-{suffix}-bottom.png")
                     )
@@ -350,7 +372,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 )
             ).to_have_count(2, timeout=15000)
             capture("saved")
-            dialog.locator(".plan-actions").get_by_role(
+            dialog.locator(".ant-modal-footer").get_by_role(
                 "button", name="Close", exact=True
             ).click()
             for width, height, suffix in [
@@ -359,7 +381,8 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 (320, 740, "narrow"),
             ]:
                 page.set_viewport_size({"width": width, "height": height})
-                catalog = page.locator(".catalog-item")
+                catalog = page.locator(".ant-card-small")
+                assert catalog.count() > 0, "No catalog entries found"
                 catalog.first.scroll_into_view_if_needed()
                 page.wait_for_timeout(150)
                 assert catalog.evaluate_all(
@@ -420,7 +443,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert unassigned.value.status == 200, unassigned.value.text()
             wait_access(client, "alice")
             capture("unassigned")
-            dialog.locator(".plan-actions").get_by_role(
+            dialog.locator(".ant-modal-footer").get_by_role(
                 "button", name="Close", exact=True
             ).click()
             assert rejected(current_alice)

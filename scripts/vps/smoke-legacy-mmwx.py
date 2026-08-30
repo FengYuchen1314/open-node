@@ -280,10 +280,10 @@ def browser_import(url, admin_password, bundle, output, secrets_to_hide):
             dialog = page.get_by_role("dialog")
             dialog.locator('input[type="file"]').set_input_files(bundle)
             expect(dialog.get_by_text(bundle.name, exact=True)).to_be_visible()
-            package_select = dialog.get_by_label("Legacy Package", exact=True)
-            package_select.focus()
-            package_select.press("ArrowDown")
-            page.get_by_role("option", name="Legacy", exact=True).click()
+            dialog.get_by_role("combobox", name="Legacy Package", exact=True).click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text("Legacy", exact=True).click()
             dialog.get_by_role("button", name="Preview", exact=True).click()
             expect(dialog.get_by_text("Users 1", exact=True)).to_be_visible()
             expect(dialog.get_by_text("TOTP 1", exact=True)).to_be_visible()
@@ -293,9 +293,17 @@ def browser_import(url, admin_password, bundle, output, secrets_to_hide):
                 dialog.get_by_text(
                     "alice: source administrator will import as subscriber"
                 )
-            )
+            ).to_be_visible()
             capture_dialog(page, output)
-            dialog.get_by_label("Confirm user count (1)", exact=True).fill("1")
+            count = dialog.get_by_label("Confirm user count (1)", exact=True)
+            for invalid in ("2", "0.6", "", "-", "1e-999"):
+                count.fill(invalid)
+                count.press("Tab")
+                count.press("Enter")
+                expect(
+                    dialog.get_by_role("button", name="Import", exact=True)
+                ).to_be_disabled()
+            count.fill("1")
             dialog.get_by_role("button", name="Import", exact=True).click()
             expect(
                 dialog.get_by_text("Imported 1 identities", exact=True)
@@ -310,10 +318,12 @@ def browser_import(url, admin_password, bundle, output, secrets_to_hide):
                 secret not in content and secret not in storage
                 for secret in secrets_to_hide
             )
-            dialog.get_by_role("button", name="Close", exact=True).click()
+            dialog.locator(".ant-modal-footer").get_by_role(
+                "button", name="Close", exact=True
+            ).click()
             expect(page.get_by_text("Legacy Alice", exact=True).last).to_be_visible()
             assert not errors, errors
-            assert all(request.startswith((url, "data:")) for request in requests)
+            assert all(request.startswith((url + "/", "data:")) for request in requests)
         finally:
             context.close()
             browser.close()
@@ -339,12 +349,15 @@ def browser_subscriber(url, password, totp_secret, output):
             )
             page.get_by_role("button", name="Verify", exact=True).click()
             expect(
-                page.get_by_role("heading", name="Legacy", exact=True)
+                page.get_by_role("region", name="Current plan", exact=True).get_by_text(
+                    "Legacy", exact=True
+                )
             ).to_be_visible()
             expect(page.get_by_label("Configuration", exact=True)).to_be_visible()
-            page.get_by_label("Configuration", exact=True).focus()
-            page.get_by_label("Configuration", exact=True).press("ArrowDown")
-            page.get_by_role("option", name="Mobile", exact=True).click()
+            page.get_by_role("combobox", name="Configuration", exact=True).click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text("Mobile", exact=True).click()
             assert page.locator("input[readonly]").evaluate_all(
                 "elements => elements.some(element => element.value.includes('/x/moblegacy_link'))"
             )
@@ -450,6 +463,8 @@ def run(args):
             "OPEN_NODE_DATABASE_URL": f"sqlite:///{target}",
             "OPEN_NODE_FRONTEND_DIR": str(ROOT / "frontend/dist"),
             "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+            # Legacy token, short-code and /x compatibility is opt-in.
+            "OPEN_NODE_SHORT_LINKS_ENABLED": "true",
             "OPEN_NODE_SUBSCRIBER_TOTP_KEY": Fernet.generate_key().decode(),
         }
         subprocess.run(
@@ -484,6 +499,8 @@ def run(args):
                 )
                 wait_http(url + "/healthz", process)
                 with operator_client(url, admin_password) as operator:
+                    metadata = operator.get("/api/v1/meta").raise_for_status().json()
+                    assert metadata["short_links_enabled"] is True
                     port = runtime.free_port()
                     plan_id = catalog(operator, port)
                     browser_import(

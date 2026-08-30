@@ -23,7 +23,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def access(client, *, enabled, timeout=45):
     def read():
-        response = client.get("/api/v1/users/access-user/access").raise_for_status().json()
+        response = (
+            client.get("/api/v1/users/access-user/access").raise_for_status().json()
+        )
         return response["servers"]
 
     return runtime.poll(
@@ -72,10 +74,14 @@ def browser(client, backend, output):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/subscriptions")
-            page.get_by_role("combobox", name="User", exact=True).last.press("Enter")
-            page.get_by_role("option", name="access-user", exact=True).click()
-            panel = page.get_by_role("region", name="Node access")
-            expect(panel.get_by_text("applied", exact=True)).to_be_visible(timeout=15000)
+            page.get_by_role("combobox", name="Subscription user", exact=True).click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text("access-user", exact=True).click()
+            panel = page.get_by_label("Node access", exact=True)
+            expect(panel.get_by_text("applied", exact=True)).to_be_visible(
+                timeout=15000
+            )
             for width, height, label in [
                 (1440, 900, "desktop"),
                 (390, 844, "mobile"),
@@ -83,10 +89,13 @@ def browser(client, backend, output):
             ]:
                 page.set_viewport_size({"width": width, "height": height})
                 panel.scroll_into_view_if_needed()
-                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
-                assert panel.evaluate(
-                    "el => [...el.querySelectorAll('.v-btn,.v-switch')]"
-                    ".every(x => x.getBoundingClientRect().right <= innerWidth + 1)"
+                assert page.evaluate(
+                    "document.documentElement.scrollWidth <= innerWidth + 1"
+                )
+                controls = panel.locator("button:visible")
+                assert controls.count() > 0
+                assert controls.evaluate_all(
+                    "items => items.every(x => x.getBoundingClientRect().right <= innerWidth + 1)"
                 )
                 page.screenshot(path=str(output / (label + ".png")))
             page.set_viewport_size({"width": 1440, "height": 900})
@@ -98,14 +107,20 @@ def browser(client, backend, output):
             panel.get_by_label("Account enabled", exact=True).click()
             dialog.get_by_role("button", name="Disable", exact=True).click()
             access(client, enabled=False)
-            expect(panel.get_by_text("Account disabled", exact=True).first).to_be_visible(
-                timeout=15000
-            )
+            expect(
+                panel.get_by_text("Account disabled", exact=True).first
+            ).to_be_visible(timeout=15000)
             panel.get_by_label("Account enabled", exact=True).click()
             access(client, enabled=True)
-            expect(panel.get_by_text("Enabled", exact=True).first).to_be_visible(timeout=15000)
-            panel.get_by_role("button", name="Reconcile node access", exact=True).click()
-            expect(panel.get_by_text("applied", exact=True)).to_be_visible(timeout=15000)
+            expect(panel.get_by_text("Enabled", exact=True).first).to_be_visible(
+                timeout=15000
+            )
+            panel.get_by_role(
+                "button", name="Reconcile node access", exact=True
+            ).click()
+            expect(panel.get_by_text("applied", exact=True)).to_be_visible(
+                timeout=15000
+            )
             assert not errors, errors
             print(
                 "PASS desktop/mobile/narrow access controls, cancellation and confirmed state",
@@ -196,7 +211,9 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca):
     clash = yaml.safe_load(
         client.get(f"/api/v1/subscribe/{token}?format=clash").raise_for_status().text
     )
-    xray = client.get(f"/api/v1/subscribe/{token}?format=xray").raise_for_status().json()
+    xray = (
+        client.get(f"/api/v1/subscribe/{token}?format=xray").raise_for_status().json()
+    )
     credentials = {
         item["tag"]: item["client"]
         for item in assigned["provisioning_batches"][0]["body"]["inbound_clients"]
@@ -206,28 +223,37 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca):
         for node in nodes:
             with native.proxy(work, args, node, clash, xray, ca) as socks:
                 assert forwards(socks, echo), node["inbound_tag"]
-        print("PASS actual provisioned credentials on all 18 protocol variants", flush=True)
+        print(
+            "PASS actual provisioned credentials on all 18 protocol variants",
+            flush=True,
+        )
         node = next(item for item in nodes if item["inbound_tag"] == "vless-vision")
-        with native.proxy(work, args, node, clash, xray, ca) as socks:
-            with native.connect(socks, echo) as existing:
-                native.transfer(existing, 4096)
-                client.patch(
-                    "/api/v1/users/access-user/active", json={"is_active": False}
-                ).raise_for_status()
-                access(client, enabled=False)
-                existing.settimeout(2)
-                try:
-                    native.transfer(existing, 1024)
-                except (OSError, AssertionError, EOFError):
-                    pass
-                else:
-                    raise AssertionError("Existing authenticated stream survived revocation")
+        with (
+            native.proxy(work, args, node, clash, xray, ca) as socks,
+            native.connect(socks, echo) as existing,
+        ):
+            native.transfer(existing, 4096)
+            client.patch(
+                "/api/v1/users/access-user/active", json={"is_active": False}
+            ).raise_for_status()
+            access(client, enabled=False)
+            existing.settimeout(2)
+            try:
+                native.transfer(existing, 1024)
+            except (OSError, AssertionError, EOFError):
+                pass
+            else:
+                raise AssertionError(
+                    "Existing authenticated stream survived revocation"
+                )
         for node in nodes:
             with native.proxy(work, args, node, clash, xray, ca) as socks:
                 assert not forwards(socks, echo), node["inbound_tag"]
         assert all(
             len(item["settings"].get("clients", item["settings"].get("users", []))) == 1
-            for item in json.loads((fixture.root / "config/xray.json").read_text())["inbounds"]
+            for item in json.loads((fixture.root / "config/xray.json").read_text())[
+                "inbounds"
+            ]
         )
         print(
             "PASS old credentials rejected, existing stream closed and original users preserved",
@@ -241,7 +267,11 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca):
         # Remove only the fixture's original users, leaving the managed user as the last one.
         candidate = json.loads((fixture.root / "config/xray.json").read_text())
         for inbound in candidate["inbounds"]:
-            key = "users" if inbound["protocol"] in {"snell", "mieru", "anytls"} else "clients"
+            key = (
+                "users"
+                if inbound["protocol"] in {"snell", "mieru", "anytls"}
+                else "clients"
+            )
             inbound["settings"][key] = [credentials[inbound["tag"]]]
         native.command(client, base, "xray/config/write", {"config": candidate})
         access(client, enabled=True)
@@ -251,7 +281,10 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca):
                 ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(), "access-user"),
             )
         access(client, enabled=False)
-        assert json.loads((fixture.root / "config/xray.json").read_text())["inbounds"] == []
+        assert (
+            json.loads((fixture.root / "config/xray.json").read_text())["inbounds"]
+            == []
+        )
         assert client.get(f"/api/v1/subscribe/{token}").status_code == 404
         subprocess.run(["systemctl", "restart", fixture.unit], check=True, timeout=30)
         runtime.poll("Agent restarted with suspended listeners", fixture.ready)
@@ -282,7 +315,9 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca):
             .raise_for_status()
             .json()["plan"]
         )
-        client.post("/api/v1/users/access-user/traffic/reset", json={}).raise_for_status()
+        client.post(
+            "/api/v1/users/access-user/traffic/reset", json={}
+        ).raise_for_status()
         client.post(
             "/api/v1/users/access-user/plan", json={"plan_id": quota_plan["id"]}
         ).raise_for_status()
@@ -292,7 +327,11 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca):
                 native.transfer(connection, 2 * 1024 * 1024)
             access(client, enabled=False)
             assert not forwards(socks, echo)
-            quota = client.get("/api/v1/users/access-user/quota").raise_for_status().json()["quota"]
+            quota = (
+                client.get("/api/v1/users/access-user/quota")
+                .raise_for_status()
+                .json()["quota"]
+            )
             assert quota["over_quota"]
             with sqlite3.connect(work / "backend.db") as db:
                 earlier = (datetime.now(UTC) - timedelta(days=40)).isoformat()
@@ -304,7 +343,8 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca):
             access(client, enabled=True)
             assert forwards(socks, echo)
         print(
-            "PASS actual traffic quota revocation and automatic monthly reset recovery", flush=True
+            "PASS actual traffic quota revocation and automatic monthly reset recovery",
+            flush=True,
         )
         client.post(
             "/api/v1/users/access-user/plan", json={"plan_id": plan["id"]}
@@ -333,5 +373,7 @@ if __name__ == "__main__":
     for name in ("xray", "mihomo", "wheel", "nginx", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--xray-archive", type=Path)
-    parser.add_argument("--transport", choices=["websocket", "http"], default="websocket")
+    parser.add_argument(
+        "--transport", choices=["websocket", "http"], default="websocket"
+    )
     run(parser.parse_args())

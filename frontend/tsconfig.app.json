@@ -5,5 +5,5 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "types": ["vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "public-probe/**/*.ts", "public-probe/**/*.vue"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "public-probe/**/*.ts", "public-probe/**/*.tsx"]
 }

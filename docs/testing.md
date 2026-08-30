@@ -19,6 +19,90 @@ VPS.
 
 ## Remote Test Command
 
+### React and standard Ant Design migration (2026-08-31)
+
+These results belong to the new React frontend, not the 268-test Vue baseline
+below. The rewrite keeps the FastAPI API, session/CSRF contracts, Agent protocol
+and single-image Docker deployment. It removes Vue, Vuetify, Pinia and their
+compiler/router dependencies. Architecture and build instructions are in
+[frontend.md](frontend.md).
+
+The first complete consolidated React run passed **509 tests in 63 files**
+(644.30 s), with no unhandled errors, in
+`/tmp/open-node-react-accessible.OTOVWliF/frontend-tests.json`. It includes the
+existing domain/API tests and real Ant Design DOM tests for the migrated views.
+The later Plan/Limiter layout checks passed 36 tests in three files; the user
+limit editor's seven tests also passed after its gutter correction. These are
+overlapping reruns, not additional tests to add to 509.
+
+Final working-source builds are at
+`/tmp/open-node-react-release.xaSu8WDc/source`. Both the administrator and
+independent public Probe builds pass TypeScript and Vite. The frozen
+`browser-assets.tar.gz` SHA-256 is
+`da85b9cc62b5d78dfae10dbb2f85d3d4ff79e935514f894c67761eabfc64fb4c`.
+Relative to the 509-test snapshot, the only product-source changes are layout
+corrections in `PlanManagementDialog`, `UserLimitEditor`, `LimiterPanel` and
+`ProbeAdministrationPanel`; no backend or shared styles changed.
+
+Production-bundle browser evidence is kept in separate immutable fixtures:
+
+| Workflows | Passing evidence |
+| --- | --- |
+| Administrator shell, server creation, Nginx paths, tunnel forms, certificate import/download, Probe settings/tasks/tokens, password change and session expiry | Final source's parent directory: `operator.log`, `operator-proof/`; includes 1440/390/320 Probe-title and header-button geometry |
+| Administrator MFA enrollment, recovery-code acknowledgment, challenge, policy, regeneration, disable and CLI recovery | Same parent: `administrator-mfa.log`, `administrator-mfa-proof/`; private material masked in screenshots |
+| Subscriber portal, MFA/recovery, password/link reset, device revocation, user isolation and live forwarding | `/tmp/open-node-react-account-r5.ErZXGOSk/evidence/{websocket,http}.log`; both full transports pass on the final bundle, 24 private screenshots |
+| Panel Agent bootstrap, server edit/delete and traffic | `/root/open-node-react-bootstrap-browser.gEUopOkd/react-dashboard-r2-evidence.json`; 24 screenshots, real systemd/runtime traffic and owned-resource cleanup |
+| Certificates and dependent change sets | `/tmp/open-node-react-control-browser.FPqNskNQ/r2/evidence/`; real ACME/EAB/revocation/recovery plus ordered apply/rollback and compensation |
+| Native limiter | Same root's `r3/evidence/limiter.log`; 18-protocol traffic, speed/connection enforcement, automatic-rule expiry, restart, revision conflicts and 1440/390/320 controls |
+| Plans, node aliases, automatic speed rules and user limits | `/tmp/open-node-react-catalog.WDzjZMFf/evidence/r4-{plan-management-websocket,plan-node-aliases-websocket,plan-speed-rules-websocket,user-limits-websocket}` |
+| Node management and legacy MMWX import | Same catalog root: `r4-node-management-http` and `r4-legacy-mmwx-stock`; node WebSocket evidence is also retained |
+| Subscription access, clients/templates, links and user management | Same catalog root: `r2-subscription-access-websocket-v2`, `r2-subscription-clients`, `r2-subscription-links-websocket`, `r2-user-management-websocket` |
+
+All ten catalog scripts completed their full gates. The client gate did not use
+the templates-only shortcut: it ran real Mihomo 1.19.30, sing-box 1.13.19 and the
+project's custom Xray. The final legacy-import gate uses official Xray 26.3.27
+for standard VLESS; it does not test an Agent transport. Surge format/template
+checks are not proof of a running Surge client.
+
+The independent public Probe gate is at
+`/tmp/open-node-react-browser.NyIq0V6p/public-probe-theme/report.json`. It uses
+real Wrangler/Miniflare/workerd, HTTP and WebSocket, idle-stream polling,
+disconnect/retry/reconnect, light/dark/system themes and credential stripping.
+The final build's public JS and CSS are byte-identical to that tested bundle:
+JS SHA-256 `3a1fc930fd7603da5b8a313aac9c5359dbe3915a6dcb5d8016d93cf103b26eb6`,
+CSS `9fd60fb31ba60054d1203f3a99a81dbb50ca9d748e34a9cd293c9b721fda4db1`.
+This is a local Cloudflare-runtime test on the VPS, not a deployment to a
+customer's Cloudflare account.
+
+The final Docker gate passed against `open-node:react-working-tree-r5`, image
+`sha256:bc17d752fab8644a9ba7fbbf69077e9387c24e5d5840c01926ede7868f5dd3c1`,
+running as UID/GID 10001 with the Compose read-only/capability restrictions.
+All 39 served files match the frozen assets and image, ten SPA deep links and
+six reserved-path 404 cases pass, and three original browser sessions plus a
+server record survive restart. Three viewport sizes and all eight administrator
+lazy routes pass. The private helper also passes eight ownership/cleanup safety
+controls. Its report is
+`/root/open-node-react-bootstrap-browser.gEUopOkd/r5-docker-4/report.json`,
+SHA-256 `201773b8df09bf2dcce869155f44edcedb3e834969fb0ebbc0516352a6b1f26c`.
+The fixture follows Docker's newly allocated loopback port after restart while
+preserving the original cookie values; it does not treat a stale test URL as a
+product failure. The labeled container and volume were removed after verification.
+
+Real browser failures drove the retained regression checks: invalid numeric
+drafts must not be clamped into valid quotas/ports on blur or Enter; loading
+icons must not change action names; uploads must not retain private File lists;
+and narrow-screen dialogs, grid gutters and headers must remain usable.
+Test-only corrections scope queries to their actual form/dialog, wait for
+closing popup animations and compare raw traffic with raw traffic separately
+from two-way charged usage. They do not remove business assertions or enlarge
+test timeouts. Ant Design Form's short presentation timers are drained before
+the sign-in test's jsdom window is disposed, without suppressing errors.
+
+The production container, image, start time, restart count and Git checkout
+remain unchanged; the shared candidate remains clean at `6ca84e2`. No public
+DNS/TLS, reverse-proxy subpath, customer Worker deployment or off-site backup
+claim follows from these isolated checks.
+
 ### Committed Agent bootstrap and hosted-runner fixture fix (2026-08-31)
 
 The feature commit is `1515a7bd56a2dbf257d861fe8760038a9329bae4`; its

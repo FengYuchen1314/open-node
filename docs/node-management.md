@@ -1,6 +1,6 @@
 # Managed Node Lifecycle
 
-Administrator node settings and removal are implemented in the FastAPI/Vue
+Administrator node settings and removal are implemented in the FastAPI/React
 monorepo without a license service. The Subscriptions catalog has edit, remove
 and pending-removal controls. These operate on managed nodes, not subscriber
 account ownership or arbitrary external provider records.

@@ -37,7 +37,13 @@ def capture(page, output, name, *, mask=()):
         page.set_viewport_size({"width": width, "height": height})
         page.wait_for_timeout(200)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
-        assert page.locator(".v-dialog .v-card").evaluate_all(
+        if mask:
+            expect(
+                page.get_by_role("dialog")
+                if name == "administrator-enrollment"
+                else page.locator(".auth-card")
+            ).to_be_visible()
+        assert page.locator(".ant-modal-container").evaluate_all(
             "items => items.every(item => item.scrollWidth <= item.clientWidth + 1)"
         )
         page.screenshot(
@@ -80,8 +86,12 @@ def exercise(url, password, output, *, reset_password, database):
         try:
             page.goto(url + "/access")
             sign_in(page, password)
-            expect(page.get_by_role("heading", name="Access", exact=True)).to_be_visible()
-            panel = page.get_by_role("region", name="Administrator security", exact=True)
+            expect(
+                page.get_by_role("heading", name="Access", exact=True)
+            ).to_be_visible()
+            panel = page.get_by_role(
+                "region", name="Administrator security", exact=True
+            )
             panel.get_by_role("button", name="Enable", exact=True).click()
             dialog = page.get_by_role("dialog")
             dialog.get_by_label("Current password", exact=True).fill(password)
@@ -104,19 +114,30 @@ def exercise(url, password, output, *, reset_password, database):
             panel.get_by_role("button", name="Require 2FA", exact=True).click()
             prove(dialog, password, codes[0])
             expect(dialog).not_to_be_visible()
-            expect(panel.get_by_role("button", name="Disable", exact=True)).to_be_disabled()
+            expect(
+                panel.get_by_role("button", name="Disable", exact=True)
+            ).to_be_disabled()
             capture(page, output, "administrator-security-enabled")
 
             page.get_by_role("button", name="Sign out", exact=True).click()
             sign_in(page, password)
-            factor_input = page.get_by_label("Authenticator or recovery code", exact=True)
+            factor_input = page.get_by_label(
+                "Authenticator or recovery code", exact=True
+            )
             expect(factor_input).to_be_visible()
-            assert context.request.get(url + "/api/v1/auth/session").json()["authenticated"] is False
+            assert (
+                context.request.get(url + "/api/v1/auth/session").json()[
+                    "authenticated"
+                ]
+                is False
+            )
             assert context.request.get(url + "/api/v1/servers").status == 401
             capture(page, output, "administrator-login-challenge")
             factor_input.fill(codes[1])
             page.get_by_role("button", name="Verify", exact=True).click()
-            expect(page.get_by_role("heading", name="Access", exact=True)).to_be_visible()
+            expect(
+                page.get_by_role("heading", name="Access", exact=True)
+            ).to_be_visible()
 
             panel.get_by_role("button", name="New recovery codes", exact=True).click()
             prove(dialog, password, codes[2])
@@ -128,8 +149,12 @@ def exercise(url, password, output, *, reset_password, database):
             panel.get_by_role("button", name="Disable", exact=True).click()
             prove(dialog, password, replacement_codes[1])
             expect(dialog).not_to_be_visible()
-            expect(panel.get_by_role("button", name="Enable", exact=True)).to_be_visible()
-            storage = page.evaluate("JSON.stringify({ ...localStorage, ...sessionStorage })")
+            expect(
+                panel.get_by_role("button", name="Enable", exact=True)
+            ).to_be_visible()
+            storage = page.evaluate(
+                "JSON.stringify({ ...localStorage, ...sessionStorage })"
+            )
             for value in [password, secret, *codes, *replacement_codes]:
                 assert value not in storage
 
@@ -143,20 +168,33 @@ def exercise(url, password, output, *, reset_password, database):
             mandatory_secret = page.get_by_label("Authenticator secret", exact=True)
             expect(mandatory_secret).to_be_visible()
             secret = mandatory_secret.input_value()
-            assert context.request.get(url + "/api/v1/auth/session").json()["authenticated"] is False
+            assert (
+                context.request.get(url + "/api/v1/auth/session").json()[
+                    "authenticated"
+                ]
+                is False
+            )
             capture(
                 page,
                 output,
                 "administrator-required-enrollment",
                 mask=(mandatory_secret, page.locator(".totp-qr")),
             )
-            page.get_by_label("Authenticator code", exact=True).fill(pyotp.TOTP(secret).now())
+            page.get_by_label("Authenticator code", exact=True).fill(
+                pyotp.TOTP(secret).now()
+            )
             page.get_by_role("button", name="Verify", exact=True).click()
             expect(page.locator(".recovery-grid code")).to_have_count(10)
-            expect(page.get_by_role("button", name="Continue to Open Node", exact=True)).to_be_disabled()
-            page.get_by_label("I have stored the recovery codes securely", exact=True).check()
+            expect(
+                page.get_by_role("button", name="Continue to Open Node", exact=True)
+            ).to_be_disabled()
+            page.get_by_label(
+                "I have stored the recovery codes securely", exact=True
+            ).check()
             page.get_by_role("button", name="Continue to Open Node", exact=True).click()
-            expect(page.get_by_role("heading", name="Access", exact=True)).to_be_visible()
+            expect(
+                page.get_by_role("heading", name="Access", exact=True)
+            ).to_be_visible()
             assert not errors, errors
         finally:
             context.close()
@@ -164,21 +202,35 @@ def exercise(url, password, output, *, reset_password, database):
 
 
 def run(output):
+    if sys.platform != "linux":
+        raise SystemExit("Run this smoke on the isolated Linux VPS, not locally.")
     root = Path(__file__).resolve().parents[2]
-    output.mkdir(parents=True, exist_ok=True)
+    output = output.resolve()
+    if output.exists() and any(output.iterdir()):
+        raise SystemExit(
+            "Choose a new or empty output directory; existing evidence is preserved."
+        )
+    output.mkdir(mode=0o700, parents=True, exist_ok=True)
     if not (root / "frontend/dist/index.html").is_file():
-        raise ValueError("Build the production frontend on the VPS before running this smoke")
+        raise ValueError(
+            "Build the production frontend on the VPS before running this smoke"
+        )
     with tempfile.TemporaryDirectory(prefix="open-node-admin-mfa-") as temporary:
         work = Path(temporary)
         database = work / "mfa.db"
         password = secrets.token_urlsafe(32)
         environment = {
-            **{key: value for key, value in os.environ.items() if not key.startswith("OPEN_NODE_")},
+            **{
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("OPEN_NODE_")
+            },
             "PYTHONPATH": str(root / "backend/app"),
             "OPEN_NODE_DATABASE_URL": f"sqlite:///{database}",
             "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
             "OPEN_NODE_SUBSCRIBER_TOTP_KEY": Fernet.generate_key().decode(),
             "OPEN_NODE_FRONTEND_DIR": str(root / "frontend/dist"),
+            "OPEN_NODE_CERTIFICATE_STATE_DIR": str(work / "certificates"),
         }
 
         def administrator(action, value):
@@ -204,7 +256,15 @@ def run(output):
             listener.listen()
             url = f"http://127.0.0.1:{listener.getsockname()[1]}"
             process = subprocess.Popen(
-                [sys.executable, "-m", "uvicorn", "open_node.main:app", "--fd", str(listener.fileno()), "--no-access-log"],
+                [
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "open_node.main:app",
+                    "--fd",
+                    str(listener.fileno()),
+                    "--no-access-log",
+                ],
                 cwd=work,
                 env=environment,
                 pass_fds=(listener.fileno(),),
@@ -213,7 +273,13 @@ def run(output):
             )
             try:
                 wait_http(url, process)
-                exercise(url, password, output, reset_password=reset_password, database=database)
+                exercise(
+                    url,
+                    password,
+                    output,
+                    reset_password=reset_password,
+                    database=database,
+                )
             except Exception:
                 log.seek(0)
                 print(log.read().replace(password, "[redacted]"), file=sys.stderr)
@@ -225,7 +291,10 @@ def run(output):
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=10)
-    print("PASS administrator MFA production-browser flows and isolated cleanup", flush=True)
+    print(
+        "PASS administrator MFA production-browser flows and isolated cleanup",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

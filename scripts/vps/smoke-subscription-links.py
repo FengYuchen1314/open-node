@@ -28,6 +28,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def exercise(work, fixture, args, client, backend, endpoint, ca):
+    metadata = client.get("/api/v1/meta").raise_for_status().json()
+    assert metadata["short_links_enabled"] is True
     accounts.setup(work, fixture, args, client, endpoint, ca)
     node = client.get("/api/v1/nodes").raise_for_status().json()["nodes"][0]
     base = "/api/v1/servers/" + node["server_id"]
@@ -136,7 +138,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             expect(
                 temporary_dialog.get_by_label("Temporary URL", exact=True)
             ).to_have_value(temporary["subscription_url"])
-            temporary_dialog.get_by_role("button", name="Close", exact=True).click()
+            temporary_dialog.locator(".ant-modal-footer").get_by_role(
+                "button", name="Close", exact=True
+            ).click()
 
             temporary_path = urlsplit(temporary["subscription_url"]).path
             temporary_xray = client.get(
@@ -147,9 +151,10 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             client.get(temporary_path, params={"format": "uri-list"}).raise_for_status()
             assert client.get(temporary_path).status_code == 404
             page.reload()
-            temporary_item = page.locator(".catalog-item").filter(
+            temporary_item = page.locator(".ant-card-small").filter(
                 has_text="Smoke temporary link"
             )
+            expect(temporary_item).to_have_count(1)
             expect(temporary_item).to_contain_text("2/2 downloads")
             expect(temporary_item).to_contain_text("exhausted")
             temporary_item.get_by_role(
@@ -160,6 +165,11 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 == temporary["subscription_url"]
             )
             accounts.capture(page, args.output, "temporary-link-exhausted")
+            temporary_item.get_by_role(
+                "button", name="Revoke temporary link Smoke temporary link", exact=True
+            ).click()
+            revoke_dialog = page.get_by_role("dialog", name="Revoke temporary link?")
+            expect(revoke_dialog).to_be_visible()
             with page.expect_response(
                 lambda response: (
                     response.url.endswith(
@@ -168,11 +178,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "DELETE"
                 )
             ) as revoked_response:
-                temporary_item.get_by_role(
-                    "button",
-                    name="Revoke temporary link Smoke temporary link",
-                    exact=True,
-                ).click()
+                revoke_dialog.get_by_role("button", name="Revoke", exact=True).click()
             assert revoked_response.value.status == 200, revoked_response.value.text()
             expect(temporary_item).to_have_count(0)
             print(
@@ -248,7 +254,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                         == expected.headers["subscription-userinfo"]
                     )
             accounts.capture(page, args.output, "admin-short-code")
-            dialog.get_by_role("button", name="Close", exact=True).click()
+            dialog.locator(".ant-modal-footer").get_by_role(
+                "button", name="Close", exact=True
+            ).click()
             forward(
                 client.get(custom["short_url"], params={"format": "xray"})
                 .raise_for_status()
@@ -299,10 +307,19 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert current["short_code"] == "Reader_Link"
             assert client.get(custom["short_url"]).status_code == 404
             accounts.capture(portal, args.output, "subscriber-short-code")
-            own.get_by_role("button", name="Close", exact=True).click()
-            portal.get_by_role("button", name="Short", exact=True).click()
-            portal.locator(".account-link-controls .v-select .v-field").click()
-            portal.get_by_role("option", name="Xray", exact=True).click()
+            own.locator(".ant-modal-footer").get_by_role(
+                "button", name="Close", exact=True
+            ).click()
+            portal.get_by_label("Subscription link type", exact=True).get_by_text(
+                "Short", exact=True
+            ).click()
+            expect(
+                portal.get_by_role("radio", name="Short", exact=True)
+            ).to_be_checked()
+            portal.get_by_role("combobox", name="Client format", exact=True).click()
+            portal.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text("Xray", exact=True).click()
             expect(portal.get_by_label("Subscription URL", exact=True)).to_have_value(
                 current["short_url"] + "?format=xray"
             )
@@ -330,7 +347,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert cleared["custom_short_code"] is None
             assert cleared["short_url"] == original["alice"]["short_url"]
             assert client.get(current["short_url"]).status_code == 404
-            dialog.get_by_role("button", name="Close", exact=True).click()
+            dialog.locator(".ant-modal-footer").get_by_role(
+                "button", name="Close", exact=True
+            ).click()
             set_code("Other_Link", "bob")
             set_code("Before_Reset")
             portal.get_by_role(
@@ -386,7 +405,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             with sqlite3.connect(work / "backend.db") as db:
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
             assert not errors, errors
-            assert all(url.startswith((backend, "data:")) for url in requests)
+            assert all(url.startswith((backend + "/", "data:")) for url in requests)
             print(
                 "PASS clear, collision, complete link reset and unchanged Xray/credentials/Bob forwarding",
                 flush=True,
@@ -400,6 +419,8 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
 def run(args):
     args.output.mkdir(parents=True, exist_ok=True)
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    # This compatibility gate opts in; production keeps secure long links by default.
+    os.environ["OPEN_NODE_SHORT_LINKS_ENABLED"] = "true"
     os.environ["OPEN_NODE_SUBSCRIBER_TOTP_KEY"] = (
         accounts.Fernet.generate_key().decode()
     )

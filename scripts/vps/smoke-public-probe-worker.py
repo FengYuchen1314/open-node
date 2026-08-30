@@ -79,6 +79,7 @@ class Fixture:
         self.lock = threading.RLock()
         self.events: list[dict] = []
         self.http_title = "Anonymous Worker Probe"
+        self.color_mode = "light"
         self.pause_http = False
         self.messages: list[str] = []
         self.close_generation = 0
@@ -134,7 +135,7 @@ class Fixture:
                 "refresh_interval_sec": 1,
                 "has_access_token": True,
                 "require_access_token": True,
-                "appearance": {"theme": "open-node", "color_mode": "light"},
+                "appearance": {"theme": "open-node", "color_mode": self.color_mode},
                 "show_resource_heatmap": True,
                 "show_traffic_quota": True,
                 "show_health_score": True,
@@ -204,8 +205,10 @@ class Fixture:
                 "cumulative_down": (4000, 8000, 12000, 16000),
             }
             series = {
-                key: [{"t": now - 180 + index * 60, "value": value}
-                      for index, value in enumerate(samples)]
+                key: [
+                    {"t": now - 180 + index * 60, "value": value}
+                    for index, value in enumerate(samples)
+                ]
                 for key, samples in values.items()
             }
         return {
@@ -260,8 +263,12 @@ def fixture_app(state: Fixture) -> FastAPI:
             return JSONResponse({"detail": "Not found"}, status_code=404)
         if request.query_params.get("redirect") == "1":
             return JSONResponse(
-                {"redirect": True}, status_code=302,
-                headers={**COOKIE_HEADERS, "Location": UPSTREAM_PREFIX + "/redirect-trap"},
+                {"redirect": True},
+                status_code=302,
+                headers={
+                    **COOKIE_HEADERS,
+                    "Location": UPSTREAM_PREFIX + "/redirect-trap",
+                },
             )
         deadline = time.monotonic() + 15
         while state.pause_http and time.monotonic() < deadline:
@@ -269,8 +276,10 @@ def fixture_app(state: Fixture) -> FastAPI:
         if state.pause_http:
             return JSONResponse({"detail": "Fixture pause timed out"}, status_code=503)
         body = (
-            state.payload() if resource == "probe-servers"
-            else state.targets() if resource == "probe-targets"
+            state.payload()
+            if resource == "probe-servers"
+            else state.targets()
+            if resource == "probe-targets"
             else state.series(request.query_params.get("metric", "ping"))
         )
         return JSONResponse(body, headers=COOKIE_HEADERS)
@@ -285,9 +294,12 @@ def fixture_app(state: Fixture) -> FastAPI:
         if reject:
             await websocket.close(code=1008)
             return
-        await websocket.accept(headers=[
-            (key.lower().encode(), value.encode()) for key, value in COOKIE_HEADERS.items()
-        ])
+        await websocket.accept(
+            headers=[
+                (key.lower().encode(), value.encode())
+                for key, value in COOKIE_HEADERS.items()
+            ]
+        )
         with state.lock:
             state.accepted_ws += 1
             state.active_ws += 1
@@ -303,7 +315,9 @@ def fixture_app(state: Fixture) -> FastAPI:
                     messages = state.messages[cursor:]
                     cursor = len(state.messages)
                 if close:
-                    await websocket.close(code=1012, reason="fixture reconnect exercise")
+                    await websocket.close(
+                        code=1012, reason="fixture reconnect exercise"
+                    )
                     return
                 for message in messages:
                     await websocket.send_text(message)
@@ -353,8 +367,11 @@ class AssetLinks(HTMLParser):
     def handle_starttag(self, tag, attributes):
         attrs = dict(attributes)
         value = (
-            attrs.get("src") if tag == "script"
-            else attrs.get("href") if tag == "link" else None
+            attrs.get("src")
+            if tag == "script"
+            else attrs.get("href")
+            if tag == "link"
+            else None
         )
         if value:
             assert value.startswith("/assets/"), f"Not a production asset path: {value}"
@@ -365,11 +382,15 @@ def http_boundary(url: str, origin: str, assets: Path, state: Fixture) -> dict:
     manifest = {}
     with httpx.Client(timeout=10, follow_redirects=False, trust_env=False) as client:
         direct = client.get(origin + UPSTREAM_PREFIX + PUBLIC_PREFIX + "probe-servers")
-        assert direct.status_code == 404, "Fixture origin must reject anonymous direct access"
+        assert direct.status_code == 404, (
+            "Fixture origin must reject anonymous direct access"
+        )
         html = client.get(url + "/")
         assert html.status_code == 200
         hardened(html.headers, dynamic=False)
-        assert html.content == (assets / "index.html").read_bytes(), "Not the production HTML"
+        assert html.content == (assets / "index.html").read_bytes(), (
+            "Not the production HTML"
+        )
         assert "/@vite/client" not in html.text and "/main.ts" not in html.text
         parser = AssetLinks()
         parser.feed(html.text)
@@ -399,24 +420,38 @@ def http_boundary(url: str, origin: str, assets: Path, state: Fixture) -> dict:
             )
             assert response.status_code == 200, (path, response.status_code)
             hardened(response.headers)
-            assert state.token not in response.text, "Worker exposed its token in API data"
-            assert state.token not in json.dumps(dict(response.headers)), "Token in response headers"
+            assert state.token not in response.text, (
+                "Worker exposed its token in API data"
+            )
+            assert state.token not in json.dumps(dict(response.headers)), (
+                "Token in response headers"
+            )
             assert response.json()["license_required"] is False
-            observed = [item for item in state.snapshot()["events"]
-                        if item["query"].get("case") == [case]]
+            observed = [
+                item
+                for item in state.snapshot()["events"]
+                if item["query"].get("case") == [case]
+            ]
             assert len(observed) == 1 and state.authorized(observed[0]), observed
             assert observed[0]["path"] == UPSTREAM_PREFIX + PUBLIC_PREFIX + resource
             assert observed[0]["query"]["target"] == ["a+b&c"]
 
         before = len(state.snapshot()["events"])
         for path in (
-            "/api", "/api/unknown", "/api/v1/auth/session", "/api/v1/servers",
-            "/api/v1/probe/tasks", "/api/v1/probe/access-token",
-            "/api/v1/public/probe-settings", "/api/public/probe-settings",
+            "/api",
+            "/api/unknown",
+            "/api/v1/auth/session",
+            "/api/v1/servers",
+            "/api/v1/probe/tasks",
+            "/api/v1/probe/access-token",
+            "/api/v1/public/probe-settings",
+            "/api/public/probe-settings",
         ):
             response = client.get(url + path)
             assert response.status_code == 404, path
-            assert response.headers.get("content-type", "").startswith("application/json")
+            assert response.headers.get("content-type", "").startswith(
+                "application/json"
+            )
             assert response.json()["success"] is False
             hardened(response.headers)
         for method in ("POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"):
@@ -424,13 +459,17 @@ def http_boundary(url: str, origin: str, assets: Path, state: Fixture) -> dict:
             assert response.status_code == 405, (method, response.status_code)
             assert response.headers["allow"] == "GET"
             hardened(response.headers)
-        assert len(state.snapshot()["events"]) == before, "Private or write route reached origin"
+        assert len(state.snapshot()["events"]) == before, (
+            "Private or write route reached origin"
+        )
 
         redirect = client.get(url + "/api/probe?redirect=1")
         assert redirect.status_code == 302
         assert redirect.headers["location"] == UPSTREAM_PREFIX + "/redirect-trap"
         hardened(redirect.headers)
-        assert state.snapshot()["redirect_traps"] == 0, "Worker followed an upstream redirect"
+        assert state.snapshot()["redirect_traps"] == 0, (
+            "Worker followed an upstream redirect"
+        )
         login = client.get(url + "/login?next=must-not-be-preserved")
         assert login.status_code == 302
         assert login.headers["location"] == origin + UPSTREAM_PREFIX + "/login"
@@ -453,25 +492,39 @@ def websocket_boundary(url: str, state: Fixture):
                 "X-MMwx-Probe-Token": "fixture-wrong-caller-token",
                 "X-Forwarded-Host": "caller.invalid",
             },
-            proxy=None, open_timeout=10, close_timeout=3, ping_interval=None,
+            proxy=None,
+            open_timeout=10,
+            close_timeout=3,
+            ping_interval=None,
         ) as connection:
             response = connection.response
             assert response.status_code == 101, (path, response.status_code)
             hardened(dict(response.headers))
             key = connection.request.headers["Sec-WebSocket-Key"]
-            expected = base64.b64encode(hashlib.sha1(
-                (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
-            ).digest()).decode()
+            expected = base64.b64encode(
+                hashlib.sha1(
+                    (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
+                ).digest()
+            ).decode()
             assert response.headers["Sec-WebSocket-Accept"] == expected
             frame = connection.recv(timeout=10)
-            assert state.token not in frame, "Worker exposed its token in a WebSocket frame"
-            assert state.token not in json.dumps(dict(response.headers)), "Token in upgrade headers"
+            assert state.token not in frame, (
+                "Worker exposed its token in a WebSocket frame"
+            )
+            assert state.token not in json.dumps(dict(response.headers)), (
+                "Token in upgrade headers"
+            )
             assert json.loads(frame)["enabled"] is True
-            observed = [item for item in state.snapshot()["events"]
-                        if item["query"].get("case") == [case]]
+            observed = [
+                item
+                for item in state.snapshot()["events"]
+                if item["query"].get("case") == [case]
+            ]
             assert len(observed) == 1 and state.authorized(observed[0]), observed
             assert observed[0]["path"] == UPSTREAM_PREFIX + PUBLIC_PREFIX + "probe-ws"
-    wait_until(lambda: state.snapshot()["active_ws"] == 0, "fixture handshake clients close")
+    wait_until(
+        lambda: state.snapshot()["active_ws"] == 0, "fixture handshake clients close"
+    )
     print(
         "PASS real WebSocket upgrades, aliases and bidirectional credential stripping",
         flush=True,
@@ -480,22 +533,60 @@ def websocket_boundary(url: str, state: Fixture):
 
 def check_layout(page: Page):
     page.wait_for_function("document.documentElement.scrollWidth <= innerWidth + 1")
+    refresh = page.get_by_role(
+        "button", name="Refresh probe status", exact=True
+    ).bounding_box()
+    assert refresh and refresh["width"] >= 28, (
+        "Probe refresh control was squeezed on a narrow screen"
+    )
+    title = (
+        page.get_by_role("region", name="Target comparison", exact=True)
+        .locator(".ant-card-head-title")
+        .first
+    )
+    assert title.evaluate(
+        "element => element.scrollWidth <= element.clientWidth + 1"
+    ), "Target comparison title was clipped"
+
+
+def assert_theme(page: Page, dark: bool):
+    page.wait_for_function(
+        """dark => {
+        const surface = document.querySelector('.probe-page');
+        const heading = surface?.querySelector('h1');
+        if (!surface || !heading) return false;
+        const channels = value => (value.match(/[\\d.]+/g) || []).map(Number);
+        const background = channels(getComputedStyle(surface).backgroundColor);
+        const foreground = channels(getComputedStyle(heading).color);
+        if (background.length < 3 || (background[3] ?? 1) < 0.99) return false;
+        return dark ? background.slice(0, 3).every(value => value < 64)
+            && foreground.slice(0, 3).every(value => value > 200)
+            : background.slice(0, 3).every(value => value > 230)
+            && foreground.slice(0, 3).every(value => value < 64);
+    }""",
+        arg=dark,
+    )
 
 
 def screenshot_pair(page: Page, output: Path, name: str):
     for width, height, suffix in ((1440, 1000, "desktop"), (390, 844, "mobile")):
         page.set_viewport_size({"width": width, "height": height})
         check_layout(page)
-        page.screenshot(path=output / f"{name}-{suffix}.png", full_page=True, animations="disabled")
+        page.screenshot(
+            path=output / f"{name}-{suffix}.png", full_page=True, animations="disabled"
+        )
         if width == 390 and name == "public-probe-series":
             drawer = page.locator(".probe-detail-drawer")
             last_chart = drawer.locator(".probe-trend-grid svg").last
             last_chart.scroll_into_view_if_needed()
             expect(last_chart).to_be_in_viewport(ratio=1)
             page.screenshot(
-                path=output / f"{name}-mobile-scrolled.png", animations="disabled",
+                path=output / f"{name}-mobile-scrolled.png",
+                animations="disabled",
             )
-            drawer.get_by_role("heading", name="worker-edge", exact=True).scroll_into_view_if_needed()
+            drawer.get_by_role(
+                "heading", name="worker-edge", exact=True
+            ).scroll_into_view_if_needed()
     page.set_viewport_size({"width": 1440, "height": 1000})
 
 
@@ -503,10 +594,18 @@ def assert_public_surface(page: Page):
     expect(page.get_by_text("Public read-only view", exact=True)).to_be_visible()
     text = page.locator("body").inner_text()
     for forbidden in (
-        "Administrator Sign-In", "Probe settings", "Worker access", "Scheduled probes",
-        "Dispatch due", "Sign out", "Create server", "Generate access token",
+        "Administrator Sign-In",
+        "Probe settings",
+        "Worker access",
+        "Scheduled probes",
+        "Dispatch due",
+        "Sign out",
+        "Create server",
+        "Generate access token",
     ):
-        assert forbidden not in text, f"Administrator UI leaked into public bundle: {forbidden}"
+        assert forbidden not in text, (
+            f"Administrator UI leaked into public bundle: {forbidden}"
+        )
 
 
 def publish_and_observe(page: Page, state: Fixture, title: str, *, malformed=False):
@@ -533,39 +632,72 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
         page = context.new_page()
         page.set_default_timeout(10_000)
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.on("request", lambda request: requests.append({
-            "url": request.url, "method": request.method,
-            "credential_present": any(key in (
-                "authorization", "cookie", "x-mmwx-probe-token",
-            ) for key in request.all_headers()),
-        }))
+        page.on(
+            "request",
+            lambda request: requests.append(
+                {
+                    "url": request.url,
+                    "method": request.method,
+                    "credential_present": any(
+                        key
+                        in (
+                            "authorization",
+                            "cookie",
+                            "x-mmwx-probe-token",
+                        )
+                        for key in request.all_headers()
+                    ),
+                }
+            ),
+        )
+
         def observe_response(response):
             path = urlparse(response.url).path
-            responses.append({
-                "url": response.url, "status": response.status, "headers": response.all_headers(),
-                "token_in_body": (
-                    state.token.encode() in response.body()
-                    if path.startswith("/api/") and not path.endswith("/probe-ws") else False
-                ),
-            })
+            responses.append(
+                {
+                    "url": response.url,
+                    "status": response.status,
+                    "headers": response.all_headers(),
+                    "token_in_body": (
+                        state.token.encode() in response.body()
+                        if path.startswith("/api/") and not path.endswith("/probe-ws")
+                        else False
+                    ),
+                }
+            )
+
         page.on("response", observe_response)
-        page.on("websocket", lambda stream: stream.on(
-            "framereceived", lambda frame: frames.append(frame)
-        ))
+        page.on(
+            "websocket",
+            lambda stream: stream.on(
+                "framereceived", lambda frame: frames.append(frame)
+            ),
+        )
         cdp = context.new_cdp_session(page)
         cdp.send("Network.enable")
-        cdp.on("Network.webSocketHandshakeResponseReceived", lambda event: upgrades.append(
-            event["response"]
-        ))
+        cdp.on(
+            "Network.webSocketHandshakeResponseReceived",
+            lambda event: upgrades.append(event["response"]),
+        )
         try:
             assert context.cookies() == [], "Browser must start anonymous"
             before_ws = state.snapshot()["accepted_ws"]
             page.goto(url, wait_until="networkidle")
-            expect(page.get_by_role("heading", level=1)).to_have_text("Anonymous Worker Probe")
-            expect(page.get_by_text("Live stream connected", exact=True)).to_be_visible()
-            expect(page.locator(".server-name").filter(has_text="worker-edge")).to_be_visible()
+            expect(page.get_by_role("heading", level=1)).to_have_text(
+                "Anonymous Worker Probe"
+            )
+            expect(
+                page.get_by_text("Live stream connected", exact=True)
+            ).to_be_visible()
+            expect(
+                page.get_by_role(
+                    "button", name="Open probe details for worker-edge", exact=True
+                )
+            ).to_be_visible()
             assert_public_surface(page)
-            wait_until(lambda: len(frames) >= 1, "browser receives initial snapshot", page=page)
+            wait_until(
+                lambda: len(frames) >= 1, "browser receives initial snapshot", page=page
+            )
             assert state.snapshot()["accepted_ws"] == before_ws + 1
             initial = state.snapshot()
             servers_before = state.count("probe-servers")
@@ -576,49 +708,84 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 "HTTP polling survives an idle live stream", timeout=12_000
             )
             wait_until(
-                lambda: state.count("probe-servers") >= servers_before + 2
-                and state.count("probe-targets") >= targets_before + 2,
-                "repeated status and target polling while socket is open", page=page,
+                lambda: (
+                    state.count("probe-servers") >= servers_before + 2
+                    and state.count("probe-targets") >= targets_before + 2
+                ),
+                "repeated status and target polling while socket is open",
+                page=page,
             )
             current = state.snapshot()
-            assert current["active_ws"] == 1 and current["accepted_ws"] == initial["accepted_ws"]
-            assert current["sent_frames"] == initial["sent_frames"], "Socket must remain idle"
-            expect(page.get_by_text("Live stream connected", exact=True)).to_be_visible()
+            assert (
+                current["active_ws"] == 1
+                and current["accepted_ws"] == initial["accepted_ws"]
+            )
+            assert current["sent_frames"] == initial["sent_frames"], (
+                "Socket must remain idle"
+            )
+            expect(
+                page.get_by_text("Live stream connected", exact=True)
+            ).to_be_visible()
             print(
                 "PASS anonymous browser and continuous polling while WebSocket stays silent",
                 flush=True,
             )
 
             publish_and_observe(
-                page, state, "Live frame applied after malformed input", malformed=True,
+                page,
+                state,
+                "Live frame applied after malformed input",
+                malformed=True,
             )
-            assert any(isinstance(frame, str) and "Live frame applied" in frame for frame in frames)
+            assert any(
+                isinstance(frame, str) and "Live frame applied" in frame
+                for frame in frames
+            )
             assert state.snapshot()["accepted_ws"] == initial["accepted_ws"]
-            compare = page.locator(".probe-target-compare")
-            compare.get_by_role("button", name="6h", exact=True).click()
-            wait_until(lambda: any(
-                event["path"].endswith("/probe-targets") and event["query"].get("range") == ["6h"]
-                and "case" not in event["query"] for event in state.snapshot()["events"]
-            ), "target range reaches origin through Worker", page=page)
+            compare = page.get_by_role("region", name="Target comparison", exact=True)
+            compare.get_by_text("6h", exact=True).click()
+            expect(compare.get_by_role("radio", name="6h", exact=True)).to_be_checked()
+            wait_until(
+                lambda: any(
+                    event["path"].endswith("/probe-targets")
+                    and event["query"].get("range") == ["6h"]
+                    and "case" not in event["query"]
+                    for event in state.snapshot()["events"]
+                ),
+                "target range reaches origin through Worker",
+                page=page,
+            )
             screenshot_pair(page, output, "public-probe")
 
             row = page.locator(".server-table tbody tr").filter(has_text="worker-edge")
-            row.locator(".server-name-row button").click()
+            row.get_by_role(
+                "button", name="Open probe details for worker-edge", exact=True
+            ).click()
             drawer = page.locator(".probe-detail-drawer")
-            expect(drawer.get_by_role("heading", name="worker-edge", exact=True)).to_be_visible()
+            expect(
+                drawer.get_by_role("heading", name="worker-edge", exact=True)
+            ).to_be_visible()
             expect(drawer.locator(".probe-trend-grid polyline").first).to_be_visible()
-            drawer.get_by_role("button", name="System", exact=True).click()
-            drawer.get_by_role("button", name="24h", exact=True).click()
-            wait_until(lambda: any(
-                event["path"].endswith("/probe-series")
-                and event["query"].get("metric") == ["system"]
-                and event["query"].get("range") == ["24h"]
-                and event["query"].get("server") == ["0"]
-                for event in state.snapshot()["events"]
-            ), "system series request reaches origin through Worker", page=page)
+            drawer.get_by_text("System", exact=True).click()
+            expect(
+                drawer.get_by_role("radio", name="System", exact=True)
+            ).to_be_checked()
+            drawer.get_by_text("24h", exact=True).click()
+            expect(drawer.get_by_role("radio", name="24h", exact=True)).to_be_checked()
+            wait_until(
+                lambda: any(
+                    event["path"].endswith("/probe-series")
+                    and event["query"].get("metric") == ["system"]
+                    and event["query"].get("range") == ["24h"]
+                    and event["query"].get("server") == ["0"]
+                    for event in state.snapshot()["events"]
+                ),
+                "system series request reaches origin through Worker",
+                page=page,
+            )
             expect(drawer.locator(".probe-trend-grid polyline").first).to_be_visible()
             screenshot_pair(page, output, "public-probe-series")
-            drawer.locator(".probe-detail-head button").click()
+            drawer.get_by_role("button", name="Close", exact=True).click()
             print(
                 "PASS target range selection and real ping/system series on desktop/mobile",
                 flush=True,
@@ -631,26 +798,35 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 state.reject_ws = True
                 state.close_generation += 1
                 state.http_title = "Polling survives WebSocket disconnect"
-            expect(page.get_by_text("Live stream connected", exact=True)).not_to_be_visible()
+            expect(
+                page.get_by_text("Live stream connected", exact=True)
+            ).not_to_be_visible()
             expect(page.get_by_role("heading", level=1)).to_have_text(
                 "Polling survives WebSocket disconnect", timeout=10_000
             )
             wait_until(
-                lambda: state.snapshot()["rejected_ws"] > before["rejected_ws"]
-                and state.count("probe-servers") > servers_before
-                and state.count("probe-targets") > targets_before,
-                "failed reconnect retains both polling routes", page=page,
+                lambda: (
+                    state.snapshot()["rejected_ws"] > before["rejected_ws"]
+                    and state.count("probe-servers") > servers_before
+                    and state.count("probe-targets") > targets_before
+                ),
+                "failed reconnect retains both polling routes",
+                page=page,
             )
             with state.lock:
                 state.reject_ws = False
             wait_until(
                 lambda: state.snapshot()["accepted_ws"] > before["accepted_ws"],
-                "automatic successful WebSocket reconnect", page=page,
+                "automatic successful WebSocket reconnect",
+                page=page,
             )
-            expect(page.get_by_text("Live stream connected", exact=True)).to_be_visible()
+            expect(
+                page.get_by_text("Live stream connected", exact=True)
+            ).to_be_visible()
             publish_and_observe(page, state, "Reconnected live snapshot")
             assert any(
-                isinstance(frame, str) and "Reconnected live snapshot" in frame for frame in frames
+                isinstance(frame, str) and "Reconnected live snapshot" in frame
+                for frame in frames
             )
             screenshot_pair(page, output, "public-probe-reconnected")
             print(
@@ -658,12 +834,37 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 flush=True,
             )
 
+            with state.lock:
+                state.color_mode = "dark"
+            publish_and_observe(page, state, "Dark Probe surface")
+            assert_theme(page, True)
+            screenshot_pair(page, output, "public-probe-dark")
+            with state.lock:
+                state.color_mode = "system"
+            page.emulate_media(color_scheme="dark")
+            publish_and_observe(page, state, "System Probe appearance")
+            assert_theme(page, True)
+            page.emulate_media(color_scheme="light")
+            assert_theme(page, False)
+            with state.lock:
+                state.color_mode = "light"
+            publish_and_observe(page, state, "Reconnected live snapshot")
+            assert_theme(page, False)
+            print(
+                "PASS built-in light/dark/system themes and readable surface colors",
+                flush=True,
+            )
+
             # A deep link receives this same read-only SPA, not an operator shell.
             page.goto(url + "/access", wait_until="networkidle")
-            expect(page.get_by_role("heading", level=1)).to_have_text("Reconnected live snapshot")
+            expect(page.get_by_role("heading", level=1)).to_have_text(
+                "Reconnected live snapshot"
+            )
             assert_public_surface(page)
             assert not errors, errors
-            assert context.cookies() == [], "Upstream cookies were installed by HTTP or WebSocket"
+            assert context.cookies() == [], (
+                "Upstream cookies were installed by HTTP or WebSocket"
+            )
             storage = page.evaluate(
                 "JSON.stringify({local: {...localStorage}, session: {...sessionStorage}})"
             )
@@ -672,14 +873,22 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 parsed = urlparse(request["url"])
                 assert parsed.netloc == urlparse(url).netloc, request["url"]
                 assert request["method"] == "GET", request
-                assert not request["credential_present"], "Public bundle used credentials"
+                assert not request["credential_present"], (
+                    "Public bundle used credentials"
+                )
                 if parsed.path == "/api" or parsed.path.startswith("/api/"):
                     assert parsed.path in ALLOWED_BROWSER_API, request
-                assert state.token not in request["url"], "Worker token exposed in browser URL"
+                assert state.token not in request["url"], (
+                    "Worker token exposed in browser URL"
+                )
             for response in responses:
                 path = urlparse(response["url"]).path
-                assert not response["token_in_body"], "Worker token exposed in an HTTP body"
-                assert state.token not in json.dumps(response["headers"]), "Token in response headers"
+                assert not response["token_in_body"], (
+                    "Worker token exposed in an HTTP body"
+                )
+                assert state.token not in json.dumps(response["headers"]), (
+                    "Token in response headers"
+                )
                 if path.endswith("/probe-ws"):
                     allowed_statuses = {101, 403}
                 elif path.startswith("/api/"):
@@ -689,22 +898,31 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                     # the deep-link navigation. Dynamic APIs must never use 304.
                     allowed_statuses = {200, 304}
                 assert response["status"] in allowed_statuses, (
-                    response["url"], response["status"],
+                    response["url"],
+                    response["status"],
                 )
                 hardened(response["headers"], dynamic="/api/" in path)
             accepted_upgrades = [item for item in upgrades if item["status"] == 101]
-            assert len(accepted_upgrades) >= 2, "No browser-level reconnect handshake evidence"
+            assert len(accepted_upgrades) >= 2, (
+                "No browser-level reconnect handshake evidence"
+            )
             for response in accepted_upgrades:
                 hardened(response["headers"])
-                assert state.token not in json.dumps(response["headers"]), "Token in upgrade headers"
+                assert state.token not in json.dumps(response["headers"]), (
+                    "Token in upgrade headers"
+                )
             assert len(frames) >= 4
             assert all(
-                state.token not in frame if isinstance(frame, str)
-                else state.token.encode() not in frame for frame in frames
+                state.token not in frame
+                if isinstance(frame, str)
+                else state.token.encode() not in frame
+                for frame in frames
             ), "Worker token exposed in a browser WebSocket frame"
             result = {
-                "browser_requests": [{"path": urlparse(item["url"]).path,
-                                      "method": item["method"]} for item in requests],
+                "browser_requests": [
+                    {"path": urlparse(item["url"]).path, "method": item["method"]}
+                    for item in requests
+                ],
                 "browser_websocket_upgrades": len(accepted_upgrades),
                 "browser_frames": len(frames),
                 "browser_page_errors": errors,
@@ -716,7 +934,9 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 print("Browser errors: " + json.dumps(errors), file=sys.stderr)
             try:
                 page.screenshot(
-                    path=output / "public-probe-failure.png", full_page=True, timeout=5000,
+                    path=output / "public-probe-failure.png",
+                    full_page=True,
+                    timeout=5000,
                 )
             except (PlaywrightError, OSError):
                 print("Could not capture the failure screenshot", file=sys.stderr)
@@ -739,10 +959,17 @@ def origin_runtime(state: Fixture):
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
-        server = uvicorn.Server(uvicorn.Config(
-            fixture_app(state), log_level="error", access_log=False, ws_ping_interval=None,
-        ))
-        thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+        server = uvicorn.Server(
+            uvicorn.Config(
+                fixture_app(state),
+                log_level="error",
+                access_log=False,
+                ws_ping_interval=None,
+            )
+        )
+        thread = threading.Thread(
+            target=server.run, kwargs={"sockets": [listener]}, daemon=True
+        )
         thread.start()
         try:
             wait_until(lambda: server.started, "loopback origin fixture starts")
@@ -807,15 +1034,21 @@ def smoke_evidence(output: Path, work: Path, report: dict, state: Fixture):
 
 def run(output: Path, assets_override: Path | None, repository: Path):
     if sys.platform != "linux":
-        raise SystemExit("Run this smoke on the isolated Linux VPS candidate, not locally.")
+        raise SystemExit(
+            "Run this smoke on the isolated Linux VPS candidate, not locally."
+        )
     worker = repository.resolve() / "probe-worker"
     wrangler = worker / "node_modules" / "wrangler" / "bin" / "wrangler.js"
     runner = Path(__file__).with_name("run-probe-worker-runtime.mjs")
     node = shutil.which("node")
     if not wrangler.is_file() or not node or not runner.is_file():
-        raise SystemExit("Install candidate probe-worker dependencies with npm ci first.")
+        raise SystemExit(
+            "Install candidate probe-worker dependencies with npm ci first."
+        )
     source_config = json.loads((worker / "wrangler.jsonc").read_text())
-    assets = (assets_override or worker / source_config["assets"]["directory"]).resolve()
+    assets = (
+        assets_override or worker / source_config["assets"]["directory"]
+    ).resolve()
     if not (assets / "index.html").is_file():
         raise SystemExit(
             "Build the production probe bundle with npm --prefix frontend run build:probe."
@@ -833,17 +1066,23 @@ def run(output: Path, assets_override: Path | None, repository: Path):
     token = secrets.token_urlsafe(32)
     state = Fixture(token, urlparse(url).netloc)
     report = {
-        "status": "failed", "stage": "configuration",
+        "status": "failed",
+        "stage": "configuration",
         "runtime": "Miniflare/workerd (Wrangler dry-run bundle)",
         "assets": str(assets),
         "versions": {
-            name: json.loads((worker / "node_modules" / name / "package.json").read_text())["version"]
+            name: json.loads(
+                (worker / "node_modules" / name / "package.json").read_text()
+            )["version"]
             for name in ("wrangler", "miniflare", "workerd")
         },
     }
     with tempfile.TemporaryDirectory(prefix="open-node-probe-worker-") as temporary:
         work = Path(temporary)
-        with smoke_evidence(output, work, report, state), origin_runtime(state) as origin:
+        with (
+            smoke_evidence(output, work, report, state),
+            origin_runtime(state) as origin,
+        ):
             # Carry the repository's entry point, compatibility date and complete
             # asset-routing configuration into a private, local-only config. Do
             # not copy account identifiers, remote bindings or real .dev.vars.
@@ -860,62 +1099,115 @@ def run(output: Path, assets_override: Path | None, repository: Path):
             config_path = work / "wrangler.json"
             config_path.write_text(json.dumps(config))
             config_path.chmod(0o600)
-            env = {key: value for key, value in os.environ.items()
-                   if not key.startswith(("CLOUDFLARE_", "CF_", "WRANGLER_", "OPEN_NODE_"))}
-            env.update({
-                "CI": "1", "NO_COLOR": "1", "WRANGLER_SEND_METRICS": "false",
-                "WRANGLER_LOG_SANITIZE": "true", "WRANGLER_LOG_PATH": str(work / "debug.log"),
-                "XDG_CONFIG_HOME": str(work / "config"), "XDG_CACHE_HOME": str(work / "cache"),
-            })
+            env = {
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith(("CLOUDFLARE_", "CF_", "WRANGLER_", "OPEN_NODE_"))
+            }
+            env.update(
+                {
+                    "CI": "1",
+                    "NO_COLOR": "1",
+                    "WRANGLER_SEND_METRICS": "false",
+                    "WRANGLER_LOG_SANITIZE": "true",
+                    "WRANGLER_LOG_PATH": str(work / "debug.log"),
+                    "XDG_CONFIG_HOME": str(work / "config"),
+                    "XDG_CACHE_HOME": str(work / "cache"),
+                }
+            )
             with (work / "runtime.log").open("w+") as log:
                 compiled = work / "compiled"
                 # Use the deployment CLI only for its official offline build.
                 # Its development ProxyController has a known fatal transient-
                 # connection regression; it is not part of a deployed Worker.
                 report["stage"] = "wrangler_dry_run"
-                build = subprocess.Popen([
-                    node, str(wrangler), "deploy", "--dry-run", "--outdir", str(compiled),
-                    "--config", str(config_path),
-                ], cwd=work, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                    start_new_session=True)
+                build = subprocess.Popen(
+                    [
+                        node,
+                        str(wrangler),
+                        "deploy",
+                        "--dry-run",
+                        "--outdir",
+                        str(compiled),
+                        "--config",
+                        str(config_path),
+                    ],
+                    cwd=work,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                )
                 try:
                     build.wait(timeout=60)
                 finally:
                     stop_process_group(build)
                 bundle = compiled / "index.js"
                 if build.returncode or not bundle.is_file():
-                    raise AssertionError("Wrangler dry-run did not produce the Worker bundle")
-                report["worker_bundle_sha256"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
+                    raise AssertionError(
+                        "Wrangler dry-run did not produce the Worker bundle"
+                    )
+                report["worker_bundle_sha256"] = hashlib.sha256(
+                    bundle.read_bytes()
+                ).hexdigest()
                 runtime_config = work / "runtime.json"
-                runtime_config.write_text(json.dumps({
-                    "workerDirectory": str(worker), "bundlePath": str(bundle),
-                    "workDirectory": str(work), "port": worker_port, "wrangler": config,
-                    "bindings": {"MMWX_ORIGIN": config["vars"]["MMWX_ORIGIN"],
-                                 "PROBE_TOKEN": token},
-                }))
+                runtime_config.write_text(
+                    json.dumps(
+                        {
+                            "workerDirectory": str(worker),
+                            "bundlePath": str(bundle),
+                            "workDirectory": str(work),
+                            "port": worker_port,
+                            "wrangler": config,
+                            "bindings": {
+                                "MMWX_ORIGIN": config["vars"]["MMWX_ORIGIN"],
+                                "PROBE_TOKEN": token,
+                            },
+                        }
+                    )
+                )
                 runtime_config.chmod(0o600)
                 report["stage"] = "runtime_start"
-                process = subprocess.Popen([
-                    node, str(runner), str(runtime_config),
-                ], cwd=work, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                    start_new_session=True)
+                process = subprocess.Popen(
+                    [
+                        node,
+                        str(runner),
+                        str(runtime_config),
+                    ],
+                    cwd=work,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                )
                 try:
                     with httpx.Client(timeout=1, trust_env=False) as client:
+
                         def ready():
                             if process.poll() is not None:
-                                raise AssertionError("Local Miniflare exited before readiness")
+                                raise AssertionError(
+                                    "Local Miniflare exited before readiness"
+                                )
                             try:
                                 return client.get(url).status_code == 200
                             except httpx.HTTPError:
                                 return False
-                        wait_until(ready, "local Miniflare serves built assets", timeout=45)
+
+                        wait_until(
+                            ready, "local Miniflare serves built assets", timeout=45
+                        )
                     report["stage"] = "http_boundary"
                     report["asset_sha256"] = http_boundary(url, origin, assets, state)
                     report["stage"] = "websocket_boundary"
                     websocket_boundary(url, state)
                     report["stage"] = "browser"
                     report.update(browser_surface(url, state, output))
-                    wait_until(lambda: state.snapshot()["active_ws"] == 0, "browser sockets close")
+                    wait_until(
+                        lambda: state.snapshot()["active_ws"] == 0,
+                        "browser sockets close",
+                    )
                     report["stage"] = "cleanup"
                 except BaseException:
                     report["runtime_exit_code"] = process.poll()
@@ -932,10 +1224,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
-        "--assets", type=Path, help="Override the built asset directory from wrangler.jsonc",
+        "--assets",
+        type=Path,
+        help="Override the built asset directory from wrangler.jsonc",
     )
     parser.add_argument(
-        "--repository", type=Path, default=ROOT,
+        "--repository",
+        type=Path,
+        default=ROOT,
         help="Read the Worker source and built assets from this isolated checkout",
     )
     arguments = parser.parse_args()

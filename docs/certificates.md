@@ -1,7 +1,7 @@
 # Certificate Management
 
 The FastAPI control plane owns certificate profiles, DNS credentials, ACME
-accounts, jobs and versions. The Vue **Certificates** workspace creates DNS
+accounts, jobs and versions. The React **Certificates** workspace creates DNS
 providers and DNS-01 or HTTP-01 profiles, imports PEM pairs, issues/renews certificates,
 edits CA account contacts, revokes individual versions, exports material and
 assigns node deployment targets. No activation key, subscription

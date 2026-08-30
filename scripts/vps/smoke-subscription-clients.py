@@ -284,9 +284,11 @@ def browser_workflow(client, url, output, username, node_id):
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(url + "/subscriptions")
             page.get_by_role("tab", name="Assign", exact=True).click()
-            user = page.get_by_role("combobox", name="User", exact=True).last
-            user.press("Enter")
-            page.get_by_role("option", name=username, exact=True).click()
+            user = page.get_by_role("combobox", name="Subscription user", exact=True)
+            user.click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text(username, exact=True).click()
             page.get_by_role("button", name="Link", exact=True).click()
             format_control = page.get_by_role(
                 "combobox", name="Client format", exact=True
@@ -298,33 +300,37 @@ def browser_workflow(client, url, output, username, node_id):
             ]:
                 page.set_viewport_size({"width": width, "height": height})
                 format_control.scroll_into_view_if_needed()
-                format_control.press("Enter")
-                page.get_by_role("option", name="sing-box JSON", exact=True).click()
+                format_control.click()
+                page.locator(
+                    ".ant-select-dropdown:visible .ant-select-item-option"
+                ).get_by_text("sing-box JSON", exact=True).click()
                 expect(
-                    page.locator(".format-exclusion").filter(has_text="snell6").first
+                    page.locator(".ant-alert").filter(has_text="snell6").first
                 ).to_be_visible()
-                format_control.press("Enter")
-                page.get_by_role("option", name="Xray JSON", exact=True).click()
+                format_control.click()
+                page.locator(
+                    ".ant-select-dropdown:visible .ant-select-item-option"
+                ).get_by_text("Xray JSON", exact=True).click()
                 select = page.get_by_role("combobox", name="Xray node", exact=True)
                 expect(select).to_be_enabled()
-                select.press("Enter")
-                page.get_by_role(
-                    "option", name="subscription-clients snell6", exact=True
-                ).click()
+                select.click()
+                page.locator(
+                    ".ant-select-dropdown:visible .ant-select-item-option"
+                ).get_by_text("subscription-clients snell6", exact=True).click()
                 expect(page.get_by_label("Format URL", exact=True)).to_have_value(
                     re.compile(".*node_id=" + node_id)
                 )
                 lifecycle.ui.check_layout(page)
-                assert page.evaluate(
-                    "() => [...document.querySelectorAll("
-                    "'.subscription-action-row .v-btn__content, "
-                    ".subscription-page .v-select__selection-text')].filter("
-                    "el => el.checkVisibility({checkVisibilityCSS: true})).every("
+                labels = page.get_by_test_id("subscriptions-view").locator(
+                    ".ant-btn > span:not([role=img]):visible, "
+                    ".ant-select-selection-item:visible"
+                )
+                assert labels.count() > 0
+                assert labels.evaluate_all(
+                    "items => items.every("
                     "el => el.scrollWidth <= el.clientWidth + 1 "
                     "&& el.scrollHeight <= el.clientHeight + 1)"
-                ), (
-                    "Control labels are clipped"
-                )
+                ), "Control labels are clipped"
                 select.scroll_into_view_if_needed()
                 page.screenshot(
                     path=output / ("subscription-xray-" + label + ".png"),
@@ -336,13 +342,17 @@ def browser_workflow(client, url, output, username, node_id):
                 pending.append((route, route.fetch()))
 
             page.route("**/subscription-preview?format=sing-box", hold_preview)
-            format_control.press("Enter")
-            page.get_by_role("option", name="sing-box JSON", exact=True).click()
+            format_control.click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text("sing-box JSON", exact=True).click()
             expect(
                 page.get_by_role("combobox", name="Xray node", exact=True)
             ).to_have_count(0)
-            format_control.press("Enter")
-            page.get_by_role("option", name="Xray JSON", exact=True).click()
+            format_control.click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text("Xray JSON", exact=True).click()
             expect(
                 page.get_by_role("combobox", name="Xray node", exact=True)
             ).to_be_enabled()
@@ -360,8 +370,10 @@ def browser_workflow(client, url, output, username, node_id):
 
             page.route("**/users/" + username + "/subscription-token", hold_token)
             page.get_by_role("button", name="Link", exact=True).click()
-            user.press("Enter")
-            page.get_by_role("option", name=alternate, exact=True).click()
+            user.click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text(alternate, exact=True).click()
             expect(page.get_by_label("Subscription URL", exact=True)).to_have_count(0)
             assert len(pending) == 1
             route, response = pending.pop()
@@ -410,9 +422,12 @@ def capture_templates(page, output, name):
         page.set_viewport_size({"width": width, "height": height})
         page.wait_for_timeout(250)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
-        assert page.locator(".templates-workspace").evaluate(
-            "element => element.scrollWidth <= element.clientWidth + 1"
-        )
+        for label in ("Template defaults", "Template library", "Template editor"):
+            surface = page.get_by_label(label, exact=True)
+            expect(surface).to_have_count(1)
+            assert surface.evaluate(
+                "element => element.scrollWidth <= element.clientWidth + 1"
+            )
         page.screenshot(
             path=output / f"templates-{name}-{suffix}.png",
             full_page=True,
@@ -598,10 +613,10 @@ def template_workflow(
             preview_user = admin.get_by_role(
                 "combobox", name="Preview subscriber", exact=True
             )
-            preview_user.press("Enter")
-            admin.get_by_role(
-                "option", name=re.compile(re.escape(username))
-            ).first.click()
+            preview_user.click()
+            admin.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text(re.compile(re.escape(username))).first.click()
             admin.get_by_role("button", name="Preview", exact=True).click()
             expect(admin.get_by_text(re.compile(r"\d+ included"))).to_be_visible()
             capture_templates(admin, args.output, "admin")
@@ -609,10 +624,10 @@ def template_workflow(
             subscriber_select = admin.get_by_role(
                 "combobox", name="Subscriber", exact=True
             )
-            subscriber_select.press("Enter")
-            admin.get_by_role(
-                "option", name=re.compile(re.escape(username))
-            ).first.click()
+            subscriber_select.click()
+            admin.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text(re.compile(re.escape(username))).first.click()
             permission = admin.get_by_label("Allow personal templates", exact=True)
             permission.check()
             with admin.expect_response(

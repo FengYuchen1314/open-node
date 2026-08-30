@@ -146,10 +146,21 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             dialog.get_by_role("tab", name="Limits", exact=True).click()
 
             def mode(label, choice, value=None):
-                dialog.locator(".v-select").filter(
-                    has=page.get_by_label(label + " mode", exact=True)
-                ).locator(".v-field").click()
-                page.get_by_role("option", name=choice, exact=True).click()
+                selector = dialog.get_by_role(
+                    "combobox", name=label + " mode", exact=True
+                )
+                selector.click()
+                expect(selector).to_have_attribute("aria-expanded", "true")
+                controlled = selector.get_attribute("aria-controls")
+                assert controlled
+                dropdown = page.locator(".ant-select-dropdown").filter(
+                    has=page.locator(f'[id="{controlled}"]')
+                )
+                dropdown.locator(".ant-select-item-option").get_by_text(
+                    choice, exact=True
+                ).click()
+                expect(selector).to_have_attribute("aria-expanded", "false")
+                expect(dropdown).not_to_be_visible()
                 if value is not None:
                     units = {
                         "Traffic quota": " (GiB)",
@@ -239,8 +250,10 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 flush=True,
             )
 
-            dialog.get_by_label("Node", exact=True).fill(node["name"])
-            page.get_by_role("option", name=node["name"], exact=True).click()
+            dialog.get_by_role("combobox", name="Node", exact=True).click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text(node["name"], exact=True).click()
             dialog.get_by_role("button", name="Add node override", exact=True).click()
             mode("Node speed", "Unlimited")
             mode("Node connections", "Unlimited")
@@ -371,7 +384,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             with sqlite3.connect(work / "backend.db") as db:
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
             assert not errors, errors
-            assert all(url.startswith((backend, "data:")) for url in requests), (
+            assert all(url.startswith((backend + "/", "data:")) for url in requests), (
                 "Unexpected external browser request"
             )
         finally:

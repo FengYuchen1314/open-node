@@ -12,7 +12,7 @@ import struct
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from uuid import uuid4
 
@@ -143,11 +143,114 @@ def udp_transfer(socks, target):
             return time.monotonic() - start
 
 
+def check_limiter_layout(page, panel):
+    """Keep ordinary controls in view and make every scroll-table control reachable."""
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+    controls = panel.locator(
+        ".ant-input, .ant-input-number, .ant-select, .ant-btn, .ant-radio-group"
+    )
+    for control in controls.all():
+        if not control.is_visible():
+            continue
+        table = control.locator(
+            "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), "
+            "' ant-table-content ')][1]"
+        )
+        left, right = 0, page.viewport_size["width"]
+        if table.count():
+            table_bounds = table.bounding_box()
+            assert table_bounds and table_bounds["x"] >= 0
+            left = table_bounds["x"]
+            right = left + table_bounds["width"]
+            assert right <= page.viewport_size["width"] + 1, table_bounds
+            # Ant Table intentionally scrolls horizontally on small screens. Do
+            # not skip its controls: each must fit and be reachable by scrolling.
+            control.scroll_into_view_if_needed()
+        bounds = control.bounding_box()
+        assert (
+            bounds
+            and bounds["x"] >= left - 1
+            and bounds["x"] + bounds["width"] <= right + 1
+        ), {
+            "bounds": bounds,
+            "control": control.evaluate("el => el.outerHTML.slice(0, 300)"),
+        }
+    for table in panel.locator(".ant-table-content").all():
+        table.evaluate("el => { el.scrollLeft = 0; }")
+
+
+def check_numeric_drafts(page, panel):
+    """Blur/Enter must not silently turn invalid rates into unlimited or old values."""
+    mutations = []
+
+    def record(request):
+        if request.method == "POST" and request.url.endswith("/operations/limiter"):
+            mutations.append(request.url)
+
+    page.on("request", record)
+    save = panel.get_by_role("button", name="Save limits", exact=True)
+    try:
+        for label, raw in (
+            ("Per-user cap Mbps", "-1"),
+            ("Per-user cap Mbps", "1e-999"),
+            ("Per-user cap Mbps", "not-a-number"),
+            ("Per-user cap Mbps", ""),
+            ("Cap Mbps", "-1"),
+            ("Cap Mbps", ""),
+            ("Connections", "-1"),
+            ("Connections", "0.4"),
+            ("Connections", "1000001"),
+        ):
+            control = panel.get_by_label(label, exact=True)
+            original = control.input_value()
+            control.fill(raw)
+            expect(save).to_be_disabled()
+            control.press("Enter")
+            control.press("Tab")
+            expect(save).to_be_disabled()
+            assert not mutations, (label, raw, mutations)
+            control.fill(original)
+            control.press("Tab")
+            expect(save).to_be_enabled()
+        cap = panel.get_by_label("Per-user cap Mbps", exact=True)
+        original = cap.input_value()
+        cap.fill("")
+        cap.press_sequentially("-")
+        expect(cap).to_have_value("-")
+        expect(save).to_be_disabled()
+        cap.press_sequentially("1")
+        expect(cap).to_have_value("-1")
+        expect(save).to_be_disabled()
+        cap.fill("")
+        cap.press_sequentially("1e")
+        expect(cap).to_have_value("1e")
+        expect(save).to_be_disabled()
+        cap.press_sequentially("2")
+        cap.press("Tab")
+        expect(cap).to_have_value("1e2")
+        expect(cap).to_have_attribute("aria-valuenow", "100")
+        expect(save).to_be_enabled()
+        cap.fill("0")
+        cap.press("Tab")
+        expect(cap).to_have_value("0")
+        expect(save).to_be_enabled()
+        assert not mutations, mutations
+        cap.fill(original)
+        cap.press("Tab")
+    finally:
+        page.remove_listener("request", record)
+    print(
+        "PASS numeric blur/Enter, raw drafts, progressive typing and explicit zero",
+        flush=True,
+    )
+
+
 def browser_workflow(client, base, backend, output):
     output.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         context = browser.new_context(viewport={"width": 1440, "height": 900})
+        page = None
         try:
             context.add_cookies(
                 [
@@ -166,17 +269,24 @@ def browser_workflow(client, base, backend, output):
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/config")
             page.get_by_role("tab", name="Limits", exact=True).click()
-            panel = page.locator(".limiter-panel")
+            panel = page.get_by_role("tabpanel", name="Limits", exact=True)
             expect(panel.get_by_label("Inbound", exact=True)).to_be_visible()
-            panel.get_by_label("Inbound", exact=True).press("Enter")
-            page.get_by_role("option", name="vless-vision", exact=True).click()
+            panel.get_by_label("Inbound", exact=True).click()
+            popup = page.locator(".ant-select-dropdown:visible")
+            popup.locator(".ant-select-item-option").get_by_text(
+                "vless-vision", exact=True
+            ).click()
+            check_numeric_drafts(page, panel)
             panel.get_by_label("Cap Mbps", exact=True).fill("0.0000001")
             expect(
                 panel.get_by_role("button", name="Save limits", exact=True)
             ).to_be_disabled()
             panel.get_by_label("Cap Mbps", exact=True).fill("0.75")
             panel.get_by_role("button", name="Add automatic rule", exact=True).click()
-            panel.get_by_role("button", name="Burst", exact=True).click()
+            panel.get_by_label("Rule 1 type", exact=True).get_by_text(
+                "Burst", exact=True
+            ).click()
+            expect(panel.get_by_role("radio", name="Burst", exact=True)).to_be_checked()
             for width, height, label in [
                 (1440, 900, "desktop"),
                 (390, 844, "mobile"),
@@ -184,16 +294,8 @@ def browser_workflow(client, base, backend, output):
             ]:
                 page.set_viewport_size({"width": width, "height": height})
                 panel.scroll_into_view_if_needed()
-                assert page.evaluate(
-                    "document.documentElement.scrollWidth <= innerWidth + 1"
-                )
-                assert (
-                    panel.evaluate("""el => [...el.querySelectorAll('.v-input,.v-btn')].filter(
-                    item => item.getClientRects().length
-                        && item.getBoundingClientRect().right > innerWidth + 1
-                ).length""")
-                    == 0
-                )
+                check_limiter_layout(page, panel)
+                panel.scroll_into_view_if_needed()
                 page.screenshot(path=output / ("limiter-" + label + ".png"))
             page.set_viewport_size({"width": 1440, "height": 900})
             panel.get_by_role("button", name="Save limits", exact=True).click()
@@ -220,9 +322,9 @@ def browser_workflow(client, base, backend, output):
                     "expected_revision": state["revision"],
                 },
             )
-            panel.locator(".limiter-user").get_by_label("Cap Mbps", exact=True).fill(
-                "1"
-            )
+            panel.get_by_role("row").filter(
+                has=page.get_by_label("Email", exact=True)
+            ).get_by_label("Cap Mbps", exact=True).fill("1")
             panel.get_by_role("button", name="Save limits", exact=True).click()
             expect(
                 panel.get_by_text(
@@ -255,6 +357,23 @@ def browser_workflow(client, base, backend, output):
                 "PASS real desktop/mobile/narrow limit apply, stale revision and confirmed removal",
                 flush=True,
             )
+        except BaseException:
+            if page is not None:
+                with suppress(Exception):
+                    page.screenshot(path=output / "failure.png", full_page=True)
+                    (output / "failure-layout.json").write_text(
+                        json.dumps(
+                            page.evaluate("""() => ({width: innerWidth,
+                                documentWidth: document.documentElement.scrollWidth,
+                                controls: [...document.querySelectorAll('.ant-input,.ant-input-number,.ant-select,.ant-btn,.ant-radio-group')]
+                                    .filter(el => el.checkVisibility({checkVisibilityCSS: true}))
+                                    .map(el => ({label: el.getAttribute('aria-label'),
+                                        className: el.className,
+                                        bounds: el.getBoundingClientRect().toJSON()}))})"""),
+                            indent=2,
+                        )
+                    )
+            raise
         finally:
             context.close()
             browser.close()
@@ -634,6 +753,7 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, _http_e
 
 def run(args):
     def callback(work, fixture, wheel, stock, client, backend, echo):
+        print(f"FIXTURE {fixture.root} {fixture.unit} {fixture.user}", flush=True)
         with lifecycle.gateway(work, args.nginx, backend) as (endpoint, ca, _):
             exercise(work, fixture, args, client, backend, endpoint, ca, echo)
 

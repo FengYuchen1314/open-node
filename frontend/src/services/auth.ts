@@ -1,4 +1,4 @@
-import { reactive } from "vue";
+import { createObservableState } from "./observable-state";
 
 export interface OperatorSession {
   configured: boolean;
@@ -28,11 +28,15 @@ export interface AdministratorSecurity {
   require_totp: boolean;
 }
 
-export const authState = reactive({
+const authStore = createObservableState({
   ready: false,
   error: "",
   session: null as OperatorSession | null,
 });
+
+export const authState = authStore.state;
+export const getAuthSnapshot = authStore.getSnapshot;
+export const subscribeAuthState = authStore.subscribe;
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 

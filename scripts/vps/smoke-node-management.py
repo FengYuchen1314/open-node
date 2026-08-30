@@ -321,13 +321,13 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 ):
                     page.set_viewport_size({"width": width, "height": height})
                     page.wait_for_timeout(200)
-                    surface = dialog.locator(".node-management-dialog")
-                    box = surface.bounding_box()
+                    box = dialog.bounding_box()
                     assert (
                         box and box["x"] >= 0 and box["x"] + box["width"] <= width + 1
                     )
                     assert box["y"] >= 0 and box["y"] + box["height"] <= height + 1
-                    content = surface.locator(".v-card-text")
+                    content = dialog.locator(".ant-modal-body")
+                    expect(content).to_have_count(1)
                     assert content.evaluate(
                         "el => el.scrollWidth <= el.clientWidth + 1"
                     )
@@ -361,7 +361,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert saved.value.status == 200
             expect(dialog.get_by_text("Node saved", exact=True)).to_be_visible()
             capture("edited")
-            dialog.locator(".v-card-actions").get_by_role(
+            dialog.locator(".ant-modal-footer").get_by_role(
                 "button", name="Close", exact=True
             ).click()
             assert (
@@ -418,7 +418,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 transfer(unrelated)
                 transfer(original)
                 capture("pending")
-                dialog.locator(".v-card-actions").get_by_role(
+                dialog.locator(".ant-modal-footer").get_by_role(
                     "button", name="Close", exact=True
                 ).click()
                 page.get_by_role(

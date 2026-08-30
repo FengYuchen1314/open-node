@@ -1,23 +1,12 @@
-import { renderToString } from "vue/server-renderer";
-import { createSSRApp, h } from "vue";
-import { createVuetify } from "vuetify";
-import * as components from "vuetify/components";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
-import ProbeView from "./ProbeView.vue";
+import ProbeView from "../react/views/ProbeView";
+import ProbeAdministrationPanel from "../react/components/ProbeAdministrationPanel";
 
 async function renderProbe(publicOnly: boolean) {
-  const app = createSSRApp({
-    render: () =>
-      h(components.VApp, null, {
-        default: () =>
-          h(components.VMain, null, {
-            default: () => h(ProbeView, { publicOnly }),
-          }),
-      }),
-  });
-  app.use(createVuetify({ components, ssr: true }));
-  return renderToString(app);
+  return renderToStaticMarkup(createElement(ProbeView, { publicOnly }));
 }
 
 describe("probe surface modes", () => {
@@ -33,7 +22,9 @@ describe("probe surface modes", () => {
   });
 
   it("keeps administrator controls in the authenticated control-plane view", async () => {
-    const html = await renderProbe(false);
+    const html = renderToStaticMarkup(createElement(ProbeAdministrationPanel, {
+      accessToken: "", onSettings: () => {}, onAccessToken: () => {}, onRefresh: () => {},
+    }));
 
     expect(html).toContain("Probe settings");
     expect(html).toContain("Worker access");

@@ -10,7 +10,7 @@
 已通过后端和浏览器验收，公共探针 Worker 的匿名浏览器门槛也已通过。本轮面板远程
 Agent 安装已完成 VPS 验收，Agent 0.3.0a0 已公开发布；功能代码 `1515a7b` 和
 托管 CI 夹具修正 `a677280` 已进入主线。用户随后明确要求前端重写为标准 Ant Design，
-目前正在将 Vue/Vuetify 迁移到 React，尚未发布重写版。生产实例保持原镜像，本轮没有
+页面现已从 Vue/Vuetify 迁入 React，正在核验最后的布局修正和发布门槛，尚未发布重写版。生产实例保持原镜像，本轮没有
 升级生产。建议在新聊天中直接说明：
 
 > 请先阅读 `docs/refactor-handoff.md`、`docs/mmwx-source-parity.md` 和 `docs/testing.md`，核对公开主线、候选分支、VPS 隔离测试 checkout 和生产镜像四者的实际 revision。继续参考用户提供的四个固定官方仓库，不要把受限 Preview 首发等同于完整 MMWX 替代。测试、构建、浏览器和真实流量验收都在 `185.99.135.224` 的隔离候选环境运行，不动生产服务和数据库。公开 HTTPS、Cloudflare 账户部署与异地加密备份需操作者的实际输入，不能用本地通过替代外部验证。
@@ -144,6 +144,42 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 以上前端数量对应已发布的 Vue 基线，不是正在重写的 React 界面。新界面的页面迁移、
 类型检查、真实 Ant Design DOM 测试和双产物/浏览器验收单独记录，尚不能据旧结果
 宣称重写完成。
+
+### React / Ant Design 验收候选（尚未发布）
+
+所有页面已迁入 `frontend/src/react`，入口为 `src/main.tsx` 和
+`public-probe/main.tsx`。工作树已移除 Vue/Vuetify 代码及依赖，旧版可从 Git
+恢复；保留 FastAPI、API/会话契约和 Docker 单镜像。依赖为 React 19.2.7、
+Ant Design 6.6.2 和 icons 6.3.2，架构及验收边界见 [`frontend.md`](frontend.md)。
+
+数值输入已统一使用标准 Ant `InputNumber` 的小型适配器，避免失焦或 Enter
+把非法配额、连接数、端口改成有效值。输入为空、NaN、下溢、未完成的负号/指数，
+以及合法的小数 GiB 分别处理。Probe 设置加载失败时禁止写入；令牌轮换仍需确认。
+真实浏览器发现的 loading 按钮名称、上传 File 残留、窄屏弹窗高度、栅格溢出和
+探针任务标题被挤掉均已修正。所有业务修改保持既有 API 和计费语义。
+
+第一轮完整 React 回归为 **509 tests / 63 files，全部通过，644.30 秒**，
+报告 `/tmp/open-node-react-accessible.OTOVWliF/frontend-tests.json`，无未处理错误。
+最终工作源在 `/tmp/open-node-react-release.xaSu8WDc/source`，双产物构建通过，
+资产包 SHA-256 为
+`da85b9cc62b5d78dfae10dbb2f85d3d4ff79e935514f894c67761eabfc64fb4c`。
+相对该全量测试，产品仅追加四个组件的布局修正，分别有专项单测或实机回归；
+最终源的完整测试仍在执行，完成后应在此记录实际结果，不能推定通过。
+
+最终源的管理员操作、MFA 和订阅账户双通道浏览器流程已通过。Docker 另验证了
+39 个文件的三方哈希、深链/404、三种屏宽登录及重启后原会话和数据保留，报告为
+`/root/open-node-react-bootstrap-browser.gEUopOkd/r5-docker-4/report.json`。
+仅清理测试所属容器和卷，生产未改变。订阅/用户管理的十组完整门禁
+也已通过；套餐、别名、自动限速和用户限额使用第四版隔离包复验，原生限速
+使用第三版验证 18 协议及 1440/390/320 控件。旧 MMWX 导入另用官方 Xray
+26.3.27 验证标准 VLESS，不能据此将扩展协议算作官方内核支持。精确目录和
+不同构建的归属见 [`testing.md`](testing.md)，不要把分批测试数相加。
+
+最终公共 Probe 的 JS/CSS 与已通过真实 Worker、匿名请求、断线重连和三种
+主题的包逐字相同，报告仍在
+`/tmp/open-node-react-browser.NyIq0V6p/public-probe-theme/report.json`。
+独立只读复核未发现本轮会话、MFA、异步 scope 或公共请求边界的新安全阻断。
+生产仍是 `open-node:cb1eb0c`，共享候选仍保留 clean `6ca84e2`；重写源码尚未进入主线。
 
 本轮安装功能的完整后端回归为 **1,250 passed**（694.29 秒）。提交后核对了
 `1515a7b` 的全部 142 个后端 tracked 文件，共 2,201,738 字节，与该回归源树和

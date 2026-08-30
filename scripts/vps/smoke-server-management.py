@@ -112,12 +112,21 @@ def browser(client, backend, base, output, quota, before_remove):
                 page.set_viewport_size({"width": width, "height": height})
                 expect(dialog).to_be_visible()
                 page.wait_for_timeout(150)
-                box = dialog.locator(".server-management-dialog").bounding_box()
-                assert box and box["x"] >= 0 and box["x"] + box["width"] <= width + 1
-                assert box["y"] >= 0 and box["y"] + box["height"] <= height + 1
-                content = dialog.locator(".v-card-text")
+                container = dialog.locator(".ant-modal-container")
+                expect(container).to_have_count(1)
+                box = container.bounding_box()
+                assert box and box["x"] >= 0 and box["x"] + box["width"] <= width + 1, (
+                    f"{label}: modal must fit viewport width {width}: {box}"
+                )
+                assert box["y"] >= 0 and box["y"] + box["height"] <= height + 1, (
+                    f"{label}: modal must fit viewport height {height}: {box}"
+                )
+                content = dialog.locator(".ant-modal-body")
+                expect(content).to_have_count(1)
                 assert content.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
-                for button in dialog.locator(".v-card-actions button").all():
+                buttons = dialog.locator(".ant-modal-footer button")
+                expect(buttons).to_have_count(2)
+                for button in buttons.all():
                     bounds = button.bounding_box()
                     assert (
                         bounds
@@ -174,6 +183,13 @@ def browser(client, backend, base, output, quota, before_remove):
             for width, height, label in sizes:
                 capture("remove-" + label, width, height)
             used = quota()
+            retained_usage = (
+                client.get("/api/v1/users/subscriber/traffic").raise_for_status().json()
+            )
+            assert retained_usage["charged_usage_bytes"] == used
+            # This fixture uses a twoway plan with the default node multiplier.
+            # Raw traffic and the doubled billed traffic are separate API fields.
+            assert retained_usage["total"] * 2 == used
             with page.expect_response(
                 lambda r: r.url.endswith(base + "/remove")
             ) as removed:
@@ -189,6 +205,7 @@ def browser(client, backend, base, output, quota, before_remove):
                 "PASS browser invalid/stale edits, selective sync, cancel, explicit removal and 1440/390/320 layouts",
                 flush=True,
             )
+            return retained_usage
         finally:
             context.close()
             browser.close()
@@ -415,7 +432,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             )
             assert fixture.ready()
 
-        browser(client, backend, base, args.output, quota, after_edit)
+        before_removal = browser(client, backend, base, args.output, quota, after_edit)
         health = fixture.root / "state/health.json"
         removed_at = time.time()
         runtime.poll(
@@ -452,8 +469,22 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
         archive = client.get("/api/v1/change-sets/" + change["id"]).json()["change_set"]
         assert archive["steps"][0]["archived"]
         assert archive["steps"][0]["server_name"] == "management-edited"
-        usage = client.get("/api/v1/users/subscriber/traffic").json()
-        assert usage["total"] == retained and usage["entries"][0]["archived"]
+        usage = client.get("/api/v1/users/subscriber/traffic").raise_for_status().json()
+        traffic_fields = (
+            "upload", "download", "total", "weighted_upload", "weighted_download",
+            "charged_usage_bytes",
+        )
+        for field in traffic_fields:
+            assert usage[field] == before_removal[field], f"Archived {field} changed"
+        assert usage["charged_usage_bytes"] == retained
+        assert usage["total"] > 0 and usage["total"] * 2 == retained
+        assert len(usage["entries"]) == 1
+        archived_usage = usage["entries"][0]
+        assert archived_usage["archived"]
+        assert archived_usage["server_id"] == server_id
+        assert archived_usage["server_name"] == "management-edited"
+        for field in traffic_fields:
+            assert archived_usage[field] == usage[field], f"Archived entry {field} differs"
         with sqlite3.connect(work / "backend.db") as db:
             assert db.execute("PRAGMA foreign_key_check").fetchall() == []
         fixture.cli("uninstall", "--purge")

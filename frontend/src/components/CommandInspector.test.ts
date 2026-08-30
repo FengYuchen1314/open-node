@@ -1,10 +1,8 @@
-import { renderToString } from "vue/server-renderer";
-import { createSSRApp, h } from "vue";
-import { createVuetify } from "vuetify";
-import * as components from "vuetify/components";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 import type { AgentCommand } from "../domain/inventory";
-import CommandInspector from "./CommandInspector.vue";
+import CommandInspector from "../react/components/CommandInspector";
 
 describe("dependent commands", () => {
   it.each([
@@ -26,11 +24,7 @@ describe("dependent commands", () => {
       created_at: "2026-08-28T00:00:00Z",
       updated_at: "2026-08-28T00:00:00Z",
     };
-    const app = createSSRApp({
-      render: () => h(CommandInspector, { commands: [command], streamFramesByCommand: {} }),
-    });
-    app.use(createVuetify({ components, ssr: true }));
-    const html = await renderToString(app);
+    const html = renderToStaticMarkup(createElement(CommandInspector, { commands: [command], streamFramesByCommand: {} }));
     expect(html).toContain(label);
     expect(html).toContain(status);
     expect(html).toContain("/api/child/xray/config");

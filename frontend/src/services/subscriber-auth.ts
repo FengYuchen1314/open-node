@@ -1,4 +1,4 @@
-import { reactive } from "vue";
+import { createObservableState } from "./observable-state";
 import type { RegistrationClaim, RegistrationClaimResponse } from "../domain/registration-invitations";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat, SubscriptionIpPolicy, SubscriptionQuotaStatus } from "../domain/subscriptions";
 import { authenticatedFetch } from "./auth";
@@ -35,7 +35,10 @@ export interface SubscriberEnrollment { secret: string; provisioning_uri: string
 export interface SubscriberAccount { username: string; configured: boolean; totp_enabled: boolean; revision: string }
 export interface SubscriberProof { password: string; code?: string }
 
-export const subscriberState = reactive({ ready: false, error: "", session: null as SubscriberSession | null });
+const subscriberStore = createObservableState({ ready: false, error: "", session: null as SubscriberSession | null });
+export const subscriberState = subscriberStore.state;
+export const getSubscriberSnapshot = subscriberStore.getSnapshot;
+export const subscribeSubscriberState = subscriberStore.subscribe;
 let epoch = 0;
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 

@@ -32,7 +32,7 @@ ACCOUNT = "/api/v1/account"
 def capture(page, output, name):
     page.mouse.move(0, 0)
     page.evaluate("document.activeElement?.blur()")
-    page.wait_for_function("""() => [...document.querySelectorAll('.v-tooltip .v-overlay__content')]
+    page.wait_for_function("""() => [...document.querySelectorAll('.ant-tooltip')]
         .every(element => element.getClientRects().length === 0
             || getComputedStyle(element).visibility === 'hidden')""")
     for width, height, suffix in (
@@ -54,9 +54,12 @@ def capture(page, output, name):
                 flush=True,
             )
             raise AssertionError("Horizontal page overflow")
-        assert page.locator(
-            ".account-content, .account-header, .v-dialog .v-card-text"
-        ).evaluate_all(
+        surfaces = page.locator(
+            ".application-content:visible, .account-content:visible, "
+            ".application-header:visible, .ant-modal-body:visible"
+        )
+        assert surfaces.count() > 0, "No responsive account or dialog surface found"
+        assert surfaces.evaluate_all(
             "items => items.every(item => item.scrollWidth <= item.clientWidth + 1)"
         )
         page.screenshot(
@@ -72,6 +75,14 @@ def sign_in(page, backend, password):
     page.get_by_label("Username", exact=True).fill("alice")
     page.get_by_label("Password", exact=True).fill(password)
     page.get_by_role("button", name="Sign In", exact=True).click()
+
+
+def expect_current_plan(page):
+    expect(
+        page.get_by_role("region", name="Current plan", exact=True).get_by_text(
+            "Community", exact=True
+        )
+    ).to_be_visible()
 
 
 def setup(work, fixture, args, client, endpoint, ca):
@@ -231,7 +242,7 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
                     "Login password saved. Existing sessions have been revoked."
                 )
             ).to_be_visible()
-            dialog.locator(".v-card-actions").get_by_role(
+            dialog.locator(".ant-modal-footer").get_by_role(
                 "button", name="Close", exact=True
             ).click()
 
@@ -242,9 +253,7 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
             expect(page.get_by_text("Invalid credentials", exact=True)).to_be_visible()
             page.get_by_label("Password", exact=True).fill(password)
             page.get_by_role("button", name="Sign In", exact=True).click()
-            expect(
-                page.get_by_role("heading", name="Community", exact=True)
-            ).to_be_visible()
+            expect_current_plan(page)
             assert primary.request.get(backend + "/api/v1/servers").status == 401
             assert (
                 primary.request.get(backend + "/api/v1/auth/session").json()[
@@ -252,8 +261,10 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
                 ]
                 is False
             )
-            page.locator(".account-link-controls .v-select .v-field").click()
-            page.get_by_role("option", name="Xray", exact=True).click()
+            page.get_by_role("combobox", name="Client format", exact=True).click()
+            page.locator(".ant-select-dropdown:visible").get_by_text(
+                "Xray", exact=True
+            ).click()
             original_url = page.get_by_label(
                 "Subscription URL", exact=True
             ).input_value()
@@ -271,9 +282,7 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
                 ),
             )
             page.get_by_role("button", name="Refresh account", exact=True).click()
-            expect(
-                page.get_by_role("heading", name="Community", exact=True)
-            ).to_be_visible()
+            expect_current_plan(page)
             page.get_by_role(
                 "button", name="Copy subscription link", exact=True
             ).click()
@@ -286,9 +295,7 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
 
             other = secondary.new_page()
             sign_in(other, backend, password)
-            expect(
-                other.get_by_role("heading", name="Community", exact=True)
-            ).to_be_visible()
+            expect_current_plan(other)
             page.get_by_role("tab", name="Security", exact=True).click()
             page.get_by_role("button", name="Enable", exact=True).click()
             dialog = page.get_by_role("dialog")
@@ -356,9 +363,7 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
                 pyotp.TOTP(secret).at(time.time() + 30)
             )
             other.get_by_role("button", name="Verify", exact=True).click()
-            expect(
-                other.get_by_role("heading", name="Community", exact=True)
-            ).to_be_visible()
+            expect_current_plan(other)
             page.get_by_role(
                 "button", name="Refresh security settings", exact=True
             ).click()
@@ -381,9 +386,7 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
                 codes[0]
             )
             other.get_by_role("button", name="Verify", exact=True).click()
-            expect(
-                other.get_by_role("heading", name="Community", exact=True)
-            ).to_be_visible()
+            expect_current_plan(other)
             assert (
                 secondary.request.get(backend + ACCOUNT + "/security").json()[
                     "recovery_codes_remaining"
@@ -419,9 +422,7 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
                 codes[2]
             )
             page.get_by_role("button", name="Verify", exact=True).click()
-            expect(
-                page.get_by_role("heading", name="Community", exact=True)
-            ).to_be_visible()
+            expect_current_plan(page)
             page.get_by_role("tab", name="Security", exact=True).click()
             page.get_by_role("button", name="Reset links", exact=True).click()
             dialog = page.get_by_role("dialog")
@@ -461,9 +462,7 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
                 page.get_by_role("heading", name="Subscriber Sign-In", exact=True)
             ).to_be_visible()
             sign_in(page, backend, password)
-            expect(
-                page.get_by_role("heading", name="Community", exact=True)
-            ).to_be_visible()
+            expect_current_plan(page)
             old_cookie = next(
                 cookie
                 for cookie in primary.cookies()
@@ -502,9 +501,9 @@ def exercise(work, fixture, args, operator, backend, endpoint, ca):
             with sqlite3.connect(work / "backend.db") as db:
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
             assert not errors, errors
-            assert all(
-                url.startswith(backend) or url.startswith("data:") for url in requests
-            ), "Unexpected external browser request"
+            assert all(url.startswith((backend + "/", "data:")) for url in requests), (
+                "Unexpected external browser request"
+            )
             print(
                 "PASS administrator MFA recovery, account disable/re-enable and isolation",
                 flush=True,

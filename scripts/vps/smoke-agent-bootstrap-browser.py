@@ -104,12 +104,22 @@ def capture(page, dialog, output, name, focus=None):
         if focus is not None:
             focus.scroll_into_view_if_needed()
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
-        assert dialog.locator(".v-card").evaluate_all(
+        # Ant Design 6 uses a modal container, not the former Vuetify card.
+        # Require it to exist so a selector regression cannot pass vacuously.
+        expect(dialog.locator(".ant-modal-container")).to_have_count(1)
+        assert dialog.locator(".ant-modal-container").evaluate_all(
             "items => items.every(item => item.scrollWidth <= item.clientWidth + 1)"
         )
+        command_field = dialog.get_by_label("Root shell installation command", exact=True)
+        if command_field.count():
+            assert command_field.evaluate("""field => {
+                const body = field.closest('.ant-modal-body');
+                return body && field.clientWidth >= body.clientWidth * 0.9;
+            }"""), "Installation command must retain the modal's full usable width"
         page.screenshot(
             path=str(output / f"{name}-{suffix}.png"), animations="disabled",
-            mask=[page.locator(".token-code"), dialog.locator(".install-command")],
+            mask=[page.get_by_label("Agent token", exact=True),
+                  dialog.get_by_label("Root shell installation command", exact=True)],
         )
     page.set_viewport_size({"width": 1440, "height": 1000})
 
@@ -120,6 +130,22 @@ def command_ticket(command, private):
     assert re.fullmatch(r"[A-Za-z0-9_-]{43}", ticket), "Command ticket is not canonical"
     private.extend((ticket, command))
     return ticket
+
+
+def close_dialog(dialog):
+    # Ant's standard header also has an accessible Close button. Exercise the
+    # visible footer action explicitly, including its mobile pointer target.
+    dialog.locator(".ant-modal-footer").get_by_role(
+        "button", name="Close", exact=True
+    ).click()
+
+
+def install_from_token(page):
+    token_field = page.get_by_label("Agent token", exact=True)
+    expect(token_field).to_be_visible()
+    page.locator(".ant-alert").filter(has=token_field).get_by_role(
+        "button", name="Install Agent", exact=True
+    ).click()
 
 
 def exercise(endpoint, password, output, configured, private, report):
@@ -142,7 +168,7 @@ def exercise(endpoint, password, output, configured, private, report):
             page.get_by_role("button", name="Sign In", exact=True).click()
             expect(page.get_by_role("heading", name="Open Node control plane")).to_be_visible()
             name = "Bootstrap browser configured" if configured else "Bootstrap browser disabled"
-            page.locator(".server-form").first.get_by_label("Name", exact=True).fill(name)
+            page.get_by_label("Name", exact=True).fill(name)
             with page.expect_response(lambda response: response.url.endswith("/api/v1/servers")
                                       and response.request.method == "POST") as created:
                 page.get_by_role("button", name="Create server", exact=True).click()
@@ -152,10 +178,9 @@ def exercise(endpoint, password, output, configured, private, report):
             private.append(token)
             server_id = server["server"]["id"]
             path = f"/api/v1/servers/{server_id}/bootstrap"
-            page.locator(".token-alert").get_by_role(
-                "button", name="Install Agent", exact=True
-            ).click()
-            dialog = page.get_by_role("dialog")
+            expect(page.get_by_label("Agent token", exact=True)).to_have_value(token)
+            install_from_token(page)
+            dialog = page.get_by_role("dialog", name="Install Agent", exact=True)
             expect(dialog.get_by_test_id("bootstrap-status")).to_contain_text(
                 "No installation ticket"
             )
@@ -175,10 +200,14 @@ def exercise(endpoint, password, output, configured, private, report):
             # Exercise issuance and copying with real mobile pointer/scroll behavior,
             # not only a resized screenshot of the desktop interaction.
             page.set_viewport_size({"width": 390, "height": 844})
-            # Vuetify's display layer overlays its small combobox input.
-            # Click the visible select field, as a pointer user would.
-            dialog.locator(".v-select").click()
-            page.get_by_role("option", name="HTTP polling", exact=True).click()
+            # Ant's virtual Select exposes separate offscreen ARIA options.
+            # Click the visible field and rendered option, never a hidden proxy.
+            dialog.locator(".ant-select").filter(
+                has=page.get_by_role("combobox", name="Connection transport", exact=True)
+            ).click()
+            page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter(
+                has_text=re.compile(r"^HTTP polling$")
+            ).click()
 
             def issue_command():
                 dialog.get_by_label(
@@ -201,6 +230,9 @@ def exercise(endpoint, password, output, configured, private, report):
             first, first_ticket = issue_command()
             assert first["issued"]["transport"] == "http"
             with httpx.Client(base_url=endpoint, trust_env=False, timeout=10) as anonymous:
+                assert anonymous.get(path).status_code == 401
+                assert anonymous.post(path, json={"transport": "http"}).status_code == 401
+                assert anonymous.delete(path).status_code == 401
                 script = anonymous.get("/api/v1/agents/bootstrap/installer.py")
                 assert script.status_code == 200
                 assert hashlib.sha256(script.content).hexdigest() in first["command"]
@@ -209,7 +241,7 @@ def exercise(endpoint, password, output, configured, private, report):
                 assert page.evaluate("navigator.clipboard.readText()") == first["command"]
                 capture(page, dialog, output, "bootstrap-command",
                         dialog.get_by_label("Root shell installation command", exact=True))
-                dialog.get_by_role("button", name="Close", exact=True).click()
+                close_dialog(dialog)
                 expect(dialog).not_to_be_visible()
                 assert first_ticket not in page.content()
                 storage = page.evaluate("JSON.stringify({ ...localStorage, ...sessionStorage })")
@@ -272,11 +304,9 @@ def exercise(endpoint, password, output, configured, private, report):
 
                 # Heartbeat can precede a formal Agent registration. Such a host
                 # must not be offered another installation ticket.
-                dialog.get_by_role("button", name="Close", exact=True).click()
+                close_dialog(dialog)
                 heartbeat_name = "Existing heartbeat host"
-                page.locator(".server-form").first.get_by_label("Name", exact=True).fill(
-                    heartbeat_name
-                )
+                page.get_by_label("Name", exact=True).fill(heartbeat_name)
                 with page.expect_response(lambda response: response.url.endswith("/api/v1/servers")
                                           and response.request.method == "POST") as created:
                     page.get_by_role("button", name="Create server", exact=True).click()
@@ -287,9 +317,10 @@ def exercise(endpoint, password, output, configured, private, report):
                     "token": heartbeat_server["agent_token"],
                 })
                 assert heartbeat.status_code == 200
-                page.locator(".token-alert").get_by_role(
-                    "button", name="Install Agent", exact=True
-                ).click()
+                expect(page.get_by_label("Agent token", exact=True)).to_have_value(
+                    heartbeat_server["agent_token"]
+                )
+                install_from_token(page)
                 expect(dialog).to_contain_text("This server has already reported a heartbeat")
                 expect(dialog.get_by_test_id("bootstrap-issue")).to_have_count(0)
                 capture(page, dialog, output, "bootstrap-existing-heartbeat")
@@ -312,7 +343,9 @@ def exercise(endpoint, password, output, configured, private, report):
                 "revocation": True, "claim_not_installation": True,
                 "registered_status_uses_synthetic_api_fixture": True,
                 "installer_checksum_bound": True, "no_secret_in_urls_or_storage": True,
+                "unauthenticated_read_issue_revoke_rejected": True,
                 "mobile_issue_and_copy": True, "existing_heartbeat_refuses_issue": True,
+                "command_field_full_width_desktop_and_mobile": True,
                 "private_cache_headers": True, "browser_errors": [],
             })
         finally:
@@ -344,7 +377,7 @@ def main():
         report["status"] = "passed"
         print("PASS Agent bootstrap production-browser workflow, privacy and desktop/mobile layout")
         return 0
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 -- All browser failures must be redacted.
         report["status"] = "failed"
         report["error"] = redacted(f"{type(error).__name__}: {error}", private)
         print(report["error"], file=sys.stderr)

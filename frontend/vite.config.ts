@@ -1,14 +1,15 @@
-import vue from "@vitejs/plugin-vue";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [react()],
   define: {
     __OPEN_NODE_PUBLIC_PROBE__: JSON.stringify(false),
   },
-  // Transform Vuetify's CSS imports for server-rendered component tests.
+  // Bound concurrent DOM suites; visual/responsive behavior is tested in Chromium.
   test: {
-    server: { deps: { inline: ["vuetify"] } },
+    maxWorkers: 2,
+    testTimeout: 30000,
   },
   server: {
     port: 5173,

@@ -299,14 +299,12 @@ def browser(client, nodes, url, password, output, xray, echo_port):
         request(client, f"/api/v1/change-sets/{identifier}/rollback")
         wait_state(client, identifier, "rollback_failed")
         page.reload()
-        page.locator(".change-run-list .v-list-item").filter(
-            has_text="Browser retry"
-        ).click()
+        page.get_by_role("button", name="Browser retry", exact=True).click()
         retry = page.get_by_role("button", name="Retry rollback", exact=True)
         expect(retry).to_be_enabled()
         expect(page.get_by_role("button", name="Dispatch", exact=True)).to_be_disabled()
-        page.locator(".change-step-item").last.locator(
-            ".command-inspector .v-expansion-panel-title"
+        page.locator(".command-inspector").last.locator(
+            ".ant-collapse-header"
         ).last.click()
         for width, height, label in ((1440, 900, "desktop"), (390, 844, "mobile")):
             page.set_viewport_size({"width": width, "height": height})
@@ -332,7 +330,9 @@ def browser(client, nodes, url, password, output, xray, echo_port):
         page.unroute("**/api/v1/change-sets", hold_list)
         wait_state(client, identifier, "rolled_back")
         expect(
-            page.locator(".change-detail").get_by_text("rolled back", exact=True)
+            page.locator(".ant-descriptions")
+            .filter(has=page.get_by_text("Browser retry", exact=True))
+            .get_by_text("rolled back", exact=True)
         ).to_be_visible(timeout=10000)
         assert change(client, identifier)["steps"][1]["rollback_history"]
 
@@ -342,9 +342,7 @@ def browser(client, nodes, url, password, output, xray, echo_port):
         request(client, f"/api/v1/change-sets/{identifier}/dispatch")
         wait_state(client, identifier, "rollback_incomplete")
         page.reload()
-        page.locator(".change-run-list .v-list-item").filter(
-            has_text="Browser partial recovery"
-        ).click()
+        page.get_by_role("button", name="Browser partial recovery", exact=True).click()
         page.get_by_role("button", name="Accept current state", exact=True).click()
         dialog = page.get_by_role("dialog")
         accept = dialog.get_by_role("button", name="Accept state", exact=True)

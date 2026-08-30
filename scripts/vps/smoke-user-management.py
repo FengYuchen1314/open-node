@@ -260,13 +260,13 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 ]:
                     page.set_viewport_size({"width": width, "height": height})
                     page.wait_for_timeout(150)
-                    surface = dialog.locator(".user-management-dialog")
-                    box = surface.bounding_box()
+                    box = dialog.bounding_box()
                     assert (
                         box and box["x"] >= 0 and box["x"] + box["width"] <= width + 1
                     )
                     assert box["y"] >= 0 and box["y"] + box["height"] <= height + 1
-                    content = surface.locator(".v-card-text")
+                    content = dialog.locator(".ant-modal-body")
+                    expect(content).to_have_count(1)
                     assert content.evaluate(
                         "el => el.scrollWidth <= el.clientWidth + 1"
                     )
@@ -341,7 +341,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 credentials() == before_credentials and exported(old_token) == original
             )
             transfer(original)
-            dialog.locator(".user-actions").get_by_role(
+            dialog.locator(".ant-modal-footer").get_by_role(
                 "button", name="Close", exact=True
             ).click()
             print(
@@ -378,7 +378,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 )
                 transfer(original)
                 capture("pending-removal")
-                dialog.locator(".user-actions").get_by_role(
+                dialog.locator(".ant-modal-footer").get_by_role(
                     "button", name="Close", exact=True
                 ).click()
                 page.get_by_role(
@@ -416,7 +416,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert client.get("/api/v1/users/alice/settings").status_code == 404
             assert len(client.get("/api/v1/plans").json()["plans"]) == 1
             assert len(client.get("/api/v1/nodes").json()["nodes"]) == 1
-            dialog.locator(".user-actions").get_by_role(
+            dialog.locator(".ant-modal-footer").get_by_role(
                 "button", name="Close", exact=True
             ).click()
             expect(
@@ -459,7 +459,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 page.get_by_role(
                     "button", name="Edit user alice", exact=True
                 ).scroll_into_view_if_needed()
-                assert page.locator(".catalog-item").evaluate_all(
+                cards = page.locator(".ant-card-small")
+                assert cards.count() > 0
+                assert cards.evaluate_all(
                     "items => items.every(item => item.scrollWidth <= item.clientWidth + 1 && item.firstElementChild.scrollWidth <= item.firstElementChild.clientWidth + 1)"
                 )
                 page.screenshot(path=str(args.output / f"catalog-{suffix}.png"))

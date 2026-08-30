@@ -58,7 +58,11 @@ def capture(page, container, output, name):
         ).to_be_in_viewport()
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
         assert editor.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
-        assert editor.evaluate("""el => [...el.querySelectorAll('.v-input,.v-btn')].every(item => {
+        controls = editor.locator(
+            "input:visible, button:visible, .ant-radio-group:visible"
+        )
+        assert controls.count() > 0, "No automatic-rule controls found"
+        assert controls.evaluate_all("""items => items.every(item => {
             const r = item.getBoundingClientRect();
             return !item.getClientRects().length || (r.left >= 0 && r.right <= innerWidth + 1);
         })""")
@@ -70,9 +74,9 @@ def capture(page, container, output, name):
 
 
 def configure(row, rule):
-    row.get_by_role(
-        "button", name="Burst" if rule["type"] == "burst" else "Sustained", exact=True
-    ).click()
+    choice = "Burst" if rule["type"] == "burst" else "Sustained"
+    row.locator(".ant-radio-group").get_by_text(choice, exact=True).click()
+    expect(row.get_by_role("radio", name=choice, exact=True)).to_be_checked()
     fields = {
         "Trigger Mbps": "threshold_mbps",
         "Hold seconds": "sustained_seconds",
@@ -199,18 +203,22 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             dialog = page.get_by_role("dialog")
             editor = dialog.get_by_role("region", name="Automatic limits", exact=True)
             editor.get_by_role("button", name="Add automatic rule", exact=True).click()
-            first = editor.get_by_role("region", name="Automatic rule 1", exact=True)
-            first.get_by_label("Hold seconds", exact=True).fill("0")
+            first = editor.get_by_label("Automatic rule 1", exact=True)
+            hold = first.get_by_label("Hold seconds", exact=True)
+            hold.fill("0")
+            hold.press("Enter")
+            expect(hold).to_have_value("0")
             acknowledgment = dialog.get_by_label(
                 "I accept the runtime restart and pending changes", exact=True
             )
             acknowledgment.check()
+            expect(hold).to_have_value("0")
             expect(
                 dialog.get_by_role("button", name="Save", exact=True)
             ).to_be_disabled()
             configure(first, SUSTAINED)
             editor.get_by_role("button", name="Add automatic rule", exact=True).click()
-            second = editor.get_by_role("region", name="Automatic rule 2", exact=True)
+            second = editor.get_by_label("Automatic rule 2", exact=True)
             configure(second, BURST)
             second.get_by_role("button", name="Move rule 2 up", exact=True).click()
             expect(first.get_by_label("Window seconds", exact=True)).to_have_value("20")
@@ -238,7 +246,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
 
             assert save()["auto_speed_rules"] == [SUSTAINED]
             before = assert_rules([SUSTAINED])
-            dialog.locator(".plan-actions").get_by_role(
+            dialog.locator(".ant-modal-footer").get_by_role(
                 "button", name="Close", exact=True
             ).click()
 
@@ -247,14 +255,15 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             limits.on("pageerror", lambda error: errors.append(str(error)))
             limits.goto(backend + "/config")
             limits.get_by_role("tab", name="Limits", exact=True).click()
-            panel = limits.locator(".limiter-panel")
-            expect(panel.get_by_label("Inbound", exact=True)).to_be_visible(
+            expect(limits.get_by_label("Inbound", exact=True)).to_be_visible(
                 timeout=20000
             )
-            panel.get_by_label("Inbound", exact=True).press("Enter")
-            limits.get_by_role("option", name="subscribers", exact=True).click()
-            panel.get_by_role("button", name="Save limits", exact=True).click()
-            expect(panel.get_by_text("Limits applied.", exact=True)).to_be_visible(
+            limits.get_by_role("combobox", name="Inbound", exact=True).click()
+            limits.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text("subscribers", exact=True).click()
+            limits.get_by_role("button", name="Save limits", exact=True).click()
+            expect(limits.get_by_text("Limits applied.", exact=True)).to_be_visible(
                 timeout=20000
             )
             after = assert_rules([SUSTAINED])
@@ -368,7 +377,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 ).click()
                 assert save()["auto_speed_rules"] == []
                 assert_rules([])
-                dialog.locator(".plan-actions").get_by_role(
+                dialog.locator(".ant-modal-footer").get_by_role(
                     "button", name="Close", exact=True
                 ).click()
                 with native.connect(alice_socks, echo) as alice:
@@ -383,15 +392,13 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 has=page.get_by_role("button", name="Create plan", exact=True)
             )
             form.get_by_label("Name", exact=True).fill("Created with rules")
-            form.get_by_role("combobox", name="Nodes", exact=True).press("Enter")
-            page.get_by_role(
-                "option", name=f"{node['name']} ({node['protocol']})", exact=True
-            ).click()
+            form.get_by_role("combobox", name="Nodes", exact=True).click()
+            page.locator(
+                ".ant-select-dropdown:visible .ant-select-item-option"
+            ).get_by_text(f"{node['name']} ({node['protocol']})", exact=True).click()
             form.get_by_role("combobox", name="Nodes", exact=True).press("Escape")
             form.get_by_role("button", name="Add automatic rule", exact=True).click()
-            configure(
-                form.get_by_role("region", name="Automatic rule 1", exact=True), BURST
-            )
+            configure(form.get_by_label("Automatic rule 1", exact=True), BURST)
             capture(page, form, args.output, "plan-rules-create")
             with page.expect_response(
                 lambda response: (

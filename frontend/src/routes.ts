@@ -1,51 +1,19 @@
-import type { RouteRecordRaw } from "vue-router";
+import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 
-import AccessView from "./views/AccessView.vue";
-import AccountView from "./views/AccountView.vue";
-import ChangesView from "./views/ChangesView.vue";
-import CertificatesView from "./views/CertificatesView.vue";
-import ConfigView from "./views/ConfigView.vue";
-import DashboardView from "./views/DashboardView.vue";
-import ProbeView from "./views/ProbeView.vue";
-import SubscriptionsView from "./views/SubscriptionsView.vue";
-import TemplatesView from "./views/TemplatesView.vue";
-
-export const routes: RouteRecordRaw[] = [
-  { path: "/account", name: "account", component: AccountView, meta: { subscriber: true } },
-  { path: "/certificates", name: "certificates", component: CertificatesView },
-  {
-    path: "/access",
-    name: "access",
-    component: AccessView,
-  },
-  {
-    path: "/",
-    name: "overview",
-    component: DashboardView,
-  },
-  {
-    path: "/probe",
-    name: "probe",
-    component: ProbeView,
-  },
-  {
-    path: "/config",
-    name: "config",
-    component: ConfigView,
-  },
-  {
-    path: "/changes",
-    name: "changes",
-    component: ChangesView,
-  },
-  {
-    path: "/subscriptions",
-    name: "subscriptions",
-    component: SubscriptionsView,
-  },
-  {
-    path: "/templates",
-    name: "templates",
-    component: TemplatesView,
-  },
+export interface WorkspaceRoute {
+  path: string;
+  name: string;
+  component: LazyExoticComponent<ComponentType>;
+  meta?: { subscriber: true };
+}
+export const routes: WorkspaceRoute[] = [
+  { path: "/account", name: "account", component: lazy(() => import("./react/views/AccountView")), meta: { subscriber: true } },
+  { path: "/certificates", name: "certificates", component: lazy(() => import("./react/views/CertificatesView")) },
+  { path: "/access", name: "access", component: lazy(() => import("./react/views/AccessView")) },
+  { path: "/", name: "overview", component: lazy(() => import("./react/views/DashboardView")) },
+  { path: "/probe", name: "probe", component: lazy(() => import("./react/views/ProbeView")) },
+  { path: "/config", name: "config", component: lazy(() => import("./react/views/ConfigView")) },
+  { path: "/changes", name: "changes", component: lazy(() => import("./react/views/ChangesView")) },
+  { path: "/subscriptions", name: "subscriptions", component: lazy(() => import("./react/views/SubscriptionsView")) },
+  { path: "/templates", name: "templates", component: lazy(() => import("./react/views/TemplatesView")) },
 ];

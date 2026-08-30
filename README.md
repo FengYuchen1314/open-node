@@ -25,18 +25,21 @@ intentionally out of scope for this refactor.
 
 - Backend: FastAPI on Python 3.11+.
 - Agent: independent Python 3.11+ Linux package with an operator-provided Xray runtime.
-- Frontend: Vue 3, Vuetify, Vite, TypeScript.
+- Frontend: React, official Ant Design, Vite, TypeScript.
 - Probe worker: Cloudflare Worker with Workers Static Assets.
 - Repository shape: one monorepo with `backend/`, `agent/`, `frontend/`, `probe-worker/`,
   `docs/`, and `scripts/`.
 - Verification target: tests are run on the VPS at `185.99.135.224` over SSH.
+
+The [frontend architecture and verification guide](docs/frontend.md) describes
+the React/Ant Design workspaces and the independent read-only Probe build.
 
 ## Administrator Access
 
 Management APIs require a local administrator session. There is no default
 password or activation key. Create the account with `open-node-admin create`
 using the same database configuration as the backend, then sign in through
-the Vue interface. [Administrator setup and recovery](docs/administrator-access.md)
+the React interface. [Administrator setup and recovery](docs/administrator-access.md)
 also covers HTTPS cookies, local previews, session expiry, and API clients.
 [Administrator MFA](docs/administrator-security.md) adds encrypted authenticator
 enrollment, one-use recovery codes, mandatory enrollment and local recovery.
@@ -59,7 +62,7 @@ with personal permissions, plan/system defaults, draft preview and catalog porta
 ## Deployment
 
 The root Dockerfile and [Compose deployment](docs/deployment.md) build a
-single non-root image containing FastAPI, the Vue production frontend, and
+single non-root image containing FastAPI, the React production frontend, and
 pinned lego. The deployment guide covers HTTPS, administrator initialization,
 private persistent storage, backup/restore, upgrades, and explicit rollback.
 No development server is needed. The hardened `cb1eb0c` baseline now runs on
@@ -310,7 +313,7 @@ log-file listing/cleanup, nginx stream-port cleanup, and
 compatibility wrappers for non-stream Xray/nginx install/remove agent routes,
 plus optional standalone probe Worker token access for hiding direct public
 probe endpoints.
-The Vue frontend now includes a config workspace, runtime/site operation
+The React frontend now includes a config workspace, runtime/site operation
 payload workbenches, subscription catalog, link, format, traffic, quota,
 preset, and import/export management, probe settings, metadata, and task
 controls, probe status/region filters, health scoring, latency buckets,
@@ -331,7 +334,7 @@ does not yet replace the full MMWX product.
 ```text
 backend/   FastAPI app, no-license API, inventory, telemetry, scan results, commands, changes, subscriptions, probe
 agent/     Independent Linux agent, persistent command journal, owned/systemd Xray runtime
-frontend/  Vue 3 + Vuetify shell, server, config, change, subscription, command, and probe views
+frontend/  React + Ant Design shell, server, config, change, subscription, command, and probe views
 probe-worker/  Cloudflare Worker for the standalone public probe surface
 docs/      migration and architecture notes
 scripts/   VPS test runner
