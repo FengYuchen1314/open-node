@@ -28,10 +28,16 @@ R4 完整前端 796 项和精确 `998839b` 干净源码的 Docker 验收已通�
 精确 `bf8eaa8` Git 镜像的 16 阶段验收和四项 CI 也已通过，通知首期已发布到
 `main`；不能归入上述 `998839b` 的验收结果。生产没有升级，也没有真实 Telegram
 投递验收。随后参考固定官方 `branding.go` 实现两项站点文字：管理员修改浏览器
-标题及页面品牌文字，登录前公开读取，中文 Ant Design 表单，免费使用。当前尚未
+标题及页面品牌文字，登录前公开读取，中文 Ant Design 表单，免费使用。首期现已
 发布。专项后端 159 项、前端 175 项、完整前端 1013 项/75 文件、双构建、浏览器
 14 阶段/27 图及工作树 Docker 10 阶段已通过。后端首轮 2498 通过、2 个旧公开路由
-权限断言失败；仅修正测试后完整 R3 正在重跑，精确 Git 镜像及 CI 仍待验收。
+权限断言失败；仅修正测试后完整 R3 的 2500 项全部通过，零跳过。候选提交为
+`f0ed515`；精确 Git 镜像 10 阶段及独立后核、四项 CI 均通过后，已同步 `main`。
+生产仍未升级。上一份文档提交一次 CI 的测试清理异常被单独保留。后续单文件
+test-only 修正 `100d93f` 已完成 7 例定向验证、计时器负控、完整前端 1013 项/75 文件、
+严格类型检查、双构建、精确 Git Docker 10 阶段及四项 CI，并同步到 `main`。
+它没有改变产品、依赖或超时，也不归入 `f0ed515` 的功能验收。历史两个 CI 回调的
+具体创建用例仍未知，不能把此次控制实验写成历史竞态的完整复现。
 通知的其他规则、完整通用设置、应用内备份和完整迁移仍未补齐。
 建议在新聊天中直接说明：
 
@@ -66,8 +72,10 @@ R4 完整前端 796 项和精确 `998839b` 干净源码的 Docker 验收已通�
 和验收设计见 [`notifications-plan.md`](notifications-plan.md)。隔离整体验收、
 精确提交镜像和 CI 已通过。没有向真实 Telegram 聊天发送消息，也没有升级生产。
 站点文字首期的功能和限制见 [`system-settings.md`](system-settings.md)，官方源码
-依据见 [`system-settings-plan.md`](system-settings-plan.md)。它仍是独立待发布切片，
-不能借用通知版本的验收。名称公开可见；本期不做 Logo、任意键值或安全开关。
+依据见 [`system-settings-plan.md`](system-settings-plan.md)。它已在 `f0ed515` 独立
+验收并发布，不能借用通知版本的结果。名称公开可见；本期不做 Logo、任意键值
+或安全开关。应用内备份仍未实现；新 [`backup-plan.md`](backup-plan.md) 只记录
+已核对的官方差异、跨文件一致性和恢复安全边界，不是完成声明。
 这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
 单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
 Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 MMWX，但它们不应
@@ -77,9 +85,11 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 | 项目 | 当前状态 |
 | --- | --- |
-| GitHub `main` | 已包含通知首期功能提交 `bf8eaa8e365f302aced10ab2eac9a340d7553d8a`、外部订阅/中文界面 `998839b`，以及此前 React/Ant Design、面板 Agent 安装等功能；后续只含文档的提交不改变功能基线 |
-| 当前候选 | 通知首期 `bf8eaa8` 已通过精确提交 Docker 和 GitHub run `33364557514` 四项 CI，并同步到 `main`；后续文档基线为 `422c540`。在此之后的站点文字切片尚未发布，完整后端 R3、精确提交 Docker 和 CI 仍待验收，不属于通知基线 |
-| 站点文字工作源 | `/tmp/open-node-branding-integration.ChNDrkyo/source-r2`，544 文件归档 SHA-256 `25d899648c457ec13b158067ffa1564af6c07434422e4b22ca4508c0c297c3ec`。完整前端 1013/75 files、类型检查和双构建通过；浏览器 14 阶段及 root 逐张 27 图复核、工作树 Docker 10 阶段/重启/两次整卷冷复制均通过。`source-r3` 仅改订阅用户测试对公开 GET 的精确字段断言，完整后端重跑中；原失败记录保留，见 `testing.md` |
+| GitHub `main` | 已包含站点文字功能提交 `f0ed515d71aa28f097d43f469d6fcc232859af9e`、通知首期 `bf8eaa8`、外部订阅/中文界面 `998839b`，以及此前 React/Ant Design、面板 Agent 安装等功能；单文件测试清理 `100d93f9f990cbef9346d9e1f2f0ed2e972a5117` 也已发布，文档或 test-only 后续提交不改变功能基线 |
+| 当前候选 | 站点文字 `f0ed515` 和后续测试清理 `100d93f` 均已通过各自完整门槛并同步 `main`；后者 CI run `33370135840` 四项全部成功。下一片按 `backup-plan.md` 实现版本化清单与只读校验；网页备份、在线恢复和完整迁移仍未实现 |
+| 测试清理独立门槛 | 干净 `100d93f` 前端源 `/tmp/open-node-fe-testonly-f0.hE5fRW3Q/source-r1`：1013/75 files、零跳过/未处理异常、946.51 秒，双构建 43 项资产与站点文字 R2 逐字节一致。精确 Docker 源 `/root/open-node-editor-timers-commit-100d93f.b5j3J2No/source`，新镜像 ID `sha256:6464d21218abfe3969208d776740d744edb6b1f5a2754a1846e6be54784ae69d`，10 阶段通过；4 容器/3 卷清理完成。547 文件和独立依赖清单前后不变，生产、旧源与旧证据均保留；封口记录见 `testing.md` |
+| 站点文字工作源 | `/tmp/open-node-branding-integration.ChNDrkyo/source-r2`，544 文件归档 SHA-256 `25d899648c457ec13b158067ffa1564af6c07434422e4b22ca4508c0c297c3ec`。完整前端 1013/75 files、类型检查和双构建通过；浏览器 14 阶段及 root 逐张 27 图复核、工作树 Docker 10 阶段/重启/两次整卷冷复制均通过。`source-r3` 仅改订阅用户测试对公开 GET 的精确字段断言，完整后端 2500/零跳过通过；原失败记录保留，见 `testing.md` |
+| 站点文字精确提交镜像 | `/root/open-node-branding-commit-f0ed515.u29eElRY/source` 是干净 `f0ed515`，547 个跟踪文件前后不变；全部 300 项 Docker 构建输入与 R2 一致。正常重建镜像 ID `sha256:e1e62f68663a7f1e95423c5267cf0cf6bedbeafb2ceec3e59e7fd812cf92fae9`、完整 OCI revision、106 Python 文件/40 前端资产和 10 阶段完整容器验收通过；4 个临时容器、3 个卷清理完成，生产不变 |
 | 通知统一工作源 | `/tmp/open-node-notifications-integration.v2sQeZ5w/source-r5`，531 文件归档 SHA-256 `9e0ea5c8ecd4c637fc0d7a900a3b5fa1e678588becaf32e12a793c7404676916`。后端与已验 R4 逐字节一致：2298 passed、0 skip；前端 890/72 files、类型检查、双构建通过。浏览器 12 图、真实 40 秒恢复/人工重试、工作树镜像 16 阶段及冷恢复通过，见 `testing.md`；没有真实 Telegram canary |
 | 通知精确提交镜像 | `/root/open-node-notifications-commit-bf8eaa8.JFudzeQC/source` 是干净 `bf8eaa8`，531 个跟踪文件保持不变。正常 Dockerfile 重建的镜像 ID `sha256:fc0feccc66b9a2ea5877dcfb99e7e37fcdef70cd129ca4825064521c316eee5f`、OCI 完整 revision、39 项前端资产及 16 阶段隔离容器验收通过；7 个临时容器、3 个卷已清理。`backend/README.md` 是相对 R5 的文档变化，也是 wheel 元数据构建输入，详见 `testing.md`，不能声称所有构建输入完全一致 |
 | 外部订阅英文基线 | 在公开 `0ffc072` 上新增，后续随中文版发布；冻结 VPS 源为 `/tmp/open-node-external-integration.YG95YRYU/source`。后端 1927 passed / 6 opt-in skipped（6 个真实 TLS 用例另行全部通过），Agent 605、前端 570/65 files、Worker 5，以及浏览器/客户端/隔离 Docker 均通过；该目录不再覆盖 |

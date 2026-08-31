@@ -19,12 +19,13 @@ VPS.
 
 ## Remote Test Command
 
-### Site text settings — unpublished integration
+### Site text settings — published first slice
 
 This is the two-field branding slice in the [operator guide](system-settings.md)
 and [pinned-source design](system-settings-plan.md), not complete general-settings
-parity. It is working-tree code after `422c540`; it is not included in the
-published notification feature `bf8eaa8` and has not upgraded production.
+parity. Feature commit `f0ed515d71aa28f097d43f469d6fcc232859af9e`, after
+`422c540`, is published on `main`. It is not included in notification feature
+`bf8eaa8` and has not upgraded production.
 
 The new integration root is `/tmp/open-node-branding-integration.ChNDrkyo`.
 The full frozen R2 source archive contains 544 files, SHA-256
@@ -85,12 +86,24 @@ three-field public projection and fixed `license_required: false` for both
 subscriber roles. No application or frontend code changed. The old failed log
 and XML remain in `backend-full-r2`.
 
-The complete backend R3 rerun is pending in `backend-full-r3`, using a new
-`source-r3`, not an overwritten R2. All 544 files match R2 except
+The complete backend R3 rerun passed **2500 tests**, zero failures/errors/skips,
+911.27 s, in `backend-full-r3`, using a new `source-r3`, not an overwritten R2.
+Root downloaded the native JUnit XML and log, verified their SHA-256 values,
+checked all 2500 testcase elements and found no failure/error/skipped elements.
+All 544 source files matched before/after and at the independent postcheck;
+the Python dependency inventory stayed unchanged and both recorded runner/pytest
+processes exited. One existing Starlette deprecation warning remains in the log.
+All 544 files match R2 except
 `backend/tests/test_subscriber_auth.py` (SHA-256
 `926d2b36ba3687979ba7a074361a42f06bd571cca8ba144277102e96e069fd18`).
 The R3 source manifest SHA-256 is
 `87554df475ee6984504df2bf607bfb8961ec7059c394b840b1d6cfa3badd139a`.
+`full-pytest.log` SHA-256 is
+`a22f03cadc0af504fd16eaac040a6617cf90c076fa0fa5d7cd29a34415a7f090`;
+`full-pytest.xml` is
+`f409a0f5e0b0aa0cb7297a36ecebc92b9b07d43d4bd3681b281dff08204f1233`;
+`reports.sha256` is
+`5d6c7c93165b748a7cafbeafb6a14480addf2a1156997c07c1a9e4d0072f7ff1`.
 Both full backend runs enable all six real external-fetch TLS fixtures using an
 address assigned only inside their private loopback namespaces. The runs use
 the existing private notification venv read-only; there is no dependency install.
@@ -197,9 +210,190 @@ auxiliary postcheck mistakes remain as failed evidence, not passing runs. An
 old network namespace inode was reused by the later root R3 pytest process;
 start time, private cwd and owner proved it unrelated, and it was never stopped.
 
-Exact-Git Docker, the complete R3 backend result, CI and publication are still
-pending for this slice. Passing working-tree/browser/frontend evidence does not
+The clean exact-Git Docker gate also passed at
+`/root/open-node-branding-commit-f0ed515.u29eElRY/source`, checked out from GitHub
+at **`f0ed515d71aa28f097d43f469d6fcc232859af9e`**. All 547 tracked files stayed
+clean and unchanged. Relative to R3, there are exactly five changed Markdown
+files plus the new operator guide and two smoke scripts; there are no product
+or test differences. Relative to R2, only the exact public-GET test correction
+is additionally present. All **300 Docker build inputs**, including
+`backend/README.md`, are byte-identical to R2. Unlike the notification release,
+this slice has no changed wheel-metadata input exception.
+
+The normal Dockerfile build produced `open-node:branding-commit-f0ed515`, image
+ID **`sha256:e1e62f68663a7f1e95423c5267cf0cf6bedbeafb2ceec3e59e7fd812cf92fae9`**,
+with the complete feature SHA as its OCI revision and UID/GID 10001:10001. It was
+not created by retagging the working-tree image. Strict Ruff, compile and the
+same frozen fixture's 49-check self-test passed. All **10 full Docker phases**
+passed again, including 106 installed Python files, 40 exact main assets, real
+CAS, unchanged unrelated data, original session/CSRF, restart and two whole-volume
+cold copies. Three current-generation graceful stops exited 143 in
+0.176–0.279 s, with no OOM or shortened 30-second grace.
+
+The independent postcheck reverified production/shared-candidate identity and
+protected files, all 547 tracked files, 43 main/Probe comparison assets, zero
+owner containers/volumes and the absence of all four container/three volume
+names. Both old working-tree and new exact-Git images remain available. No
+production service, database or image was replaced.
+
+Exact-Git `gate/report.json` SHA-256 is
+`92ed14fd521139c4e1674e252dd72c4608a9b229d5716b6cbc6d75c569b8686b`;
+`evidence/independent-post-audit.json` is
+`61d0f0f796916bb5e5cb8d9978851e23c9340f3dc4f125a464eb175c9c94ea15`;
+`final-evidence.sha256` is
+`54a398087e4f31b09f3e96f5e23bd7e8ff70bea60f7aed756cb48a1af062400d`.
+Both tracked-file manifests have SHA-256
+`f6635a94e1c9f3c7e8498ff04e5727a264df296c31deeaa3fb047051312d6f15`;
+the 300-input Docker manifest has SHA-256
+`bf5a23dd25d9648de8993b1183c370a5d866bede26b5929607249a2fefc20604`.
+
+All four clean-checkout jobs (Backend, Frontend, Agent and Probe Worker) passed
+in [run 33368641706](https://github.com/FengYuchen1314/open-node/actions/runs/33368641706),
+with its head SHA checked against the complete feature commit. Root then
+non-force fast-forwarded `main` from `422c540` to `f0ed515` and independently
+verified both remote branch refs. The feature is published; this does not
 authorize a production upgrade or establish complete MMWX parity.
+The subsequent main-branch [run 33369806430](https://github.com/FengYuchen1314/open-node/actions/runs/33369806430)
+also completed all four jobs successfully at the same `f0ed515` SHA.
+
+### Earlier documentation-only CI failure — retained
+
+The candidate-branch run
+[33366136872](https://github.com/FengYuchen1314/open-node/actions/runs/33366136872)
+at documentation-only `422c540` failed its Frontend job. All 890 test assertions
+in 72 files passed, but Vitest reported two unhandled `ReferenceError: window is
+not defined` exceptions after the `SubscriptionEditors.test.tsx` environment was
+torn down. The main/Probe builds in that job were consequently skipped. It is a
+failed run, not a full frontend pass. The separate main-branch run
+[33366136941](https://github.com/FengYuchen1314/open-node/actions/runs/33366136941)
+at the same SHA completed all four jobs successfully; this does not erase the
+candidate failure.
+
+The stack reaches a delayed state update in locked `@rc-component/util` 1.12.0
+with Ant Design 6.6.2 and React 19.2.7. Static inspection found that its pending
+timeout has no unmount cleanup; Ant Design form error/warning debounces use
+0/10 ms delays. The affected test's teardown synchronously unmounts and restores
+globals, while its flush helper only advances promise microtasks. The logs name
+the test file, not the two originating test cases, so the exact creation sites
+remain unknown. Pending-timer cleanup is covered by the separate test-only
+follow-up below; no fix is attributed to `f0ed515`, whose affected test,
+components, lockfile and CI configuration are unchanged from `422c540`.
+The read-only investigation is retained at
+`/tmp/open-node-ci-33366136872.9IfmAfUe/diagnosis.md`; its 38-file
+`final-evidence.sha256` has SHA-256
+`7b7407085462317c80dcc31f776dc778dc86bbf9817ea29b22ad5464612a7823`.
+The original failed-job log SHA-256 is
+`59b2d9ee02cac04efbdb7dedcc8164a8a28c9efa96347906e6c17f45a9596c97`.
+
+### Subscription editor timer teardown — published test-only follow-up
+
+Commit `100d93f9f990cbef9346d9e1f2f0ed2e972a5117` changes only
+`frontend/src/react/components/SubscriptionEditors.test.tsx`, SHA-256
+`a67c1e6384552f233c46402ca1fb003b9d10f1170264bc386a9ca4eb07e4bbbd`.
+The seven original test bodies, microtask flush helper, timeouts, application
+code, dependencies and CI configuration remain unchanged. The fixture now owns
+`setTimeout`/`clearTimeout`, unmounts, actually executes pending callbacks inside
+React `act` while jsdom still exists, asserts an empty queue, then restores real
+timers, mocks and globals. It does not discard the queue or ignore unhandled
+exceptions.
+
+The isolated negative control at
+`/tmp/open-node-editor-timers-f0.gXfbtmfo` ran all seven original test bodies but
+deliberately omitted the drain before its new empty-queue assertion. Each failed
+only that assertion, with 15/18/8/4/8/17/16 pending timers; `finally` then executed
+them to leave the private environment clean. This is an **expected failing
+negative control**, not a product regression or a passing suite. Its native
+`evidence/negative-r1.json` SHA-256 is
+`511311777d7226631675eca1fef14ac34cccec430a91ffb22c673cd21c8f1da0`.
+
+The corrected fixture passed **7/7 tests in one file**, zero failed or pending
+tests, in a separate lo-only namespace. Both strict app/node no-emit typechecks
+passed. `evidence/positive-r1.json` SHA-256 is
+`7f2920b7935e9e50b35d2f8c15064e83a817369053a44d7b28c1735270709ee4`.
+Root read both native reports and verified the single-file diff and frozen hash.
+This proves the controlled pending-timer risk and its cleanup; it does not
+identify the two original CI callbacks' exact creating cases.
+
+The final focused postcheck verifies all 547 original source files, the one-file
+variants, all 25 unchanged assertion call sites, and unchanged 24,024-file/19-link
+canonical and private dependency copies. No owned process remains; the original
+38-file CI investigation is unchanged. Root independently read the postcheck
+and verified all 55 entries in `evidence/final-evidence.sha256`, whose SHA-256 is
+`95d436fbfd131306ba15ee31112f3a276fc373bcc56474217889ec68c2980780`.
+`evidence/postcheck.json` SHA-256 is
+`e2e5c45317dce04cc74d8a285c70f72003c6807017e84235a56f80dff6e2fe36`.
+
+The exact-commit Docker gate at
+`/root/open-node-editor-timers-commit-100d93f.b5j3J2No` passed all 10 phases,
+with the unchanged fixture's 49 self-checks, compilation and strict Ruff also
+passing. The normal Dockerfile build used full `VCS_REF=100d93f9f990cbef9346d9e1f2f0ed2e972a5117`
+and produced `open-node:editor-timers-commit-100d93f`, image ID
+`sha256:6464d21218abfe3969208d776740d744edb6b1f5a2754a1846e6be54784ae69d`.
+It performed a new production build, not a retag. All 547 tracked files remain
+clean and unchanged; only the test file differs from `f0ed515`, including among
+the 300 Docker inputs. The other 299 inputs, including `backend/README.md`, are
+identical. All 106 installed application files and 40 main assets match the
+feature baseline; the three Probe assets are an unchanged comparison source,
+not a claim that this Dockerfile builds Probe.
+
+Permissions, concurrent CAS, original session/CSRF after restart, two complete
+cold copies and all 61 other business tables passed. The only volatile database
+exclusion is `operator_sessions.last_seen_at`. Three shutdowns completed in
+0.188–0.249 seconds with SIGTERM exit 143 and no OOM. All four owned containers
+and three volumes were removed; independent owner checks found no residuals.
+Production, the shared candidate and both earlier branding sources, images and
+evidence are unchanged. The new image is retained. This is a container gate,
+not a new browser-rendering or real Telegram-delivery claim.
+
+Root read the report and independent post-audit, then verified every one of the
+53 entries in `final-evidence.sha256`. Report SHA-256 is
+`86b018851982e3195796e15a541b4071affe270774b0d988cc8485acf0f98a86`;
+`evidence/independent-post-audit.json` SHA-256 is
+`54a19bc022c16cd272bd333cc45236e3dff78fa0f4119641379bc7169ed1c3fc`;
+the final manifest SHA-256 is
+`45999f8152d83c22011e403c48bddb90ed07fd4f28c20421f6a27a49595bb166`.
+
+The independent complete frontend gate used an exact `100d93f` Git archive at
+`/tmp/open-node-fe-testonly-f0.hE5fRW3Q/source-r1`, alongside an unchanged `f0ed515`
+comparison archive. In one fresh loopback-only namespace, the original full
+configuration passed **1013 tests in 75 files**, zero failed/skipped/todo tests
+or unhandled error blocks, in 946.51 seconds. This is a new complete run, not a
+reuse of the earlier R2 counts. Strict app/node no-emit checks and both normal
+main/Probe builds passed. All 40 main and three Probe assets match R2 byte-for-byte;
+the combined asset-manifest SHA-256 remains
+`542350230e6538b7a00dfb890fde8f653b880a5dedbd8b08ad2a2fa4ce0cac8a`.
+
+All 547 source files, including 190 frontend files, and the 18 frozen branding
+files are unchanged by the run. The canonical and private copies' 24,021
+dependency-content files and 19 symlinks remain unchanged. The only private
+dependency-tree changes are the two expected TypeScript build-info files and
+one Vitest result cache, recorded separately; canonical caches are unchanged.
+Root independently checked the native report and every assertion status,
+the phase exits, the actual source/dependency/asset checksums, and all 88 entries
+in `gate-r1/artifacts.sha256`. The original runner PID no longer exists.
+
+`gate-r1/full-vitest.json` SHA-256 is
+`dd5e1ab1c682fde96d29fdd6571ef4fc288a93bda720071b981d1297818fa068`;
+the full log SHA-256 is
+`8079dc66e73816610975015d18c686242d4a2341f1e86fedcd58e8c8cf7c1ae4`;
+the 88-entry artifact manifest SHA-256 is
+`573991189bea13d5ee5e355be360e2f3fbe9658aca816a9ecf83702729d06f95`.
+
+The separate closure check confirms private root/source/evidence directories,
+physical dependencies, all eight exit records at zero, the exited runner and
+released network namespace. Root verified all 13 entries in the final chained
+manifest `gate-r1/final-chain.sha256`, SHA-256
+`8101b4f4c899104767a7e4d88e6c09a9aa42c68fbf82030a6f5f3c33cfa42800`.
+`gate-r1/closure-check.log` SHA-256 is
+`bfa97a103370a0c261b809249bb3783dd9bf5e2248fb989235236dc7f24fa0f3`.
+
+All four jobs in
+[CI run 33370135840](https://github.com/FengYuchen1314/open-node/actions/runs/33370135840)
+passed at the complete `100d93f` SHA. After the focused, complete-frontend,
+exact-Docker and CI gates, root non-force fast-forwarded `main` from `f0ed515`
+to `100d93f` and independently verified both remote refs. The test-only change
+is published; it does not change the site-text feature baseline `f0ed515`,
+upgrade production, or make the original CI callback creation sites known.
 
 ### Administrator Telegram notifications — published first slice
 

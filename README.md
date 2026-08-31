@@ -58,9 +58,10 @@ daily digests, other alert rules and renewal approval are not part of this slice
 its current release and verification status is recorded in the linked guide.
 
 [Site text settings](docs/system-settings.md) add administrator-controlled browser
-and page titles. This next slice is still under release verification; it is not
-part of `bf8eaa8`. Names are public plain text, with versioned atomic saves and
-no license gate. Probe-only titles and security settings remain independent.
+and page titles, published in `f0ed515`. Names are public plain text, with
+versioned atomic saves and no license gate. Probe-only titles and security
+settings remain independent.
+This is the two-field first slice, not complete general-settings parity.
 
 Subscribers use the separate `/account` portal. Administrators provision their
 login passwords directly or issue a high-entropy, single-use
