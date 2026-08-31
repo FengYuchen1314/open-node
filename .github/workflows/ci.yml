@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - '**'
     # Agent release tags point to source already covered by the main push.
     tags-ignore:
       - 'agent-v*'

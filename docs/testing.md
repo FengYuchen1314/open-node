@@ -24,6 +24,14 @@ These focused fixes are not a claim that the prior full CI run passed.
 The same run's backend job hit its 30-minute limit at 75%, so it has no final
 test result. Its timeout is now 60 minutes without dropping tests. Agent release
 tags no longer launch a duplicate full suite; the main-branch push still does.
+The initial tag-only filter also excluded branch pushes; adding the explicit
+`branches: ['**']` filter restores them. No full suite ran for that intermediate
+publication, and it is not counted as a successful check.
+
+Agent 0.3.0a1 was then built from exact `1484aeb` and publicly released. Anonymous
+VPS downloads matched all four published checksums, and the control plane's
+release-manifest parser accepted the updated pin. The old bootstrap bytes are
+unchanged; existing installations and production services were not upgraded.
 
 ## Subscription clients, self-service sources, certificates and renewals — 2026-08-31
 
