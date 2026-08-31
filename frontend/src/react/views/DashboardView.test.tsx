@@ -2,11 +2,14 @@
 import { act, cleanup, configure, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentCommand, AgentRead, ServerSummary } from "../../domain/inventory";
+import { getPublicBranding } from "../../services/branding";
+import { BrandingProvider } from "../hooks/useBranding";
 import { createServer, createServerCommand, getLatestScanResult, getLatestTelemetry, listAgents, listCommandStreamFrames,
   listServerCommands, listServers, queueAgentOperation, updateServerProbeMetadata } from "../../services/inventory";
 import DashboardView from "./DashboardView";
 vi.mock("../../services/inventory", () => ({ createServer: vi.fn(), createServerCommand: vi.fn(), getLatestScanResult: vi.fn(), getLatestTelemetry: vi.fn(),
   listAgents: vi.fn(), listCommandStreamFrames: vi.fn(), listServerCommands: vi.fn(), listServers: vi.fn(), queueAgentOperation: vi.fn(), updateServerProbeMetadata: vi.fn() }));
+vi.mock("../../services/branding", async original => ({ ...await original<typeof import("../../services/branding")>(), getPublicBranding: vi.fn() }));
 vi.mock("../components/ServerTrafficPanel", () => ({ default: ({ servers }: { servers: ServerSummary[] }) => <div data-testid="traffic-panel">{servers.length}</div> }));
 vi.mock("../components/AgentBootstrapDialog", () => ({ default: ({ open, serverId }: { open: boolean; serverId: string }) => open ? <div data-testid="bootstrap-dialog-target">{serverId}</div> : null }));
 vi.mock("../components/AgentLifecycleDialog", () => ({ default: ({ open, serverId, action }: { open: boolean; serverId: string; action: string }) => open ? <div data-testid="lifecycle-dialog-target">{serverId}:{action}</div> : null }));
@@ -72,6 +75,13 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); configure({ defaultHidden: false }); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("React Dashboard workflows", () => {
+  it("updates only the visible dashboard brand and keeps refresh and Agent descriptions intact", async () => {
+    vi.mocked(getPublicBranding).mockResolvedValue({ site_title: "站点标题", brand_title: "品牌🧭".repeat(10), license_required: false });
+    render(<BrandingProvider><DashboardView /></BrandingProvider>); await flush();
+    expect(screen.getByRole("heading", { name: `${"品牌🧭".repeat(10)} 控制台` }).classList.contains("branding-block-text")).toBe(true);
+    expect(screen.getByText("管理服务器、查看 Agent 遥测数据并下发操作，无需许可证。")).toBeTruthy();
+    expect(getButton("刷新")).toBeTruthy(); expect(createServer).not.toHaveBeenCalled();
+  }, 30000);
   it("loads server inventory and opens explicit bootstrap/edit/remove actions for the selected row", async () => {
     await mount(); expect(screen.getByText("192.0.2.1")).toBeTruthy(); expect(screen.getByTestId("traffic-panel").textContent).toBe("2");
     expect(getLatestTelemetry).toHaveBeenCalledWith("edge"); expect(getLatestScanResult).toHaveBeenCalledWith("other");

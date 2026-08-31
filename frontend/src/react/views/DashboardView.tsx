@@ -17,6 +17,7 @@ import RouteProbeFields from "../components/RouteProbeFields";
 import ServerManagementDialog from "../components/ServerManagementDialog";
 import ServerTrafficPanel from "../components/ServerTrafficPanel";
 import StrictInputNumber from "../components/StrictInputNumber";
+import { useBranding } from "../hooks/useBranding";
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 
 export interface DashboardViewProps { }
@@ -85,6 +86,7 @@ function renewalLabel(server: ServerSummary) {
 }
 
 export default function DashboardView(_props: DashboardViewProps) {
+  const { branding } = useBranding();
   const [servers, setServers] = useState<ServerSummary[]>([]);
   const [agents, setAgents] = useState<Record<string, AgentRead>>({});
   const [telemetry, setTelemetry] = useState<Record<string, AgentTelemetry | null>>({});
@@ -368,10 +370,10 @@ export default function DashboardView(_props: DashboardViewProps) {
   const closeWarp = () => { if (!control.current.savingOperation) setWarp(previous => ({ ...previous, action: "", confirmed: false })); };
 
   return <Space orientation="vertical" size="large" style={{ width: "100%" }}>
-    <Space align="start" wrap style={{ width: "100%", justifyContent: "space-between" }}><div>
-      <Typography.Title level={2}>Open Node 控制台</Typography.Title>
+    <div className="branding-page-heading"><div className="min-width-zero">
+      <Typography.Title level={2} className="branding-block-text">{branding.brand_title} 控制台</Typography.Title>
       <Typography.Paragraph type="secondary">管理服务器、查看 Agent 遥测数据并下发操作，无需许可证。</Typography.Paragraph>
-    </div><Button aria-label="刷新" icon={<ReloadOutlined aria-hidden />} loading={loading} onClick={() => void refreshServers()}>刷新</Button></Space>
+    </div><Button aria-label="刷新" icon={<ReloadOutlined aria-hidden />} loading={loading} onClick={() => void refreshServers()}>刷新</Button></div>
     {error && <Alert type="error" showIcon title={zhMessage(error)} closable onClose={() => setError("")} />}
     {success && <Alert type="success" showIcon title={success} closable onClose={() => setSuccess("")} />}
     <Row gutter={[16, 16]}><Col xs={24} sm={8}><Card><Statistic title="服务器" value={servers.length} /></Card></Col>

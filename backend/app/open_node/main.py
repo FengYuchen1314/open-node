@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,11 +17,13 @@ from open_node.api.routes.subscription_profiles import legacy_router
 from open_node.api.routes.system import healthz
 from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
 from open_node.core.config import Settings, get_settings
+from open_node.domain.branding import BRANDING_ERROR_MESSAGES, BrandingError
 from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.domain.notifications import NotificationError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.auth import AuthStore
+from open_node.services.branding import BrandingStore
 from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
 from open_node.services.external_subscriptions import ExternalSubscriptionError
@@ -40,6 +43,8 @@ from open_node.services.subscription_templates import (
 from open_node.services.telegram_transport import TelegramTransport
 from open_node.services.template_rendering import TemplateError
 from open_node.web import FrontendFiles
+
+log = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -113,6 +118,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     active_settings.api_prefix + "/agents/bootstrap/",
                     active_settings.api_prefix + "/external-subscriptions",
                     active_settings.api_prefix + "/notifications",
+                    active_settings.api_prefix + "/system-settings/branding",
+                    active_settings.api_prefix + "/branding",
                 )
             )
             or (
@@ -131,6 +138,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
+        if request.url.path.startswith(active_settings.api_prefix + "/system-settings/branding"):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "branding_invalid_request",
+                    "detail": BRANDING_ERROR_MESSAGES["branding_invalid_request"],
+                    "license_required": False,
+                },
+            )
         if request.url.path.startswith(active_settings.api_prefix + "/notifications"):
             return JSONResponse(
                 status_code=422,
@@ -190,6 +206,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
 
+    @app.exception_handler(BrandingError)
+    async def invalid_branding(_request, exc):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"code": exc.code, "detail": str(exc), "license_required": False},
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+
     @app.exception_handler(NotificationError)
     async def invalid_notification(_request, exc):
         return JSONResponse(
@@ -239,6 +263,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ):
             raise ValueError("Notification secrets require a separate, non-overlapping directory")
     app.state.inventory.create_schema()
+    app.state.branding = BrandingStore(app.state.inventory)
+    try:
+        app.state.branding.create_schema()
+    except BrandingError:
+        # Site labels must not make authentication or other services unavailable.
+        # Reads still fail safely; the UI uses its built-in text fallback.
+        log.warning("Branding settings could not be initialized")
     app.state.notifications = NotificationStore(app.state.inventory, notification_state_dir)
     app.state.notifications.create_schema()
     app.state.notification_transport = TelegramTransport()

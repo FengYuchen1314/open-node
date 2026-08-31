@@ -57,6 +57,11 @@ Back up the notification key directory together with SQLite. User bot binding,
 daily digests, other alert rules and renewal approval are not part of this slice;
 its current release and verification status is recorded in the linked guide.
 
+[Site text settings](docs/system-settings.md) add administrator-controlled browser
+and page titles. This next slice is still under release verification; it is not
+part of `bf8eaa8`. Names are public plain text, with versioned atomic saves and
+no license gate. Probe-only titles and security settings remain independent.
+
 Subscribers use the separate `/account` portal. Administrators provision their
 login passwords directly or issue a high-entropy, single-use
 [registration invitation](docs/registration-invitations.md) bound to an existing

@@ -4,6 +4,17 @@ body { margin: 0; }
 .application-layout, .account-layout { min-height: 100dvh; }
 .application-brand { min-height: 88px; padding: 24px; display: flex; flex-direction: column; gap: 4px; }
 .application-header { background: #fff; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #f0f0f0; }
+.application-header-brand { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.application-header-brand > button, .application-header-actions { flex-shrink: 0; }
+.branding-header-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branding-block-text { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.branding-page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.branding-page-heading > div { flex: 1; }
+.branding-page-heading > button { flex-shrink: 0; }
+.account-header-brand { flex: 1; }
+.account-header-username { display: block; max-width: min(30vw, 180px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branding-continue-button { max-width: 100%; height: auto; white-space: normal; overflow-wrap: anywhere; }
+.branding-settings-card .ant-form-item-extra, .branding-settings-card .ant-form-item-explain { overflow-wrap: anywhere; }
 .application-content { padding: 24px; min-width: 0; }
 .page-shell { display: flex; flex-direction: column; gap: 24px; min-width: 0; max-width: 100%; }
 .page-shell > *, .min-width-zero { min-width: 0; }

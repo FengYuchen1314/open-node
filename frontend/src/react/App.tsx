@@ -1,11 +1,12 @@
 import { App as AntApp, Alert, Button, ConfigProvider, Drawer, Grid, Layout, Menu, Result, Space, Spin, Tag, Typography } from "antd";
-import { ApartmentOutlined, BellOutlined, DashboardOutlined, FileProtectOutlined, FileTextOutlined, HistoryOutlined, LineChartOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined, SettingOutlined } from "@ant-design/icons";
+import { ApartmentOutlined, BellOutlined, ControlOutlined, DashboardOutlined, FileProtectOutlined, FileTextOutlined, HistoryOutlined, LineChartOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined, SettingOutlined } from "@ant-design/icons";
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import zhCN from "antd/locale/zh_CN";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { routes } from "../routes";
 import { loadSession, signOut } from "../services/auth";
 import { useAdministratorSession } from "./hooks/useSession";
+import { BrandingProvider, useBranding } from "./hooks/useBranding";
 import SignInView from "./views/SignInView";
 import { zhMessage } from "../i18n/zh-CN";
 
@@ -19,6 +20,7 @@ const navigation = [
   { key: "/probe", label: "探针", icon: <LineChartOutlined aria-hidden /> },
   { key: "/access", label: "访问管理", icon: <SafetyOutlined aria-hidden /> },
   { key: "/notifications", label: "通知设置", icon: <BellOutlined aria-hidden /> },
+  { key: "/system-settings", label: "系统设置", icon: <ControlOutlined aria-hidden /> },
 ];
 class WorkspaceBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -38,6 +40,7 @@ function WorkspaceRoutes() {
 
 function ApplicationLayout() {
   const auth = useAdministratorSession();
+  const { branding } = useBranding();
   const location = useLocation();
   const navigate = useNavigate();
   const screens = Grid.useBreakpoint();
@@ -55,8 +58,8 @@ function ApplicationLayout() {
   useEffect(() => {
     const title = subscriber ? "用户中心" : !auth.session?.authenticated ? "管理员登录" : navigation.find(item => item.key === location.pathname)?.label ?? "管理后台";
     document.documentElement.lang = "zh-CN";
-    document.title = `${title} - Open Node`;
-  }, [auth.session?.authenticated, location.pathname, subscriber]);
+    document.title = `${title} - ${branding.site_title}`;
+  }, [auth.session?.authenticated, branding.site_title, location.pathname, subscriber]);
   async function logout() {
     if (logoutBusy) return;
     setLogoutBusy(true); setLogoutError("");
@@ -69,14 +72,14 @@ function ApplicationLayout() {
   if (!auth.session?.authenticated) return <SignInView />;
   const menu = <Menu mode="inline" selectedKeys={[location.pathname]} items={navigation} onClick={({ key }) => { navigate(key); setDrawer(false); }} />;
   return <Layout className="application-layout">
-    {!mobile && <Layout.Sider theme="light" width={248} collapsible collapsed={collapsed} onCollapse={setCollapsed}><div className="application-brand"><Typography.Title level={4} style={{ margin: 0 }}>{collapsed ? "ON" : "Open Node"}</Typography.Title>{!collapsed && <Typography.Text type="secondary">管理后台</Typography.Text>}</div>{menu}</Layout.Sider>}
-    <Drawer title="Open Node" placement="left" size={280} open={mobile && drawer} onClose={() => setDrawer(false)} styles={{ body: { padding: 0 } }}>{menu}</Drawer>
+    {!mobile && <Layout.Sider theme="light" width={248} collapsible collapsed={collapsed} onCollapse={setCollapsed}><div className="application-brand"><Typography.Title level={4} className="branding-block-text" style={{ margin: 0 }}>{collapsed ? "ON" : branding.brand_title}</Typography.Title>{!collapsed && <Typography.Text type="secondary">管理后台</Typography.Text>}</div>{menu}</Layout.Sider>}
+    <Drawer title={<span className="branding-header-text" title={branding.brand_title}>{branding.brand_title}</span>} placement="left" size={280} open={mobile && drawer} onClose={() => setDrawer(false)} styles={{ body: { padding: 0 } }}>{menu}</Drawer>
     <Layout>
-      <Layout.Header className="application-header"><Space>{mobile && <Button icon={<MenuOutlined aria-hidden />} aria-label="切换导航菜单" onClick={() => setDrawer(true)} />}<Typography.Title level={4} style={{ margin: 0 }}>Open Node</Typography.Title></Space><Space><Tag color="success" aria-label="免费版">免费版</Tag><Button icon={<LogoutOutlined aria-hidden />} aria-label="退出登录" loading={logoutBusy} onClick={() => void logout()} /></Space></Layout.Header>
+      <Layout.Header className="application-header"><div className="application-header-brand">{mobile && <Button icon={<MenuOutlined aria-hidden />} aria-label="切换导航菜单" onClick={() => setDrawer(true)} />}<Typography.Title level={4} className="branding-header-text" title={branding.brand_title} style={{ margin: 0 }}>{branding.brand_title}</Typography.Title></div><Space className="application-header-actions"><Tag color="success" aria-label="免费版">免费版</Tag><Button icon={<LogoutOutlined aria-hidden />} aria-label="退出登录" loading={logoutBusy} onClick={() => void logout()} /></Space></Layout.Header>
       <Layout.Content className="application-content">{logoutError && <Alert className="form-alert" type="error" showIcon title={logoutError} role="alert" />}<WorkspaceRoutes /></Layout.Content>
     </Layout>
   </Layout>;
 }
 export default function App() {
-  return <ConfigProvider locale={zhCN}><AntApp><ApplicationLayout /></AntApp></ConfigProvider>;
+  return <ConfigProvider locale={zhCN}><AntApp><BrandingProvider><ApplicationLayout /></BrandingProvider></AntApp></ConfigProvider>;
 }

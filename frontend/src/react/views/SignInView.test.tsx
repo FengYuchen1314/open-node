@@ -2,10 +2,13 @@
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acceptOperatorSession, authState, loadSession, signIn, verifySignIn, type OperatorLogin } from "../../services/auth";
+import { getPublicBranding } from "../../services/branding";
+import { BrandingProvider } from "../hooks/useBranding";
 import { deferred, flush, installDom, renderUi } from "../test-utils";
 import SignInView from "./SignInView";
 
 vi.mock("../../services/auth", async importOriginal => ({ ...await importOriginal<typeof import("../../services/auth")>(), signIn: vi.fn(), verifySignIn: vi.fn(), acceptOperatorSession: vi.fn(), loadSession: vi.fn() }));
+vi.mock("../../services/branding", async original => ({ ...await original<typeof import("../../services/branding")>(), getPublicBranding: vi.fn() }));
 const { qrDataUrl } = vi.hoisted(() => ({ qrDataUrl: vi.fn<(text: string, options?: object) => Promise<string>>() }));
 vi.mock("qrcode", () => ({ default: { toDataURL: qrDataUrl } }));
 const anonymous = { configured: true, authenticated: false, username: null, csrf_token: null };
@@ -31,6 +34,15 @@ function fillCredentials() {
 }
 async function login() { fillCredentials(); fireEvent.click(screen.getByRole("button", { name: "登录" })); await flush(); }
 describe("React administrator sign-in", () => {
+  it("uses a public brand as plain text without changing credential or MFA semantics", async () => {
+    const brand = "<img src=x onerror=evil()>";
+    vi.mocked(getPublicBranding).mockResolvedValue({ site_title: "站点", brand_title: brand, license_required: false });
+    renderUi(<BrandingProvider><SignInView /></BrandingProvider>); await flush();
+    expect(screen.getByRole("heading", { name: brand }).classList.contains("branding-block-text")).toBe(true);
+    expect(document.querySelector("img")).toBeNull(); expect(screen.getByLabelText("密码")).toBeTruthy();
+    await login(); expect(signIn).toHaveBeenCalledExactlyOnceWith("admin", "administrator-password");
+    expect(screen.getByLabelText("验证器验证码或恢复码")).toBeTruthy();
+  });
   it("keeps password and MFA steps distinct and refuses duplicate password submissions", async () => {
     const pending = deferred<OperatorLogin>(); vi.mocked(signIn).mockReturnValue(pending.promise);
     renderUi(<SignInView />); fillCredentials();

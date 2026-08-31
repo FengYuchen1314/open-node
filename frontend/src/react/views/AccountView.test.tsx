@@ -2,6 +2,8 @@
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProductUserSubscriptionToken } from "../../domain/subscriptions";
+import { getPublicBranding } from "../../services/branding";
+import { BrandingProvider } from "../hooks/useBranding";
 import {
   loadSubscriberSession, subscriberProfile, subscriberProfiles, subscriberRegister,
   subscriberSignIn, subscriberState, subscriberToken, verifySubscriberLogin,
@@ -15,6 +17,7 @@ vi.mock("../../services/subscriber-auth", async original => ({
   loadSubscriberSession: vi.fn(), subscriberSignIn: vi.fn(), verifySubscriberLogin: vi.fn(),
   subscriberRegister: vi.fn(), subscriberProfile: vi.fn(), subscriberProfiles: vi.fn(), subscriberToken: vi.fn(),
 }));
+vi.mock("../../services/branding", async original => ({ ...await original<typeof import("../../services/branding")>(), getPublicBranding: vi.fn() }));
 vi.mock("../components/PrivateRoutedNodesPanel", () => ({ default: () => <div>用户路由工作区</div> }));
 vi.mock("../components/SubscriberSecurityPanel", () => ({ default: () => <div>账户安全工作区</div> }));
 vi.mock("../components/TemplatesWorkspace", () => ({ default: () => <div>订阅模板工作区</div> }));
@@ -61,6 +64,16 @@ async function login() {
 }
 
 describe("Chinese subscriber portal", () => {
+  it("uses the same public brand for subscriber login and the signed-in header", async () => {
+    const brand = "站点🧭".repeat(10);
+    vi.mocked(getPublicBranding).mockResolvedValue({ site_title: "用户中心标题", brand_title: brand, license_required: false });
+    renderUi(<BrandingProvider><AccountView /></BrandingProvider>); await flush();
+    expect(screen.getByRole("heading", { name: brand }).classList.contains("branding-block-text")).toBe(true);
+    expect(screen.getByRole("heading", { name: "用户登录" })).toBeTruthy();
+    await act(async () => { subscriberState.session = { ...session }; }); await flush();
+    expect(screen.getByRole("heading", { name: brand }).classList.contains("branding-header-text")).toBe(true);
+    expect(screen.getByRole("button", { name: "退出登录" })).toBeTruthy(); expect(screen.getByRole("heading", { name: "Alice Custom Name" })).toBeTruthy();
+  });
   it("shows Chinese login and retry controls while preserving the separate account session", async () => {
     subscriberState.error = "Connection unavailable";
     await mount();

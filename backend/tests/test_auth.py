@@ -75,6 +75,7 @@ def test_every_management_route_requires_an_operator(tmp_path: Path):
         ("get", "/api/v1/license/status"),
         ("get", "/api/v1/healthz"),
         ("get", "/api/v1/meta"),
+        ("get", "/api/v1/branding"),
         ("get", "/api/v1/agents/bootstrap/manifest"),
         ("get", "/api/v1/agents/bootstrap/installer.py"),
         ("post", "/api/v1/agents/bootstrap/redeem"),

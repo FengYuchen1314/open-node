@@ -19,6 +19,188 @@ VPS.
 
 ## Remote Test Command
 
+### Site text settings — unpublished integration
+
+This is the two-field branding slice in the [operator guide](system-settings.md)
+and [pinned-source design](system-settings-plan.md), not complete general-settings
+parity. It is working-tree code after `422c540`; it is not included in the
+published notification feature `bf8eaa8` and has not upgraded production.
+
+The new integration root is `/tmp/open-node-branding-integration.ChNDrkyo`.
+The full frozen R2 source archive contains 544 files, SHA-256
+`25d899648c457ec13b158067ffa1564af6c07434422e4b22ca4508c0c297c3ec`.
+All 18 frontend-owned files match the passed focused snapshot; the final store
+fix and the administrator-route allowlist update below are also included.
+The two new browser/Docker smoke scripts and later documentation are recorded
+separately, not silently added to this archive.
+
+| Focused gate | Verified result |
+| --- | --- |
+| Domain/store | **159 passed**, no skips or errors, 8.203 s in `/tmp/open-node-branding-store.YWSSePjT/source-r4`; strict Ruff and compile passed. Covers defaults, raw Unicode before trim, visible characters, strict versions, public projection, concurrent initialization/CAS, atomic pairs, corrupt storage, transaction faults, independent SQLite restoration and unchanged business tables. |
+| Frontend | **175 passed in 8 files**, no failures or skips, 218.05 s in `/tmp/open-node-branding-fe.TtW5l0MC/source-r1`; forced typecheck passed. Service 83, provider 9, settings view 23, App 11, account 12, dashboard 30, sign-in 6, router 1. Includes default fallback, canonical responses, literal HTML, drafts, lifecycle/identity changes, late replies and read-only reconciliation after an uncertain save. |
+
+Store R4 hashes: domain
+`dcdac33174dae9caf915303d07d9c6e0307cd5d32be41d6dd0622cadab59c8eb`,
+store `56fd4f60614046c653b2e67f00767bcaf1c1826cf515a4908513bb7998f6249a`,
+tests `a11e35e62decceddd913f463131429d1673344010e37e62e9920f5b9b2cd9cf7`.
+Its `final-report.json` SHA-256 is
+`601e38b8b9757c0ef8e31fac4e90b7c627a08602cab52811e9cda5425f8ac440`;
+`final-evidence.sha256` is
+`7f73ed77458745061b88d59a6463950d9c0d57c3175f0747642af86cd3438ba7`.
+The 159 baseline backend files and three new files stayed unchanged through the
+run; no owned pytest process remained.
+
+Earlier store R1/R2 failed only strict lint. R3 ran 157 tests: 156 passed and one
+real pre-DBAPI-commit fault test failed because an uncommitted SQLite write could
+remain on a pooled connection after the SQLAlchemy commit hook failed. The R4
+fix explicitly rolls back that owned DBAPI connection before returning it to the
+pool. Separate tests prove that a failure **after actual commit** preserves the
+committed version for GET reconciliation and rejects an old CAS; the code does
+not pretend that an already committed write can be rolled back. The original
+failed logs remain alongside R4.
+
+Frontend `gate-r1/focused.json` SHA-256 is
+`1e02e265eb19d9935a52aa64bfe0feb61c282c5e9d285c7701dde03f8d30bc73`;
+`gate-r1/artifacts.sha256` is
+`01bee712bcd34bcc0546d24f24e3c048dc9a0ab3f1cf66de72fb1958c094cf53`.
+All 190 frontend source files remained unchanged. The private physical dependency
+copy and read-only canonical copy matched before/after on 24,021 content files;
+only the two generated tsbuildinfo files and one Vitest cache were excluded.
+No dependency was installed or changed in another candidate's environment.
+
+The root's first API execution used the earlier `source-r1`: **109 passed and one
+failed**, 87.80 s, `evidence/root-r3.log` and XML. The existing exhaustive auth test
+did not yet list the deliberately public `GET /api/v1/branding`; that exact GET
+was added to its public allowlist. The new administrator routes remain subject
+to the exhaustive 401 check. Two preceding preflight attempts did not run pytest:
+one inspected shared sysfs rather than actual namespace interfaces; the other
+used an incorrect manifest path. Their evidence remains, and neither is a test
+pass. R2 checks real netlink interfaces and has only loopback with no default route.
+
+The R2 full backend run ended with **2498 passed and 2 failed**, no skips,
+981.30 s. Both failures were the existing subscriber-role exhaustive auth test:
+it treated the new public branding GET as an administrator-only route. The R3
+test change permits only that exact method/path and also asserts the exact
+three-field public projection and fixed `license_required: false` for both
+subscriber roles. No application or frontend code changed. The old failed log
+and XML remain in `backend-full-r2`.
+
+The complete backend R3 rerun is pending in `backend-full-r3`, using a new
+`source-r3`, not an overwritten R2. All 544 files match R2 except
+`backend/tests/test_subscriber_auth.py` (SHA-256
+`926d2b36ba3687979ba7a074361a42f06bd571cca8ba144277102e96e069fd18`).
+The R3 source manifest SHA-256 is
+`87554df475ee6984504df2bf607bfb8961ec7059c394b840b1d6cfa3badd139a`.
+Both full backend runs enable all six real external-fetch TLS fixtures using an
+address assigned only inside their private loopback namespaces. The runs use
+the existing private notification venv read-only; there is no dependency install.
+
+The full frontend R2 run passed **1013 tests in 75 files**, no failures or skips,
+976.78 s. Root independently checked the native JSON totals, all file statuses
+and every assertion result. `frontend-full-r2/full-vitest.json` SHA-256 is
+`7ee93c130884c5b29ef0122513f0448e8034bf4dab1b6bf908d02328df79f6fd`;
+the complete log is
+`e3b2c032b3980807caa6ac6f6e57957528047c9331ca30c5fa33dbfb7cc977d4`.
+Existing Ant Design deprecation and Probe chart-size warnings remain visible in
+the log, not suppressed or described as test failures. The 544 source files,
+24,021 private/canonical dependency content files, and built assets matched
+before/after; generated caches are excluded as described above.
+
+Frontend typecheck and both production builds passed; 40 administrator and
+3 Probe assets were frozen at 2026-08-31 07:01:39 UTC. In `frontend-full-r2`,
+`production-assets.tar.gz` SHA-256 is
+`7e51ec83a0229ee6bf380bced2ec49473a953388c01e7492d08e034a689de886` and
+`assets-before.sha256` is
+`542350230e6538b7a00dfb890fde8f653b880a5dedbd8b08ad2a2fa4ce0cac8a`.
+The 57 Agent/Probe Worker source files match the earlier notification R5 source;
+no previous test counts are relabeled as a new run.
+
+A normal Dockerfile build from a separate copy at
+`/tmp/open-node-branding-docker-r2.KZ98bXQH/source` succeeded. Image
+`open-node:branding-working-tree-r2` has ID
+`sha256:e0b7b3ecff038b690ef198d1d811790db09db441439a85e4a50f819134a1e5d6`
+and OCI revision **`working-tree-422c540-branding-r2`**, not a Git SHA. Source,
+main/Probe assets and production identity/image/start/restart count were unchanged
+through the build. The working-tree label is not an exact Git revision.
+
+The working-tree Docker R2 gate passed **10 phases** at
+`/tmp/open-node-branding-docker-gate-r2.wvo2pyoW`. It compares all 106 installed
+application Python files and all 40 main assets, then exercises real permissions,
+concurrent CAS, Unicode/literal text, restart and two stopped whole-volume copies
+to empty independent volumes. The original administrator session/CSRF survives
+restart and cold restoration; the other 61 business tables remain unchanged,
+apart from the explicitly expected session `last_seen_at` refresh. All six
+persisted files/entries match in content, mode and UID/GID across both copies.
+All three graceful current-generation stops exited 143 in 0.24–0.28 s with
+30 seconds allowed and no OOM. Four label-owned containers and three volumes were
+cleaned; production, the shared candidate and frozen source/assets were untouched.
+
+The dedicated `scripts/vps/smoke-branding-docker.py` fixture SHA-256 is
+`2391e7ff5edaacb1f7e3f3c24f900f5ffce8e4bd100da2241ade9710237d505b`.
+Strict Ruff, compile and its 49-check ownership/cleanup self-test passed without
+invoking Docker. R1 failed because the fixture's SPA request lacked
+`Accept: text/html`; the real SPA correctly refused the fallback. Only the
+fixture header and its self-test changed, and R1 evidence remains.
+R2 report SHA-256 is
+`b1c1d879e7a7bff6fd3de6670bbca02cdca319fafabb5347656c2df5918484e0`;
+`final-audit.json` is
+`f4d0fd9d899bbb1ce25606b8c90e9580eaa1fe7dca8fbe8060a82514f767d5fa`;
+`final-evidence.sha256` is
+`13b5ebb19390bbc1f166333cb4e98943ec70b4bd873517b2dc54afd93ecccb7c`.
+
+The real browser R3 gate passed **14 phases** and produced **27 new PNGs** at
+`/tmp/open-node-branding-browser.BDV35Iyg/browser-r3`, using the same 544-file
+product and all 43 built assets. Root downloaded the passing report/archive,
+verified every PNG hash, and individually viewed all 27 originals at 1440, 390
+and 320 pixels. Long Chinese/emoji names wrap or ellipsize without hiding
+navigation/logout; literal HTML remains text; settings, administrator sign-in,
+dashboard, subscriber sign-in/account and public fallback remain usable. The
+independent Probe keeps its original title and real WebSocket connection.
+Password masks are intentional. The synthetic loopback account subscription
+URL in the private desktop screenshot is not a production credential; the
+screenshots are test evidence, not published marketing assets.
+
+The browser makes real administrator/subscriber logins and a real process
+restart without reseeding users or replacing cookies/CSRF. It proves actual
+409 conflict, post-commit lost-receipt GET reconciliation without replaying PUT,
+late public/private responses, double-click protection, and real corrupt-row
+503 fallback that does not block login. All 13 public branding requests omit
+Cookie, Authorization, CSRF and Referer and expose exactly the public fields.
+There are **two expected** status-specific browser network diagnostics (409 and
+503), zero unexpected console errors, page errors or external requests. All
+three service generations stopped under their 30-second grace, with current
+generation shutdown logs and zero owned processes/listeners remaining.
+
+The browser fixture SHA-256 is
+`4e909540317dc6306b9dc79f7295d738dbca2d53ab45eec74d4e7db00ba3ae45`.
+R3 report SHA-256 is
+`01153b54c3adfa36029b091662cba2e61ba3f1c167d8b74ae9172096f91c24f2`;
+`evidence-r4/screenshots-browser-r3.tar.gz` is
+`694ca1a90e17214762af8eb1ac4af27dc533d37fa214df10364f9b0603f6ab02`;
+the 143-file `evidence-r4/final-evidence-r3.sha256` is
+`9a8de8c56b4c0936ac1b76da4863f68f61c7949f6eb650325372be86159265f8`;
+independent `postcheck-final` SHA-256 is
+`02bd4894158b3f385c36de8002135487fb25eeaf4a5e8dabe7ad834996a3fb35`.
+Root's separate 27-image visual audit is retained at the integration root as
+`evidence/root-visual-audit-browser-r3.json`, SHA-256
+`c80df3c573b84e6ece4e8b60b8e8821f2503fdb6b5dd47e7ac041b09f0ee7afd`.
+
+Browser R1 failed while reading the first real 200 response body; the cause
+remains unknown and did not recur. R2 completed 12 phases but failed by comparing
+the dynamic health timestamp as if it were fixed. R3 checks the exact health
+schema/status/service and nondecreasing valid timestamp, while comparing the
+complete metadata response unchanged. The fixture also waits for the exact
+request-finished event rather than the installed Playwright 1.62 `finished()`
+helper, whose unfinished auxiliary waiter generated a task warning. No product,
+dependency, timeout or production security setting was changed. R1/R2 and the
+auxiliary postcheck mistakes remain as failed evidence, not passing runs. An
+old network namespace inode was reused by the later root R3 pytest process;
+start time, private cwd and owner proved it unrelated, and it was never stopped.
+
+Exact-Git Docker, the complete R3 backend result, CI and publication are still
+pending for this slice. Passing working-tree/browser/frontend evidence does not
+authorize a production upgrade or establish complete MMWX parity.
+
 ### Administrator Telegram notifications — published first slice
 
 This is the first administrator-only notification slice described in the

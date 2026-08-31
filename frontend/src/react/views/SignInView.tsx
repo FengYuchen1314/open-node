@@ -8,11 +8,13 @@ import {
   type AdministratorTotpEnrollment, type OperatorLogin,
 } from "../../services/auth";
 import { useAsyncScope } from "../hooks/useAsyncScope";
+import { useBranding } from "../hooks/useBranding";
 import { useAdministratorSession } from "../hooks/useSession";
 import { zhMessage } from "../../i18n/zh-CN";
 
 export default function SignInView() {
   const auth = useAdministratorSession();
+  const { branding } = useBranding();
   const scope = useAsyncScope();
   const busyRef = useRef(false);
   const [username, setUsername] = useState("");
@@ -80,14 +82,14 @@ export default function SignInView() {
 
   return <section className="auth-page"><Card className="auth-card">
     <Space orientation="vertical" size="large" style={{ width: "100%" }}>
-      <div><Typography.Title level={2}>Open Node</Typography.Title><Typography.Title level={4}>管理员登录</Typography.Title></div>
+      <div><Typography.Title level={2} className="branding-block-text">{branding.brand_title}</Typography.Title><Typography.Title level={4}>管理员登录</Typography.Title></div>
       {auth.error ? <Alert type="error" showIcon title={zhMessage(auth.error, "暂时无法连接服务器。")} action={<Button aria-label="重新连接" icon={<ReloadOutlined aria-hidden />} onClick={() => void loadSession()} />} />
         : auth.session?.configured === false ? <Alert type="warning" showIcon title="尚未配置管理员账户。" />
         : recoveryCodes.length ? <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
           <Alert type="success" showIcon title="双重验证已启用。请妥善保存这些一次性恢复码后再继续。" />
           <div className="recovery-grid" aria-label="管理员恢复码">{recoveryCodes.map(item => <Typography.Text code key={item}>{item}</Typography.Text>)}</div>
           <Checkbox checked={accepted} onChange={event => setAccepted(event.target.checked)}>我已妥善保存恢复码</Checkbox>
-          <Button type="primary" disabled={!accepted} onClick={continueLogin}>进入 Open Node</Button>
+          <Button type="primary" className="branding-continue-button" disabled={!accepted} onClick={continueLogin}>进入 {branding.brand_title}</Button>
         </Space> : challenge ? <Form layout="vertical" onFinish={() => void verify()}>
           {error && <Alert className="form-alert" type="error" showIcon title={error} role="alert" />}
           {enrollment && <>

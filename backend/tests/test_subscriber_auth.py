@@ -148,6 +148,12 @@ def test_roles_cookies_and_operator_routes_are_isolated(tmp_path, role):
         ):
             continue
         for method in methods:
+            if (method, path) == ("get", "/api/v1/branding"):
+                public = client.get(path)
+                assert public.status_code == 200
+                assert set(public.json()) == {"site_title", "brand_title", "license_required"}
+                assert public.json()["license_required"] is False
+                continue
             response = client.request(method, path)
             assert response.status_code == 401, (method, path, response.text)
     assert client.get(PREFIX + "/me").json()["username"] == "alice"

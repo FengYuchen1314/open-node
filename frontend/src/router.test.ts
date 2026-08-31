@@ -10,6 +10,8 @@ describe("router", () => {
     expect(paths).toContain("/subscriptions");
     expect(paths).toContain("/templates");
     expect(paths).toContain("/notifications");
+    expect(paths).toContain("/system-settings");
+    expect(routes.find(route => route.path === "/system-settings")?.meta?.subscriber).toBeUndefined();
     expect(routes.find(route => route.path === "/notifications")?.meta?.subscriber).toBeUndefined();
     expect(routes.find(route => route.path === "/account")?.meta?.subscriber).toBe(true);
     expect(routes.find(route => route.path === "/subscriptions")?.meta?.subscriber).toBeUndefined();

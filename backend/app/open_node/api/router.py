@@ -5,6 +5,7 @@ from open_node.api.routes import (
     agent_bootstrap,
     agents,
     auth,
+    branding,
     certificates,
     changes,
     external_subscriptions,
@@ -32,6 +33,7 @@ api_router = APIRouter()
 private_router = APIRouter(dependencies=[Depends(require_administrator)])
 private_router.include_router(servers.router)
 private_router.include_router(agent_bootstrap.router)
+private_router.include_router(branding.router)
 private_router.include_router(server_management.router)
 private_router.include_router(certificates.router)
 private_router.include_router(changes.router)
@@ -55,6 +57,7 @@ api_router.include_router(private_routed_nodes.account_router)
 api_router.include_router(subscription_templates.router)
 api_router.include_router(subscription_templates.router, prefix="/account")
 api_router.include_router(system.router)
+api_router.include_router(branding.public_router)
 api_router.include_router(license.router)
 api_router.include_router(agents.router)
 api_router.include_router(agent_bootstrap.public_router)
