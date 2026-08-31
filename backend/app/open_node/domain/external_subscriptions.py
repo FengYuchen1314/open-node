@@ -5,7 +5,16 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, StrictInt, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 
 def external_name(value: str) -> str:
@@ -82,6 +91,43 @@ class ExternalRevisionRequest(ExternalRequest):
     expected_revision: StrictInt = Field(ge=1)
 
 
+class ExternalRefreshUpdate(ExternalRevisionRequest):
+    enabled: StrictBool
+    interval_minutes: StrictInt = Field(ge=15, le=10080)
+    scope: Literal["saved_only", "all"]
+    accept_changes: StrictBool
+
+    @model_validator(mode="after")
+    def acknowledged(self):
+        if self.enabled and not self.accept_changes:
+            raise ValueError("Automatic refresh requires explicit consent")
+        return self
+
+
+RefreshCode = Literal[
+    "never", "refresh_succeeded", "fetch_failed", "parse_failed", "credentials_unavailable",
+    "source_changed", "worker_interrupted", "node_limit", "refresh_failed", "restore_paused",
+]
+
+
+class ExternalRefreshRead(BaseModel):
+    enabled: bool = False
+    interval_minutes: int = 60
+    scope: Literal["saved_only", "all"] = "saved_only"
+    paused: bool = False
+    running: bool = False
+    next_run_at: datetime | None = None
+    last_attempt_at: datetime | None = None
+    last_finished_at: datetime | None = None
+    last_success_at: datetime | None = None
+    code: RefreshCode = "never"
+    consecutive_failures: int = 0
+    imported_count: int = 0
+    updated_count: int = 0
+    missing_count: int = 0
+    new_available_count: int = 0
+
+
 class ExternalSourceDelete(ExternalRevisionRequest):
     confirm: StrictBool
 
@@ -113,6 +159,7 @@ class ExternalSourceRead(BaseModel):
     last_synced_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    refresh: ExternalRefreshRead = Field(default_factory=ExternalRefreshRead)
 
 
 class ExternalSourcesResponse(BaseModel):

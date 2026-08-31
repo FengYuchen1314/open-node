@@ -151,6 +151,17 @@ def _quiesce(connection: sqlite3.Connection) -> dict[str, int]:
                 (now.timestamp(),),
             )
             connection.execute("UPDATE notification_settings SET enabled=0")
+            # Older v1 archives have no refresh table. New restores must not
+            # start fetching provider URLs merely because first-boot review ends.
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='external_subscription_refresh'"
+            ).fetchone():
+                connection.execute(
+                    "UPDATE external_subscription_refresh SET enabled=0, next_run_at=NULL, "
+                    "lease_id=NULL, lease_until=NULL, code='restore_paused', "
+                    "consecutive_failures=0"
+                )
             connection.execute(
                 "UPDATE notification_deliveries SET state=CASE WHEN state='sending' "
                 "THEN 'unknown' ELSE 'cancelled' END, next_attempt_at=NULL, "

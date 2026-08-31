@@ -1,6 +1,7 @@
 import type {
   ExternalConfirmationRead, ExternalNodeChange, ExternalNodeRead, ExternalNodeUpdate,
   ExternalPreviewCancelResponse, ExternalPreviewConfirm, ExternalPreviewNode, ExternalPreviewRead,
+  ExternalRefreshCode, ExternalRefreshRead, ExternalRefreshUpdate,
   ExternalRevisionRequest, ExternalSourceCreate, ExternalSourceDelete, ExternalSourceDeleteResponse,
   ExternalSourceDetail, ExternalSourceRead, ExternalSourcesResponse, ExternalSourceUpdate,
 } from "../domain/external-subscriptions";
@@ -82,6 +83,24 @@ function source(value: unknown): ExternalSourceRead {
     revision: number(row.revision), has_custom_user_agent: boolean(row.has_custom_user_agent),
     node_count: number(row.node_count), available_node_count: number(row.available_node_count), metadata: metadata(row.metadata),
     last_synced_at: nullableString(row.last_synced_at), created_at: string(row.created_at), updated_at: string(row.updated_at),
+    ...(row.refresh === undefined ? {} : { refresh: refresh(row.refresh) }),
+  };
+}
+function refresh(value: unknown): ExternalRefreshRead {
+  const row = record(value), scope = string(row.scope), code = string(row.code);
+  if (!["saved_only", "all"].includes(scope) || !["never", "refresh_succeeded", "fetch_failed", "parse_failed",
+    "credentials_unavailable", "source_changed", "worker_interrupted", "node_limit", "refresh_failed", "restore_paused"].includes(code)) invalid();
+  const minutes = number(row.interval_minutes);
+  if (minutes < 15 || minutes > 10080) invalid();
+  const count = (key: string) => { const n = number(row[key]); return Number.isSafeInteger(n) && n >= 0 ? n : invalid(); };
+  const stamp = (key: string) => { const s = nullableString(row[key]); return s === null || Number.isFinite(Date.parse(s)) ? s : invalid(); };
+  return {
+    enabled: boolean(row.enabled), interval_minutes: minutes, scope: scope as ExternalRefreshRead["scope"],
+    paused: boolean(row.paused), running: boolean(row.running), code: code as ExternalRefreshCode,
+    next_run_at: stamp("next_run_at"), last_attempt_at: stamp("last_attempt_at"),
+    last_finished_at: stamp("last_finished_at"), last_success_at: stamp("last_success_at"),
+    consecutive_failures: count("consecutive_failures"), imported_count: count("imported_count"),
+    updated_count: count("updated_count"), missing_count: count("missing_count"), new_available_count: count("new_available_count"),
   };
 }
 function node(value: unknown): ExternalNodeRead {
@@ -163,6 +182,16 @@ export function createExternalSource(payload: ExternalSourceCreate, fetcher = au
 export function getExternalSource(sourceId: string, fetcher = authenticatedFetch): Promise<ExternalSourceDetail> {
   return request(sourcePath(sourceId), {}, value => detail(value, sourceId), fetcher);
 }
+export function updateExternalRefresh(sourceId: string, payload: ExternalRefreshUpdate, fetcher = authenticatedFetch): Promise<ExternalSourceRead> {
+  const { expected_revision, enabled, interval_minutes, scope, accept_changes } = payload;
+  return request(`${sourcePath(sourceId)}/refresh-schedule`, {
+    method: "PUT", body: JSON.stringify({ expected_revision, enabled, interval_minutes, scope, accept_changes }),
+  }, value => {
+    const result = source(value);
+    if (result.id !== sourceId || !result.refresh) invalid();
+    return result;
+  }, fetcher);
+}
 export function updateExternalSource(sourceId: string, payload: ExternalSourceUpdate, fetcher = authenticatedFetch): Promise<ExternalSourceRead> {
   const { expected_revision, name, enabled, url = null, user_agent = null } = payload;
   return request(sourcePath(sourceId), { method: "PUT", body: JSON.stringify({ expected_revision, name, enabled, url, user_agent }) }, value => {
@@ -203,6 +232,7 @@ export function cancelExternalPreview(sourceId: string, previewId: string, fetch
 }
 
 export interface ExternalSubscriptionsClient {
+  updateExternalRefresh: typeof updateExternalRefresh;
   listExternalSources: typeof listExternalSources;
   createExternalSource: typeof createExternalSource;
   getExternalSource: typeof getExternalSource;
@@ -237,6 +267,7 @@ export function accountExternalSubscriptions(username: string, fetcher = fetch):
   const owned = (value: ExternalSourceRead) => { if (value.owner_username !== username) invalid(); return value; };
   const ownedDetail = (value: ExternalSourceDetail) => { owned(value.source); return value; };
   return {
+    updateExternalRefresh: async (id, payload) => owned(await updateExternalRefresh(id, payload, accountFetch)),
     listExternalSources: async () => {
       const result = await listExternalSources(accountFetch);
       result.sources.forEach(owned);

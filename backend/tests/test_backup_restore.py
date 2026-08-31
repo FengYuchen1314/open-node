@@ -205,7 +205,7 @@ def test_first_boot_and_fresh_review_require_explicit_restart(saved, tmp_path, m
         async def run(self):
             await asyncio.Event().wait()
     for name in ("CertificateWorker", "SubscriptionAccessWorker", "ServerTrafficWorker",
-                 "NotificationWorker"):
+                 "NotificationWorker", "ExternalRefreshWorker"):
         monkeypatch.setattr(main, name, Worker)
     configuration = settings(tmp_path / "restored", saved.key)
     app = create_app(configuration)
@@ -244,7 +244,7 @@ def test_first_boot_and_fresh_review_require_explicit_restart(saved, tmp_path, m
     try:
         assert restarted.state.restore_state.blocked is False
         with authenticated_client(restarted) as client:
-            assert len(constructors) == 4
+            assert len(constructors) == 5
             assert client.get("/api/v1/servers").status_code == 200
     finally:
         close_app(restarted)

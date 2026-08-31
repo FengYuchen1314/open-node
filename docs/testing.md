@@ -1,5 +1,39 @@
 # Testing
 
+## Scheduled external refresh — 2026-09-01
+
+VPS evidence: `/tmp/open-node-refresh.e6s5c4WF/evidence`. Tests run against
+synthetic sources in an isolated mount/PID/network namespace, with no external
+routes, `/opt/open-node` masked, and read-only source/dependency mounts.
+Production, shared candidate and historical evidence remain unchanged.
+
+- Backend: **127 passed**, covering the new scheduler and the adjacent manual
+  source, subscriber source, input, application-backup and restore suites.
+  Coverage includes strict opt-in/range validation, delayed persistent plans,
+  the shared merge, upstream credentials in the primary link, unchanged local
+  accounting, local node choices, safe failure codes/backoff, competing claims,
+  stale/in-flight results, disable/delete/URL changes, node limits, restore-time
+  disable, and the actual executor retaining its backup barrier after task
+  cancellation. Both administrator and real subscriber authentication/CSRF
+  paths are covered. Worker lifecycle tests now assert all five workers.
+- Initial Ruff reported nine formatting/import issues; they were corrected
+  without behavior changes. Ruff against the final complete backend tree
+  passed (`ruff-final.log`). A standalone-file lint attempt inferred a different
+  package root; the final check uses the real project structure and config.
+- Frontend: **89 passed in six files**, including five new Chinese schedule
+  component cases and eight new service-contract cases. This covers consent
+  (including keyboard submit), all-node warning and renewed consent, unknown
+  outcomes requiring a read, duplicate/late saves, paused/failure display,
+  strict safe DTOs, subscriber CSRF/ownership, and existing manual/account flows.
+  App and Node TypeScript checks and the main Vite build passed. The initial
+  runner's nonzero exit reflects only the subsequently corrected Ruff findings.
+  No repeated historical browser, forwarding or Docker image audit was run.
+
+The preceding exact-`74a98e3` hosted CI
+[33416036932](https://github.com/FengYuchen1314/open-node/actions/runs/33416036932)
+completed with all four jobs successful. That is the previous release's result,
+not a substitute for the current scheduled-refresh gate.
+
 ## Offline restore and first-boot review — 2026-09-01
 
 Only synthetic data in private VPS mount/PID/network namespaces was used:

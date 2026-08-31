@@ -53,6 +53,9 @@ open-node-backup validate backup.zip.age --identity backup-identity.txt --json
 
 ## 离线恢复到新目录
 
+恢复会关闭外部订阅的定时刷新并清除在途租约。完成复核、重启后，来源和已保存节点仍在，
+但不会自动抓取上游；需在来源详情重新确认开启。
+
 参考官方[管理员恢复及首次初始化恢复处理器](https://github.com/tajiaoyezi/miaomiaowuX/blob/c12ce653bc07fe30426b7dfcb85076974b7be0e0/internal/handler/backup.go#L342)。
 本项目采用新目录导入和首次启动复核，不直接覆盖在线数据库。此入口只接受本项目 v1 包，
 不接受原版 mmwx ZIP、安装器 tar 或 PostgreSQL dump；后两种数据库之间的迁移尚未实现。

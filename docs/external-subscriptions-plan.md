@@ -8,6 +8,15 @@ below are retained as the design record; their future tense does not describe
 the current implementation status. The wider subscription ecosystem remains
 unfinished.
 
+Update on 2026-09-01: URI/Base64 and subscriber self-service are already present.
+The current slice adds opt-in persistent scheduling with the pinned reference's
+`saved_only` / `all` selection semantics. Scheduling uses the same encrypted
+snapshot merge as manual confirmation, a 120-second durable source lease,
+source-revision fencing, exponential failure backoff, and restore-time disable.
+Unlike the reference's download-time force-sync, subscription downloads remain
+network-free. Current behavior is documented in the operator guide; the original
+first-slice requirements below are historical, not a fresh task list.
+
 ## Reference and intended workflow
 
 The control-plane reference is `tajiaoyezi/miaomiaowuX` at

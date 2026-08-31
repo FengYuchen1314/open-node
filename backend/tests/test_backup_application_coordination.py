@@ -172,7 +172,7 @@ def test_all_worker_constructors_share_barrier_but_idle_tasks_do_not(tmp_path, m
 
     for name in (
         "CertificateWorker", "SubscriptionAccessWorker",
-        "ServerTrafficWorker", "NotificationWorker",
+        "ServerTrafficWorker", "NotificationWorker", "ExternalRefreshWorker",
     ):
         monkeypatch.setattr(application, name, IdleWorker)
     try:
@@ -182,7 +182,7 @@ def test_all_worker_constructors_share_barrier_but_idle_tasks_do_not(tmp_path, m
                 snapshot_once(app.state.backup_writes)
             with app.state.backup_writes.operation() as lease:
                 assert lease.child_fds
-        assert created == list(range(8))
+        assert created == list(range(10))
         assert sorted(running) == sorted(stopped) == created
     finally:
         app.state.backup_writes.close()

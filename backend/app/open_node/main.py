@@ -35,6 +35,7 @@ from open_node.services.backup_snapshot import BackupSnapshotError, configured_b
 from open_node.services.branding import BrandingStore
 from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
+from open_node.services.external_refresh import ExternalRefreshWorker
 from open_node.services.external_subscriptions import ExternalSubscriptionError
 from open_node.services.inventory import InventoryStore, ManagedNodeConflict
 from open_node.services.notification_worker import NotificationWorker
@@ -113,12 +114,16 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 interval=active_settings.notifications_poll_seconds,
                 backup_writes=backup_writes,
             )
+            external_refresh = ExternalRefreshWorker(
+                app.state.external_subscriptions, backup_writes=backup_writes,
+            )
         # Each actual cycle establishes its own lease. Idle workers must not
         # inherit an initialization operation or prevent a snapshot forever.
         task = asyncio.create_task(worker.run())
         access_task = asyncio.create_task(access.run())
         traffic_task = asyncio.create_task(traffic.run())
         notification_task = asyncio.create_task(notification.run())
+        external_refresh_task = asyncio.create_task(external_refresh.run())
         try:
             if app.state.backup_jobs is not None:
                 await asyncio.to_thread(app.state.backup_jobs.start)
@@ -128,6 +133,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             access_task.cancel()
             traffic_task.cancel()
             notification_task.cancel()
+            external_refresh_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             with contextlib.suppress(asyncio.CancelledError):
@@ -136,6 +142,8 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 await traffic_task
             with contextlib.suppress(asyncio.CancelledError):
                 await notification_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await external_refresh_task
             if app.state.backup_jobs is not None:
                 # A timeout stops admission, not the actual producer thread.
                 # It retains its barrier and closes private resources on exit.

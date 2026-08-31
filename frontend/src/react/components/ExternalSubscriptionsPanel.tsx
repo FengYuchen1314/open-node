@@ -10,10 +10,11 @@ import type { ProductUser } from "../../domain/subscriptions";
 import {
   cancelExternalPreview, confirmExternalPreview, createExternalPreview, createExternalSource, deleteExternalSource,
   ExternalSubscriptionsError, externalSubscriptionsErrorMessage, getExternalPreview, getExternalSource,
-  listExternalSources, updateExternalNode, updateExternalSource,
+  listExternalSources, updateExternalNode, updateExternalSource, updateExternalRefresh,
   type ExternalSubscriptionsClient,
 } from "../../services/external-subscriptions";
 import { useAsyncScope } from "../hooks/useAsyncScope";
+import ExternalRefreshPanel from "./ExternalRefreshPanel";
 
 export interface ExternalSubscriptionsPanelProps {
   users: Pick<ProductUser, "username" | "display_name" | "is_active" | "removal_id">[];
@@ -27,6 +28,7 @@ export interface ExternalSubscriptionsPanelProps {
 const administratorApi: ExternalSubscriptionsClient = {
   listExternalSources, createExternalSource, getExternalSource, updateExternalSource, deleteExternalSource,
   updateExternalNode, createExternalPreview, getExternalPreview, confirmExternalPreview, cancelExternalPreview,
+  updateExternalRefresh,
 };
 const ExternalApi = createContext(administratorApi);
 const AccountOwner = createContext<string | undefined>(undefined);
@@ -83,7 +85,7 @@ function ExternalSubscriptionsContent({ users, onUpdated }: Omit<ExternalSubscri
   return <section aria-label="外部订阅" data-testid="external-subscriptions-panel" style={{ minWidth: 0 }}><Flex vertical gap="middle">
     <Card size="small" title="外部订阅"><Flex vertical gap="middle">
       <Alert type="info" showIcon title="仍须满足本地订阅使用条件" description="已确认的外部节点仅加入所属用户的主订阅，并受本地套餐、有效期和配额检查约束。临时链接和命名订阅配置不会自动包含这些节点。上游流量仅供展示，不会改变本地用量计费。" />
-      <Typography.Paragraph type="secondary">支持上游返回 Clash/Mihomo YAML、URI 列表及 Base64 编码内容，须手动预览并确认。保存来源、打开此页面和下载订阅都不会抓取上游链接；尚未启用定时刷新。不支持的协议或参数会明确显示为不可导入。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">支持上游返回 Clash/Mihomo YAML、URI 列表及 Base64 编码内容。默认手动预览并确认，也可在来源详情中开启定时刷新。保存来源、打开页面和下载订阅不会触发上游抓取。不支持的协议或参数会明确显示为不可导入。</Typography.Paragraph>
       <Flex gap="small" wrap>
         <Button type="primary" icon={<PlusOutlined aria-hidden />} aria-label="添加外部订阅来源" disabled={!users.some(user => !user.removal_id)} onClick={() => { setSelectedId(""); setCreating(true); }}>添加来源</Button>
         <Button icon={<ReloadOutlined aria-hidden />} aria-label="刷新外部订阅来源" loading={loading} onClick={() => void load()}>刷新来源</Button>
@@ -120,7 +122,8 @@ interface SourceDetailsProps {
   onClose: () => void; onUpdated: (source?: ExternalSourceRead) => void; onDeleted: () => void;
 }
 function SourceDetails({ sourceId, ownerUsername, users, onClose, onUpdated, onDeleted }: SourceDetailsProps) {
-  const { getExternalSource } = useContext(ExternalApi);
+  const api = useContext(ExternalApi);
+  const { getExternalSource } = api;
   const scope = useAsyncScope();
   const [detail, setDetail] = useState<ExternalSourceDetail | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [editing, setEditing] = useState(false), [deleting, setDeleting] = useState(false), [previewOpen, setPreviewOpen] = useState(false);
@@ -147,15 +150,16 @@ function SourceDetails({ sourceId, ownerUsername, users, onClose, onUpdated, onD
         { key: "revision", label: "来源版本", children: detail.source.revision },
         { key: "agent", label: "User-Agent", children: detail.source.has_custom_user_agent ? "自定义（不显示）" : `默认（${defaultAgent}）` },
         { key: "nodes", label: "可用节点 / 已保存节点", children: `${detail.source.available_node_count} / ${detail.source.node_count}` },
-        { key: "synced", label: "上次确认同步时间", children: date(detail.source.last_synced_at) },
+        { key: "synced", label: "上次成功同步时间", children: date(detail.source.last_synced_at) },
       ]} />
-      <Typography.Paragraph type="secondary">已保存的链接和自定义 User-Agent 只可写入，不能读回。更换链接后，原先确认的节点会保留，直到手动预览并确认新内容。停用或删除来源只会停止后续分发，无法撤回客户端已下载的上游凭据。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">已保存的链接和自定义 User-Agent 只可写入，不能读回。更换链接会关闭定时刷新，原节点保留，直到手动确认新内容或重新开启自动刷新。停用或删除来源只会停止后续分发，无法撤回客户端已下载的上游凭据。</Typography.Paragraph>
       <Flex gap="small" wrap>
         <Button icon={<EditOutlined aria-hidden />} aria-label="编辑外部订阅来源" disabled={loading || !writable} onClick={() => setEditing(true)}>编辑来源</Button>
         <Button type="primary" aria-label="预览外部订阅来源" disabled={loading || !writable} onClick={() => setPreviewOpen(true)}>预览 / 恢复回执</Button>
         <Button danger icon={<DeleteOutlined aria-hidden />} aria-label="删除外部订阅来源" disabled={loading || !writable} onClick={() => setDeleting(true)}>删除来源</Button>
       </Flex>
       <UpstreamMetadata metadata={detail.source.metadata} />
+      <ExternalRefreshPanel source={detail.source} disabled={loading || !writable} api={api} onRead={acceptRead} onSaved={source => { onUpdated(source); void load(); }} />
       <Table<ExternalNodeRead> rowKey="id" size="small" dataSource={detail.nodes} scroll={{ x: 720 }} pagination={{ pageSize: 10, showSizeChanger: false }} locale={{ emptyText: "尚无已确认的外部节点。请抓取并确认预览后再导入。" }} columns={[
         { title: "节点", width: 220, render: (_, node) => <><Typography.Text style={wrapText}>{node.name}</Typography.Text><div><Typography.Text type="secondary" style={wrapText}>上游：{node.upstream_name}</Typography.Text></div></> },
         { title: "协议", dataIndex: "protocol", width: 100 },

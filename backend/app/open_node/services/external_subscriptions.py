@@ -39,6 +39,8 @@ from open_node.domain.external_subscriptions import (
     ExternalPreviewConfirm,
     ExternalPreviewNode,
     ExternalPreviewRead,
+    ExternalRefreshRead,
+    ExternalRefreshUpdate,
     ExternalSourceCreate,
     ExternalSourceDelete,
     ExternalSourceDetail,
@@ -137,6 +139,28 @@ class ExternalPreviewModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ExternalRefreshModel(Base):
+    """One durable schedule per source; no network work is done in a DB transaction."""
+
+    __tablename__ = "external_subscription_refresh"
+
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("external_subscription_sources.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    scope: Mapped[str] = mapped_column(String(16), default="saved_only")
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    lease_id: Mapped[str | None] = mapped_column(String(36))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    code: Mapped[str] = mapped_column(String(32), default="never")
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    counts: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 def _canonical(value) -> bytes:
@@ -322,7 +346,47 @@ class ExternalSubscriptions:
             last_synced_at=_utc(source.last_synced_at),
             created_at=_utc(source.created_at),
             updated_at=_utc(source.updated_at),
+            refresh=self._refresh_read(session, source),
         )
+
+    def _refresh_read(self, session, source):
+        row = session.get(ExternalRefreshModel, source.id)
+        if row is None:
+            return ExternalRefreshRead()
+        owner = self._owner(session, source.owner_username)
+        paused = not source.enabled or not owner.is_active or bool(owner.removal_id)
+        return ExternalRefreshRead(
+            enabled=row.enabled, interval_minutes=row.interval_minutes, scope=row.scope,
+            paused=paused,
+            running=bool(row.lease_id and _utc(row.lease_until) > datetime.now(UTC)),
+            next_run_at=_utc(row.next_run_at) if row.enabled and not paused else None,
+            last_attempt_at=_utc(row.last_attempt_at),
+            last_finished_at=_utc(row.last_finished_at),
+            last_success_at=_utc(row.last_success_at), code=row.code,
+            consecutive_failures=row.consecutive_failures, **(row.counts or {}),
+        )
+
+    def update_refresh(self, identifier, payload: ExternalRefreshUpdate, *, owner_username=None):
+        now = datetime.now(UTC)
+        with self._write() as session:
+            source = self._source(
+                session, identifier, writable=True, owner_username=owner_username
+            )
+            self._expected(source, payload.expected_revision)
+            row = session.get(ExternalRefreshModel, source.id)
+            if row is None:
+                row = ExternalRefreshModel(source_id=source.id)
+                session.add(row)
+            row.enabled = payload.enabled
+            row.interval_minutes = payload.interval_minutes
+            row.scope = payload.scope
+            # Saving does not fetch. First execution is due one interval later.
+            row.next_run_at = now + timedelta(minutes=row.interval_minutes) if row.enabled else None
+            row.lease_id = row.lease_until = None
+            row.consecutive_failures = 0
+            self._bump(session, source, payload.expected_revision, now)
+            session.flush()
+            return self._read(session, source)
 
     def list(self, *, owner_username=None):
         with self.store._session() as session:
@@ -390,6 +454,11 @@ class ExternalSubscriptions:
                 cipher, key = self._keys(session)
                 secret = self._open(cipher, source, "source", source.secret)
                 if payload.url is not None:
+                    if secret["url"] != payload.url.get_secret_value():
+                        schedule = session.get(ExternalRefreshModel, source.id)
+                        if schedule:
+                            schedule.enabled = False
+                            schedule.next_run_at = schedule.lease_id = schedule.lease_until = None
                     secret["url"] = payload.url.get_secret_value()
                 if payload.user_agent is not None:
                     secret["user_agent"] = (
@@ -668,55 +737,7 @@ class ExternalSubscriptions:
                 )
             cipher, _key = self._keys(session)
             snapshot = self._open(cipher, source, "preview:" + preview.id, preview.secret)
-            existing = {row.id: row for row in self._nodes(session, source.id)}
-            if len(existing) + len(selected) > MAX_SAVED_NODES:
-                raise ExternalSubscriptionConflict("External source saved-node limit reached")
-            incoming = {entry["id"]: entry for entry in snapshot["nodes"]}
-            imported = updated = missing = 0
-            for node_id, old in existing.items():
-                entry = incoming.get(node_id)
-                if entry is None:
-                    if old.present:
-                        missing += 1
-                    old.present = False
-                    old.updated_at = now
-                    continue
-                old_config = (
-                    self._open(cipher, source, "node:" + old.id, old.secret) if old.secret else None
-                )
-                if (
-                    old_config != entry["config"]
-                    or old.reason != entry["reason"]
-                    or not old.present
-                ):
-                    updated += 1
-                old.protocol = entry["protocol"]
-                old.present = True
-                old.reason = entry["reason"]
-                old.secret = (
-                    self._seal(cipher, source, "node:" + old.id, entry["config"])
-                    if entry["config"] is not None
-                    else None
-                )
-                old.updated_at = now
-            for node_id in sorted(selected):
-                entry = incoming[node_id]
-                if entry["config"] is None or entry["reason"]:
-                    raise ExternalSubscriptionConflict("Selected external node is unavailable")
-                session.add(
-                    ExternalNodeModel(
-                        id=node_id,
-                        source_id=source.id,
-                        upstream_name=entry["name"],
-                        protocol=entry["protocol"],
-                        enabled=True,
-                        present=True,
-                        secret=self._seal(cipher, source, "node:" + node_id, entry["config"]),
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-                imported += 1
+            counts = self._apply_snapshot(session, source, cipher, snapshot["nodes"], selected, now)
             source.upstream_metadata = snapshot["metadata"]
             source.last_synced_at = preview.created_at
             self._bump(session, source, payload.expected_revision, now)
@@ -724,9 +745,7 @@ class ExternalSubscriptions:
                 source_id=source.id,
                 preview_id=preview.id,
                 revision=source.revision,
-                imported_count=imported,
-                updated_count=updated,
-                missing_count=missing,
+                **counts,
                 applied_at=now,
             )
             preview.applied_at = now
@@ -734,6 +753,47 @@ class ExternalSubscriptions:
             preview.receipt = receipt.model_dump(mode="json")
             preview.secret = None
             return receipt
+
+    def _apply_snapshot(self, session, source, cipher, entries, selected, now):
+        """Shared atomic merge for a confirmed preview or explicitly enabled schedule."""
+        existing = {row.id: row for row in self._nodes(session, source.id)}
+        if len(existing) + len(selected) > MAX_SAVED_NODES:
+            raise ExternalSubscriptionConflict("External source saved-node limit reached")
+        incoming = {entry["id"]: entry for entry in entries}
+        imported = updated = missing = 0
+        for node_id, old in existing.items():
+            entry = incoming.get(node_id)
+            if entry is None:
+                if old.present:
+                    missing += 1
+                old.present = False
+                old.updated_at = now
+                continue
+            old_config = (
+                self._open(cipher, source, "node:" + old.id, old.secret) if old.secret else None
+            )
+            if old_config != entry["config"] or old.reason != entry["reason"] or not old.present:
+                updated += 1
+            old.protocol = entry["protocol"]
+            old.present = True
+            old.reason = entry["reason"]
+            old.secret = (
+                self._seal(cipher, source, "node:" + old.id, entry["config"])
+                if entry["config"] is not None else None
+            )
+            old.updated_at = now
+        for node_id in sorted(selected):
+            entry = incoming[node_id]
+            if entry["config"] is None or entry["reason"]:
+                raise ExternalSubscriptionConflict("Selected external node is unavailable")
+            session.add(ExternalNodeModel(
+                id=node_id, source_id=source.id, upstream_name=entry["name"],
+                protocol=entry["protocol"], enabled=True, present=True,
+                secret=self._seal(cipher, source, "node:" + node_id, entry["config"]),
+                created_at=now, updated_at=now,
+            ))
+            imported += 1
+        return dict(imported_count=imported, updated_count=updated, missing_count=missing)
 
     def subscription_candidates(self, session, username):
         sources = session.scalars(

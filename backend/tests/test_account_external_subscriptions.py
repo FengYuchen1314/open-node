@@ -240,3 +240,24 @@ def test_store_rechecks_owner_inside_commit_after_network_returns(workspace):
         store.preview(source["id"], uuid4(), owner_username="alice")
     with operator.app.state.inventory._session() as session:
         assert session.scalar(select(func.count()).select_from(ExternalPreviewModel)) == 0
+
+
+def test_refresh_schedule_enforces_subscriber_ownership_csrf_and_explicit_consent(workspace):
+    operator, alice, bob, calls = workspace
+    source = create(alice)
+    endpoint = f"{ACCOUNT}/{source['id']}/refresh-schedule"
+    payload = dict(expected_revision=1, enabled=True, interval_minutes=60,
+                   scope="all", accept_changes=True)
+    assert bob.put(endpoint, json=payload).status_code == 404
+    assert operator.put(endpoint, json=payload).status_code == 401
+    for headers in ({"X-CSRF-Token": ""}, {"Origin": "https://evil.example"}):
+        assert alice.put(endpoint, json=payload, headers=headers).status_code == 403
+    assert alice.put(endpoint, json={**payload, "owner_username": "bob"}).status_code == 422
+    assert alice.put(endpoint, json={**payload, "accept_changes": False}).status_code == 422
+    response = alice.put(endpoint, json=payload)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["refresh"]["enabled"] is True
+    assert response.json()["refresh"]["scope"] == "all"
+    assert SOURCE_URL not in response.text and not calls
+    assert alice.put(endpoint, json=payload).status_code == 409

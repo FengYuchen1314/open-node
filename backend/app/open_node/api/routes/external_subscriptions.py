@@ -14,6 +14,7 @@ from open_node.domain.external_subscriptions import (
     ExternalNodeUpdate,
     ExternalPreviewConfirm,
     ExternalPreviewRead,
+    ExternalRefreshUpdate,
     ExternalRevisionRequest,
     ExternalSourceCreate,
     ExternalSourceDelete,
@@ -107,6 +108,14 @@ async def delete_source(source_id: UUID, request: Request):
     return {"deleted": True, "license_required": False}
 
 
+@router.put("/{source_id}/refresh-schedule", response_model=ExternalSourceRead)
+async def update_refresh_schedule(source_id: UUID, request: Request):
+    payload = await _payload(request, ExternalRefreshUpdate)
+    return await run_in_backup_threadpool(
+        request.app.state.external_subscriptions.update_refresh, source_id, payload
+    )
+
+
 @router.put("/{source_id}/nodes/{node_id}", response_model=ExternalSourceDetail)
 async def update_node(source_id: UUID, node_id: UUID, request: Request):
     payload = await _payload(request, ExternalNodeUpdate)
@@ -184,6 +193,15 @@ async def delete_account_source(source_id: UUID, request: Request, identity: Ide
         source_id, payload, owner_username=identity.username,
     )
     return {"deleted": True, "license_required": False}
+
+
+@account_router.put("/{source_id}/refresh-schedule", response_model=ExternalSourceRead)
+async def update_account_refresh_schedule(source_id: UUID, request: Request, identity: Identity):
+    payload = await _payload(request, ExternalRefreshUpdate)
+    return await run_in_backup_threadpool(
+        request.app.state.external_subscriptions.update_refresh,
+        source_id, payload, owner_username=identity.username,
+    )
 
 
 @account_router.put("/{source_id}/nodes/{node_id}", response_model=ExternalSourceDetail)

@@ -12,6 +12,32 @@ export type AccountExternalSourceCreate = Omit<ExternalSourceCreate, "owner_user
 
 export interface ExternalRevisionRequest { expected_revision: number }
 
+export type ExternalRefreshCode = "never" | "refresh_succeeded" | "fetch_failed" | "parse_failed" |
+  "credentials_unavailable" | "source_changed" | "worker_interrupted" | "node_limit" | "refresh_failed" | "restore_paused";
+export interface ExternalRefreshRead {
+  enabled: boolean;
+  interval_minutes: number;
+  scope: "saved_only" | "all";
+  paused: boolean;
+  running: boolean;
+  next_run_at: string | null;
+  last_attempt_at: string | null;
+  last_finished_at: string | null;
+  last_success_at: string | null;
+  code: ExternalRefreshCode;
+  consecutive_failures: number;
+  imported_count: number;
+  updated_count: number;
+  missing_count: number;
+  new_available_count: number;
+}
+export interface ExternalRefreshUpdate extends ExternalRevisionRequest {
+  enabled: boolean;
+  interval_minutes: number;
+  scope: "saved_only" | "all";
+  accept_changes: boolean;
+}
+
 export interface ExternalSourceUpdate extends ExternalRevisionRequest {
   name: string;
   enabled: boolean;
@@ -37,6 +63,8 @@ export interface ExternalSourceRead {
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Absent only on older backends; schedule writes require the new contract. */
+  refresh?: ExternalRefreshRead;
 }
 
 export interface ExternalSourcesResponse { sources: ExternalSourceRead[]; license_required: false }
