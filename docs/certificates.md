@@ -69,8 +69,8 @@ or lego executable:
 
 DNS and IPv4 targets use the existing Agent deployment flow. Validating a
 certificate for an **IPv6 literal target** requires an Agent build containing
-the IPv6 certificate-validation fix. This fix is currently source-only: the
-published Agent `0.3.0a0` release and the panel's bootstrap pin are unchanged.
+the IPv6 certificate-validation fix, included in Agent `0.3.0a1` and the updated
+panel bootstrap pin. Existing `0.3.0a0` installations require an explicit upgrade.
 Generating or exporting a certificate with IPv6 SANs happens on the control
 plane and does not require an Agent update.
 

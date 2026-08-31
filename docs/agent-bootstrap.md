@@ -60,10 +60,11 @@ checks their pinned hashes and `BUILD.json` source/version identity, and safely
 extracts the host installer. It separately verifies the pinned official Xray
 archive. Neither an unpinned `latest` download nor `curl | bash` is used.
 
-The bundled selection is Agent `0.3.0a0` (an alpha/Preview prerelease) and
+The bundled selection is Agent `0.3.0a1` (an alpha/Preview prerelease) and
 official Xray `v26.3.27` for x86-64. The exact artifact identities are in
 `backend/app/open_node/resources/agent-release.json` and the
-[Agent release record](releases/agent-0.3.0a0.md).
+[Agent release record](releases/agent-0.3.0a1.md). New installation configs enable
+online-user statistics on policy level 0; existing hosts are not changed.
 
 The initial Xray configuration has a loopback-only StatsService, a direct
 outbound and **no public proxy inbound**. Create the intended nodes/inbounds

@@ -179,8 +179,8 @@ smoke prerequisites, and installer support boundary.
 ## Current Milestone
 
 The production control-plane Preview remains on the hardened `cb1eb0c`
-baseline. The newer [Agent 0.3.0a0 alpha](https://github.com/FengYuchen1314/open-node/releases/tag/agent-v0.3.0a0)
-is published from exact `6ca84e2`, with a verified wheel, bootstrap archive,
+baseline. The current [Agent 0.3.0a1 alpha](https://github.com/FengYuchen1314/open-node/releases/tag/agent-v0.3.0a1)
+is published from exact `1484aeb`, with a verified wheel, bootstrap archive,
 source manifest and checksum list. It is a prerelease, not a stable/latest
 release. The supported scope is a new installation or controlled migration on Debian 12
 amd64, one control-plane process and worker, and non-root managed Agents/Xray.

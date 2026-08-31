@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
   "agent": {
-    "version": "0.3.0a0",
-    "source_commit": "6ca84e21202950bf5ee4754a8ae20e28dbde42ed",
-    "tag": "agent-v0.3.0a0",
+    "version": "0.3.0a1",
+    "source_commit": "1484aeb1dce610b127e52eb83a562d4d65f96124",
+    "tag": "agent-v0.3.0a1",
     "wheel": {
-      "filename": "open_node_agent-0.3.0a0-py3-none-any.whl",
-      "url": "https://github.com/FengYuchen1314/open-node/releases/download/agent-v0.3.0a0/open_node_agent-0.3.0a0-py3-none-any.whl",
-      "sha256": "ef7267b062db6a4128a63b6a5e0228e40f749b61fd3a076c09dfd826f8c691fd"
+      "filename": "open_node_agent-0.3.0a1-py3-none-any.whl",
+      "url": "https://github.com/FengYuchen1314/open-node/releases/download/agent-v0.3.0a1/open_node_agent-0.3.0a1-py3-none-any.whl",
+      "sha256": "11a566eb9a064f84dd022afe0a5baf97a0d20b1a6e564c7eafb2402665e6f2a3"
     },
     "bootstrap": {
-      "filename": "open-node-agent-bootstrap-0.3.0a0.tar.gz",
-      "url": "https://github.com/FengYuchen1314/open-node/releases/download/agent-v0.3.0a0/open-node-agent-bootstrap-0.3.0a0.tar.gz",
+      "filename": "open-node-agent-bootstrap-0.3.0a1.tar.gz",
+      "url": "https://github.com/FengYuchen1314/open-node/releases/download/agent-v0.3.0a1/open-node-agent-bootstrap-0.3.0a1.tar.gz",
       "sha256": "9bc36c9c36b169fe1dcc67269eb11a4a12f0602ab31fc8aac493b8510dfe1310"
     },
     "build": {
       "filename": "BUILD.json",
-      "url": "https://github.com/FengYuchen1314/open-node/releases/download/agent-v0.3.0a0/BUILD.json",
-      "sha256": "3240a9a05b3507a4614b6cba91b560aaa1095acb79b599ad8a2cccf67e683d8f"
+      "url": "https://github.com/FengYuchen1314/open-node/releases/download/agent-v0.3.0a1/BUILD.json",
+      "sha256": "b503249361d1307b8d7caf194b1607c1e54cc1424f257a140131b32e58aae4a3"
     }
   },
   "xray": {
