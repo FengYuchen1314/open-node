@@ -29,3 +29,16 @@ parser, stored-ZIP validator, internal staging writer and the read-only
 private copy and never loads application settings, starts workers or restores
 files. It reports database, key, provenance, snapshot and restoration checks as
 not performed. This is not an online backup/download or recovery feature.
+
+The CLI can encrypt an existing v1 package with
+`open-node-backup encrypt PATH --recipient AGEKEY --output FILE`, or validate
+an encrypted package with `open-node-backup validate PATH --identity KEYFILE`.
+These operations use the pinned official age v1.3.2 binary bundled in the Docker
+image, with exactly one native X25519 recipient. A Python-only installation does
+not install that executable automatically. Output is private ciphertext created
+without replacing an existing path; validation never publishes plaintext.
+The identity file must belong to the caller, be a single-link regular file with
+mode 0400 or 0600, and contain one native key. Neither operation reads application
+settings or proves the database, stored credentials or snapshot are recoverable.
+Temporary space can approach twice the input size; the default Compose `/tmp`
+limit remains 64 MiB. See the format guide before processing larger files.

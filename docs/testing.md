@@ -19,9 +19,153 @@ VPS.
 
 ## Remote Test Command
 
+### 备份加密：候选切片的专项验证
+
+此切片在已发布的 `2a28103` 格式层之上新增官方 age 加密和带私钥的只读验证，
+不创建应用快照，也不提供网页备份或恢复。完整工作树 R1 冻结为 564 个文件：
+归档 SHA-256 为
+`f503f0f0130584380c0dde7dbc21815bdd4b797d9426841b5a0926c323b6e546`，
+逐文件清单为
+`9501bbd6b7b43faf977ce140f198ff156ef1ff39713632b1504a8b981e6e30db`。
+它来自 `9602217` 加候选修改，不能冒充一个精确 Git 提交。本节记录已经完成的
+专项、完整后端、真实大包与工作树镜像；后续精确 Git 提交验收尚在进行。
+
+| 专项 | 实际结果与边界 |
+| --- | --- |
+| 加密服务 | `/tmp/open-node-backup-encryption.deNYrJ9w/source-r6`：163 项通过，零跳过；144 项边界/受控执行器测试，19 项实际调用固定官方 age。Ruff、编译均通过。包括关闭标准 FD 后的真实加解密、错误密钥与损坏密文拒绝、非主线程运行及只读匿名输出。 |
+| 独立恶意输入 | `/tmp/open-node-encryption-adversarial.EL3RQEgF/gate-r2`：316 项替身/输入边界和 49 项原生专项通过，零跳过；Ruff、编译、runner 均为 0。49 项中，40 项调用了真实官方进程，2 项用官方 scrypt 向量验证预检拒绝，7 项验证可执行文件拒绝；不能把 49 项全部称为密码学往返。 |
+| 命令行与文件发布 | `/tmp/open-node-backup-encryption-root.SF18OwaR/evidence-cli-r4`：154 项通过，零跳过，Ruff 通过；其中原只读 CLI 77 项、新入口 77 项。新测试只替换加密服务，真实执行参数、权限、FD、短写、磁盘错误和发布逻辑，不作为密码学证据。 |
+| 容器 age 获取器 | `/tmp/open-node-age-fetch-v132.3bj2SJWK/source-r3`：158 项离线测试通过，零跳过；Ruff、编译均通过。另通过真实官方 HTTPS 分别取得 amd64/arm64 归档，核对摘要、ELF 和完整许可，只发布 `age` 与 `LICENSE`。这不是 arm64 容器运行验收。 |
+
+服务文件 SHA-256 为
+`5f44494b9b68685b5b0c57001094096aebde18e44b08b1b3ea4475d0715a916f`，
+命令行文件为
+`f6ef2c6e0f026808c4c02771f194fc275c5f6a85a0059ae722f2fa8a1543cacd`。
+root 独立核对了服务的 1201 项证据和独立测试的 121 项证据，并直接读取原始 JUnit：
+服务 163 项 JUnit 为
+`f1ed257a51d9d7940607e82c203abbbf0183321cb55d611be4ff99c75e52bf5e`；
+独立原生 49 项 JUnit 为
+`f6683968946f105e798bf0d30870b76fb8b0d359d89da43600684dc170a7eda0`；
+CLI 154 项 JUnit 为
+`f3730bd6065f94e24597fc7931f328debbc567d7275f17f526313116466e9099`。
+自有进程和 namespace 已退出，源文件、6344 个依赖文件及四个依赖链接未变。
+
+独立超时测试在真实官方 age 已 exec 后暂停它，保留产品的 30 秒硬期限；实际
+用例耗时 30.074 秒，随后真实 kill/reap。取消测试只注入一次取消异常，子进程
+终止和回收不使用替身。它不证明取消外层 `asyncio.to_thread` 就会停止工作线程。
+默认托管 CI 没有设置原生工具路径时，服务 19 项与独立 49 项会显式跳过；VPS
+专项使用 `OPEN_NODE_BACKUP_AGE_TEST_BINARY`，独立组另设置
+`OPEN_NODE_BACKUP_AGE_VECTOR_DIRECTORY`，因此本轮没有跳过。
+
+CLI 的失败测试确认：加密失败不覆盖已有目标，源和私钥 FD 会关闭；完整密文
+发布后的目录同步或终端输出失败可能返回非零并留下完整新文件。此时不回滚公共
+目标名，其他进程随后放入的替换文件也不会被删除。随机私有临时文件的清理是
+可信目录内的尽力清理，不承诺对同 UID 恶意进程实现原子的比较后删除。
+
+所有初轮失败保留。独立 R1 的 365 项测试虽通过，但测试文件有两项 Ruff 问题，
+且默认 Ruff 缓存向其私有 source 新增四个文件，runner 因而为 1；R2 只修测试格式、
+将缓存放到自有运行目录，重新全过。CLI R2 为 149 通过、1 失败：测试把一次快速
+等长改写当作必然可观察的 stat 变化；原失败瞬间没有单独采集 stat，不能声称已
+记录其确切时序。另做的真实文件控制实验中，256 次快速等长改写有 252 次 stat
+九元组不变；显式推进 mtime 的 256 次均被拒绝。R3/R4 仅把测试限定为可观察的
+修改，没有将 stat 检查包装成快照锁。输入仍须是已经完成、独占的备份包。
+
+此前还单独运行过官方 age v1.3.2 互操作实验，根目录为
+`/tmp/open-node-age-interop.spzVuJIj`。66 次小输入调用与 6 次大包阶段调用验证了
+流式认证的边界：某些尾部损坏会先输出部分明文；恰好两块的明文在追加/拼接后
+甚至会全部输出，官方进程最后仍失败。因此服务必须等官方进程成功退出并完成
+独立 ZIP 校验，才向调用者提供明文。该实验只测试官方工具，不冒充产品封装或
+安装后命令行验收。age 的认证也不证明发送者身份、数据库有效性或恢复就绪。
+
+正常 Dockerfile 已构建工作树镜像
+`sha256:6c363723a8de092106950da59712c853cd4795c6f710c213b5ad75ce0ef2a83c`，
+OCI revision 明确为 `working-tree-9602217-backup-encryption-r1`。
+`/tmp/open-node-backup-encryption-image.wG1oyvkm/evidence/report.json`
+通过四个阶段：已安装文件比较、64 MiB CLI 与负例、128 MiB 同输入往返、独立新应用。
+111 个 Python 文件匹配冻结源；相对精确 `2a28103` 镜像，只有 `backup_cli.py`
+变化并新增加密服务，其余 109 个模块和 40 个前端文件逐字节相同。wheel 仅
+`METADATA`、`RECORD` 变化；本轮修改的 `backend/README.md` 是元数据构建输入。
+固定官方 amd64 age 为 6,977,014 字节、root 所有、0755，完整 2,975 字节 LICENSE
+也在镜像中；没有安装 age-keygen 或插件。
+
+root 读取了原始 27 项 CLI/守卫记录与另外 2 项容量记录。正常 console/module
+加解密成功，旧纯 ZIP 输出保持 13 字段，新加密输出为 17 字段；错误私钥、截断、
+追加和拼接均失败。另一个输入的 age 进程成功解密，但内部 ZIP 非法，产品仍拒绝。
+这批检查运行在 UID/GID 10001、无网络、只读根文件系统、零 capability 的容器内，
+使用默认 entrypoint。观察器的导入/环境阻断检查有真实负控；未改产品执行、限额
+或输出。没有在 CLI 容器创建应用数据库或密钥。
+
+工作树镜像的 453 项最终证据已由 root 逐项核验。清单 SHA-256 为
+`cd8fb2cf503772d7c8cdb978b85aa5bd9a96fee79a4bc636dbf745499215f1ce`，
+报告为 `f23fe8de4c4d34c97205fa4a40df17b606b4397a8413ebd93a0f30e7b59f484c`，
+独立后核为 `febb4e833827ee4035eaafe89821a88029f412e1e127aa21066902ea1e44a7a0`。
+
+40 MiB 内容生成的 ZIP 为 41,943,887 字节，SHA-256 为
+`bfe2efc2f52c7d0b73d30aa6cf40ba90c5bf58eeabdae5ef62af089279541af3`。
+它在 64 MiB tmpfs 中通过纯 ZIP 校验，但加密时官方 age 退出 `1`，只读观察器在
+实际 wait 返回时记录可用空间为零。CLI 返回固定安全错误，未发布新输出，临时
+空间和 FD 恢复到基线。没有捕获 age 那次 write 的 errno，因此不把这个结果写成
+已追踪到具体 `ENOSPC` 系统调用。另一个 128 MiB 容器对同一输入完成加密与验证，
+密文为 41,954,327 字节，明文摘要相同，仍不宣称恢复就绪。默认 Compose 不变。
+
+独立应用容器通过 health、meta、branding 和 HTML SPA 检查；非 HTML 深链接仍为
+404。四个自有容器均正常退出 `0`，没有 OOM 或剩余容器/卷；既有比较镜像保留。
+原 R1 只因 helper 把 entrypoint 配置误认作绝对路径而失败，尚未调用 CLI；实际
+配置是 `open-node-entrypoint`。仅修 helper 后运行 R2，产品和镜像没有修改或 retag。
+此前 helper 静态行宽失败也原样保留。后续精确 Git 镜像须另行构建，不能用这个
+工作树 revision 代替。
+
+完整后端在 `/tmp/open-node-encryption-full-backend.ZgoSHNdy` 使用同一份 564 文件
+冻结源，只运行一次完整 pytest：**4048 项通过，零失败、错误和跳过，967.14 秒**。
+Ruff、编译、收集和 pytest 均退出 `0`。19 项服务原生、49 项独立原生专项和
+6 项真实 TLS 用例全部启用；TLS 地址仅配置在私有 namespace 的 loopback 上。
+root 直接解析了全部 4048 个原始 JUnit testcase，核对日志及独立后核。JUnit 为
+`7317b447f721e13471c8eb5f65b19a73be80a50b20d80a30d48262324c8d85fa`，
+日志为 `248942e7cd620539d0d54360706444453ecbd2c8929886efe004b193032cb0f4`。
+
+原 runner 的汇总结果是 `1`，不能写成全部退出码为零：helper 错把 CLI 的 154 项
+都计入 `test_backup_cli`，实际是原模块 77 项、新加密模块 77 项。原 runner、报告
+和退出码均保留，没有重跑测试或改产品。新独立后核正确按两组核验，通过且 SHA-256
+为 `a3ec2af5c49c45243d45a4663a397bec64e07af7f3b6243d7e2b21ca29cb215a`。
+564 个原文件不变，另外产生的是旧证书测试的六个 `.pyc`、私有测试数据库及
+`worker.lock` 共八项工件，均单独列出并保留。6344 个依赖文件、四个依赖链接、
+五个原生工具/向量输入及原冻结归档未变，测试进程和 namespace 已无持有者。
+root 还逐项复核了 4254 项最终工件和 27 项封存链；清单分别为
+`f2819dba217c4685ba91b735722eff847e7c1e1d70c28d7a60c9b272e0acd8cb`、
+`ccccc804b1767f243367d3f8aa5914ddcb6260f8f4b0bf14c1ac64b1f83d2e99`，
+`final-seal.json` 为
+`2570c1e1fc64fddf0932c013d6ca36f7a5a3f8ef6c3ab61f53dc351dafbfa44a`。
+
+真实大包验收位于 `/tmp/open-node-encryption-max.LtwXeRuR`，使用此前保留的
+**1 GiB 正文、4096 文件、1,075,004,637 字节 ZIP**，不是替身流，也没有修改产品
+字节、时间或文件数限制。实际模块 CLI 加密退出 `0`，耗时 24.825 秒；实际
+`validate --identity` 退出 `0`，耗时 13.538 秒。密文为 1,075,267,285 字节，SHA-256
+为 `c5ad22cf9fac1b1621973a650fdc45b7926f28644c4618d938986cf42964c836`。
+两份报告均为 17 字段，解密验证的 `authenticated_decryption` 为真，
+`restoration_ready` 仍为假。
+
+另一次独立库解密在 15.398 秒内完成，并直接读回只读、无缓冲的匿名 FileIO：
+起始内核/流位置同为 0，中间位置 17，最终位置 1,075,004,637；写入被内核拒绝。
+解密后重新计算的完整 ZIP 摘要为
+`d8504e8916eab114c499a3e4ef924100916d1e64ff8c7b33e3c4ea8ef5f9dbc3`，
+与保留输入完全一致。三阶段 `wait4` 峰值 RSS 分别为 30,832、30,968、31,496 KiB；
+这是子进程及其已回收后代的统计，不是 age 堆内存或主机缓存大小。
+
+该门使用私有挂载/网络 namespace 和磁盘暂存目录，不是默认 64 MiB 容器。
+采样观察到自有文件最多占用 3,225,612,288 个分配字节；这不是绝对峰值保证。
+官方工具、输入和源码只读绑定，主机没有留下 `/usr/local/bin/age` 或传播挂载。
+仅在复核 inode、大小、摘要后删除本门新生成的密文，原 1 GiB ZIP 没有改动；
+暂存、输出目录、匿名 FD 和自有进程均清空。root 直接读取了原始 CLI 输出、
+三份资源记录和清理/主机后核，并验证了 68 项工件及 12 项最终链：清单分别为
+`582178c2c002a2a49ceacf7f1a80616a5f4a0dc93f8f54ff0d93e9ddccfa478a`、
+`a0d49e6b2f3d34aee9fea175d9c089ba420418f9f8e89ad0c5a583307f560c90`，
+最终封存为 `918cb00aab5d2d263b9f54144ee95dd5d7fa5a642baa182bde2b26a956407825`。
+初次准备目录 `/tmp/open-node-encryption-max.1dKQIpLZ` 因缺少 GNU time、helper
+误要求清单路径带 `./` 而停止，均未运行产品；失败记录保留。
+
 ### Backup v1 format — structure checks, not recovery
 
-The new [format and CLI contract](backup-format.md) follows the pinned-source
+The `2a28103` [format and CLI contract](backup-format.md) follows the pinned-source
 [backup plan](backup-plan.md). It does not implement a consistent online snapshot,
 authenticated encryption, a downloadable Web backup, extraction or recovery.
 The existing installer-level stopped-volume backup is unchanged. All fixtures

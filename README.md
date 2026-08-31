@@ -67,9 +67,14 @@ This is the two-field first slice, not complete general-settings parity.
 an internal staging writer and `open-node-backup validate PATH [--json]` with
 Chinese output. The command checks a private copy without loading application
 configuration or restoring data. Passing structure and hashes does not verify
-the database, keys, provenance or recoverability. Online snapshots, encryption,
+the database, keys, provenance or recoverability. The encryption extension adds
+`encrypt PATH --recipient AGEKEY --output FILE` and
+`validate PATH --identity KEYFILE`, using a pinned official age executable and
+private staging. It accepts one native X25519 recipient, never overwrites an
+existing output, and never publishes decrypted plaintext. Online snapshots,
 Web download and restore remain unfinished; the existing stopped-volume
-installer backup is unchanged.
+installer backup is unchanged. See the guide for private-key and temporary-space
+requirements; a successful envelope check is not sender authentication.
 
 Subscribers use the separate `/account` portal. Administrators provision their
 login passwords directly or issue a high-entropy, single-use

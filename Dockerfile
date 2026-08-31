@@ -18,6 +18,11 @@ ARG TARGETARCH
 COPY scripts/container/fetch-lego.py /fetch-lego.py
 RUN python /fetch-lego.py "$TARGETARCH" /out
 
+FROM python-base AS age
+ARG TARGETARCH
+COPY scripts/container/fetch-age.py /fetch-age.py
+RUN python /fetch-age.py "$TARGETARCH" /out
+
 FROM python-base AS runtime
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="Open Node" \
@@ -39,6 +44,8 @@ COPY --from=backend /opt/venv /opt/venv
 COPY --from=frontend /build/dist /opt/open-node/frontend
 COPY --from=lego /out/lego /usr/local/bin/lego
 COPY --from=lego /out/LICENSE /usr/share/licenses/lego/LICENSE
+COPY --from=age /out/age /usr/local/bin/age
+COPY --from=age /out/LICENSE /usr/share/licenses/age/LICENSE
 COPY LICENSE /usr/share/licenses/open-node/LICENSE
 COPY --chmod=755 scripts/container/entrypoint.sh /usr/local/bin/open-node-entrypoint
 WORKDIR /opt/open-node
