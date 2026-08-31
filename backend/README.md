@@ -16,8 +16,9 @@ version history, account contact editing, version revocation, and deployment to
 owned Agent certificate directories. Updating this package installs the pinned
 Certbot ACME client used for account/revocation operations.
 
-[Administrator Telegram notifications](../docs/notifications.md) have passed
-isolated integration gates and await publication: encrypted bot configuration,
-offline preview, durable test delivery and package-expiry reminders. The first slice uses SQLite and a
+[Administrator Telegram notifications](../docs/notifications.md) are published
+in `bf8eaa8` after isolated integration, exact-commit Docker and CI gates:
+encrypted bot configuration, offline preview, durable test delivery and
+package-expiry reminders. The first slice uses SQLite and a
 separate private notification key directory; it does not implement user binding,
 bot commands, payment or renewal approval.

@@ -1,8 +1,9 @@
 # Notifications: first-slice design and implementation boundaries
 
-Status: implemented, not published. Unified regression, production-browser and
-working-tree Docker gates passed; exact-Git-revision Docker and clean-checkout CI
-remain pending. See the [operator guide](notifications.md) and [test record](testing.md).
+Status: published on `main` in `bf8eaa8e365f302aced10ab2eac9a340d7553d8a`.
+Unified regression, production-browser, working-tree and exact-Git Docker gates,
+and all four clean-checkout CI jobs passed. The running production instance was
+not upgraded. See the [operator guide](notifications.md) and [test record](testing.md).
 Administrator Telegram configuration, preview, test and package-expiry reminders
 are one independent slice, not full notification or renewal parity.
 

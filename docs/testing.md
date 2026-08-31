@@ -19,12 +19,16 @@ VPS.
 
 ## Remote Test Command
 
-### Administrator Telegram notifications — unpublished integration
+### Administrator Telegram notifications — published first slice
 
 This is the first administrator-only notification slice described in the
 [operator guide](notifications.md), not full Telegram Bot or renewal parity.
-It is working-tree code after public `caf016c`; no notification code is in that
-published commit and the production container has not been upgraded.
+The feature is published on `main` in
+`bf8eaa8e365f302aced10ab2eac9a340d7553d8a`, after the unified-source gates below,
+the exact-Git Docker gate and all four clean-checkout CI jobs passed in
+[run 33364557514](https://github.com/FengYuchen1314/open-node/actions/runs/33364557514).
+The preceding public `caf016c` did not include notification code.
+The production container has not been upgraded.
 No real Telegram credentials or destination have been used.
 
 The new root integration environment is
@@ -74,8 +78,8 @@ All 531 source files, 24,024 shared dependency files and the 39 administrator / 
 Probe assets stayed unchanged. Combined asset manifest SHA-256 is
 `39491685f0277eec9be2250e208817d4980d29f39ac91eafbcce1107ea8c3f61`.
 
-The production-bundle browser and working-tree Docker gates below have passed.
-Clean-commit CI and the exact-Git-revision Docker gate remain pending.
+The production-bundle browser, working-tree Docker and exact-Git Docker gates
+below have passed. Clean-commit CI also passed for the full `bf8eaa8` revision.
 Earlier Chinese/external gates further below are separate
 evidence and must not be relabeled as notification acceptance.
 
@@ -166,6 +170,53 @@ The production container was not restarted or upgraded. Evidence hashes:
 - `independent-postcheck.json`: `7dac7f0a97740ff96227a29c322b332e94204643762c2a0b7669809a3af929e8`.
 - `executed-source.tar`: `0baf9494cff019f64572c4017783243a7299f61cb05bc5252556e3edc4871447`.
 - `final-evidence.sha256`: `206c49cf1349355abfe3dc6eb9bed418659d62903bfbe205d85d5542fff4a11b`.
+
+#### Notification clean exact-commit publication gate
+
+A fresh GitHub clone at
+`/root/open-node-notifications-commit-bf8eaa8.JFudzeQC/source` was checked out
+detached at `bf8eaa8e365f302aced10ab2eac9a340d7553d8a`. All 531 tracked files
+remained clean and hash-identical throughout the gate. Against the earlier R5
+snapshot, 522 files were identical; two smoke fixtures and seven documentation
+files differed. The application, tests and other build inputs matched R5, but
+`backend/README.md` also feeds wheel metadata. The initial all-build-inputs-equal
+comparison correctly failed and is retained as `source-comparison.json`.
+The subsequent reviewed allowlist records that specific documentation change;
+it does **not** claim that all build inputs were identical.
+
+The normal Dockerfile rebuilt the frontend and backend wheel from this clean
+commit, without retagging the working-tree image or reusing its wheel:
+
+- Image tag: `open-node:notifications-commit-bf8eaa8e365f302aced10ab2eac9a340d7553d8a`.
+- Image ID: `sha256:fc0feccc66b9a2ea5877dcfb99e7e37fcdef70cd129ca4825064521c316eee5f`.
+- OCI revision: the full `bf8eaa8` commit above.
+- Build: 2026-08-31 06:37:07–06:37:36 UTC.
+- Fixture: unchanged `4610687487d15a7c88209e3ec3cc92411a4893b0ccdb644845f4ab9a3d461a34`.
+
+All 16 Docker phases passed with exit zero at 06:40:08–06:41:25 UTC. The 39
+administrator assets (1,789,471 bytes) matched the previously verified R5 assets.
+The same permission, encryption, session continuity, independent cold recovery,
+missing/wrong-key and original-key restoration checks described above passed.
+Each of the six SIGTERM/143 stops had matching current-start shutdown evidence,
+took 0.187–0.259 seconds and had no OOM. No delivery was accepted and no real
+Telegram endpoint was reachable.
+
+Seven containers and three volumes bearing owner
+`5019e8fb87e4b72498188d18dbce1112` were cleaned up; the independent postcheck
+found zero owned leftovers. The frozen R5 source and all 42 main/Probe assets,
+424 protected production/shared-candidate files, and production container
+identity, image, start time and restart count remained unchanged. Evidence paths
+below are relative to `/root/open-node-notifications-commit-bf8eaa8.JFudzeQC`:
+
+- `docker-r1/report.json`: `b9c69297478e0d2324b8413ad2b441175a51c86aaf4f2eeb3db54196af3d89d6`.
+- `evidence/independent-postcheck-r1.json`: `aacaf64bbbe059324e8c2d12211aceac61e2d429f56602adca46a53e1dcf1cd3`.
+- `evidence/exact-commit-source.tar`: `2756de0f753d77339fb0fee8f38e0aaf14678b55ce410aa761ec8a8b76648cf3`.
+- `evidence/final-evidence.sha256` (63 evidence files): `0a72ad3f24f8e351cb5a23849a846772ae1596cadcd0044fea58ef1c58515f21`.
+
+After the exact-commit Docker and Backend, Agent, Frontend and Probe Worker CI
+jobs all succeeded, a non-forced fast-forward published `bf8eaa8` to `main`.
+Subsequent documentation-only commits do not change this functional baseline.
+New system-settings work is a separate, unverified slice, not part of these gates.
 
 ### External subscriptions
 

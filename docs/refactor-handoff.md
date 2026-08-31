@@ -23,10 +23,11 @@ Agent 605 项、Worker 5 项通过；中文浏览器和隔离 Docker 多项验�
 早先一次 gRPC 转发失败在新完整运行中未复现，原因仍未知，不称为已定位修复。
 R4 完整前端 796 项和精确 `998839b` 干净源码的 Docker 验收已通过。四项 GitHub CI
 全部通过后，外部订阅和中文界面已以 `998839b` 发布到 `main`；生产保持原镜像。
-工作区随后加入管理员 Telegram 配置、预览/测试、持久投递和套餐临期提醒。
+随后加入管理员 Telegram 配置、预览/测试、持久投递和套餐临期提醒。
 后端 2298 项、前端 890 项/72 文件、双构建、浏览器及工作树镜像验收已通过，
-待精确 Git 镜像和 CI 后发布；不能归入上述 `998839b` 的验收结果。通知的其他规则、通用设置、
-应用内备份和完整迁移仍未补齐。
+精确 `bf8eaa8` Git 镜像的 16 阶段验收和四项 CI 也已通过，通知首期已发布到
+`main`；不能归入上述 `998839b` 的验收结果。生产没有升级，也没有真实 Telegram
+投递验收。通知的其他规则、通用设置、应用内备份和完整迁移仍未补齐。
 建议在新聊天中直接说明：
 
 > 请先阅读 `docs/refactor-handoff.md`、`docs/mmwx-source-parity.md` 和 `docs/testing.md`，核对公开主线、候选分支、VPS 隔离测试 checkout 和生产镜像四者的实际 revision。继续参考用户提供的四个固定官方仓库，不要把受限 Preview 首发等同于完整 MMWX 替代。测试、构建、浏览器和真实流量验收都在 `185.99.135.224` 的隔离候选环境运行，不动生产服务和数据库。公开 HTTPS、Cloudflare 账户部署与异地加密备份需操作者的实际输入，不能用本地通过替代外部验证。
@@ -55,10 +56,10 @@ R4 完整前端 796 项和精确 `998839b` 干净源码的 Docker 验收已通�
 规则/provider 生态仍有缺口。首期用法和密钥恢复见
 [`external-subscriptions.md`](external-subscriptions.md)，官方源码接点与原设计记录见
 [`external-subscriptions-plan.md`](external-subscriptions-plan.md)。通知、完整迁移和
-应用内备份恢复也未完成。管理员 Telegram 配置、测试和套餐到期提醒已有未发布的
-工作区实现，用法见 [`notifications.md`](notifications.md)，官方源码接点、安全边界
-和验收设计见 [`notifications-plan.md`](notifications-plan.md)。隔离整体验收已过，
-精确提交镜像和 CI 尚待完成。没有向真实 Telegram 聊天发送消息，也没有升级生产。
+应用内备份恢复也未完成。管理员 Telegram 配置、测试和套餐到期提醒已在 `bf8eaa8`
+发布，用法见 [`notifications.md`](notifications.md)，官方源码接点、安全边界
+和验收设计见 [`notifications-plan.md`](notifications-plan.md)。隔离整体验收、
+精确提交镜像和 CI 已通过。没有向真实 Telegram 聊天发送消息，也没有升级生产。
 这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
 单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
 Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 MMWX，但它们不应
@@ -68,9 +69,10 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 | 项目 | 当前状态 |
 | --- | --- |
-| GitHub `main` | 已包含外部订阅/中文界面功能提交 `998839ba06429d47de2e12b5562b4a4c4cad6a62`，以及此前 React/Ant Design、面板 Agent 安装等功能；后续只含文档的提交不改变该功能基线 |
-| 当前候选 | 通知首期在公开文档提交 `caf016c` 后实现，隔离统一源验收已过，精确提交镜像与 CI 尚待完成；不是 `998839b` 的原有功能。之前 `998839b` 的 GitHub run `33359846368` 四项全过并已发布，不要重做 |
+| GitHub `main` | 已包含通知首期功能提交 `bf8eaa8e365f302aced10ab2eac9a340d7553d8a`、外部订阅/中文界面 `998839b`，以及此前 React/Ant Design、面板 Agent 安装等功能；后续只含文档的提交不改变功能基线 |
+| 当前候选 | 通知首期 `bf8eaa8` 已通过精确提交 Docker 和 GitHub run `33364557514` 四项 CI，并同步到 `main`。后续未提交的站点文字工作不属于该验收基线，必须单独核对和验收 |
 | 通知统一工作源 | `/tmp/open-node-notifications-integration.v2sQeZ5w/source-r5`，531 文件归档 SHA-256 `9e0ea5c8ecd4c637fc0d7a900a3b5fa1e678588becaf32e12a793c7404676916`。后端与已验 R4 逐字节一致：2298 passed、0 skip；前端 890/72 files、类型检查、双构建通过。浏览器 12 图、真实 40 秒恢复/人工重试、工作树镜像 16 阶段及冷恢复通过，见 `testing.md`；没有真实 Telegram canary |
+| 通知精确提交镜像 | `/root/open-node-notifications-commit-bf8eaa8.JFudzeQC/source` 是干净 `bf8eaa8`，531 个跟踪文件保持不变。正常 Dockerfile 重建的镜像 ID `sha256:fc0feccc66b9a2ea5877dcfb99e7e37fcdef70cd129ca4825064521c316eee5f`、OCI 完整 revision、39 项前端资产及 16 阶段隔离容器验收通过；7 个临时容器、3 个卷已清理。`backend/README.md` 是相对 R5 的文档变化，也是 wheel 元数据构建输入，详见 `testing.md`，不能声称所有构建输入完全一致 |
 | 外部订阅英文基线 | 在公开 `0ffc072` 上新增，后续随中文版发布；冻结 VPS 源为 `/tmp/open-node-external-integration.YG95YRYU/source`。后端 1927 passed / 6 opt-in skipped（6 个真实 TLS 用例另行全部通过），Agent 605、前端 570/65 files、Worker 5，以及浏览器/客户端/隔离 Docker 均通过；该目录不再覆盖 |
 | 中文工作源 | 当前产品冻结于 `/tmp/open-node-zh-release.fp33Igbt/source-r4`，源码归档 SHA-256 `5c8d6008d20c692710e9e4718b935e87a3558c2172f400c5dbb6d9ccf6fdec04`。R4 全量前端 796/70 files、双构建及受影响实机流程通过；后端与已验 1927 + 6 opt-in skips（230 项 fetcher 含 6 项真实 TLS 全过）的源码相同，Agent 605、Worker 5 代码亦未变。客户端两次完整验收通过，初次 gRPC 失败原因仍未知。R2 和所有失败记录保留，详见 `testing.md` |
 | 中文精确提交镜像 | `/root/open-node-zh-commit-998839b.c3ycWOn7/source` 是干净 `998839b`；非文档源码与已验 R4 一致。精确 OCI label、38 项打包前端资产、中文浏览器、重启保留、外部密钥及 HTTPS 抓取通过。镜像 ID `sha256:77b0d0faed6aa4f3e2195eebb44be8c506c6a62bc624363c3ab4cb2f2eba8b04`；临时容器和卷已清理，不是生产镜像 |
@@ -434,7 +436,7 @@ ssh root@185.99.135.224 "git -C /opt/open-node status --short; git -C /opt/open-
 - [`external-subscriptions-plan.md`](external-subscriptions-plan.md)
 - [`external-subscriptions.md`](external-subscriptions.md)
 - [`notifications-plan.md`](notifications-plan.md)（首批实现边界与官方源码接点）
-- [`notifications.md`](notifications.md)（工作区通知功能用法；发布状态见文件开头）
+- [`notifications.md`](notifications.md)（已发布的首批通知功能用法与真实投递边界）
 
 工作约束：
 
