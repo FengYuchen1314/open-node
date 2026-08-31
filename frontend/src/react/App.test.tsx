@@ -15,7 +15,9 @@ vi.mock("../routes", () => ({ routes: [
   { path: "/subscriptions", component: () => <div>Subscriptions workspace</div> },
   { path: "/notifications", component: () => <div>Notifications workspace</div> },
   { path: "/system-settings", component: () => <div>System settings workspace</div> },
-  { path: "/account", component: () => <div>Separate subscriber portal</div> },
+  { path: "/account", component: () => <div>Separate subscriber portal</div>, meta: { subscriber: true } },
+  { path: "/account/external-subscriptions", component: () => <div>Subscriber external sources</div>, meta: { subscriber: true } },
+  { path: "/account/renewals", component: () => <div>Subscriber renewals</div>, meta: { subscriber: true } },
 ] }));
 vi.mock("../services/auth", async importOriginal => ({ ...await importOriginal<typeof import("../services/auth")>(), loadSession: vi.fn(), signOut: vi.fn() }));
 vi.mock("../services/branding", async original => ({ ...await original<typeof import("../services/branding")>(), getPublicBranding: vi.fn() }));
@@ -93,9 +95,13 @@ describe("React application shell", () => {
     expect(screen.getByText("Notifications workspace")).toBeTruthy();
     expect(document.title).toBe("通知设置 - Open Node");
   });
-  it("does not request an administrator session on the separate account route", async () => {
-    authState.ready = false; authState.session = null; mount("/account"); await flush();
-    expect(screen.getByText("Separate subscriber portal")).toBeTruthy();
+  it.each([
+    ["/account", "Separate subscriber portal"],
+    ["/account/external-subscriptions", "Subscriber external sources"],
+    ["/account/renewals", "Subscriber renewals"],
+  ])("does not request an administrator session on %s", async (path, content) => {
+    authState.ready = false; authState.session = null; mount(path); await flush();
+    expect(screen.getByText(content)).toBeTruthy();
     expect(loadSession).not.toHaveBeenCalled();
     expect(screen.queryByText("管理员登录")).toBeNull();
   });

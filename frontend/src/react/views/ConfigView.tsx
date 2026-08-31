@@ -8,6 +8,7 @@ import { acceptXrayConfigPendingRecovery, applyXrayConfigRecovery, createXrayRun
 import { cleanupExtraXrayRuntimeCredentials, createManagedNodeFromRuntimeInbound, getXrayRuntimeCredentialReconciliation, getXrayRuntimeNodeReconciliation, importManagedNodesFromRuntimeInbounds, listXrayRuntimeNodeDrafts, repairMissingXrayRuntimeCredentials, syncManagedNodeFromRuntime } from "../../services/subscriptions";
 import CommandInspector from "../components/CommandInspector";
 import LimiterPanel from "../components/LimiterPanel";
+import OnlineUsersPanel from "../components/OnlineUsersPanel";
 import StrictInputNumber from "../components/StrictInputNumber";
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 
@@ -489,6 +490,7 @@ export default function ConfigView(props: ConfigViewProps) {
     <Card title="工作区"><Typography.Paragraph type="secondary">MMW Agent 子接口配置操作</Typography.Paragraph><Form layout="vertical"><Form.Item label="目标服务器"><Select aria-label="目标服务器" value={selectedId || undefined} options={serverOptions} disabled={!serverOptions.length} onChange={(id) => selectServer(id)} /></Form.Item></Form><Tabs activeKey={activeTab} onChange={setActiveTab} items={[
       { key: "xray", label: "Xray", children: xrayTab }, { key: "system", label: "系统", children: systemTab }, { key: "runtime", label: "运行时", children: runtimeTab },
       { key: "limits", label: "限制", children: activeTab === "limits" ? <LimiterPanel key={selectedId} serverId={selectedId} inbounds={runtime.inventory?.inbounds ?? []} onCommands={receiveCommands} /> : null },
+      { key: "online", label: "在线用户", children: activeTab === "online" ? <OnlineUsersPanel key={selectedId} serverId={selectedId} /> : null },
       { key: "nginx", label: "Nginx", children: nginxTab }, { key: "sites", label: "网站", children: sitesTab }, { key: "files", label: "文件", children: filesTab },
     ]} /></Card>
     <Card title="命令结果" extra={<Button icon={<ReloadOutlined />} aria-label="刷新命令结果" onClick={() => void refreshCommands()} />}><Typography.Paragraph type="secondary">所选服务器的历史记录</Typography.Paragraph><CommandInspector commands={selectedCommands} streamFramesByCommand={frames} emptyText="暂无配置命令。" /></Card>

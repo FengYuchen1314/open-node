@@ -497,6 +497,7 @@ def apply_xray_system_config(
             level.update(
                 statsUserUplink=payload["stats_enabled"],
                 statsUserDownlink=payload["stats_enabled"],
+                statsUserOnline=payload["stats_enabled"],
             )
         submitted_system.update(
             statsInboundUplink=payload["stats_enabled"],

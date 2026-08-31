@@ -25,6 +25,11 @@ intentionally out of scope for this refactor.
 
 - Backend: FastAPI on Python 3.11+.
 - Agent: independent Python 3.11+ Linux package with an operator-provided Xray runtime.
+
+The Chinese configuration workspace now includes [online users and IPs](docs/online-users.md),
+with bounded Agent collection, explicit unavailable/partial states and automatic
+expiry of the displayed sample. Agent 0.3.0a1 or newer is required; IP counts are
+not device counts, and the data is administrator-only.
 - Frontend: React, official Ant Design, Vite, TypeScript.
 - Probe worker: Cloudflare Worker with Workers Static Assets.
 - Repository shape: one monorepo with `backend/`, `agent/`, `frontend/`, `probe-worker/`,

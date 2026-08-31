@@ -162,7 +162,7 @@ describe("Chinese subscriber portal", () => {
     subscriberState.session = { ...session };
     vi.mocked(subscriberProfile).mockResolvedValue({ ...profile, quota: { ...profile.quota, ...overrides, available: false } });
     await mount();
-    expect(screen.getByRole("alert").textContent).toContain(message);
+    expect(screen.getByText(message).closest('[role="alert"]')).toBeTruthy();
     const download = document.querySelector('[aria-label="下载订阅"]')!;
     expect(download.classList.contains("ant-btn-disabled") || download.hasAttribute("disabled")).toBe(true);
   });

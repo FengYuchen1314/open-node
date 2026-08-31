@@ -18,6 +18,11 @@ This agent is under active development. The implemented runtime path uses an
 operator-provided Xray binary, either as an owned subprocess or a configured
 systemd service. It is not yet a full replacement for every MMWX host operation.
 
+Version 0.3.0a1 adds bounded [online-user/IP telemetry](../docs/online-users.md)
+using the official Xray statistics API. It distinguishes unsupported, disabled,
+stopped, failed and partial collection from a valid empty sample. Existing Xray
+policies are not silently enabled; the administrator explicitly applies them.
+
 ## Configuration
 
 For a persistent host installation with a dedicated account, systemd service,

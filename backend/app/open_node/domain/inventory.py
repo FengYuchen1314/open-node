@@ -17,6 +17,11 @@ from pydantic import (
 )
 
 from open_node.domain.auto_speed import AutoSpeedRule
+from open_node.domain.online_users import (
+    OnlineCollectionRead,
+    OnlineCollectionReport,
+    validate_online_users,
+)
 
 MAX_AGENT_MESSAGE_BYTES = 4 * 1024 * 1024
 
@@ -500,11 +505,17 @@ class AgentTelemetryReport(BaseModel):
     reported_at: datetime | None = None
     stats: XrayStats | None = None
     online_users: dict[str, list[str]] = Field(default_factory=dict)
+    online_collection: OnlineCollectionReport | None = None
     user_speeds: dict[str, int] = Field(default_factory=dict)
     conn_counts: dict[str, int] = Field(default_factory=dict)
     system: SystemTraffic | None = None
     sysmetrics: ProbeSysMetrics | None = None
     latency: list[ProbeLatencySample] = Field(default_factory=list)
+
+    @field_validator("online_users", mode="before")
+    @classmethod
+    def bounded_online_users(cls, value):
+        return validate_online_users(value)
 
 
 class AgentTelemetryRead(BaseModel):
@@ -514,6 +525,7 @@ class AgentTelemetryRead(BaseModel):
     received_at: datetime
     stats: XrayStats | None = None
     online_users: dict[str, list[str]] = Field(default_factory=dict)
+    online_collection: OnlineCollectionRead = Field(default_factory=OnlineCollectionRead)
     user_speeds: dict[str, int] = Field(default_factory=dict)
     conn_counts: dict[str, int] = Field(default_factory=dict)
     system: SystemTraffic | None = None

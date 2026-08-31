@@ -107,6 +107,7 @@ from open_node.domain.inventory import (
     XrayRuntimeTunnelRead,
     XrayStats,
 )
+from open_node.domain.online_users import read_online_collection
 from open_node.domain.probe import (
     ProbeAccessTokenCreateResponse,
     ProbeAppearance,
@@ -907,6 +908,7 @@ class TelemetrySnapshotModel(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     stats: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     online_users: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    online_collection: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     user_speeds: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
     conn_counts: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
     system_rx_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -1657,6 +1659,10 @@ class InventoryStore:
         table_names = set(inspector.get_table_names())
         ledger_columns_to_backfill: set[str] = set()
         archive_columns_to_backfill: set[str] = set()
+        if "telemetry_snapshots" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector, "telemetry_snapshots", {"online_collection": "JSON"},
+            )
         if "subscription_plans" in table_names:
             self._sqlite_add_missing_columns(
                 inspector,
@@ -2134,7 +2140,12 @@ class InventoryStore:
                 reported_at=reported_at,
                 received_at=now,
                 stats=payload.stats.model_dump(mode="json") if payload.stats else None,
-                online_users=payload.online_users,
+                online_users=payload.online_users if (
+                    payload.online_collection
+                    and payload.online_collection.status in {"ready", "limited"}
+                ) else {},
+                online_collection=payload.online_collection.model_dump(mode="json")
+                if payload.online_collection else None,
                 user_speeds=payload.user_speeds,
                 conn_counts=payload.conn_counts,
                 system_rx_total=payload.system.rx_total if payload.system else None,
@@ -2158,7 +2169,14 @@ class InventoryStore:
             server = session.get(ServerModel, str(server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {server_id}")
-            telemetry = self._latest_telemetry_model(session, str(server_id))
+            # Live views follow controller receipt time. A skewed Agent clock
+            # must not pin an old online sample ahead of newer error/empty reports.
+            telemetry = session.scalar(
+                select(TelemetrySnapshotModel)
+                .where(TelemetrySnapshotModel.server_id == str(server_id))
+                .order_by(TelemetrySnapshotModel.received_at.desc())
+                .limit(1)
+            )
             return self._telemetry_read(telemetry) if telemetry else None
 
     def record_scan_result(
@@ -8687,6 +8705,7 @@ class InventoryStore:
                         "downlinkOnly": 2,
                         "statsUserUplink": True,
                         "statsUserDownlink": True,
+                        "statsUserOnline": True,
                     }
                 },
                 "system": {
@@ -9905,6 +9924,7 @@ class InventoryStore:
     @staticmethod
     def _telemetry_read(snapshot: TelemetrySnapshotModel) -> AgentTelemetryRead:
         system = None
+        online = read_online_collection(snapshot.online_collection, snapshot.received_at)
         if (
             snapshot.system_rx_total is not None
             and snapshot.system_tx_total is not None
@@ -9922,7 +9942,9 @@ class InventoryStore:
             reported_at=snapshot.reported_at,
             received_at=snapshot.received_at,
             stats=XrayStats.model_validate(snapshot.stats) if snapshot.stats else None,
-            online_users=snapshot.online_users or {},
+            online_users=(snapshot.online_users or {})
+            if online.status in {"ready", "limited"} else {},
+            online_collection=online,
             user_speeds=snapshot.user_speeds or {},
             conn_counts=snapshot.conn_counts or {},
             system=system,

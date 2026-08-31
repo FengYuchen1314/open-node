@@ -981,7 +981,9 @@ def configuration_data(job, claim, stats_address):
         "api": {"tag": "api", "listen": stats_address, "services": ["StatsService"]},
         "stats": {},
         "policy": {
-            "levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}},
+            "levels": {"0": {
+                "statsUserUplink": True, "statsUserDownlink": True, "statsUserOnline": True,
+            }},
             "system": {"statsInboundUplink": True, "statsInboundDownlink": True},
         },
         "inbounds": [],

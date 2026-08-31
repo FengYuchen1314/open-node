@@ -1,5 +1,30 @@
 # Testing
 
+## Online users/IP and Agent 0.3.0a1
+
+Focused VPS evidence: `/tmp/open-node-online.JUz2LGwv/evidence` and `evidence-r2`.
+The final feature checks passed **19 backend, 20 online-collector Agent tests,
+11 adjacent Agent tests, and 12 frontend tests**, with app/node type checks and
+the main production build. The real collector test used the pinned MMWX fork
+and verified a VLESS connection's IP appearing and disappearing on disconnect.
+No production or shared candidate was changed; tests ran in private namespaces.
+
+The initial collector called the wrong runtime accessor and its positive cases
+failed; changing it to `read()` passed all 20 collector tests. Nine overlong
+test lines were corrected without changing assertions; Ruff passed. Unchanged
+backend and frontend checks were not rerun.
+
+Previous public CI run `33408662933` reported 5 frontend failures and 1047 passes.
+Two failures came from a mocked subscriber route missing its new metadata;
+three came from assuming the account page contained only one alert after adding
+format help. The fixtures were updated, quota assertions remain specific, and
+subscriber isolation was expanded to both new account routes: **25 tests passed**.
+These focused fixes are not a claim that the prior full CI run passed.
+
+The same run's backend job hit its 30-minute limit at 75%, so it has no final
+test result. Its timeout is now 60 minutes without dropping tests. Agent release
+tags no longer launch a duplicate full suite; the main-branch push still does.
+
 ## Subscription clients, self-service sources, certificates and renewals — 2026-08-31
 
 Following the request to prioritize functional delivery, these changes use

@@ -24,8 +24,8 @@ existing Nginx service. Its desired running state participates in readiness.
 ## Prepare
 
 Use a trusted wheel built from this repository or the verified
-[0.3.0a0 prerelease](releases/agent-0.3.0a0.md). The current VPS test runner builds
-`agent/dist/open_node_agent-0.3.0a0-py3-none-any.whl`. The bootstrap deployment
+[0.3.0a1 prerelease](releases/agent-0.3.0a1.md). The current VPS test runner builds
+`agent/dist/open_node_agent-0.3.0a1-py3-none-any.whl`. The bootstrap deployment
 script uses only Python's standard library; package dependencies are installed
 into a separate virtual environment for each release, never the system Python.
 
@@ -59,7 +59,7 @@ Run from the repository checkout:
 
 ```bash
 sudo python3 agent/app/open_node_agent/service.py install \
-  --wheel agent/dist/open_node_agent-0.3.0a0-py3-none-any.whl \
+  --wheel agent/dist/open_node_agent-0.3.0a1-py3-none-any.whl \
   --config /root/open-node-agent.yaml \
   --xray-config /root/xray.json \
   --xray /usr/local/bin/xray
@@ -73,7 +73,7 @@ separate instance, supply both global options before `install`:
 ```bash
 sudo python3 agent/app/open_node_agent/service.py \
   --root /opt/open-node-agent-edge --unit open-node-agent-edge.service \
-  install --wheel /path/to/open_node_agent-0.3.0a0-py3-none-any.whl \
+  install --wheel /path/to/open_node_agent-0.3.0a1-py3-none-any.whl \
   --config /root/edge.yaml --xray-config /root/edge-xray.json --xray /usr/local/bin/xray
 ```
 

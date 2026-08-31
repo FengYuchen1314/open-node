@@ -163,8 +163,9 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             )
             or (
                 path.startswith(active_settings.api_prefix + "/servers/")
-                and path.rstrip("/").endswith("/bootstrap")
+                and path.rstrip("/").endswith(("/bootstrap", "/telemetry/latest"))
             )
+            or path.rstrip("/") == active_settings.api_prefix + "/agents/telemetry"
         )
 
     @app.middleware("http")

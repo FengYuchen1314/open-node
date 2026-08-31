@@ -12,6 +12,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from open_node_agent.config import AgentConfig
+from open_node_agent.online import collect_online
 
 MAX_CONFIG_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
@@ -722,6 +723,9 @@ class XrayRuntime:
         except (OSError, ValueError, AttributeError, TypeError):
             pass
         return None
+
+    async def online_users(self) -> dict:
+        return await collect_online(self, run_command)
 
     async def stats(self) -> dict | None:
         endpoint = self.stats_endpoint()

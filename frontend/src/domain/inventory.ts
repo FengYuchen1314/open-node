@@ -263,6 +263,14 @@ export interface ProbeLatencySample {
   at?: number | null;
 }
 
+export type OnlineCollectionStatus = "ready" | "limited" | "not_configured" | "stopped" | "unsupported" | "error" | "unknown" | "stale";
+export interface OnlineCollection {
+  status: OnlineCollectionStatus;
+  source: "xray_stats_api" | null;
+  received_at?: string | null;
+  expires_at?: string | null;
+}
+
 export interface AgentTelemetry {
   id: string;
   server_id: string;
@@ -270,6 +278,7 @@ export interface AgentTelemetry {
   received_at: string;
   stats?: XrayStats | null;
   online_users: Record<string, string[]>;
+  online_collection?: OnlineCollection | null;
   user_speeds: Record<string, number>;
   conn_counts: Record<string, number>;
   system?: SystemTraffic | null;

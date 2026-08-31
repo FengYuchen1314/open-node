@@ -162,7 +162,7 @@ export async function getLatestTelemetry(
   serverId: string,
   fetcher = authenticatedFetch,
 ): Promise<ServerTelemetryResponse> {
-  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/telemetry/latest`);
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/telemetry/latest`, { cache: "no-store" });
   if (!response.ok) {
     throw await apiError(response, "获取服务器遥测数据失败");
   }

@@ -198,6 +198,7 @@ class Agent:
             report["stats"] = await self.runtime.stats()
         except (ValueError, OSError, TimeoutError):
             report["stats"] = None
+        report.update(await self.runtime.online_users())
         limiter = await self.runtime.limiter.status()
         if limiter.get("available"):
             for key in ("user_speeds", "conn_counts"):

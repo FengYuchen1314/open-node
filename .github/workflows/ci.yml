@@ -2,6 +2,9 @@ name: CI
 
 on:
   push:
+    # Agent release tags point to source already covered by the main push.
+    tags-ignore:
+      - 'agent-v*'
   pull_request:
   workflow_dispatch:
 
@@ -16,7 +19,8 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The expanded integration suite reached 75% at the old 30-minute cutoff.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
