@@ -3,11 +3,13 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from open_node.api.backup import BackupAPIRoute
+from open_node.api.routes.subscriber_auth import Identity, require_subscriber
 from open_node.domain.external_subscriptions import (
+    AccountExternalSourceCreate,
     ExternalConfirmationRead,
     ExternalNodeUpdate,
     ExternalPreviewConfirm,
@@ -24,6 +26,12 @@ from open_node.services.backup_runtime import run_in_backup_threadpool
 
 router = APIRouter(
     route_class=BackupAPIRoute, prefix="/external-subscriptions", tags=["external subscriptions"]
+)
+account_router = APIRouter(
+    route_class=BackupAPIRoute,
+    prefix="/account/external-subscriptions",
+    tags=["subscriber external subscriptions"],
+    dependencies=[Depends(require_subscriber)],
 )
 MAX_REQUEST_BYTES = 65536
 
@@ -133,4 +141,98 @@ async def confirm_preview(source_id: UUID, preview_id: UUID, request: Request):
 @router.delete("/{source_id}/previews/{preview_id}")
 def cancel_preview(source_id: UUID, preview_id: UUID, request: Request):
     request.app.state.external_subscriptions.cancel_preview(source_id, preview_id)
+    return {"cancelled": True, "license_required": False}
+
+
+@account_router.get("", response_model=ExternalSourcesResponse)
+def list_account_sources(request: Request, identity: Identity):
+    return ExternalSourcesResponse(
+        sources=request.app.state.external_subscriptions.list(owner_username=identity.username)
+    )
+
+
+@account_router.post("", response_model=ExternalSourceRead, status_code=201)
+async def create_account_source(request: Request, identity: Identity):
+    payload = await _payload(request, AccountExternalSourceCreate)
+    owned = ExternalSourceCreate(owner_username=identity.username, **payload.model_dump())
+    return await run_in_backup_threadpool(
+        request.app.state.external_subscriptions.create, owned, owner_username=identity.username
+    )
+
+
+@account_router.get("/{source_id}", response_model=ExternalSourceDetail)
+def account_source_detail(source_id: UUID, request: Request, identity: Identity):
+    return request.app.state.external_subscriptions.detail(
+        source_id, owner_username=identity.username
+    )
+
+
+@account_router.put("/{source_id}", response_model=ExternalSourceRead)
+async def update_account_source(source_id: UUID, request: Request, identity: Identity):
+    payload = await _payload(request, ExternalSourceUpdate)
+    return await run_in_backup_threadpool(
+        request.app.state.external_subscriptions.update,
+        source_id, payload, owner_username=identity.username,
+    )
+
+
+@account_router.post("/{source_id}/delete")
+async def delete_account_source(source_id: UUID, request: Request, identity: Identity):
+    payload = await _payload(request, ExternalSourceDelete)
+    await run_in_backup_threadpool(
+        request.app.state.external_subscriptions.delete,
+        source_id, payload, owner_username=identity.username,
+    )
+    return {"deleted": True, "license_required": False}
+
+
+@account_router.put("/{source_id}/nodes/{node_id}", response_model=ExternalSourceDetail)
+async def update_account_node(
+    source_id: UUID, node_id: UUID, request: Request, identity: Identity,
+):
+    payload = await _payload(request, ExternalNodeUpdate)
+    return await run_in_backup_threadpool(
+        request.app.state.external_subscriptions.update_node,
+        source_id, node_id, payload, owner_username=identity.username,
+    )
+
+
+@account_router.post("/{source_id}/previews", response_model=ExternalPreviewRead)
+async def fetch_account_preview(source_id: UUID, request: Request, identity: Identity):
+    payload = await _payload(request, ExternalRevisionRequest)
+    return await run_in_backup_threadpool(
+        request.app.state.external_subscriptions.prepare_preview,
+        source_id, payload.expected_revision, owner_username=identity.username,
+    )
+
+
+@account_router.get("/{source_id}/previews/{preview_id}", response_model=ExternalPreviewRead)
+def account_preview_detail(
+    source_id: UUID, preview_id: UUID, request: Request, identity: Identity,
+):
+    return request.app.state.external_subscriptions.preview(
+        source_id, preview_id, owner_username=identity.username
+    )
+
+
+@account_router.post(
+    "/{source_id}/previews/{preview_id}/confirm", response_model=ExternalConfirmationRead
+)
+async def confirm_account_preview(
+    source_id: UUID, preview_id: UUID, request: Request, identity: Identity,
+):
+    payload = await _payload(request, ExternalPreviewConfirm)
+    return await run_in_backup_threadpool(
+        request.app.state.external_subscriptions.confirm,
+        source_id, preview_id, payload, owner_username=identity.username,
+    )
+
+
+@account_router.delete("/{source_id}/previews/{preview_id}")
+def cancel_account_preview(
+    source_id: UUID, preview_id: UUID, request: Request, identity: Identity,
+):
+    request.app.state.external_subscriptions.cancel_preview(
+        source_id, preview_id, owner_username=identity.username
+    )
     return {"cancelled": True, "license_required": False}

@@ -3,6 +3,14 @@ import { requestError } from "./request-error";
 
 export type CertificateChallenge = "dns" | "standalone" | "webroot";
 
+export interface SelfSignedCertificateInput {
+  name: string;
+  domains: string[];
+  valid_days: number;
+  purpose: "server_auth";
+  confirm_self_signed: true;
+}
+
 export interface DNSProvider {
   id: string;
   name: string;
@@ -30,6 +38,7 @@ export interface ManagedCertificate {
 
 export interface CertificateCapabilities {
   available: boolean;
+  self_signed?: boolean;
   account_management: boolean;
   revocation: boolean;
   remote_http_available?: boolean;
@@ -43,7 +52,7 @@ export interface CertificateCapabilities {
 export interface CertificateVersion {
   id: string;
   created_at: number;
-  details: { serial: string; issuer: string; expires_at: number };
+  details: { serial: string; issuer: string; expires_at: number; self_signed?: boolean };
   revocation: { status: "pending" | "unknown" | "revoked"; reason: number; confirmed_at: number | null; directory_url: string } | null;
 }
 

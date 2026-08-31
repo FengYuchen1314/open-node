@@ -3,7 +3,8 @@
 The FastAPI control plane owns certificate profiles, DNS credentials, ACME
 accounts, jobs and versions. The React **Certificates** workspace creates DNS
 providers and DNS-01 or HTTP-01 profiles, imports PEM pairs, issues/renews certificates,
-edits CA account contacts, revokes individual versions, exports material and
+generates self-signed server certificates, edits CA account contacts, revokes
+CA-issued versions, exports material and
 assigns node deployment targets. No activation key, subscription
 payment or commercial entitlement is required.
 
@@ -43,10 +44,51 @@ one worker and is inherited by the ACME child, preventing another worker
 from issuing while a surviving child still owns the lock.
 
 Without a configured lego executable, remote-node HTTP-01 issuance/renewal,
-PEM import/export, account editing, revocation and automatic/manual node deployment
-remain available on Linux. Central DNS-01 and HTTP-01 issuance are unavailable. Deployments
+self-signed generation, PEM import/export, account editing, revocation and
+automatic/manual node deployment remain available on Linux. Central DNS-01 and
+HTTP-01 issuance are unavailable. Deployments
 require an installed, scanned Open Node Agent with an owned certificate
 directory. Agent credentials and management authentication remain separate.
+
+## Self-Signed Certificates
+
+Administrators can generate a certificate without a DNS provider, ACME account
+or lego executable:
+
+1. Open **证书** and select **生成自签名证书**.
+2. Enter a certificate name and **DNS 域名或 IP（SAN）**. Supply up to 20 distinct
+   names, separated by spaces, commas or newlines. DNS names, single-level DNS
+   wildcards such as `*.example.com`, IPv4 and IPv6 are supported. Enter an IP
+   as `192.0.2.20` or `2001:db8::20`, without brackets, a zone ID, protocol, port
+   or path.
+3. Set **有效天数**: the default is **365**, with a permitted range of **1–3650**
+   whole days. Check **我了解自签名证书不受浏览器默认信任**, then select **生成并保存**.
+4. Open the saved certificate's details to download its certificate or,
+   after separate confirmation, its private key. To publish it to an Agent,
+   add a deployment target and use the existing deployment controls.
+
+DNS and IPv4 targets use the existing Agent deployment flow. Validating a
+certificate for an **IPv6 literal target** requires an Agent build containing
+the IPv6 certificate-validation fix. This fix is currently source-only: the
+published Agent `0.3.0a0` release and the panel's bootstrap pin are unchanged.
+Generating or exporting a certificate with IPv6 SANs happens on the control
+plane and does not require an Agent update.
+
+Generation creates a fresh ECDSA P-256 key and a TLS server-authentication
+(`serverAuth`) certificate, not a CA certificate. It creates a new profile/version
+and encrypts the stored certificate/key material. Generating again with the same
+name or SANs does not overwrite older records or keys. It does **not** automatically
+deploy, create a TLS site, or replace the control plane's HTTPS certificate.
+
+A self-signed certificate is not issued by a trusted CA. Each consuming client
+must explicitly trust that certificate through its supported trust mechanism;
+do not disable TLS verification to make it work. Generation does not establish
+public DNS ownership or browser trust.
+
+These certificates cannot renew or revoke through ACME. Generate and deliberately
+deploy a replacement before expiry. Deleting the local profile does not remove
+already deployed copies or client trust. Deployment filename ownership and
+replacement rules are the same as for other local certificates, described below.
 
 ## Providers And Accounts
 
@@ -259,8 +301,8 @@ resubmitted on resume. Inspect CA state before initiating a new job.
 
 ## Renewal And Deployment
 
-The worker checks for due certificates every 30 seconds by default. Renewal
-starts during the last third of validity, capped at 30 days, or the last half
+For renewable ACME profiles, the worker checks for due certificates every 30 seconds
+by default. Renewal starts during the last third of validity, capped at 30 days, or the last half
 for certificates valid for ten days or less. Successful/not-due checks are
 scheduled at most an hour apart, shortened for short-lived certificates.
 For central validation, lego also applies its renewal and ARI decisions.
@@ -279,8 +321,9 @@ The worker bounds execution time and output and terminates its process group
 on cancellation. Private `last-job.log` files aid diagnosis and may contain
 provider responses: do not publish these logs.
 
-Add a target with a concrete covered hostname, server, certificate filename,
-reload mode and automatic-deployment preference. A filename on one node can
+Add a target with a covered concrete DNS hostname or exact IPv4/IPv6 SAN, server,
+certificate filename, reload mode and automatic-deployment preference. IPv6
+literal targets require the compatible Agent build described above. A filename on one node can
 belong to only one certificate profile. Automatic deployment queues once per
 new active version, including version activation. The target tracks the last
 queued version and command status; a queued/failed command is not proof of a
@@ -298,6 +341,8 @@ activation requires a matching, still-valid version; it does not revoke other
 versions at the CA.
 
 ## Version Revocation
+
+Generated self-signed versions have no issuing CA and cannot use this workflow.
 
 Revocation is irreversible. Select the exact version, reason and confirmation
 in its dialog. Managed profiles use their original CA directory; imported

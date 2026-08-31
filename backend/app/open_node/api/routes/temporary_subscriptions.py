@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -18,6 +18,7 @@ from open_node.services.inventory import (
     ManagedNodeNotFoundError,
     SubscriptionUnavailableError,
 )
+from open_node.services.subscription_clients import select_client_format
 from open_node.services.temporary_subscriptions import (
     TemporarySubscriptionConflict,
     TemporarySubscriptionNotFoundError,
@@ -79,14 +80,19 @@ def delete_temporary_subscription(
 @public_router.get("/t/{code}", name="render_temporary_subscription")
 def render_temporary_subscription(
     code: str,
+    request: Request,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     client_format: Annotated[
-        SubscriptionClientFormat, Query(alias="format")
-    ] = SubscriptionClientFormat.CLASH,
+        SubscriptionClientFormat | Literal["auto"] | None, Query(alias="format")
+    ] = None,
     node_id: UUID | None = None,
 ):
     try:
-        rendered = store._temporary_subscriptions().render(code, client_format, node_id)
+        rendered = store._temporary_subscriptions().render(
+            code,
+            select_client_format(client_format, request.headers.get("user-agent", "")),
+            node_id,
+        )
     except (TemporarySubscriptionNotFoundError, SubscriptionUnavailableError) as exc:
         raise HTTPException(
             404,

@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -20,6 +20,7 @@ from open_node.services.inventory import (
     SubscriptionTokenNotFoundError,
     SubscriptionUnavailableError,
 )
+from open_node.services.subscription_clients import select_client_format
 from open_node.services.subscription_profiles import (
     SubscriptionProfileConflict,
     SubscriptionProfileNotFoundError,
@@ -55,15 +56,16 @@ def render_legacy_mmwx_subscription(
     code: str,
     request: Request,
     client_format: Annotated[
-        SubscriptionClientFormat, Query(alias="format")
-    ] = SubscriptionClientFormat.CLASH,
+        SubscriptionClientFormat | Literal["auto"] | None, Query(alias="format")
+    ] = None,
     t: str | None = None,
     node_id: UUID | None = None,
 ):
     if not request.app.state.settings.short_links_enabled:
         raise HTTPException(404, "Subscription not found")
     profiles = request.app.state.inventory._subscription_profiles()
-    selected_format = profiles.legacy_format(t, client_format)
+    selected_format = select_client_format(client_format, request.headers.get("user-agent", ""))
+    selected_format = profiles.legacy_format(t, selected_format)
     try:
         rendered = profiles.resolve(code, selected_format, node_id)
     except (SubscriptionTokenNotFoundError, SubscriptionUnavailableError) as exc:

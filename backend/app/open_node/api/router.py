@@ -20,6 +20,7 @@ from open_node.api.routes import (
     probe,
     public,
     registration_invitations,
+    renewals,
     server_management,
     servers,
     subscriber_auth,
@@ -50,6 +51,7 @@ private_router.include_router(subscription_profiles.router)
 private_router.include_router(temporary_subscriptions.router)
 private_router.include_router(private_routed_nodes.router)
 private_router.include_router(registration_invitations.router)
+private_router.include_router(renewals.router)
 private_router.include_router(plan_management.router)
 private_router.include_router(user_management.router)
 private_router.include_router(node_management.router)
@@ -58,6 +60,8 @@ private_router.include_router(subscriber_auth.management_router)
 api_router.include_router(private_router)
 api_router.include_router(auth.router)
 api_router.include_router(subscriber_auth.router)
+api_router.include_router(external_subscriptions.account_router)
+api_router.include_router(renewals.account_router)
 api_router.include_router(private_routed_nodes.account_router)
 api_router.include_router(subscription_templates.router)
 api_router.include_router(subscription_templates.router, prefix="/account")

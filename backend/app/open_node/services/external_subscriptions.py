@@ -169,8 +169,10 @@ class ExternalSubscriptions:
                     "External source changed or already exists; reload before retrying"
                 ) from None
 
-    def _source(self, session, identifier, *, writable=False):
+    def _source(self, session, identifier, *, writable=False, owner_username=None):
         query = select(ExternalSourceModel).where(ExternalSourceModel.id == str(identifier))
+        if owner_username is not None:
+            query = query.where(ExternalSourceModel.owner_username == owner_username)
         if writable:
             query = query.with_for_update()
         row = session.scalar(query)
@@ -322,25 +324,29 @@ class ExternalSubscriptions:
             updated_at=_utc(source.updated_at),
         )
 
-    def list(self):
+    def list(self, *, owner_username=None):
         with self.store._session() as session:
-            sources = session.scalars(
-                select(ExternalSourceModel).order_by(
-                    ExternalSourceModel.created_at, ExternalSourceModel.id
-                )
+            query = select(ExternalSourceModel).order_by(
+                ExternalSourceModel.created_at, ExternalSourceModel.id
             )
+            if owner_username is not None:
+                self._owner(session, owner_username)
+                query = query.where(ExternalSourceModel.owner_username == owner_username)
+            sources = session.scalars(query)
             return [self._read(session, source) for source in sources]
 
-    def detail(self, identifier):
+    def detail(self, identifier, *, owner_username=None):
         with self.store._session() as session:
-            source = self._source(session, identifier)
+            source = self._source(session, identifier, owner_username=owner_username)
             nodes = self._nodes(session, source.id)
             return ExternalSourceDetail(
                 source=self._read(session, source, nodes),
                 nodes=[self._node_read(source, node) for node in nodes],
             )
 
-    def create(self, payload: ExternalSourceCreate):
+    def create(self, payload: ExternalSourceCreate, *, owner_username=None):
+        if owner_username is not None and payload.owner_username != owner_username:
+            raise ExternalSubscriptionNotFound("External source not found")
         now = datetime.now(UTC)
         with self._write() as session:
             self._owner(session, payload.owner_username, writable=True)
@@ -373,10 +379,12 @@ class ExternalSubscriptions:
             session.flush()
             return self._read(session, source, [])
 
-    def update(self, identifier, payload: ExternalSourceUpdate):
+    def update(self, identifier, payload: ExternalSourceUpdate, *, owner_username=None):
         now = datetime.now(UTC)
         with self._write() as session:
-            source = self._source(session, identifier, writable=True)
+            source = self._source(
+                session, identifier, writable=True, owner_username=owner_username
+            )
             self._expected(source, payload.expected_revision)
             if payload.url is not None or payload.user_agent is not None:
                 cipher, key = self._keys(session)
@@ -396,16 +404,20 @@ class ExternalSubscriptions:
             session.flush()
             return self._read(session, source)
 
-    def delete(self, identifier, payload: ExternalSourceDelete):
+    def delete(self, identifier, payload: ExternalSourceDelete, *, owner_username=None):
         with self._write() as session:
-            source = self._source(session, identifier, writable=True)
+            source = self._source(
+                session, identifier, writable=True, owner_username=owner_username
+            )
             self._expected(source, payload.expected_revision)
             session.delete(source)
 
-    def update_node(self, source_id, node_id, payload: ExternalNodeUpdate):
+    def update_node(self, source_id, node_id, payload: ExternalNodeUpdate, *, owner_username=None):
         now = datetime.now(UTC)
         with self._write() as session:
-            source = self._source(session, source_id, writable=True)
+            source = self._source(
+                session, source_id, writable=True, owner_username=owner_username
+            )
             self._expected(source, payload.expected_revision)
             row = session.get(ExternalNodeModel, str(node_id))
             if row is None or row.source_id != source.id:
@@ -436,12 +448,12 @@ class ExternalSubscriptions:
             )
         )
 
-    def prepare_preview(self, identifier, expected_revision):
+    def prepare_preview(self, identifier, expected_revision, *, owner_username=None):
         # Snapshot the immutable source ID and revision, then close the session.
         # A late response cannot upsert a deleted source or transfer it to a
         # same-name subscriber recreated while this request was in flight.
         with self.store._session() as session:
-            source = self._source(session, identifier)
+            source = self._source(session, identifier, owner_username=owner_username)
             self._owner(session, source.owner_username, writable=True)
             self._expected(source, expected_revision)
             cipher, _key = self._keys(session)
@@ -453,7 +465,9 @@ class ExternalSubscriptions:
             raise ExternalSubscriptionError(str(exc)) from None
         now = datetime.now(UTC)
         with self._write() as session:
-            source = self._source(session, identifier, writable=True)
+            source = self._source(
+                session, identifier, writable=True, owner_username=owner_username
+            )
             self._expected(source, expected_revision)
             self._purge_expired(session, source.id, now)
             count = session.scalar(
@@ -588,16 +602,26 @@ class ExternalSubscriptions:
             raise ExternalSubscriptionConflict("External subscription preview expired; fetch again")
         return row
 
-    def preview(self, source_id, preview_id):
+    def preview(self, source_id, preview_id, *, owner_username=None):
         with self.store._session() as session:
-            source = self._source(session, source_id)
+            source = self._source(session, source_id, owner_username=owner_username)
             return self._preview_read(self._preview(session, source, preview_id))
 
-    def cancel_preview(self, source_id, preview_id):
+    def cancel_preview(self, source_id, preview_id, *, owner_username=None):
         with self._write() as session:
-            source = self._source(session, source_id, writable=True)
-            row = session.get(ExternalPreviewModel, str(preview_id))
+            source = self._source(
+                session, source_id, writable=True, owner_username=owner_username
+            )
+            if owner_username is None:
+                row = session.get(ExternalPreviewModel, str(preview_id))
+            else:
+                row = session.scalar(select(ExternalPreviewModel).where(
+                    ExternalPreviewModel.id == str(preview_id),
+                    ExternalPreviewModel.source_id == source.id,
+                ))
             if row is None:
+                if owner_username is not None:
+                    raise ExternalSubscriptionNotFound("External subscription preview not found")
                 return
             if row.source_id != source.id:
                 raise ExternalSubscriptionNotFound("External subscription preview not found")
@@ -607,7 +631,9 @@ class ExternalSubscriptions:
                 )
             session.delete(row)
 
-    def confirm(self, source_id, preview_id, payload: ExternalPreviewConfirm):
+    def confirm(
+        self, source_id, preview_id, payload: ExternalPreviewConfirm, *, owner_username=None
+    ):
         now = datetime.now(UTC)
         selected = {str(identifier) for identifier in payload.selected_node_ids}
         selection_digest = hashlib.sha256(
@@ -620,7 +646,9 @@ class ExternalSubscriptions:
             )
         ).hexdigest()
         with self._write() as session:
-            source = self._source(session, source_id, writable=True)
+            source = self._source(
+                session, source_id, writable=True, owner_username=owner_username
+            )
             preview = self._preview(session, source, preview_id)
             if preview.applied_at is not None:
                 if preview.selection_digest != selection_digest:

@@ -57,6 +57,12 @@ Back up the notification key directory together with SQLite. User bot binding,
 daily digests, other alert rules and renewal approval are not part of this slice;
 its current release and verification status is recorded in the linked guide.
 
+[Manual renewal review](docs/renewals.md) now provides a separate Chinese Web
+workflow: subscribers request renewal of their current package, administrators
+check the reference and explicitly approve or reject it, and repeated approvals
+cannot extend the same request twice. No Telegram setup or payment-provider
+integration is required. Existing traffic usage and reset rules are preserved.
+
 [Site text settings](docs/system-settings.md) add administrator-controlled browser
 and page titles, published in `f0ed515`. Names are public plain text, with
 versioned atomic saves and no license gate. Probe-only titles and security
@@ -71,10 +77,14 @@ the database, keys, provenance or recoverability. The encryption extension adds
 `encrypt PATH --recipient AGEKEY --output FILE` and
 `validate PATH --identity KEYFILE`, using a pinned official age executable and
 private staging. It accepts one native X25519 recipient, never overwrites an
-existing output, and never publishes decrypted plaintext. Online snapshots,
-Web download and restore remain unfinished; the existing stopped-volume
-installer backup is unchanged. See the guide for private-key and temporary-space
-requirements; a successful envelope check is not sender authentication.
+existing output, and never publishes decrypted plaintext. The control plane now
+also provides [consistent snapshots](docs/backup-runtime.md) and an
+[administrator Web backup page](docs/backups.md): fresh password/MFA proof,
+background creation, bounded retention and encrypted download to an age public
+recipient. Controlled application restore remains unfinished; the existing
+stopped-volume installer backup is unchanged. See the guides for private-key
+and temporary-space requirements; a successful envelope check is not sender
+authentication.
 
 Subscribers use the separate `/account` portal. Administrators provision their
 login passwords directly or issue a high-entropy, single-use
@@ -89,6 +99,20 @@ assignments and multi-file subscription profiles through explicit plan mappings,
 including compatible legacy `/x` links.
 Both workspaces include free [custom Clash and Surge templates](docs/subscription-templates.md)
 with personal permissions, plan/system defaults, draft preview and catalog portability.
+
+The [client-format guide](docs/subscription-clients.md) covers the original
+Clash, Surge, sing-box, Xray, URI and Base64 outputs plus Loon, Quantumult X,
+Shadowrocket, Stash, Surfboard and Egern. Unsupported settings are reported in
+format previews rather than silently weakened. [External subscriptions](docs/external-subscriptions.md)
+support administrator management and subscriber self-service, with manual
+HTTPS fetching, YAML/URI/Base64 input, explicit preview/confirmation and merging
+into the user's primary link. No external source is fetched merely because a
+client downloads a subscription.
+
+[Certificate management](docs/certificates.md) includes a one-click self-signed
+option for DNS and IP SANs alongside ACME, import/export and Agent deployment.
+Self-signed generation does not configure trusted public HTTPS or automatically
+replace a running certificate.
 
 ## Deployment
 

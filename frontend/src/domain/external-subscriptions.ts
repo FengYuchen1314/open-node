@@ -7,6 +7,9 @@ export interface ExternalSourceCreate {
   enabled?: boolean;
 }
 
+/** The account API accepts no owner field, even when the caller supplies one. */
+export type AccountExternalSourceCreate = Omit<ExternalSourceCreate, "owner_username">;
+
 export interface ExternalRevisionRequest { expected_revision: number }
 
 export interface ExternalSourceUpdate extends ExternalRevisionRequest {

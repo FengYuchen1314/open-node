@@ -35,6 +35,13 @@ LEGACY_FORMATS = {
     "v2ray": SubscriptionClientFormat.BASE64,
     "uri": SubscriptionClientFormat.URI_LIST,
     "xray": SubscriptionClientFormat.XRAY,
+    "loon": SubscriptionClientFormat.LOON,
+    "qx": SubscriptionClientFormat.QUANTUMULT_X,
+    "quantumult-x": SubscriptionClientFormat.QUANTUMULT_X,
+    "shadowrocket": SubscriptionClientFormat.SHADOWROCKET,
+    "stash": SubscriptionClientFormat.STASH,
+    "surfboard": SubscriptionClientFormat.SURFBOARD,
+    "egern": SubscriptionClientFormat.EGERN,
 }
 
 
@@ -306,10 +313,11 @@ class SubscriptionProfiles:
 
     @staticmethod
     def _template(session, profile, client_format):
-        if profile is None or client_format.value not in {"clash", "surge"}:
+        format = "clash" if client_format == SubscriptionClientFormat.STASH else client_format.value
+        if profile is None or format not in {"clash", "surge"}:
             return None
-        identifier = getattr(profile, client_format.value + "_template_id")
+        identifier = getattr(profile, format + "_template_id")
         row = session.get(TemplateRecord, identifier) if identifier else None
-        if row is not None and row.format == client_format.value:
+        if row is not None and row.format == format:
             return row
         return None

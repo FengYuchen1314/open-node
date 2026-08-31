@@ -1,11 +1,16 @@
 import json
 import os
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from ipaddress import ip_address
 from time import time
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -225,6 +230,7 @@ class CertificateStore:
             ]
         return {
             "available": bool(binary and binary.is_file() and os.access(binary, os.X_OK)),
+            "self_signed": True,
             "license_required": False,
             "account_management": os.name == "posix",
             "revocation": os.name == "posix",
@@ -564,9 +570,64 @@ class CertificateStore:
 
     def import_certificate(self, payload):
         data = material(payload.cert_pem, payload.key_pem.get_secret_value())
+        return self._import_material(payload.name, data)
+
+    def generate_self_signed(self, payload):
+        key = ec.generate_private_key(ec.SECP256R1())
+        primary = payload.domains[0]
+        subject = x509.Name([
+            x509.NameAttribute(
+                NameOID.COMMON_NAME,
+                primary if len(primary.encode()) <= 64 else "Open Node self-signed server",
+            )
+        ])
+        names = []
+        for domain in payload.domains:
+            try:
+                name = x509.IPAddress(ip_address(domain))
+            except ValueError:
+                name = x509.DNSName(domain)
+            names.append(name)
+        now = datetime.now(UTC)
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(subject)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=5))
+            .not_valid_after(now + timedelta(days=payload.valid_days))
+            .add_extension(x509.SubjectAlternativeName(names), critical=False)
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(
+                x509.KeyUsage(
+                    digital_signature=True, content_commitment=False, key_encipherment=False,
+                    data_encipherment=False, key_agreement=False, key_cert_sign=False,
+                    crl_sign=False, encipher_only=False, decipher_only=False,
+                ),
+                critical=True,
+            )
+            .add_extension(
+                x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False
+            )
+            .sign(key, hashes.SHA256())
+        )
+        data = material(
+            certificate.public_bytes(serialization.Encoding.PEM).decode(),
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ).decode(),
+            payload.domains,
+        )
+        data["self_signed"] = True
+        return self._import_material(payload.name, data)
+
+    def _import_material(self, name, data):
         with self.write() as db:
             row = ManagedCertificate(
-                id=str(uuid4()), name=payload.name, domains=data["domains"], auto_renew=False
+                id=str(uuid4()), name=name, domains=data["domains"], auto_renew=False
             )
             db.add(row)
             self.publish(db, row, data)
@@ -728,6 +789,8 @@ class CertificateStore:
             version = self.get(db, CertificateVersion, version_id)
             if version.certificate_id != row.id:
                 raise CertificateError("Certificate version does not belong to this certificate")
+            if version.details.get("self_signed") is True:
+                raise CertificateError("Self-signed certificates cannot be revoked through ACME")
             directory = row.directory_url or payload.directory_url
             if (
                 payload.directory_url

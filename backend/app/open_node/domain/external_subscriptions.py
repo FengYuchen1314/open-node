@@ -19,22 +19,15 @@ class ExternalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
 
-class ExternalSourceCreate(ExternalRequest):
-    owner_username: str = Field(min_length=1, max_length=120)
+class AccountExternalSourceCreate(ExternalRequest):
+    """Owner is deliberately absent: account routes derive it from the session."""
+
     name: str = Field(min_length=1, max_length=160)
     url: SecretStr
     user_agent: SecretStr = SecretStr("")
     enabled: StrictBool = True
 
     _name = field_validator("name")(external_name)
-
-    @field_validator("owner_username")
-    @classmethod
-    def owner(cls, value: str) -> str:
-        value = value.strip()
-        if not value or any(ord(char) < 32 or ord(char) == 127 for char in value):
-            raise ValueError("An existing subscriber is required")
-        return value
 
     @field_validator("url")
     @classmethod
@@ -49,6 +42,18 @@ class ExternalSourceCreate(ExternalRequest):
         raw = value.get_secret_value()
         if len(raw) > 256 or any(not 32 <= ord(char) <= 126 for char in raw):
             raise ValueError("User agent must contain at most 256 printable ASCII characters")
+        return value
+
+
+class ExternalSourceCreate(AccountExternalSourceCreate):
+    owner_username: str = Field(min_length=1, max_length=120)
+
+    @field_validator("owner_username")
+    @classmethod
+    def owner(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("An existing subscriber is required")
         return value
 
 

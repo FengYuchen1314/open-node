@@ -1,6 +1,6 @@
 import base64
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -55,6 +55,7 @@ from open_node.services.inventory import (
     SubscriptionUnavailableError,
 )
 from open_node.services.subscription_access import SubscriptionAccessConflict
+from open_node.services.subscription_clients import select_client_format
 
 router = APIRouter(route_class=BackupAPIRoute, tags=["subscriptions"])
 public_router = APIRouter(route_class=BackupAPIRoute, tags=["subscriptions"])
@@ -422,15 +423,15 @@ def render_user_subscription(
     request: Request,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     client_format: Annotated[
-        SubscriptionClientFormat,
+        SubscriptionClientFormat | Literal["auto"] | None,
         Query(alias="format"),
-    ] = SubscriptionClientFormat.CLASH,
+    ] = None,
     node_id: UUID | None = None,
 ) -> Response:
     try:
         rendered = store.render_subscription(
             subscription_key,
-            client_format,
+            select_client_format(client_format, request.headers.get("user-agent", "")),
             node_id,
             allow_short=request.app.state.settings.short_links_enabled,
         )

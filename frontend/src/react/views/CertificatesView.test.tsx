@@ -42,6 +42,80 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("React certificate workflows", () => {
+  it("generates a server self-signed certificate without ACME only after trust confirmation", async () => {
+    caps.self_signed = true; caps.available = false; caps.challenge_types = []; providers = [];
+    const original = vi.mocked(certificateRequest).getMockImplementation()!;
+    let complete!: () => void;
+    const pending = new Promise<void>((resolve) => { complete = resolve; });
+    vi.mocked(certificateRequest).mockImplementation(async (path = "", method = "GET", body) => {
+      if (path === "/self-signed" && method === "POST") { await pending; return {} as never; }
+      return await original(path, method, body) as never;
+    });
+    render(<CertificatesView />); await flush();
+    expect((screen.getByRole("button", { name: "新建证书" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "生成自签名证书" }));
+    const dialog = modal("生成自签名证书");
+    const save = dialog.getByRole("button", { name: "生成并保存" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(dialog.getByText(/不是受信 CA 签发/)).toBeTruthy();
+    expect(dialog.queryByLabelText("私钥 PEM")).toBeNull();
+    expect((dialog.getByRole("spinbutton", { name: "有效天数" }) as HTMLInputElement).value).toBe("365");
+    fireEvent.change(dialog.getByLabelText("证书名称"), { target: { value: " Private TLS " } });
+    fireEvent.change(dialog.getByLabelText("DNS 域名或 IP（SAN）"), { target: { value: "example.com, 192.0.2.20\n2001:db8::20" } });
+    expect(save.disabled).toBe(true);
+    fireEvent.click(dialog.getByRole("checkbox", { name: "我了解自签名证书不受浏览器默认信任" }));
+    fireEvent.click(save); fireEvent.click(save); await flush();
+    expect(vi.mocked(certificateRequest).mock.calls.filter(([path, method]) => path === "/self-signed" && method === "POST")).toHaveLength(1);
+    expect(certificateRequest).toHaveBeenCalledWith("/self-signed", "POST", { name: "Private TLS", domains: ["example.com", "192.0.2.20", "2001:db8::20"], valid_days: 365, purpose: "server_auth", confirm_self_signed: true });
+    expect(save.disabled).toBe(true);
+    complete(); await flush();
+    expect(screen.getByText(/自签名证书已生成并保存。未自动部署/)).toBeTruthy();
+    expect(vi.mocked(certificateRequest).mock.calls.filter(([, method]) => method === "POST")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "生成自签名证书" }));
+    expect((modal("生成自签名证书").getByRole("checkbox", { name: "我了解自签名证书不受浏览器默认信任" }) as HTMLInputElement).checked).toBe(false);
+  });
+  it("keeps self-signed trust warnings, IP filenames and explicit deployment without CA actions", async () => {
+    row.directory_url = null; row.auto_renew = false; row.domains = ["2001:db8::20"];
+    detail.account = null; detail.jobs = []; detail.versions = [detail.versions[0]];
+    detail.versions[0].details.self_signed = true;
+    render(<CertificatesView />); await flush(); await inspect();
+    expect(screen.getByText(/不支持 ACME 自动续签或 CA 吊销/)).toBeTruthy();
+    expect(screen.getByText("自签名", { selector: ".ant-tag" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "吊销版本" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "立即续签" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "下载证书" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByLabelText("主机名") as HTMLInputElement).value).toBe("2001:db8::20");
+    expect((screen.getByLabelText("证书文件名") as HTMLInputElement).value).toBe("2001_db8__20");
+    expect(vi.mocked(certificateRequest).mock.calls.every(([, method]) => !method || method === "GET")).toBe(true);
+    // Existing explicit deployment remains available; generation itself never invokes it.
+    fireEvent.click(screen.getByRole("button", { name: "部署证书" })); await flush();
+    expect(certificateRequest).toHaveBeenCalledWith("/cert/targets/target/deploy", "POST");
+  });
+  it("fails closed without the capability and never resends a failed generation after polling or unmount", async () => {
+    const view = render(<CertificatesView />); await flush();
+    expect((screen.getByRole("button", { name: "生成自签名证书" }) as HTMLButtonElement).disabled).toBe(true);
+    view.unmount(); caps.self_signed = true;
+    const original = vi.mocked(certificateRequest).getMockImplementation()!;
+    let fail!: (reason: Error) => void;
+    const pending = new Promise<never>((_, reject) => { fail = reject; });
+    vi.mocked(certificateRequest).mockImplementation(async (path = "", method = "GET", body) => {
+      if (path === "/self-signed" && method === "POST") return await pending;
+      return await original(path, method, body) as never;
+    });
+    const mounted = render(<CertificatesView />); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "生成自签名证书" }));
+    fireEvent.change(screen.getByLabelText("证书名称"), { target: { value: "Local" } });
+    fireEvent.change(screen.getByLabelText("DNS 域名或 IP（SAN）"), { target: { value: "localhost" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "我了解自签名证书不受浏览器默认信任" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成并保存" })); await flush();
+    fail(new Error("provider failure with private-key-material")); await flush();
+    expect(document.body.textContent).not.toContain("private-key-material");
+    expect(screen.queryByText(/自签名证书已生成并保存/)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    mounted.unmount(); await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(vi.mocked(certificateRequest).mock.calls.filter(([path, method]) => path === "/self-signed" && method === "POST")).toHaveLength(1);
+  });
+
   it("creates DNS certificates with explicit CA terms and optional EAB", async () => {
     render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("button", { name: "新建证书" }));
     expect((screen.getByRole("button", { name: "创建证书" }) as HTMLButtonElement).disabled).toBe(true);

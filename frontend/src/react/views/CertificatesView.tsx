@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Checkbox, Col, Collapse, Descriptions, Form, Input, Modal, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
+import { Alert, Button, Card, Checkbox, Col, Collapse, Descriptions, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import { CloseOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FolderOpenOutlined, PlusOutlined, ReloadOutlined, StopOutlined, UploadOutlined } from "@ant-design/icons";
 import { listServers } from "../../services/inventory";
-import { certificateRequest, type CertificateCapabilities, type CertificateChallenge, type CertificateDetail, type CertificateVersion, type DNSProvider, type ManagedCertificate } from "../../services/certificates";
+import { certificateRequest, type CertificateCapabilities, type CertificateChallenge, type CertificateDetail, type CertificateVersion, type DNSProvider, type ManagedCertificate, type SelfSignedCertificateInput } from "../../services/certificates";
 import type { ServerSummary } from "../../domain/inventory";
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 
 export interface CertificatesViewProps { onUpdated?: () => void }
-type Dialog = "" | "provider" | "certificate" | "import" | "account" | "revoke";
+type Dialog = "" | "provider" | "certificate" | "self-signed" | "import" | "account" | "revoke";
 const emptyCapabilities: CertificateCapabilities = { available: false, account_management: false, revocation: false, directories: [], providers: [], challenge_types: [], webroots: [] };
 const challengeLabels: Record<CertificateChallenge, string> = { dns: "DNS-01", standalone: "HTTP-01 / 独立服务", webroot: "HTTP-01 / 网站根目录" };
 const reasons = [{ label: "未指定", value: 0 }, { label: "密钥泄露", value: 1 }, { label: "所属关系变更", value: 3 }, { label: "已被替代", value: 4 }, { label: "停止使用", value: 5 }, { label: "权限已撤回", value: 9 }];
 const initialCertificateForm = { name: "", domains: "", email: "", challenge_type: "dns" as CertificateChallenge, validation_server_id: "", provider_id: "", webroot_id: "", directory_url: "", accept_terms: false, auto_renew: true, eab_kid: "", eab_hmac_key: "" };
+const initialSelfSignedForm = { name: "", domains: "", valid_days: 365 as number | null, confirm_self_signed: false };
+const selfSignedWarning = "自签名证书不受浏览器和系统默认信任，不是受信 CA 签发的证书。生成只保存到本地证书库，不会自动部署或替换控制台 HTTPS。请按需在使用端单独信任此证书，不要关闭 TLS 验证。";
 function date(value: number | null) { return value ? new Date(value * 1000).toLocaleString("zh-CN") : "-"; }
 function color(status: string) { return ["issued", "succeeded"].includes(status) ? "success" : ["failed", "interrupted", "revoked"].includes(status) ? "error" : ["unknown", "revocation_unknown"].includes(status) ? "warning" : "default"; }
 function statusLabel(status: string) { return ({ revoked: "已吊销", revocation_pending: "吊销中", revocation_unknown: "尚未确认", updating_account: "账户更新中", not_registered: "未注册", unconfirmed: "尚未确认", unavailable: "不可用", registered: "已注册" } as Record<string, string>)[status] ?? zhStatus(status); }
@@ -36,6 +38,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
   const [selected, setSelected] = useState("");
   const [detail, setDetail] = useState<CertificateDetail | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [dialog, setDialog] = useState<Dialog>("");
@@ -43,6 +46,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
   const [providerForm, setProviderForm] = useState({ name: "", provider: "cloudflare", credentials: {} as Record<string, string> });
   const [form, setForm] = useState({ ...initialCertificateForm });
   const [importForm, setImportForm] = useState({ name: "", cert_pem: "", key_pem: "" });
+  const [selfSignedForm, setSelfSignedForm] = useState({ ...initialSelfSignedForm });
   const [accountForm, setAccountForm] = useState({ email: "", eab_action: "keep", eab_kid: "", eab_hmac_key: "" });
   const [revokeForm, setRevokeForm] = useState({ version_id: "", serial: "", directory_url: "", reason: 0, confirm: false });
   const [target, setTarget] = useState({ server_id: "", domain: "", cert_name: "", reload: "nginx", auto_deploy: true });
@@ -62,7 +66,10 @@ export default function CertificatesView(props: CertificatesViewProps) {
   const wildcardError = form.challenge_type !== "dns" && form.domains.trim().split(/[\s,]+/).some((name) => name.startsWith("*."));
   const canCreate = Boolean(form.name && form.domains.trim() && form.email && form.directory_url && form.accept_terms && !wildcardError && challengeTypes.includes(form.challenge_type) && (form.challenge_type === "dns" ? form.provider_id : validationOptions.some((option) => option.value === form.validation_server_id && !option.disabled)) && (form.challenge_type !== "webroot" || webrootOptions.includes(form.webroot_id)));
   const hasChallenge = providers.length > 0 || challengeTypes.some((type) => type !== "dns");
-  const currentRevocation = detail?.versions.find((version) => version.id === detail.certificate.version_id)?.revocation;
+  const currentVersion = detail?.versions.find((version) => version.id === detail.certificate.version_id);
+  const currentRevocation = currentVersion?.revocation;
+  const selfSignedNames = selfSignedForm.domains.trim().split(/[\s,]+/).filter(Boolean);
+  const canGenerate = capabilities.self_signed === true && Boolean(selfSignedForm.name.trim()) && selfSignedNames.length > 0 && selfSignedNames.length <= 20 && Number.isInteger(selfSignedForm.valid_days) && (selfSignedForm.valid_days ?? 0) >= 1 && (selfSignedForm.valid_days ?? 0) <= 3650 && selfSignedForm.confirm_self_signed;
   const canSaveAccount = Boolean(accountForm.email.trim() && (accountForm.eab_action !== "replace" || (accountForm.eab_kid && accountForm.eab_hmac_key)));
   const canSaveProvider = Boolean(providerForm.name && providerFields?.required.every((key) => providerForm.credentials[key]));
   const serverName = (id: string) => servers.find((server) => server.id === id)?.name ?? id;
@@ -98,6 +105,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
     busyRef.current = true;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await work();
       if (mounted.current) { live.current.props.onUpdated?.(); await refresh(true); }
@@ -120,6 +128,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
     setForm((value) => ({ ...value, eab_kid: "", eab_hmac_key: "" }));
     setAccountForm((value) => ({ ...value, eab_kid: "", eab_hmac_key: "" }));
     setRevokeForm((value) => ({ ...value, confirm: false }));
+    setSelfSignedForm({ ...initialSelfSignedForm });
   }
   function closeDetails() { live.current.selected = ""; setSelected(""); setDetail(null); }
   function inspect(row: ManagedCertificate) {
@@ -128,7 +137,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
     setSelected(row.id);
     setDetail(null);
     setForce(false);
-    setTarget((value) => ({ ...value, domain: row.domains[0]?.startsWith("*.") ? "" : row.domains[0] ?? "", cert_name: (row.domains[0] ?? "").replace("*.", "_.") }));
+    setTarget((value) => ({ ...value, domain: row.domains[0]?.startsWith("*.") ? "" : row.domains[0] ?? "", cert_name: (row.domains[0] ?? "").replace("*.", "_.").replaceAll(":", "_") }));
     void action(async () => {
       const response = await certificateRequest<CertificateDetail>(`/${row.id}`);
       if (mounted.current && live.current.selected === row.id) setDetail(response);
@@ -152,7 +161,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
     setDialog("revoke");
   }
   function saveDialog() {
-    if (dialog === "provider" && !canSaveProvider || dialog === "certificate" && !canCreate || dialog === "account" && !canSaveAccount || dialog === "revoke" && (!revokeForm.confirm || !revokeForm.directory_url) || dialog === "import" && (!importForm.name || !importForm.cert_pem || !importForm.key_pem)) return;
+    if (dialog === "provider" && !canSaveProvider || dialog === "certificate" && !canCreate || dialog === "self-signed" && !canGenerate || dialog === "account" && !canSaveAccount || dialog === "revoke" && (!revokeForm.confirm || !revokeForm.directory_url) || dialog === "import" && (!importForm.name || !importForm.cert_pem || !importForm.key_pem)) return;
     const id = selected;
     void action(async () => {
       if (dialog === "provider") {
@@ -160,6 +169,9 @@ export default function CertificatesView(props: CertificatesViewProps) {
         await certificateRequest(`/providers${editingProvider ? `/${editingProvider}` : ""}`, editingProvider ? "PUT" : "POST", { ...providerForm, credentials });
       } else if (dialog === "certificate") {
         await certificateRequest("", "POST", { ...form, validation_server_id: form.challenge_type === "dns" ? null : form.validation_server_id || null, provider_id: form.challenge_type === "dns" ? form.provider_id : null, webroot_id: form.challenge_type === "webroot" ? form.webroot_id : null, domains: form.domains.trim().split(/[\s,]+/), eab_kid: form.eab_kid || null, eab_hmac_key: form.eab_hmac_key || null });
+      } else if (dialog === "self-signed") {
+        await certificateRequest("/self-signed", "POST", { name: selfSignedForm.name.trim(), domains: selfSignedNames, valid_days: selfSignedForm.valid_days!, purpose: "server_auth", confirm_self_signed: true } satisfies SelfSignedCertificateInput);
+        if (mounted.current) setNotice("自签名证书已生成并保存。未自动部署；可在证书详情中下载，或添加部署目标后按需发布。此证书不会自动续签。");
       } else if (dialog === "account") {
         await certificateRequest(`/${id}/account`, "POST", { email: accountForm.email, eab_action: accountForm.eab_action, ...(accountForm.eab_action === "replace" ? { eab_kid: accountForm.eab_kid, eab_hmac_key: accountForm.eab_hmac_key } : {}) });
       } else if (dialog === "revoke") {
@@ -174,7 +186,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
   }
   function download(privateKey = false) {
     const id = selected;
-    const filename = `${detail?.certificate.domains[0]?.replace("*.", "_.") ?? "certificate"}.${privateKey ? "key" : "pem"}`;
+    const filename = `${detail?.certificate.domains[0]?.replace("*.", "_.").replaceAll(":", "_") ?? "certificate"}.${privateKey ? "key" : "pem"}`;
     const work = async () => {
       const data = await certificateRequest<{ cert_pem: string; key_pem?: string }>(`/${id}/material?include_private_key=${privateKey}`);
       const url = URL.createObjectURL(new Blob([privateKey ? data.key_pem ?? "" : data.cert_pem], { type: "application/x-pem-file" }));
@@ -189,14 +201,14 @@ export default function CertificatesView(props: CertificatesViewProps) {
     void action(() => certificateRequest(`/${selected}/targets`, "POST", { ...target }));
   }
   const actionLabel = (row: ManagedCertificate) => needsReissue(row) ? "重新签发证书" : row.version_id ? "续签证书" : "签发证书";
-  const dialogTitle = dialog === "provider" ? editingProvider ? "更换 DNS 凭据" : "添加 DNS 服务商" : dialog === "import" ? "导入 PEM" : dialog === "account" ? "编辑 ACME 账户" : dialog === "revoke" ? "吊销证书版本" : "新建证书";
-  const dialogSaveLabel = dialog === "provider" ? "保存服务商" : dialog === "certificate" ? "创建证书" : dialog === "account" ? "更新账户" : dialog === "revoke" ? "吊销版本" : "导入证书";
-  const saveDisabled = busy || (dialog === "provider" ? !canSaveProvider : dialog === "certificate" ? !canCreate : dialog === "account" ? !canSaveAccount : dialog === "revoke" ? !revokeForm.confirm || !revokeForm.directory_url : !importForm.name || !importForm.cert_pem || !importForm.key_pem);
+  const dialogTitle = dialog === "provider" ? editingProvider ? "更换 DNS 凭据" : "添加 DNS 服务商" : dialog === "self-signed" ? "生成自签名证书" : dialog === "import" ? "导入 PEM" : dialog === "account" ? "编辑 ACME 账户" : dialog === "revoke" ? "吊销证书版本" : "新建证书";
+  const dialogSaveLabel = dialog === "provider" ? "保存服务商" : dialog === "certificate" ? "创建证书" : dialog === "self-signed" ? "生成并保存" : dialog === "account" ? "更新账户" : dialog === "revoke" ? "吊销版本" : "导入证书";
+  const saveDisabled = busy || (dialog === "provider" ? !canSaveProvider : dialog === "certificate" ? !canCreate : dialog === "self-signed" ? !canGenerate : dialog === "account" ? !canSaveAccount : dialog === "revoke" ? !revokeForm.confirm || !revokeForm.directory_url : !importForm.name || !importForm.cert_pem || !importForm.key_pem);
 
   const certificateList = <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-    <Space wrap><Button type="primary" aria-label="新建证书" icon={<PlusOutlined />} disabled={busy || !hasChallenge} onClick={openCertificate}>新建证书</Button><Button aria-label="导入 PEM" icon={<UploadOutlined />} disabled={busy} onClick={() => setDialog("import")}>导入 PEM</Button>{!capabilities.available && !validationNodes.length && <Tag color="warning">ACME 不可用</Tag>}</Space>
+    <Space wrap><Button type="primary" aria-label="新建证书" icon={<PlusOutlined />} disabled={busy || !hasChallenge} onClick={openCertificate}>新建证书</Button><Button aria-label="生成自签名证书" icon={<PlusOutlined />} disabled={busy || capabilities.self_signed !== true} onClick={() => { setSelfSignedForm({ ...initialSelfSignedForm }); setDialog("self-signed"); }}>生成自签名证书</Button><Button aria-label="导入 PEM" icon={<UploadOutlined />} disabled={busy} onClick={() => setDialog("import")}>导入 PEM</Button>{!capabilities.available && !validationNodes.length && <Tag color="warning">ACME 不可用</Tag>}</Space>
     <Table<ManagedCertificate> rowKey="id" dataSource={certificates} loading={loading} scroll={{ x: 800 }} locale={{ emptyText: "暂无证书" }} columns={[
-      { title: "证书", key: "name", render: (_, row) => <Space orientation="vertical" size={0}><Button type="link" disabled={busy} onClick={() => inspect(row)}>{row.name}</Button><Typography.Text>{row.domains.join(", ")}</Typography.Text><Typography.Text type="secondary">{row.directory_url ? `${challengeLabels[row.challenge_type]}${row.validation_server_id ? ` / ${serverName(row.validation_server_id)}` : ""}${row.webroot_id ? ` / ${row.webroot_id}` : ""}` : "已导入"}</Typography.Text></Space> },
+      { title: "证书", key: "name", render: (_, row) => <Space orientation="vertical" size={0}><Button type="link" disabled={busy} onClick={() => inspect(row)}>{row.name}</Button><Typography.Text>{row.domains.join(", ")}</Typography.Text><Typography.Text type="secondary">{row.directory_url ? `${challengeLabels[row.challenge_type]}${row.validation_server_id ? ` / ${serverName(row.validation_server_id)}` : ""}${row.webroot_id ? ` / ${row.webroot_id}` : ""}` : "本地证书（无 ACME）"}</Typography.Text></Space> },
       { title: "状态", key: "status", render: (_, row) => <Tag color={color(row.status)}>{statusLabel(row.status)}</Tag> },
       { title: "到期时间", key: "expires", render: (_, row) => date(row.expires_at) },
       { title: "操作", key: "actions", render: (_, row) => <Space wrap><Button icon={<FolderOpenOutlined />} aria-label="证书详情" title="证书详情" disabled={busy} onClick={() => inspect(row)} /><Button icon={<ReloadOutlined />} aria-label={actionLabel(row)} title={actionLabel(row)} disabled={busy || Boolean(row.active_job_id) || !row.directory_url || !issuerAvailable(row)} onClick={() => queue(row)} /><Button danger icon={<DeleteOutlined />} aria-label="删除证书" title="删除证书" disabled={busy || Boolean(row.active_job_id)} onClick={() => confirmRemove(row)} /></Space> },
@@ -213,10 +225,12 @@ export default function CertificatesView(props: CertificatesViewProps) {
   return <Space orientation="vertical" size="large" style={{ width: "100%" }}>
     <Space wrap style={{ width: "100%", justifyContent: "space-between" }}><Typography.Title level={2}>证书</Typography.Title><Button icon={<ReloadOutlined />} aria-label="刷新证书" title="刷新证书" loading={loading} onClick={() => void refresh()} /></Space>
     {error && <Alert type="error" title={zhMessage(error)} showIcon closable={{ onClose: () => setError("") }} />}
+    {notice && <Alert type="success" title={notice} showIcon closable={{ onClose: () => setNotice("") }} />}
     <Tabs activeKey={tab} onChange={setTab} items={[{ key: "certificates", label: "证书", children: certificateList }, { key: "providers", label: "DNS 服务商", children: providerList }]} />
     {detail && tab === "certificates" && <Card title={detail.certificate.name} extra={<Button icon={<CloseOutlined />} aria-label="关闭证书详情" title="关闭证书详情" onClick={closeDetails} />}>
       <Space orientation="vertical" size="large" style={{ width: "100%" }}>
         {detail.certificate.last_error && <Alert type="error" title={zhMessage(detail.certificate.last_error)} showIcon />}
+        {currentVersion?.details.self_signed === true && <Alert type="warning" title="自签名证书" description={`${selfSignedWarning} 不支持 ACME 自动续签或 CA 吊销。`} showIcon />}
         {currentRevocation && <Alert type={currentRevocation.status === "revoked" ? "error" : "warning"} title={`${currentRevocation.status === "revoked" ? "此证书已吊销。" : "吊销结果尚未确认。"}已部署的文件仍保留在节点上。`} showIcon />}
         <Space wrap align="center">
           <Form.Item label="自动续签" style={{ marginBottom: 0 }}><Switch aria-label="自动续签" checked={detail.certificate.auto_renew} disabled={busy || Boolean(currentRevocation) || !detail.certificate.directory_url} onChange={(enabled) => void action(() => certificateRequest(`/${selected}`, "PATCH", { name: detail.certificate.name, auto_renew: enabled }))} /></Form.Item>
@@ -232,7 +246,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
           <Form layout="vertical" disabled={busy} onFinish={saveTarget}>
             <Row gutter={16}>
               <Col xs={24} md={12}><Form.Item label="目标服务器"><Select aria-label="目标服务器" value={target.server_id || undefined} options={servers.map((server) => ({ label: server.name, value: server.id }))} onChange={(server_id) => setTarget((value) => ({ ...value, server_id }))} /></Form.Item></Col>
-              <Col xs={24} md={12}><Form.Item label="主机名"><Input aria-label="主机名" value={target.domain} onChange={(event) => setTarget((value) => ({ ...value, domain: event.target.value }))} /></Form.Item></Col>
+              <Col xs={24} md={12}><Form.Item label="主机名" help="填写证书覆盖的 DNS 域名或 IP，不带协议、端口或路径。"><Input aria-label="主机名" value={target.domain} onChange={(event) => setTarget((value) => ({ ...value, domain: event.target.value }))} /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item label="证书文件名"><Input aria-label="证书文件名" value={target.cert_name} onChange={(event) => setTarget((value) => ({ ...value, cert_name: event.target.value }))} /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item label="重载服务"><Select aria-label="重载服务" value={target.reload} options={["nginx", "xray", "both", "none"].map((value) => ({ label: ({ nginx: "Nginx", xray: "Xray", both: "两者", none: "不重载" } as Record<string, string>)[value], value }))} onChange={(reload) => setTarget((value) => ({ ...value, reload }))} /></Form.Item></Col>
             </Row>
@@ -247,8 +261,8 @@ export default function CertificatesView(props: CertificatesViewProps) {
         <Card size="small" title="版本"><Table<CertificateVersion> rowKey="id" dataSource={detail.versions} pagination={false} scroll={{ x: 700 }} columns={[
           { title: "版本", key: "version", render: (_, version) => <Space orientation="vertical" size={0}><Typography.Text strong>{date(version.created_at)}</Typography.Text><Typography.Text>{version.details.issuer}</Typography.Text><Typography.Text code>{version.details.serial}</Typography.Text></Space> },
           { title: "到期时间", key: "expires", render: (_, version) => date(version.details.expires_at) },
-          { title: "状态", key: "status", render: (_, version) => <Space wrap>{version.revocation && <Tag color={color(version.revocation.status)}>{version.revocation.status === "unknown" ? "尚未确认" : version.revocation.status === "pending" ? "吊销中" : "已吊销"}</Tag>}{version.id === detail.certificate.version_id && <Tag color={version.revocation ? "default" : "success"}>{version.revocation ? "当前" : "使用中"}</Tag>}</Space> },
-          { title: "操作", key: "actions", render: (_, version) => <Space wrap>{version.id !== detail.certificate.version_id && <Button aria-label="启用版本" disabled={busy || Boolean(version.revocation) || Boolean(detail.certificate.active_job_id)} onClick={() => setConfirmation({ title: "启用此证书版本？", description: version.details.serial, work: () => certificateRequest(`/${selected}/versions/${version.id}/activate`, "POST") })}>启用版本</Button>}<Button danger icon={<StopOutlined />} aria-label={version.revocation?.status === "unknown" ? "重试吊销" : "吊销版本"} disabled={busy || !capabilities.revocation || Boolean(detail.certificate.active_job_id) || Boolean(version.revocation && version.revocation.status !== "unknown")} onClick={() => openRevoke(version)}>{version.revocation?.status === "unknown" ? "重试吊销" : "吊销版本"}</Button></Space> },
+          { title: "状态", key: "status", render: (_, version) => <Space wrap>{version.details.self_signed === true && <Tag color="warning">自签名</Tag>}{version.revocation && <Tag color={color(version.revocation.status)}>{version.revocation.status === "unknown" ? "尚未确认" : version.revocation.status === "pending" ? "吊销中" : "已吊销"}</Tag>}{version.id === detail.certificate.version_id && <Tag color={version.revocation ? "default" : "success"}>{version.revocation ? "当前" : "使用中"}</Tag>}</Space> },
+          { title: "操作", key: "actions", render: (_, version) => <Space wrap>{version.id !== detail.certificate.version_id && <Button aria-label="启用版本" disabled={busy || Boolean(version.revocation) || Boolean(detail.certificate.active_job_id)} onClick={() => setConfirmation({ title: "启用此证书版本？", description: version.details.serial, work: () => certificateRequest(`/${selected}/versions/${version.id}/activate`, "POST") })}>启用版本</Button>}<Button danger icon={<StopOutlined />} aria-label={version.revocation?.status === "unknown" ? "重试吊销" : "吊销版本"} disabled={busy || version.details.self_signed === true || !capabilities.revocation || Boolean(detail.certificate.active_job_id) || Boolean(version.revocation && version.revocation.status !== "unknown")} onClick={() => openRevoke(version)}>{version.revocation?.status === "unknown" ? "重试吊销" : "吊销版本"}</Button></Space> },
         ]} /></Card>
         <Card size="small" title="任务"><Table<CertificateDetail["jobs"][number]> rowKey="id" dataSource={detail.jobs} pagination={false} scroll={{ x: 500 }} columns={[
           { title: "任务", key: "job", render: (_, job) => <Space orientation="vertical" size={0}><Typography.Text strong>{zhStatus(job.kind)}</Typography.Text><Typography.Text>{job.message ? zhMessage(job.message) : ""}</Typography.Text>{job.cleanup_pending && <Typography.Text type="warning">节点验证文件待清理</Typography.Text>}</Space> },
@@ -276,6 +290,14 @@ export default function CertificatesView(props: CertificatesViewProps) {
           <Collapse items={[{ key: "eab", label: "外部账户绑定", children: <><Form.Item label="EAB 密钥 ID"><Input.Password aria-label="EAB 密钥 ID" autoComplete="off" value={form.eab_kid} onChange={(event) => patchForm({ eab_kid: event.target.value })} /></Form.Item><Form.Item label="EAB HMAC 密钥"><Input.Password aria-label="EAB HMAC 密钥" autoComplete="off" value={form.eab_hmac_key} onChange={(event) => patchForm({ eab_hmac_key: event.target.value })} /></Form.Item></> }]} />
           <Form.Item label="自动续签" style={{ marginTop: 16 }}><Switch aria-label="自动续签" checked={form.auto_renew} onChange={(auto_renew) => patchForm({ auto_renew })} /></Form.Item>
           <Checkbox checked={form.accept_terms} onChange={(event) => patchForm({ accept_terms: event.target.checked })}>我接受此 CA 的服务条款</Checkbox>
+        </>}
+        {dialog === "self-signed" && <>
+          <Alert type="warning" title="请确认自签名信任边界" description={selfSignedWarning} showIcon style={{ marginBottom: 16 }} />
+          <Form.Item label="证书名称" required><Input aria-label="证书名称" maxLength={120} value={selfSignedForm.name} onChange={(event) => setSelfSignedForm((value) => ({ ...value, name: event.target.value }))} /></Form.Item>
+          <Form.Item label="DNS 域名或 IP（SAN）" required help="最多 20 项，用换行、空格或逗号分隔；支持 IPv4、IPv6 和单层通配符 DNS。不要填写协议、端口、方括号或路径。"><Input.TextArea aria-label="DNS 域名或 IP（SAN）" rows={3} maxLength={5120} value={selfSignedForm.domains} onChange={(event) => setSelfSignedForm((value) => ({ ...value, domains: event.target.value }))} /></Form.Item>
+          <Form.Item label="有效天数" required help="1–3650 天，默认 365 天。到期前需手动生成并部署新证书，不会自动续签。"><InputNumber aria-label="有效天数" min={1} max={3650} precision={0} value={selfSignedForm.valid_days} style={{ width: "100%" }} onChange={(valid_days) => setSelfSignedForm((value) => ({ ...value, valid_days }))} /></Form.Item>
+          <Typography.Paragraph>用途：服务器 TLS 身份验证（serverAuth）；使用 ECDSA P-256 密钥。这不是可签发其他证书的 CA 证书。</Typography.Paragraph>
+          <Checkbox checked={selfSignedForm.confirm_self_signed} onChange={(event) => setSelfSignedForm((value) => ({ ...value, confirm_self_signed: event.target.checked }))}>我了解自签名证书不受浏览器默认信任</Checkbox>
         </>}
         {dialog === "account" && <>
           <Form.Item label="账户邮箱"><Input aria-label="账户邮箱" type="email" value={accountForm.email} onChange={(event) => setAccountForm((value) => ({ ...value, email: event.target.value }))} /></Form.Item>

@@ -22,6 +22,7 @@ const navigation = [
   { key: "/notifications", label: "通知设置", icon: <BellOutlined aria-hidden /> },
   { key: "/system-settings", label: "系统设置", icon: <ControlOutlined aria-hidden /> },
   { key: "/backups", label: "备份与恢复", icon: <CloudDownloadOutlined aria-hidden /> },
+  { key: "/renewals", label: "续费审核", icon: <HistoryOutlined aria-hidden /> },
 ];
 class WorkspaceBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -46,7 +47,7 @@ function ApplicationLayout() {
   const navigate = useNavigate();
   const screens = Grid.useBreakpoint();
   const mobile = !screens.lg;
-  const subscriber = location.pathname.replace(/\/+$/, "") === "/account";
+  const subscriber = routes.some(route => route.meta?.subscriber && route.path === location.pathname.replace(/\/+$/, ""));
   const sessionRequest = useRef<Promise<void> | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [collapsed, setCollapsed] = useState(false);

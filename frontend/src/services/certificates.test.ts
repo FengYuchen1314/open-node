@@ -1,10 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authState } from "./auth";
-import { certificateRequest } from "./certificates";
+import { certificateRequest, type SelfSignedCertificateInput } from "./certificates";
 
 afterEach(() => { vi.unstubAllGlobals(); authState.session = null; });
 
 describe("certificate requests", () => {
+  it("sends only public self-signed settings through the authenticated CSRF write", async () => {
+    authState.session = { configured: true, authenticated: true, username: "admin", csrf_token: "csrf" };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ id: "new-certificate" }), { status: 201 }));
+    vi.stubGlobal("fetch", fetcher);
+    const body: SelfSignedCertificateInput = { name: "Private TLS", domains: ["example.com", "192.0.2.20", "2001:db8::20"], valid_days: 365, purpose: "server_auth", confirm_self_signed: true };
+    expect(await certificateRequest("/self-signed", "POST", body)).toEqual({ id: "new-certificate" });
+    expect(fetcher).toHaveBeenCalledOnce();
+    const [url, options] = fetcher.mock.calls[0];
+    expect(url).toBe("/api/v1/certificates/self-signed");
+    expect(options?.method).toBe("POST");
+    expect(options?.credentials).toBe("include");
+    expect(new Headers(options?.headers).get("X-CSRF-Token")).toBe("csrf");
+    expect(JSON.parse(options?.body as string)).toEqual(body);
+    expect(options?.body).not.toMatch(/key_pem|cert_pem|password/u);
+  });
+
   it("uses authenticated writes and never puts credential values in the URL", async () => {
     authState.session = { configured: true, authenticated: true, username: "admin", csrf_token: "csrf" };
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ id: "provider" })));

@@ -1,5 +1,48 @@
 # Testing
 
+## Subscription clients, self-service sources, certificates and renewals — 2026-08-31
+
+Following the request to prioritize functional delivery, these changes use
+focused VPS checks and one combined frontend build, not repeated historical
+full-suite/image audits:
+
+- Six additional client formats: **18 backend tests**, Ruff and both frontend
+  type checks passed. Evidence: `/tmp/open-node-client-exports-r2.4MTeuMkn/evidence`.
+  This exercises actual subscription APIs and serialization; it is not native
+  acceptance in all six commercial/mobile applications.
+- Self-signed certificates: **62 backend, 30 Agent and 28 frontend tests**, Ruff
+  and type checks passed in one run at
+  `/tmp/open-node-self-signed.yRbHwiv5/gate-r1`. The published Agent 0.3.0a0
+  wheel and bootstrap pin were not changed; IPv6-literal certificate validation
+  requires an Agent build containing the new source change.
+- External URI/Base64 input and subscriber-owned sources: **14 backend and
+  8 frontend tests** passed. One account cancellation check was subsequently
+  rerun after making missing/foreign preview IDs uniformly 404. Existing
+  administrator cancellation idempotency is preserved.
+- Web renewal requests/review: **16 backend tests** and Ruff passed at
+  `/tmp/open-node-renewals-root.Z7MQVWeH/evidence-r2`, including concurrent
+  duplicate approval, durable Agent commands, owner separation, expiry math,
+  rollback and restart. **10 frontend tests** passed across the combined run
+  and one corrected UI-test rerun.
+- Combined app/node type checks and the **main and Probe production builds**
+  passed at `/tmp/open-node-external-inputs.UtDfJ2on/evidence-r3`; artifacts are
+  in the adjacent `runtime-r3/dist` and `runtime-r3/dist-probe` directories.
+
+Original failures are retained: the client REALITY check initially treated a
+generated default uTLS value as an explicit user option; it was corrected.
+A dependency symlink caused TS2742 and was replaced only in the private test
+environment. The first combined type check caught a missing JSX closing brace.
+The first renewal fixture omitted required `traffic_limit_gb` (15 fixture
+failures, one real concurrency test passed); the fixture was corrected. The
+renewal double-click test then failed only because Ant Design's loading icon
+changed the button's accessible name; retaining the same DOM button reference
+preserved the double-click/secret-clearing assertions and passed. Only affected
+checks were rerun. These records are not a new full-project or Docker gate.
+
+Production and the shared candidate were not upgraded. The release commit's
+GitHub CI is the independent complete repository check; use that exact run's
+status rather than projecting any older gate onto this source.
+
 ## Web backup jobs — 2026-08-31
 
 The administrator Web creation/download slice passed one VPS integration run:

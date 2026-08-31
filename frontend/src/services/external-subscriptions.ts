@@ -5,6 +5,7 @@ import type {
   ExternalSourceDetail, ExternalSourceRead, ExternalSourcesResponse, ExternalSourceUpdate,
 } from "../domain/external-subscriptions";
 import { authenticatedFetch } from "./auth";
+import { clearSubscriberSession, subscriberState } from "./subscriber-auth";
 
 const base = `${import.meta.env.VITE_API_BASE_URL ?? ""}/api/v1/external-subscriptions`;
 const unknownOutcome = "无法完成外部订阅请求。再次写入前，请先核实当前状态。";
@@ -25,7 +26,7 @@ function errorMessage(status: number | null, detail?: unknown): string {
   switch (status) {
     case null: return unknownOutcome;
     case 401: return "请重新登录后管理外部订阅。";
-    case 403: return "此操作需要管理员权限和有效的请求验证。";
+    case 403: return "此操作未通过权限或请求验证，请刷新登录状态后重试。";
     case 404: return "外部订阅来源或预览已不可用，请刷新状态。";
     case 409: return "来源或预览已发生变化。再次写入前，请先刷新状态。";
     case 410: return "此预览已过期。请关闭预览，并手动获取新预览。";
@@ -199,4 +200,60 @@ export function cancelExternalPreview(sourceId: string, previewId: string, fetch
     if (row.cancelled !== true) invalid();
     return { cancelled: true, license_required: free(row.license_required) };
   }, fetcher);
+}
+
+export interface ExternalSubscriptionsClient {
+  listExternalSources: typeof listExternalSources;
+  createExternalSource: typeof createExternalSource;
+  getExternalSource: typeof getExternalSource;
+  updateExternalSource: typeof updateExternalSource;
+  deleteExternalSource: typeof deleteExternalSource;
+  updateExternalNode: typeof updateExternalNode;
+  createExternalPreview: typeof createExternalPreview;
+  getExternalPreview: typeof getExternalPreview;
+  confirmExternalPreview: typeof confirmExternalPreview;
+  cancelExternalPreview: typeof cancelExternalPreview;
+}
+
+/** Same preview/CAS workflow, with subscriber cookies and no administrator fetch. */
+export function accountExternalSubscriptions(username: string, fetcher = fetch): ExternalSubscriptionsClient {
+  const csrf = subscriberState.session?.csrf_token;
+  const current = () => subscriberState.session?.authenticated && subscriberState.session.username === username && subscriberState.session.csrf_token === csrf;
+  const accountBase = `${import.meta.env.VITE_API_BASE_URL ?? ""}/api/v1/account/external-subscriptions`;
+  const accountFetch: typeof fetch = async (input, init = {}) => {
+    if (!current() || !csrf) throw new ExternalSubscriptionsError(401);
+    const path = String(input);
+    if (path !== base && !path.startsWith(`${base}/`)) invalid();
+    const headers = new Headers(init.headers);
+    headers.set("X-Open-Node-Client", "browser");
+    if (!["GET", "HEAD", "OPTIONS"].includes((init.method ?? "GET").toUpperCase())) headers.set("X-CSRF-Token", csrf);
+    const response = await fetcher(`${accountBase}${path.slice(base.length)}`, {
+      ...init, headers, credentials: "include", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer",
+    });
+    if (!current()) invalid();
+    if (response.status === 401) clearSubscriberSession();
+    return response;
+  };
+  const owned = (value: ExternalSourceRead) => { if (value.owner_username !== username) invalid(); return value; };
+  const ownedDetail = (value: ExternalSourceDetail) => { owned(value.source); return value; };
+  return {
+    listExternalSources: async () => {
+      const result = await listExternalSources(accountFetch);
+      result.sources.forEach(owned);
+      return result;
+    },
+    createExternalSource: payload => {
+      // Do not serialize payload.owner_username: the server derives ownership.
+      const { name, url, user_agent = "", enabled = true } = payload;
+      return request("", { method: "POST", body: JSON.stringify({ name, url, user_agent, enabled }) }, value => owned(source(value)), accountFetch);
+    },
+    getExternalSource: async id => ownedDetail(await getExternalSource(id, accountFetch)),
+    updateExternalSource: async (id, payload) => owned(await updateExternalSource(id, payload, accountFetch)),
+    deleteExternalSource: (id, payload) => deleteExternalSource(id, payload, accountFetch),
+    updateExternalNode: async (id, nodeId, payload) => ownedDetail(await updateExternalNode(id, nodeId, payload, accountFetch)),
+    createExternalPreview: (id, payload) => createExternalPreview(id, payload, accountFetch),
+    getExternalPreview: (id, previewId) => getExternalPreview(id, previewId, accountFetch),
+    confirmExternalPreview: (id, previewId, payload) => confirmExternalPreview(id, previewId, payload, accountFetch),
+    cancelExternalPreview: (id, previewId) => cancelExternalPreview(id, previewId, accountFetch),
+  };
 }

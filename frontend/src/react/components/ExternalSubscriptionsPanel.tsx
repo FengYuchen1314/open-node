@@ -1,7 +1,7 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Checkbox, Descriptions, Empty, Flex, Form, Input, Modal, Select, Spin, Switch, Table, Tag, Typography } from "antd";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type {
   ExternalNodeRead, ExternalPreviewConfirm, ExternalPreviewNode, ExternalPreviewRead,
   ExternalSourceDetail, ExternalSourceRead,
@@ -11,15 +11,26 @@ import {
   cancelExternalPreview, confirmExternalPreview, createExternalPreview, createExternalSource, deleteExternalSource,
   ExternalSubscriptionsError, externalSubscriptionsErrorMessage, getExternalPreview, getExternalSource,
   listExternalSources, updateExternalNode, updateExternalSource,
+  type ExternalSubscriptionsClient,
 } from "../../services/external-subscriptions";
 import { useAsyncScope } from "../hooks/useAsyncScope";
 
 export interface ExternalSubscriptionsPanelProps {
-  users: ProductUser[];
+  users: Pick<ProductUser, "username" | "display_name" | "is_active" | "removal_id">[];
+  accountUsername?: string;
+  api?: ExternalSubscriptionsClient;
   /** Inactive tabs must destroy write-only credentials and pending preview UI. */
   active?: boolean;
   onUpdated?: () => void;
 }
+
+const administratorApi: ExternalSubscriptionsClient = {
+  listExternalSources, createExternalSource, getExternalSource, updateExternalSource, deleteExternalSource,
+  updateExternalNode, createExternalPreview, getExternalPreview, confirmExternalPreview, cancelExternalPreview,
+};
+const ExternalApi = createContext(administratorApi);
+const AccountOwner = createContext<string | undefined>(undefined);
+type SourceUsers = ExternalSubscriptionsPanelProps["users"];
 
 const defaultAgent = "clash-meta/2.4.0";
 const modalStyle = { maxWidth: "calc(100vw - 24px)" };
@@ -32,11 +43,13 @@ const date = (value: string | null) => value && Number.isFinite(Date.parse(value
 const conflict = (failure: unknown) => failure instanceof ExternalSubscriptionsError && failure.status === 409;
 const selectable = (node: ExternalPreviewNode) => node.change === "new" && node.selectable && !node.existing;
 
-export default function ExternalSubscriptionsPanel({ active = true, ...props }: ExternalSubscriptionsPanelProps) {
-  return active ? <ExternalSubscriptionsContent {...props} /> : null;
+export default function ExternalSubscriptionsPanel({ active = true, api = administratorApi, accountUsername, ...props }: ExternalSubscriptionsPanelProps) {
+  return active ? <ExternalApi.Provider value={api}><AccountOwner.Provider value={accountUsername}><ExternalSubscriptionsContent key={accountUsername ?? "administrator"} {...props} /></AccountOwner.Provider></ExternalApi.Provider> : null;
 }
 
 function ExternalSubscriptionsContent({ users, onUpdated }: Omit<ExternalSubscriptionsPanelProps, "active">) {
+  const { listExternalSources } = useContext(ExternalApi);
+  const accountUsername = useContext(AccountOwner);
   const scope = useAsyncScope();
   const [sources, setSources] = useState<ExternalSourceRead[]>([]);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
@@ -51,7 +64,7 @@ function ExternalSubscriptionsContent({ users, onUpdated }: Omit<ExternalSubscri
       setSelectedId(previous => value.sources.some(source => source.id === previous) ? previous : "");
     } catch (failure) { if (scope.isCurrent(run)) setError(externalSubscriptionsErrorMessage(failure)); }
     finally { if (scope.isCurrent(run)) setLoading(false); }
-  }, [scope]);
+  }, [scope, listExternalSources]);
   useEffect(() => { void load(); }, [load]);
 
   function changed(source?: ExternalSourceRead) {
@@ -70,12 +83,12 @@ function ExternalSubscriptionsContent({ users, onUpdated }: Omit<ExternalSubscri
   return <section aria-label="外部订阅" data-testid="external-subscriptions-panel" style={{ minWidth: 0 }}><Flex vertical gap="middle">
     <Card size="small" title="外部订阅"><Flex vertical gap="middle">
       <Alert type="info" showIcon title="仍须满足本地订阅使用条件" description="已确认的外部节点仅加入所属用户的主订阅，并受本地套餐、有效期和配额检查约束。临时链接和命名订阅配置不会自动包含这些节点。上游流量仅供展示，不会改变本地用量计费。" />
-      <Typography.Paragraph type="secondary">本阶段通过手动预览导入 Clash/Mihomo YAML。保存来源、打开此页面和下载订阅都不会抓取上游链接。此处尚未启用 URI/Base64 输入和定时刷新。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">支持上游返回 Clash/Mihomo YAML、URI 列表及 Base64 编码内容，须手动预览并确认。保存来源、打开此页面和下载订阅都不会抓取上游链接；尚未启用定时刷新。不支持的协议或参数会明确显示为不可导入。</Typography.Paragraph>
       <Flex gap="small" wrap>
         <Button type="primary" icon={<PlusOutlined aria-hidden />} aria-label="添加外部订阅来源" disabled={!users.some(user => !user.removal_id)} onClick={() => { setSelectedId(""); setCreating(true); }}>添加来源</Button>
         <Button icon={<ReloadOutlined aria-hidden />} aria-label="刷新外部订阅来源" loading={loading} onClick={() => void load()}>刷新来源</Button>
       </Flex>
-      <Form layout="vertical"><Form.Item label="按所属用户筛选"><Select aria-label="按所属用户筛选外部订阅来源" allowClear placeholder="所有用户" value={owner} options={ownerOptions} onChange={value => { setOwner(value); setSelectedId(""); setCreating(false); }} /></Form.Item></Form>
+      {accountUsername ? <Typography.Text>仅管理当前账户自己的来源：{accountUsername}</Typography.Text> : <Form layout="vertical"><Form.Item label="按所属用户筛选"><Select aria-label="按所属用户筛选外部订阅来源" allowClear placeholder="所有用户" value={owner} options={ownerOptions} onChange={value => { setOwner(value); setSelectedId(""); setCreating(false); }} /></Form.Item></Form>}
       {error && <Alert type="error" title={zhMessage(error)} showIcon />}
       <Table<ExternalSourceRead> rowKey="id" size="small" loading={loading} dataSource={visible} scroll={{ x: 650 }} pagination={{ pageSize: 10, showSizeChanger: false }} locale={{ emptyText: "暂无外部订阅来源。" }} columns={[
         { title: "来源", dataIndex: "name", width: 210, render: value => <Typography.Text style={wrapText}>{value}</Typography.Text> },
@@ -103,10 +116,11 @@ function UpstreamMetadata({ metadata }: { metadata: Record<string, number> }) {
 }
 
 interface SourceDetailsProps {
-  sourceId: string; ownerUsername: string; users: ProductUser[];
+  sourceId: string; ownerUsername: string; users: SourceUsers;
   onClose: () => void; onUpdated: (source?: ExternalSourceRead) => void; onDeleted: () => void;
 }
 function SourceDetails({ sourceId, ownerUsername, users, onClose, onUpdated, onDeleted }: SourceDetailsProps) {
+  const { getExternalSource } = useContext(ExternalApi);
   const scope = useAsyncScope();
   const [detail, setDetail] = useState<ExternalSourceDetail | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [editing, setEditing] = useState(false), [deleting, setDeleting] = useState(false), [previewOpen, setPreviewOpen] = useState(false);
@@ -117,7 +131,7 @@ function SourceDetails({ sourceId, ownerUsername, users, onClose, onUpdated, onD
     try { const value = await getExternalSource(sourceId); if (scope.isCurrent(run)) setDetail(value); }
     catch (failure) { if (scope.isCurrent(run)) setError(externalSubscriptionsErrorMessage(failure)); }
     finally { if (scope.isCurrent(run)) setLoading(false); }
-  }, [scope, sourceId]);
+  }, [scope, sourceId, getExternalSource]);
   useEffect(() => { void load(); }, [load]);
   function acceptRead(value: ExternalSourceDetail) { scope.invalidate(); setLoading(false); setDetail(value); }
   function close() { scope.invalidate(); onClose(); }
@@ -158,13 +172,15 @@ function SourceDetails({ sourceId, ownerUsername, users, onClose, onUpdated, onD
 }
 
 interface SourceEditorProps {
-  open: boolean; source?: ExternalSourceRead; users: ProductUser[]; onOpenChange: (open: boolean) => void;
+  open: boolean; source?: ExternalSourceRead; users: SourceUsers; onOpenChange: (open: boolean) => void;
   onSaved: (source: ExternalSourceRead) => void; onRead?: (detail: ExternalSourceDetail) => void;
 }
 function SourceEditor(props: SourceEditorProps) { return props.open ? <SourceEditorContent {...props} /> : null; }
 function SourceEditorContent({ source, users, onOpenChange, onSaved, onRead }: SourceEditorProps) {
+  const { createExternalSource, updateExternalSource, getExternalSource } = useContext(ExternalApi);
+  const accountUsername = useContext(AccountOwner);
   const scope = useAsyncScope(), busyRef = useRef(false);
-  const [owner, setOwner] = useState(source?.owner_username ?? ""), [name, setName] = useState(source?.name ?? ""), [enabled, setEnabled] = useState(source?.enabled ?? true);
+  const [owner, setOwner] = useState(source?.owner_username ?? accountUsername ?? ""), [name, setName] = useState(source?.name ?? ""), [enabled, setEnabled] = useState(source?.enabled ?? true);
   const [url, setUrl] = useState(""), [agent, setAgent] = useState(""), [agentMode, setAgentMode] = useState<"keep" | "default" | "replace">(source ? "keep" : "default");
   const [revision, setRevision] = useState(source?.revision ?? 1), [latest, setLatest] = useState<ExternalSourceRead | null>(null);
   const [busy, setBusy] = useState(""), [error, setError] = useState(""), [stale, setStale] = useState(false);
@@ -202,7 +218,7 @@ function SourceEditorContent({ source, users, onOpenChange, onSaved, onRead }: S
   return <Modal open title={source ? "编辑外部订阅来源" : "添加外部订阅来源"} width={600} style={modalStyle} styles={{ body: modalBody }} destroyOnHidden onCancel={close} footer={<Flex gap="small" wrap justify="end"><Button aria-label="取消编辑外部订阅来源" onClick={close}>取消</Button><Button type="primary" aria-label="保存外部订阅来源" loading={busy === "save"} disabled={!canSave} onClick={() => void save()}>保存来源</Button></Flex>}>
     <Form layout="vertical" preserve={false} autoComplete="off" onFinish={() => void save()}>
       {error && <Alert type="error" showIcon title={zhMessage(error)} />}
-      {source ? <Descriptions size="small" column={1} items={[{ key: "owner", label: "所属用户（不可更改）", children: <span style={wrapText}>{source.owner_username}</span> }, { key: "revision", label: "预期来源版本", children: revision }]} /> : <Form.Item label="所属用户" required><Select aria-label="外部订阅所属用户" placeholder="选择已有用户" value={owner || undefined} disabled={!!busy} options={users.filter(user => !user.removal_id).map(user => ({ label: `${user.display_name || user.username} (${user.username})${user.is_active ? "" : " — 未启用"}`, value: user.username }))} onChange={value => { setOwner(value); setUrl(""); setAgent(""); setError(""); }} /></Form.Item>}
+      {source ? <Descriptions size="small" column={1} items={[{ key: "owner", label: "所属用户（不可更改）", children: <span style={wrapText}>{source.owner_username}</span> }, { key: "revision", label: "预期来源版本", children: revision }]} /> : accountUsername ? <Typography.Paragraph>所属用户（由登录会话确定）：{accountUsername}</Typography.Paragraph> : <Form.Item label="所属用户" required><Select aria-label="外部订阅所属用户" placeholder="选择已有用户" value={owner || undefined} disabled={!!busy} options={users.filter(user => !user.removal_id).map(user => ({ label: `${user.display_name || user.username} (${user.username})${user.is_active ? "" : " — 未启用"}`, value: user.username }))} onChange={value => { setOwner(value); setUrl(""); setAgent(""); setError(""); }} /></Form.Item>}
       <Form.Item label="来源名称" required help="1–160 个字符，不得包含控制字符"><Input aria-label="外部订阅来源名称" value={name} disabled={!!busy} onChange={event => setName(event.target.value)} /></Form.Item>
       <Form.Item label={source ? "新链接（可选）" : "订阅链接"} required={!source} help={source ? "留空保留已保存的链接。更换链接后，须先预览并确认，才会替换已确认的节点。" : "请输入私密的 HTTPS 订阅链接，仅在保存时发送。"}>
         <Input.Password aria-label="外部订阅链接" autoComplete="off" autoCapitalize="none" spellCheck={false} visibilityToggle={false} value={url} disabled={!!busy} onChange={event => setUrl(event.target.value)} />
@@ -221,6 +237,7 @@ function SourceEditorContent({ source, users, onOpenChange, onSaved, onRead }: S
 interface SourceDeletionProps { open: boolean; source: ExternalSourceRead; onOpenChange: (open: boolean) => void; onRead: (detail: ExternalSourceDetail) => void; onDeleted: () => void }
 function SourceDeletion(props: SourceDeletionProps) { return props.open ? <SourceDeletionContent {...props} /> : null; }
 function SourceDeletionContent({ source, onOpenChange, onRead, onDeleted }: SourceDeletionProps) {
+  const { deleteExternalSource, getExternalSource } = useContext(ExternalApi);
   const scope = useAsyncScope(), busyRef = useRef(false);
   const [revision, setRevision] = useState(source.revision), [accepted, setAccepted] = useState(false), [stale, setStale] = useState(false), [busy, setBusy] = useState(""), [error, setError] = useState("");
   function close() { scope.invalidate(); onOpenChange(false); }
@@ -253,6 +270,7 @@ function SourceDeletionContent({ source, onOpenChange, onRead, onDeleted }: Sour
 interface NodeEditorProps { open: boolean; source: ExternalSourceRead; node: ExternalNodeRead; onOpenChange: (open: boolean) => void; onRead: (detail: ExternalSourceDetail) => void; onSaved: (detail: ExternalSourceDetail) => void }
 function NodeEditor(props: NodeEditorProps) { return props.open ? <NodeEditorContent {...props} /> : null; }
 function NodeEditorContent({ source, node, onOpenChange, onRead, onSaved }: NodeEditorProps) {
+  const { updateExternalNode, getExternalSource } = useContext(ExternalApi);
   const scope = useAsyncScope(), busyRef = useRef(false);
   const [name, setName] = useState(node.name), [enabled, setEnabled] = useState(node.enabled), [revision, setRevision] = useState(source.revision);
   const [busy, setBusy] = useState(""), [error, setError] = useState(""), [stale, setStale] = useState(false), [latest, setLatest] = useState<ExternalNodeRead | null>(null);
@@ -291,6 +309,7 @@ function NodeEditorContent({ source, node, onOpenChange, onRead, onSaved }: Node
 interface PreviewDialogProps { open: boolean; source: ExternalSourceRead; onOpenChange: (open: boolean) => void; onRead: (detail: ExternalSourceDetail) => void; onApplied: () => void }
 function PreviewDialog(props: PreviewDialogProps) { return props.open ? <PreviewContent {...props} /> : null; }
 function PreviewContent({ source, onOpenChange, onRead, onApplied }: PreviewDialogProps) {
+  const { createExternalPreview, getExternalPreview, confirmExternalPreview, cancelExternalPreview, getExternalSource } = useContext(ExternalApi);
   const scope = useAsyncScope(), busyRef = useRef(false);
   const [preview, setPreview] = useState<ExternalPreviewRead | null>(null), [recoveryId, setRecoveryId] = useState("");
   const [selection, setSelection] = useState<string[]>([]), [accepted, setAccepted] = useState(false);

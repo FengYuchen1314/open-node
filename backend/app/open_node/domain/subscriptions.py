@@ -82,6 +82,19 @@ class SubscriptionClientFormat(StrEnum):
     XRAY = "xray"
     URI_LIST = "uri-list"
     BASE64 = "base64"
+    LOON = "loon"
+    QUANTUMULT_X = "quantumult-x"
+    SHADOWROCKET = "shadowrocket"
+    STASH = "stash"
+    SURFBOARD = "surfboard"
+    EGERN = "egern"
+
+    @classmethod
+    def _missing_(cls, value):
+        # The pinned MMWX converter uses ?t=qx; the public canonical name is explicit.
+        if value == "qx":
+            return cls.QUANTUMULT_X
+        return None
 
 
 class SubscriptionFormatNode(BaseModel):

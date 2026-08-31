@@ -29,11 +29,18 @@ The public endpoint is `/api/v1/subscribe/{token}?format=...`:
 
 | Format | Verified Client |
 | --- | --- |
-| `clash` (default) | Mihomo v1.19.30 |
+| `clash` (fallback for unrecognized clients) | Mihomo v1.19.30 |
 | `surge` | Server-side profile validation; Apple client gate remains |
 | `sing-box` | sing-box v1.13.19 |
 | `xray` | Pinned, patched [compatibility runtime](fork-runtime.md) |
 | `uri-list`, `base64` | Mihomo v1.19.30 file-provider URI importer |
+| `loon`, `quantumult-x`, `shadowrocket`, `stash`, `surfboard`, `egern` | Pinned-schema and real subscription API tests; native application import is not claimed |
+
+An explicit format overrides User-Agent selection. Omit `format` or use
+`format=auto` to select by the requesting client. See the
+[client usage guide](subscription-clients.md) for mappings, the six additional
+export schemas, unsupported options and Stash template limits. Shadowrocket
+exports node YAML; select `base64` explicitly when that representation is needed.
 
 Clash and sing-box export complete configurations with a loopback mixed
 listener on port 7890 and a `Proxy` selector. Xray exports a loopback SOCKS
@@ -47,7 +54,7 @@ Local listener ports can be changed in the downloaded client configuration.
 
 Administrators can also create [temporary subscription links](temporary-subscriptions.md)
 at `/t/{code}` for selected nodes from one subscriber's current plan. These
-links use the same renderer and all six formats, but have a 1-100 successful
+links use the same renderer and supported formats, but have a 1-100 successful
 download limit and expire after 1-60 minutes. They recheck the source user,
 plan, quota, templates and credentials on every request and omit the
 `subscription-userinfo` header. Expiry, exhaustion or deletion blocks future

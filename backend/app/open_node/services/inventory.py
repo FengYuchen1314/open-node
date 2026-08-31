@@ -1619,12 +1619,14 @@ class InventoryStore:
 
     def create_schema(self) -> None:
         from open_node.services.external_subscriptions import ExternalSourceModel
+        from open_node.services.renewals import RenewalRequestModel
         from open_node.services.subscriber_auth import SubscriberAccount
         from open_node.services.subscription_templates import TemplateRecord
 
         SubscriberAccount.metadata.create_all(self._engine)
         TemplateRecord.metadata.create_all(self._engine)
         ExternalSourceModel.metadata.create_all(self._engine)
+        RenewalRequestModel.metadata.create_all(self._engine)
         # Historical SQLite deployments ran with FK enforcement disabled. Refuse
         # to mutate such a database until an operator repairs or restores any
         # existing orphaned rows, then verify again after our own migrations.
@@ -4098,7 +4100,7 @@ class InventoryStore:
                 "subscription has no compatible nodes for this format and selection"
             )
         selected = template_override or self.subscription_templates().resolve(
-            session, user, plan, client_format.value
+            session, user, plan, "clash" if client_format.value == "stash" else client_format.value
         )
         content, media_type, extension = self._render_subscription_content(
             proxies, client_format, selected.content if selected else None
@@ -4190,11 +4192,19 @@ class InventoryStore:
             "GLOBAL",
             "COMPATIBLE",
         }
-        from open_node.services.template_rendering import DEFAULT_SURGE, reserved_names, surge_name
+        from open_node.services.template_rendering import (
+            DEFAULT_SURGE,
+            TemplateError,
+            reserved_names,
+            surge_name,
+            validate_stash_template,
+        )
 
-        if client_format.value in {"clash", "surge"}:
+        template_reason = None
+        if client_format.value in {"clash", "surge", "stash"}:
+            template_format = "clash" if client_format.value == "stash" else client_format.value
             selected = self.subscription_templates().resolve(
-                session, user, plan, client_format.value
+                session, user, plan, template_format
             )
             content = (
                 template_override
@@ -4206,14 +4216,22 @@ class InventoryStore:
                 else None
             )
             if content is not None:
-                used_names.update(reserved_names(content, client_format.value))
+                try:
+                    if client_format.value == "stash":
+                        validate_stash_template(content)
+                    used_names.update(reserved_names(content, template_format))
+                except TemplateError:
+                    if client_format.value != "stash":
+                        raise
+                    template_reason = "Selected Clash template is not compatible with Stash"
+                    warnings.append(template_reason)
         prepared = []
         name_map: dict[str, str] = {}
         ambiguous_names: set[str] = set()
         for identifier, proxy in candidates:
             original_name = str(proxy.get("name") or "Node")
             name = original_name
-            if client_format == SubscriptionClientFormat.SURGE:
+            if client_format.value in {"surge", *subscription_clients.TEXT_NODE_FORMATS}:
                 name = surge_name(name)
             unique, suffix = name, 2
             while unique in used_names:
@@ -4231,7 +4249,7 @@ class InventoryStore:
                         name_map[alias] = unique
             prepared.append((identifier, proxy, unique))
         for identifier, proxy, unique in prepared:
-            reason = None
+            reason = template_reason
             dialer = proxy.get("dialer-proxy")
             if isinstance(dialer, str) and dialer in ambiguous_names:
                 reason = "Dialer proxy reference is ambiguous after node naming"
@@ -6640,6 +6658,18 @@ class InventoryStore:
     ) -> tuple[str, str, str]:
         from open_node.services.template_rendering import DEFAULT_SURGE, render
 
+        if client_format == SubscriptionClientFormat.STASH:
+            from open_node.services.template_rendering import DEFAULT_CLASH, render_stash
+
+            return (
+                render_stash(template_content or DEFAULT_CLASH, proxies)[0],
+                "text/yaml; charset=utf-8",
+                "yaml",
+            )
+        if client_format.value in subscription_clients.EXTRA_FORMATS:
+            from open_node.services.subscription_extra_clients import render_nodes
+
+            return render_nodes(proxies, client_format.value)
         if client_format == SubscriptionClientFormat.SURGE:
             return (
                 render(template_content or DEFAULT_SURGE, "surge", proxies)[0],

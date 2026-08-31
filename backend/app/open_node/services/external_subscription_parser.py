@@ -1,4 +1,4 @@
-"""Bounded, data-only parsing of the external Clash/Mihomo ``proxies`` list.
+"""Bounded, data-only parsing of external Clash YAML and native URI lists.
 
 This is an input trust boundary, not a client-format compatibility converter.
 Whole-client rules/providers/scripts are never copied. YAML references (including
@@ -9,13 +9,14 @@ Unsupported nodes remain visible, but none of their configuration is importable.
 import base64
 import binascii
 import ipaddress
+import json
 import math
 import re
 import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
 import yaml
@@ -650,8 +651,399 @@ def _validated_node(proxy: Any) -> ParsedExternalNode:
     return ParsedExternalNode(name, kind, config)
 
 
+def _decode_base64(value: str, maximum: int) -> bytes:
+    # One canonical standard/URL-safe layer; no ignored punctuation, mixed
+    # alphabets, surplus padding or nonzero pad bits, and never recursion.
+    if not value or len(value) > ((maximum + 2) // 3) * 4:
+        _reject()
+    urlsafe = "-" in value or "_" in value
+    alphabet = r"[A-Za-z0-9_-]+={0,2}" if urlsafe else r"[A-Za-z0-9+/]+={0,2}"
+    if not re.fullmatch(alphabet, value) or len(value.rstrip("=")) % 4 == 1:
+        _reject()
+    bare = value.rstrip("=")
+    padded = bare + "=" * (-len(bare) % 4)
+    if "=" in value and value != padded:
+        _reject()
+    decoded = base64.b64decode(padded, altchars=b"-_" if urlsafe else None, validate=True)
+    encoder = base64.urlsafe_b64encode if urlsafe else base64.b64encode
+    if len(decoded) > maximum or encoder(decoded).decode().rstrip("=") != bare:
+        _reject()
+    return decoded
+
+
+def _unquote(value: str, *, query=False) -> str:
+    if re.search(r"%(?![0-9A-Fa-f]{2})", value):
+        _reject()
+    return _text(
+        unquote(value.replace("+", " ") if query else value, errors="strict"),
+        limit=MAX_SCALAR_LENGTH, empty=True,
+    )
+
+
+def _uri_query(value: str) -> dict[str, str]:
+    result = {}
+    parts = value.split("&") if value else []
+    if len(parts) > 64:
+        _reject()
+    for part in parts:
+        key, separator, item = part.partition("=")
+        key, item = _unquote(key, query=True), _unquote(item, query=True)
+        if not separator or not key or key in result:
+            _reject()
+        result[key] = item
+    return result
+
+
+def _take(options: dict, *names: str, default=None):
+    present = [name for name in names if name in options]
+    if len(present) > 1:
+        _reject()  # Equal aliases are ambiguous too, not a precedence rule.
+    return options.pop(present[0]) if present else default
+
+
+def _uri_int(value, minimum=0, maximum=65535):
+    if type(value) is str:
+        if not re.fullmatch(r"[0-9]{1,10}", value):
+            _reject()
+        value = int(value)
+    return _integer(value, minimum, maximum)
+
+
+def _uri_bool(value):
+    if type(value) is bool:
+        return value
+    if type(value) is int and value in (0, 1):
+        return bool(value)
+    if type(value) is str and value in {"0", "1", "true", "false"}:
+        return value in {"1", "true"}
+    _reject()
+
+
+def _uri_tls(proxy, options, *, default=False):
+    security = _take(options, "security", default="tls" if default else "none")
+    if security not in {"none", "tls", "reality"}:
+        proxy["unsupported-uri-options"] = True
+    proxy["tls"] = security in {"tls", "reality"}
+    sni = _take(options, "sni", "peer", "servername")
+    if sni is not None:
+        proxy["servername" if proxy["type"] in {"vless", "vmess"} else "sni"] = sni
+    alpn = _take(options, "alpn")
+    if alpn is not None:
+        proxy["alpn"] = _text(alpn).split(",")
+    fingerprint = _take(options, "fp")
+    if fingerprint is not None:
+        proxy["client-fingerprint"] = fingerprint
+    insecure = _take(options, "allowInsecure", "insecure", "skip-cert-verify", "allow-insecure")
+    if insecure is not None:
+        insecure = _uri_bool(insecure)
+        if proxy["tls"] or insecure:
+            proxy["skip-cert-verify"] = insecure
+    if security == "reality":
+        if proxy["type"] != "vless":
+            proxy["unsupported-uri-options"] = True
+        proxy["reality-opts"] = {
+            "public-key": _take(options, "pbk", "public-key"),
+            "short-id": _take(options, "sid", default=""),
+        }
+
+
+def _uri_transport(proxy, options):
+    transport = _take(options, "type", default="tcp")
+    # Native V2Ray type=http means HTTP/2, not the YAML TCP HTTP-header mode.
+    transport = {"raw": "tcp", "http": "h2", "http-upgrade": "httpupgrade"}.get(
+        transport, transport
+    )
+    proxy["network"] = transport
+    header = _take(options, "headerType", default="none")
+    if header not in {"", "none"}:
+        proxy["unsupported-uri-options"] = True
+    if transport == "grpc":
+        proxy["grpc-opts"] = {
+            "grpc-service-name": _take(options, "serviceName", "path", default="")
+        }
+    elif transport in {"ws", "h2", "httpupgrade", "xhttp"}:
+        target = {
+            "ws": "ws-opts", "h2": "h2-opts",
+            "httpupgrade": "http-upgrade-opts", "xhttp": "xhttp-opts",
+        }[transport]
+        values = {"path": _take(options, "path", default="/")}
+        host = _take(options, "host")
+        if host is not None:
+            if transport == "ws":
+                values["headers"] = {"Host": host}
+            else:
+                values["host"] = host.split(",") if transport == "h2" else host
+        if transport == "ws":
+            early = _take(options, "ed")
+            if early is not None:
+                values["max-early-data"] = _uri_int(early)
+            early_header = _take(options, "eh")
+            if early_header is not None:
+                values["early-data-header-name"] = early_header
+        if transport == "xhttp":
+            mode = _take(options, "mode")
+            if mode is not None:
+                values["mode"] = mode
+        proxy[target] = values
+
+
+def _json_unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            _reject()
+        result[key] = value
+    return result
+
+
+def _uri_sni_fallback(proxy):
+    field = "servername" if proxy["type"] in {"vless", "vmess"} else "sni"
+    if not proxy.get("tls") or field in proxy:
+        return
+    for key in ("ws-opts", "h2-opts", "http-upgrade-opts", "xhttp-opts"):
+        options = proxy.get(key, {})
+        host = options.get("headers", {}).get("Host") or options.get("host")
+        if host:
+            proxy[field] = host[0] if isinstance(host, list) else host
+            return
+    try:
+        ipaddress.ip_address(proxy["server"])
+    except ValueError:
+        proxy[field] = proxy["server"]
+
+
+def _vmess_uri(line, index):
+    values = _mapping(json.loads(
+        _decode_base64(line[len("vmess://"):], MAX_SCALAR_LENGTH).decode("utf-8"),
+        object_pairs_hook=_json_unique, parse_constant=lambda _value: _reject(),
+    ))
+    proxy = {
+        "name": _take(values, "ps", "name", default=f"VMess Node {index}"),
+        "type": "vmess", "server": _take(values, "add", "address"),
+        "port": _uri_int(_take(values, "port"), 1), "uuid": _take(values, "id"),
+        "alterId": _uri_int(_take(values, "aid", default=0)),
+        "cipher": _take(values, "scy", default="auto"),
+        "udp": _uri_bool(_take(values, "udp", default=True)),
+    }
+    version = _take(values, "v", default="2")
+    if type(version) not in (str, int) or str(version) != "2":
+        proxy["unsupported-uri-options"] = True
+    network = _text(_take(values, "net", default="tcp"))
+    header = _text(_take(values, "type", default="none"), empty=True)
+    tls = _text(_take(values, "tls", default=""), empty=True)
+    explicit_sni = "sni" in values
+    options = {"type": network, "headerType": header, "security": tls or "none"}
+    for key in ("sni", "alpn", "fp", "allowInsecure"):
+        if key in values:
+            value = values.pop(key)
+            if key != "allowInsecure":
+                value = _text(value, empty=True)
+            if value != "":
+                options[key] = value
+    for key in ("host", "path"):
+        if key in values:
+            value = _text(values.pop(key), empty=True)
+            if value:
+                options[key] = value
+    service = _take(values, "grpc-service-name")
+    if service is not None:
+        options["serviceName"] = service
+    _uri_tls(proxy, options)
+    _uri_transport(proxy, options)
+    if not explicit_sni:
+        _uri_sni_fallback(proxy)
+    if values or options:
+        proxy["unsupported-uri-options"] = True
+    return _validated_node(proxy)
+
+
+def _ss_plugin(proxy, value):
+    parts = value.split(";")
+    if len(parts) > 32:
+        _reject()
+    plugin = {"obfs-local": "obfs", "simple-obfs": "obfs"}.get(parts[0], parts[0])
+    options = {}
+    for item in parts[1:]:
+        key, separator, value = item.partition("=")
+        if not key or key in options:
+            _reject()
+        options[key] = value if separator else True
+    proxy["plugin"] = plugin
+    if plugin == "obfs":
+        result = {"mode": _take(options, "obfs")}
+        host = _take(options, "obfs-host")
+        if host is not None:
+            result["host"] = host
+    elif plugin == "v2ray-plugin":
+        result = {"mode": _take(options, "mode", default="websocket")}
+        for key in ("host", "path"):
+            if key in options:
+                result[key] = options.pop(key)
+        for key in ("tls", "mux"):
+            if key in options:
+                result[key] = _uri_bool(options.pop(key))
+    else:
+        result = {}
+    if options:
+        proxy["unsupported-uri-options"] = True
+    proxy["plugin-opts"] = result
+
+
+def _native_uri(line, index):
+    _text(line, limit=MAX_SCALAR_LENGTH)
+    if any(char.isspace() or unicodedata.category(char) == "Cf" for char in line):
+        _reject()
+    if line.startswith("vmess://"):
+        return _vmess_uri(line, index)
+    parts = urlsplit(line)
+    if not line.startswith(parts.scheme + "://"):
+        _reject()
+    kind = {"ss": "shadowsocks", "socks5": "socks", "https": "http", "hy2": "hysteria2"}.get(
+        parts.scheme, parts.scheme
+    )
+    name = _unquote(parts.fragment) if parts.fragment else f"{kind} Node {index}"
+    if kind not in _FIELDS:
+        # Unsupported protocols stay visible without guessing their credentials.
+        return _validated_node({"name": name, "type": kind})
+    options = _uri_query(parts.query)
+    legacy_encoded = False
+    if kind == "shadowsocks" and "@" not in parts.netloc:
+        encoded = line[len("ss://"):].split("#", 1)[0].split("?", 1)[0]
+        decoded = _text(
+            _decode_base64(encoded, MAX_SCALAR_LENGTH).decode("utf-8"), limit=MAX_SCALAR_LENGTH
+        )
+        parts = urlsplit("ss://" + decoded)
+        legacy_encoded = True
+        if parts.query or parts.fragment:
+            _reject()
+    if parts.path not in {"", "/"} or parts.netloc.count("@") > 1:
+        _reject()
+    credentials, marker, endpoint = parts.netloc.rpartition("@")
+    if not marker:
+        endpoint = parts.netloc
+    address = urlsplit("//" + endpoint)
+    host = _host(address.hostname)
+    port = address.port
+    if port is None:
+        port = {"vless": 443, "trojan": 443, "anytls": 443,
+                "http": 80, "https": 443}.get(parts.scheme)
+        if endpoint.endswith(":"):
+            _reject()
+    proxy = {"name": name, "type": kind, "server": host, "port": _uri_int(port, 1)}
+    if "udp" in options:
+        proxy["udp"] = _uri_bool(options.pop("udp"))
+    elif kind not in {"snell", "mieru", "http"}:
+        proxy["udp"] = True  # Native URI defaults, not YAML defaults.
+    if kind == "vless":
+        if not marker:
+            _reject()
+        proxy["uuid"] = _unquote(credentials)
+        proxy["encryption"] = _take(options, "encryption", default="none")
+        flow = _take(options, "flow")
+        if flow is not None:
+            proxy["flow"] = flow
+    elif kind == "shadowsocks":
+        if not marker:
+            _reject()
+        auth = credentials if legacy_encoded else _unquote(credentials)
+        if ":" not in auth:
+            auth = _decode_base64(auth, MAX_SCALAR_LENGTH).decode("utf-8")
+        cipher, separator, password = auth.partition(":")
+        if not separator:
+            _reject()
+        proxy.update(cipher=cipher, password=password)
+        plugin = _take(options, "plugin")
+        if plugin is not None:
+            _ss_plugin(proxy, plugin)
+    elif kind in {"socks", "http", "mieru"}:
+        if marker:
+            if kind == "socks" and ":" not in credentials:
+                credentials = _decode_base64(
+                    _unquote(credentials), MAX_SCALAR_LENGTH
+                ).decode("utf-8")
+                user, separator, password = credentials.partition(":")
+            else:
+                user, separator, password = credentials.partition(":")
+                user, password = _unquote(user), _unquote(password)
+            if not separator:
+                _reject()
+            proxy.update(username=user, password=password)
+        if kind == "mieru":
+            proxy["transport"] = _take(options, "transport", "handshake-mode", default="TCP")
+        if parts.scheme == "https":
+            _uri_tls(proxy, options, default=True)
+    else:
+        if not marker:
+            _reject()
+        proxy["psk" if kind == "snell" else "password"] = _unquote(credentials)
+    if kind in {"vless", "trojan", "anytls", "hysteria2"}:
+        _uri_tls(proxy, options, default=kind != "vless")
+    if kind in _WRAPPED:
+        _uri_transport(proxy, options)
+    if kind in {"vless", "trojan", "anytls", "hysteria2"}:
+        _uri_sni_fallback(proxy)
+    if kind == "snell":
+        proxy["version"] = _uri_int(_take(options, "version", default=4), 0, 6)
+        mode = _take(options, "mode")
+        if mode is not None:
+            proxy["mode"] = mode
+        obfs = _take(options, "obfs")
+        host = _take(options, "obfs-host", "obfs-hostname")
+        if obfs is not None or host is not None:
+            proxy["obfs-opts"] = {"mode": obfs if obfs is not None else "none"}
+            if host is not None:
+                proxy["obfs-opts"]["host"] = host
+    if kind == "anytls":
+        for source, target in (
+            ("idleSessionCheckInterval", "idle-session-check-interval"),
+            ("idleSessionTimeout", "idle-session-timeout"), ("minIdleSession", "min-idle-session"),
+        ):
+            value = _take(options, source, target)
+            if value is not None:
+                proxy[target] = _uri_int(value, 0, 86400)
+    if kind == "hysteria2":
+        for names, target in (
+            (("obfs",), "obfs"), (("obfs-password", "obfsParam"), "obfs-password"),
+            (("mport", "ports"), "ports"),
+        ):
+            value = _take(options, *names)
+            if value is not None:
+                proxy[target] = value
+        for names, target in (
+            (("up", "upmbps"), "up"), (("down", "downmbps"), "down"),
+            (("hop-interval", "hopInterval"), "hop-interval"),
+        ):
+            value = _take(options, *names)
+            if value is not None:
+                proxy[target] = _uri_int(value, 0, 1_000_000)
+    if options:
+        proxy["unsupported-uri-options"] = True
+    return _validated_node(proxy)
+
+
+def _subscription_nodes(content):
+    stripped = content.strip(" \t\r\n")
+    # CRLF wrapping is allowed, but no other characters are ignored by Base64.
+    compact = stripped.replace("\r", "").replace("\n", "")
+    if compact and re.fullmatch(r"[A-Za-z0-9+/_=-]+", compact):
+        content = _decode_base64(compact, MAX_BODY_BYTES).decode("utf-8-sig")
+        stripped = content.strip(" \t\r\n")
+    if re.match(r"[a-z][a-z0-9+.-]*://", stripped):
+        lines = [line.strip(" \t\r") for line in stripped.split("\n") if line.strip(" \t\r")]
+        if not lines or len(lines) > MAX_PROXIES:
+            _reject()
+        return [_native_uri(line, index) for index, line in enumerate(lines, 1)]
+    loader = _SubscriptionLoader(content)
+    try:
+        document = loader.get_single_data()
+    finally:
+        loader.dispose()
+    document = _mapping(document)
+    return [_validated_node(proxy) for proxy in _list(document.get("proxies"), maximum=MAX_PROXIES)]
+
+
 def parse_external_subscription(body: bytes) -> list[ParsedExternalNode]:
-    """Parse one bounded YAML document, or raise an input-free public error.
+    """Parse bounded YAML/URI/Base64 content, or raise an input-free public error.
 
     An explicit ``proxies: []`` is a valid empty preview. Missing/null ``proxies``
     is not. Names are NFC-normalized and trimmed before duplicate detection.
@@ -661,23 +1053,14 @@ def parse_external_subscription(body: bytes) -> list[ParsedExternalNode]:
     try:
         if type(body) is not bytes or not body or len(body) > MAX_BODY_BYTES:
             _reject()
-        loader = _SubscriptionLoader(body.decode("utf-8-sig"))
-        try:
-            document = loader.get_single_data()
-        finally:
-            loader.dispose()
-        document = _mapping(document)
-        proxies = _list(document.get("proxies"), maximum=MAX_PROXIES)
-        result: list[ParsedExternalNode] = []
+        result = _subscription_nodes(body.decode("utf-8-sig"))
         names: set[str] = set()
-        for proxy in proxies:
-            node = _validated_node(proxy)
+        for node in result:
             if node.name in names:
                 _reject()
             names.add(node.name)
-            result.append(node)
         return result
-    except (ExternalSubscriptionParseError, yaml.YAMLError, UnicodeError, RecursionError):
+    except (ValueError, TypeError, yaml.YAMLError, RecursionError):
         # Raise outside the handler: even exception.__context__ must not retain a
         # scanner error containing a credential-bearing line from the document.
         pass

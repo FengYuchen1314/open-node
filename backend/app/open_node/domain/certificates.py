@@ -1,4 +1,5 @@
 import re
+from ipaddress import ip_address
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -9,6 +10,7 @@ from pydantic import (
     EmailStr,
     Field,
     SecretStr,
+    StrictStr,
     field_validator,
     model_validator,
 )
@@ -46,6 +48,24 @@ def dns_name(value: str) -> str:
     ):
         raise ValueError("Invalid DNS name")
     return "*." + host if wildcard else host
+
+
+def certificate_name(value: str) -> str:
+    """A DNS SAN or an unscoped IP literal, separate from ACME DNS validation."""
+    if (
+        not isinstance(value, str)
+        or len(value) > 1024
+        or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value)
+        or "%" in value
+    ):
+        raise ValueError("Invalid certificate DNS name or IP address")
+    value = value.strip()
+    try:
+        return str(ip_address(value))
+    except ValueError:
+        if ":" in value or re.fullmatch(r"[0-9]+(?:\.[0-9]+){3}\.?", value):
+            raise ValueError("Invalid certificate DNS name or IP address") from None
+        return dns_name(value)
 
 
 class CertificateInput(BaseModel):
@@ -180,6 +200,36 @@ class CertificateImport(CertificateInput):
     key_pem: SecretStr = Field(min_length=1, max_length=131072)
 
 
+class CertificateSelfSigned(CertificateInput):
+    name: str = Field(strict=True, min_length=1, max_length=120)
+    domains: list[StrictStr] = Field(min_length=1, max_length=20)
+    valid_days: int = Field(default=365, strict=True, ge=1, le=3650)
+    purpose: Literal["server_auth"] = "server_auth"
+    confirm_self_signed: Literal[True]
+
+    @field_validator("name")
+    @classmethod
+    def display_name(cls, value):
+        if not value.strip() or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value):
+            raise ValueError("A non-empty certificate name without control characters is required")
+        return value.strip()
+
+    @field_validator("domains")
+    @classmethod
+    def names(cls, values):
+        names = [certificate_name(value) for value in values]
+        if len(set(names)) != len(names):
+            raise ValueError("Certificate SAN names must be distinct")
+        return names
+
+    @field_validator("confirm_self_signed", mode="before")
+    @classmethod
+    def explicit_confirmation(cls, value):
+        if value is not True:
+            raise ValueError("Explicit confirmation of self-signed certificate trust is required")
+        return value
+
+
 class CertificateDeployment(CertificateInput):
     server_id: UUID
     domain: str = Field(max_length=253)
@@ -190,7 +240,7 @@ class CertificateDeployment(CertificateInput):
     @field_validator("domain")
     @classmethod
     def concrete_name(cls, value):
-        value = dns_name(value)
+        value = certificate_name(value)
         if value.startswith("*."):
             raise ValueError("A deployment requires a concrete hostname")
         return value

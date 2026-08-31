@@ -3,6 +3,7 @@ import { Alert, Button, Card, Descriptions, Flex, Form, Input, Layout, Progress,
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat } from "../../domain/subscriptions";
+import { extraSubscriptionFormats, subscriptionFormatHelp } from "../../domain/subscriptions";
 import type { SubscriberSubscriptionProfile } from "../../domain/subscription-profiles";
 import {
   loadSubscriberSession, subscriberFormatUrl, subscriberProfile, subscriberProfiles, subscriberRegister,
@@ -21,6 +22,7 @@ import { zhMessage } from "../../i18n/zh-CN";
 const formats: { label: string; value: SubscriptionClientFormat }[] = [
   { label: "Clash / Mihomo", value: "clash" }, { label: "sing-box", value: "sing-box" }, { label: "Surge", value: "surge" },
   { label: "Xray", value: "xray" }, { label: "URI 列表", value: "uri-list" }, { label: "Base64", value: "base64" },
+  ...extraSubscriptionFormats,
 ];
 const date = (value?: string | null) => value ? new Date(value).toLocaleDateString("zh-CN") : "无";
 function bytes(value: number) {
@@ -187,8 +189,10 @@ function SubscriberWorkspace({ username }: { username: string }) {
       </Flex>
       {selectedProfile && (!selectedProfile.enabled || selectedProfile.warnings.length > 0) && <Alert className="form-alert" type={selectedProfile.enabled ? "warning" : "error"} showIcon title={selectedProfile.enabled ? selectedProfile.warnings.map(warning => zhMessage(warning, "此订阅配置有待处理的提示，请联系管理员检查。")).join("；") : "此订阅配置需要管理员进一步设置。"} />}
       <Form.Item label="客户端格式" htmlFor="account-client-format"><Select id="account-client-format" value={format} options={formats} onChange={setFormat} /></Form.Item>
+      <Alert className="form-alert" type="info" showIcon title={subscriptionFormatHelp(format)} />
       <Form.Item label="订阅地址" htmlFor="account-subscription-url"><Input id="account-subscription-url" value={url} readOnly /></Form.Item>
       <Space wrap><Button icon={copied ? <CheckOutlined aria-hidden /> : <CopyOutlined aria-hidden />} aria-label="复制订阅链接" disabled={!url} onClick={() => void copyLink()}>{copied ? "已复制" : "复制链接"}</Button><Button icon={<DownloadOutlined aria-hidden />} aria-label="下载订阅" href={url || undefined} disabled={!url || !quota.available || selectedProfile?.enabled === false} rel="noreferrer" download>下载</Button></Space>
+      <div className="form-alert"><Space wrap><Link to="/account/external-subscriptions">外部订阅</Link><Link to="/account/renewals">申请续费</Link></Space></div>
       {!quota.available && <Alert className="form-alert" type="warning" showIcon title={!quota.has_plan ? "尚未分配订阅套餐" : quota.expired ? "你的套餐已到期" : "你的流量额度已用尽"} />}
     </Form></Card></section>
     {profile.node_limits?.length > 0 && <section aria-label="节点限制"><Card title="节点限制"><Table rowKey="node_id" dataSource={profile.node_limits} pagination={false} scroll={{ x: 420 }} columns={[

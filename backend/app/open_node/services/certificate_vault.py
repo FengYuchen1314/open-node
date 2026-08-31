@@ -6,6 +6,7 @@ import stat
 import tempfile
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from ipaddress import ip_address
 from pathlib import Path
 
 from cryptography import x509
@@ -133,12 +134,16 @@ def material(cert_pem: str, key_pem: str, expected_domains=None) -> dict:
             encoding, fmt
         ):
             raise ValueError()
-        names = [
-            dns_name(name)
-            for name in cert.extensions.get_extension_for_class(
-                x509.SubjectAlternativeName
-            ).value.get_values_for_type(x509.DNSName)
-        ]
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        names = [dns_name(name) for name in san.get_values_for_type(x509.DNSName)]
+        # Numeric DNSName entries do not authenticate IP addresses in TLS.
+        for name in names:
+            try:
+                ip_address(name)
+            except ValueError:
+                continue
+            raise ValueError()
+        names.extend(str(address) for address in san.get_values_for_type(x509.IPAddress))
         if not names or (expected_domains and set(names) != set(expected_domains)):
             raise ValueError()
         now = datetime.now(UTC)
@@ -166,6 +171,12 @@ def material(cert_pem: str, key_pem: str, expected_domains=None) -> dict:
 
 
 def covers(names: list[str], host: str) -> bool:
+    try:
+        address = ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return str(address) in names
     return any(
         name == host
         or (

@@ -2,6 +2,13 @@
 // Keep this allowlist limited to subscription_clients.py's compatibility reasons.
 const subscriptionCompatibilityMessages: Record<string, string> = {
   "Protocol is not supported by this client format": "此客户端格式不支持该协议。",
+  "Client format cannot represent these proxy options": "此客户端格式无法完整表示这些节点选项，请选择其他格式。",
+  "Client format cannot represent these TLS options": "此客户端格式无法完整保留这些 TLS 选项，请选择其他格式。",
+  "Client format cannot represent these credentials safely": "节点参数包含此客户端格式无法安全表示的字符或值。",
+  "Client format cannot represent this Shadowsocks cipher": "此客户端导出暂不支持该 Shadowsocks 加密方式。",
+  "Client format cannot represent this VMess cipher or legacy mode": "此客户端导出暂不支持该 VMess 加密方式或旧版模式。",
+  "Client format does not support this Snell version": "此客户端格式不支持该 Snell 版本。",
+  "Selected Clash template is not compatible with Stash": "所选 Clash 模板包含无法完整转换到 Stash 的配置，请调整模板或选择其他格式。",
   "Server address is missing": "缺少服务器地址。",
   "Server port is invalid": "服务器端口无效。",
   "User credential is missing": "缺少用户凭据。",

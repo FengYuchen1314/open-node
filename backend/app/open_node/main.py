@@ -23,6 +23,7 @@ from open_node.core.config import Settings, get_settings
 from open_node.domain.branding import BRANDING_ERROR_MESSAGES, BrandingError
 from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.domain.notifications import NotificationError
+from open_node.domain.renewals import RENEWAL_MESSAGES, RenewalError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.auth import AuthStore
@@ -39,6 +40,7 @@ from open_node.services.inventory import InventoryStore, ManagedNodeConflict
 from open_node.services.notification_worker import NotificationWorker
 from open_node.services.notifications import NotificationStore
 from open_node.services.probe_stream import PublicProbeStreamManager
+from open_node.services.renewals import RenewalStore
 from open_node.services.secure_channel import AgentIdentity, decode_public_key
 from open_node.services.server_traffic import ServerTrafficWorker
 from open_node.services.subscriber_auth import SubscriberAuthStore
@@ -154,6 +156,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                     active_settings.api_prefix + "/agents/bootstrap/",
                     active_settings.api_prefix + "/external-subscriptions",
                     active_settings.api_prefix + "/notifications",
+                    active_settings.api_prefix + "/renewals",
                     active_settings.api_prefix + "/system-settings/branding",
                     active_settings.api_prefix + "/branding",
                 )
@@ -174,6 +177,14 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
+        if request.url.path.startswith((
+            active_settings.api_prefix + "/renewals",
+            active_settings.api_prefix + "/account/renewals",
+        )):
+            return JSONResponse(status_code=422, content={
+                "code": "renewal_invalid_request",
+                "detail": RENEWAL_MESSAGES["renewal_invalid_request"], "license_required": False,
+            })
         if request.url.path.startswith(active_settings.api_prefix + "/system-settings/branding"):
             return JSONResponse(
                 status_code=422,
@@ -203,6 +214,12 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 },
             )
         return await request_validation_exception_handler(request, exc)
+
+    @app.exception_handler(RenewalError)
+    async def renewal_error(_request, exc):
+        return JSONResponse(status_code=exc.status_code, content={
+            "code": exc.code, "detail": RENEWAL_MESSAGES[exc.code], "license_required": False,
+        }, headers={"Retry-After": "60"} if exc.status_code == 429 else None)
 
     @app.exception_handler(AgentCommandPayloadError)
     async def invalid_agent_command(_request, exc):
@@ -350,6 +367,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.state.notifications.create_schema()
     app.state.notification_transport = TelegramTransport()
     app.state.external_subscriptions = app.state.inventory.external_subscriptions()
+    app.state.renewals = RenewalStore(app.state.inventory)
     app.state.agent_bootstrap = AgentBootstrapStore(app.state.inventory)
     app.state.subscriber_auth = SubscriberAuthStore(app.state.inventory, active_settings)
     app.state.certificates = CertificateStore(active_settings, app.state.inventory)

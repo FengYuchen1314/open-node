@@ -13,6 +13,7 @@ from open_node.domain.certificates import (
     CertificateImport,
     CertificateJobRequest,
     CertificateRevoke,
+    CertificateSelfSigned,
     CertificateUpdate,
     DNSProviderInput,
 )
@@ -96,6 +97,11 @@ def create(request: Request, payload: CertificateCreate):
 @router.post("/import", status_code=201)
 def import_certificate(request: Request, payload: CertificateImport):
     return request.app.state.certificates.import_certificate(payload)
+
+
+@router.post("/self-signed", status_code=201)
+def self_signed(request: Request, payload: CertificateSelfSigned):
+    return request.app.state.certificates.generate_self_signed(payload)
 
 
 @router.get("/{identifier}")

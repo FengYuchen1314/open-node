@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
+from ipaddress import ip_address
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -19,7 +20,7 @@ from open_node_agent.nginx import directive
 from open_node_agent.runtime import RuntimeFailure, atomic_write
 
 
-def certificate(domain="localhost", *, expired=False, not_yet_valid=False):
+def certificate(domain="localhost", *, expired=False, not_yet_valid=False, ip_san=False):
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, domain)])
     now = datetime.now(UTC)
@@ -31,7 +32,12 @@ def certificate(domain="localhost", *, expired=False, not_yet_valid=False):
         .serial_number(x509.random_serial_number())
         .not_valid_before(now + timedelta(days=1) if not_yet_valid else now - timedelta(days=2))
         .not_valid_after(now + timedelta(days=-1 if expired else 3))
-        .add_extension(x509.SubjectAlternativeName([x509.DNSName(domain)]), critical=False)
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.IPAddress(ip_address(domain)) if ip_san else x509.DNSName(domain)
+            ]),
+            critical=False,
+        )
         .sign(key, hashes.SHA256())
     )
     return (
@@ -67,6 +73,32 @@ def test_certificate_validity_and_name_matching():
             validate_pair("localhost", *pair)
     with pytest.raises(RuntimeFailure, match="Invalid certificate"):
         validate_pair("localhost", "invalid-secret-certificate", "invalid-secret-key")
+
+
+@pytest.mark.parametrize("domain", ["192.0.2.20", "2001:db8::20"])
+async def test_ip_san_certificate_deployment_keeps_exact_matching_and_owned_paths(agent, domain):
+    cert, key = certificate(domain, ip_san=True)
+    expanded = str(ip_address(domain).exploded)
+    assert validate_pair(expanded, cert, key)["domain"] == domain
+    with pytest.raises(RuntimeFailure, match="SAN"):
+        validate_pair(str(ip_address(domain) + 1), cert, key)
+    with pytest.raises(RuntimeFailure, match="SAN"):
+        validate_pair(domain, *certificate(domain))
+    if ":" in domain:
+        with pytest.raises(RuntimeFailure, match="Invalid domain"):
+            hostname(domain)  # Site hostname parsing has not been widened.
+        with pytest.raises(RuntimeFailure, match="Invalid domain"):
+            validate_pair(domain + "%eth0", cert, key)
+    nginx = agent.operations.nginx
+    await seed(nginx)
+    response = await nginx.handle("POST", "/api/child/cert/deploy", {
+        "domain": domain, "cert_pem": cert, "key_pem": key,
+        "cert_path": "private-ip.pem", "key_path": "private-ip.key", "reload": "none",
+    }, {})
+    assert response["success"] and key not in str(response)
+    assert nginx.cert_path("private-ip.pem").read_text() == cert
+    assert nginx.cert_path("private-ip.key").read_text() == key
+    assert nginx.cert_path("private-ip.key").stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.parametrize(

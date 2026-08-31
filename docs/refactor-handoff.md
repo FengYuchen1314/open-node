@@ -2,11 +2,16 @@
 
 更新时间：2026-08-31
 
-最新开发进度：网页加密备份已接通管理员重新验证、后台任务、进度、限时下载和删除，
-中文 Ant Design 页面已加入导航。VPS 一次目标门通过 512 项后端测试、17 项前端测试、
-类型检查和主前端构建，包含真实 HTTP 创建/下载及官方 age 独立解密。
-尚未发布这批网页功能或升级生产，恢复入口仍未完成；用法见 [`backups.md`](backups.md)。
-更多客户端输出、用户自助外部订阅与自签名证书正在分工实现。
+最新源码已加入网页加密备份、六种客户端输出、URI/Base64 外部订阅、用户自助来源、
+一键自签名证书和用户续费申请/管理员审核，均有中文 Ant Design 操作入口。
+网页备份 512 后端/17 前端，客户端 18 后端，自签名 62 后端/30 Agent/28 前端，
+外部订阅 14 后端/8 前端，续费 16 后端/10 前端专项检查已通过；合并类型检查、
+主站与 Probe 构建也已通过。完整 CI 以本次发布提交对应的 GitHub 结果为准，
+不是重跑历史镜像审计。入口与限制见 [`backups.md`](backups.md)、
+[`subscription-clients.md`](subscription-clients.md)、[`external-subscriptions.md`](external-subscriptions.md)、
+[`certificates.md`](certificates.md) 和 [`renewals.md`](renewals.md)。
+生产实例没有升级。受控恢复、Bot/Mini App、DDNS、在线 IP 采集及完整迁移仍待完成。
+公开 Agent 0.3.0a0 资产未改；以 IPv6 字面地址校验证书需包含本次源码修正的 Agent 构建。
 用户已明确要求“不要反复验证，尽量快地实现所有功能然后交付”：继续补功能，
 只做必要的针对性检查，完成后集中整体回归，不重跑已经通过的历史审计。
 
@@ -101,23 +106,25 @@ test-only 修正 `100d93f` 已完成 7 例定向验证、计时器负控、完�
 旧的百分比估算已经作废。当前状态必须以
 [`mmwx-source-parity.md`](mmwx-source-parity.md) 的固定源码矩阵和可执行发布门槛为准；
 套餐计费已按官方语义修正并验证，面板生成远程 Agent 安装命令也已实现。
-外部订阅已有管理员手动 YAML 导入，但 URI/Base64 输入、定时同步、用户自助和
-规则/provider 生态仍有缺口。首期用法和密钥恢复见
+外部订阅已有管理员和用户自助手动 YAML/URI/Base64 导入；定时同步和
+规则/provider 生态仍有缺口。用法和密钥恢复见
 [`external-subscriptions.md`](external-subscriptions.md)，官方源码接点与原设计记录见
 [`external-subscriptions-plan.md`](external-subscriptions-plan.md)。通知、完整迁移和
-应用内备份恢复也未完成。管理员 Telegram 配置、测试和套餐到期提醒已在 `bf8eaa8`
+受控备份恢复也未完成。管理员 Telegram 配置、测试和套餐到期提醒已在 `bf8eaa8`
 发布，用法见 [`notifications.md`](notifications.md)，官方源码接点、安全边界
 和验收设计见 [`notifications-plan.md`](notifications-plan.md)。隔离整体验收、
 精确提交镜像和 CI 已通过。没有向真实 Telegram 聊天发送消息，也没有升级生产。
 站点文字首期的功能和限制见 [`system-settings.md`](system-settings.md)，官方源码
 依据见 [`system-settings-plan.md`](system-settings-plan.md)。它已在 `f0ed515` 独立
 验收并发布，不能借用通知版本的结果。名称公开可见；本期不做 Logo、任意键值
-或安全开关。应用内备份仍未完成；[`backup-format.md`](backup-format.md) 说明本轮
+或安全开关。应用内备份创建/下载现已完成，恢复未完成；[`backup-format.md`](backup-format.md) 说明
 格式工具、只读 CLI 及单接收者 age 加密；这些通用格式工具本身不验证数据库、密钥
 配对或快照。开发候选的实际快照与依赖检查见 [`backup-runtime.md`](backup-runtime.md)，
 它仍不证明发送者身份、远端 Agent 信任或恢复就绪。
 [`backup-plan.md`](backup-plan.md) 保留已核对的官方差异、全部写入路径和后续恢复
-边界，接下来完成新代码的完整发布验收，再接管理员创建/下载与受控恢复，不要重复既有冷备。
+边界。续费已加入独立网页申请、人工口令核对、幂等审批和事务内延期，
+不依赖 Bot，不自动收款，也不重置流量；见 [`renewals.md`](renewals.md)。
+接下来补受控恢复、在线 IP 和其余矩阵缺口，不要重做已完成的网页创建/下载或既有冷备。
 这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
 单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
 Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 MMWX，但它们不应
@@ -127,8 +134,8 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 | 项目 | 当前状态 |
 | --- | --- |
-| GitHub `main` | 已发布命令行备份加密 `a29345b7e58417d1089c349f6f9cca878830817e`，包括此前的 `2a28103` 格式层/只读 CLI；站点文字 `f0ed515`、通知首期 `bf8eaa8`、外部订阅/中文界面 `998839b`、React/Ant Design、面板 Agent 安装等功能保持。文档或 test-only 后续提交不改变功能基线 |
-| 备份格式发布 | `2a28103` 的 785 项专项、真实大包和完整后端 3285 项通过；精确 Git 镜像 `sha256:642bc4a8ee1069aaa87aed00ff8291fde34c3e38a66acd03c5678ac641cb9d43`、18 项实际 CLI/守卫检查、独立新应用及候选四项 CI 全部通过。完整后核和原失败记录见 `testing.md`。网页备份、在线快照、受控恢复和完整迁移未实现 |
+| 本次源码交付 | 在此前主线 `b506dbe` 基础上纳入 `ef93676` 一致快照、`862d7c1` 网页备份及本轮客户端/用户自助/证书/续费改动。远端实际 HEAD 与 CI 状态以 GitHub 为准；源码发布不代表生产升级。历史站点文字、通知、中文界面和 Agent 安装功能保持 |
+| 备份格式发布 | `2a28103` 的 785 项专项、真实大包和完整后端 3285 项通过；精确 Git 镜像 `sha256:642bc4a8ee1069aaa87aed00ff8291fde34c3e38a66acd03c5678ac641cb9d43`、18 项实际 CLI/守卫检查、独立新应用及候选四项 CI 全部通过。完整后核和原失败记录见 `testing.md`。该历史提交不包含后来增加的网页备份和在线快照，受控恢复和完整迁移至今仍未实现 |
 | 备份加密发布 | `a29345b`：固定官方 age v1.3.2，已有 v1 ZIP 加密、私钥只读解密校验、拒绝覆盖的文件发布。完整后端 4048 项零跳过，真实 1 GiB 正文往返通过。精确镜像 `sha256:40868d23f5961f8731b59c8a41c210485d32469cc89086884a09af371b666d66`、27+2 CLI/容量检查、独立应用及候选四项 CI 通过；379 项证据已由 root 核对。默认 64 MiB tmpfs 的容量限制保留，不宣称应用快照或恢复就绪 |
 | 测试清理独立门槛 | 干净 `100d93f` 前端源 `/tmp/open-node-fe-testonly-f0.hE5fRW3Q/source-r1`：1013/75 files、零跳过/未处理异常、946.51 秒，双构建 43 项资产与站点文字 R2 逐字节一致。精确 Docker 源 `/root/open-node-editor-timers-commit-100d93f.b5j3J2No/source`，新镜像 ID `sha256:6464d21218abfe3969208d776740d744edb6b1f5a2754a1846e6be54784ae69d`，10 阶段通过；4 容器/3 卷清理完成。547 文件和独立依赖清单前后不变，生产、旧源与旧证据均保留；封口记录见 `testing.md` |
 | 站点文字工作源 | `/tmp/open-node-branding-integration.ChNDrkyo/source-r2`，544 文件归档 SHA-256 `25d899648c457ec13b158067ffa1564af6c07434422e4b22ca4508c0c297c3ec`。完整前端 1013/75 files、类型检查和双构建通过；浏览器 14 阶段及 root 逐张 27 图复核、工作树 Docker 10 阶段/重启/两次整卷冷复制均通过。`source-r3` 仅改订阅用户测试对公开 GET 的精确字段断言，完整后端 2500/零跳过通过；原失败记录保留，见 `testing.md` |
@@ -199,6 +206,9 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 - 用户、节点、套餐、套餐分配、有效期、流量周期、配额、限速和连接数限制已完成。
 - Clash、Surge、sing-box、Xray、URI list 和 Base64 订阅格式已完成，支持不兼容节点过滤。
+- 新增 Loon、Quantumult X、Shadowrocket、Stash、Surfboard、Egern；按客户端检查字段，不猜测转换，不声明六款原生客户端均已实机验收。
+- 外部 HTTPS 来源支持 YAML/URI/Base64，用户自助管理自己的来源，仍需预览后明确确认，不在订阅下载时访问上游。
+- 用户续费申请、撤回、历史记录、管理员通过/拒绝和幂等套餐延期已完成；保留流量与重置规则，不接支付平台。
 - 长订阅 token、临时分享链接和链接重置已完成。短码、自定义短码和旧 `/x`
   只在显式迁移兼容模式可用；安全默认、旧 bearer 轮换和边缘代理回退保护已经验证。
 - 套餐节点别名、自动速度规则、用户级配额/速度/连接覆盖和原生执行已完成。

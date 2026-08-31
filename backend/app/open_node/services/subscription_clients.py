@@ -4,6 +4,32 @@ from copy import deepcopy
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+EXTRA_FORMATS = frozenset({"loon", "quantumult-x", "shadowrocket", "stash", "surfboard", "egern"})
+TEXT_NODE_FORMATS = frozenset({"loon", "quantumult-x", "surfboard"})
+
+
+def select_client_format(value, user_agent: str = ""):
+    from open_node.domain.subscriptions import SubscriptionClientFormat
+
+    if value is not None and value != "auto":
+        return SubscriptionClientFormat(value)
+    # Specific clients precede generic Clash/Surge substrings, as in pinned client_ua.go.
+    agent = user_agent[:4096].casefold()
+    for keywords, target in (
+        (("stash",), "stash"),
+        (("shadowrocket",), "shadowrocket"),
+        (("surge",), "surge"),
+        (("loon",), "loon"),
+        (("quantumult%20x", "quantumult x", "quantumultx"), "quantumult-x"),
+        (("egern",), "egern"),
+        (("surfboard",), "surfboard"),
+        (("sing-box", "sfi/", "sfa/", "sfm/", "sft/"), "sing-box"),
+        (("v2rayn", "v2rayng", "v2box"), "base64"),
+    ):
+        if any(keyword in agent for keyword in keywords):
+            return SubscriptionClientFormat(target)
+    return SubscriptionClientFormat.CLASH
+
 
 def protocol(proxy: dict[str, Any]) -> str:
     value = str(proxy.get("type") or "").lower()
@@ -39,6 +65,11 @@ def upgrade_options(proxy: dict[str, Any]) -> dict[str, Any]:
 
 
 def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
+    if target in EXTRA_FORMATS:
+        from open_node.services.subscription_extra_clients import unsupported_reason as extra_reason
+
+        # Share credential/TLS/type validation, not the target's wire representation.
+        return unsupported_reason(proxy, "clash") or extra_reason(proxy, target)
     kind, transport = protocol(proxy), network(proxy)
     supported = {"vless", "vmess", "trojan", "shadowsocks", "hysteria2", "anytls", "socks", "http"}
     if target in {"clash", "xray"}:

@@ -29,7 +29,13 @@ def hostname(value: str) -> str:
 
 
 def validate_pair(domain: str, cert_pem: str, key_pem: str) -> dict:
-    domain = hostname(domain)
+    # Certificate deployment accepts IP SANs; Nginx site hostname rules stay separate.
+    if not isinstance(domain, str) or "%" in domain:
+        raise RuntimeFailure("Invalid domain")
+    try:
+        domain = str(ipaddress.ip_address(domain))
+    except ValueError:
+        domain = hostname(domain)
     if not all(
         isinstance(value, str) and 0 < len(value) <= 131072 for value in (cert_pem, key_pem)
     ):

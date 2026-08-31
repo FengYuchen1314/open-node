@@ -8,6 +8,9 @@ export interface WorkspaceRoute {
 }
 export const routes: WorkspaceRoute[] = [
   { path: "/account", name: "account", component: lazy(() => import("./react/views/AccountView")), meta: { subscriber: true } },
+  { path: "/account/external-subscriptions", name: "account-external-subscriptions", component: lazy(() => import("./react/views/AccountExternalSourcesView")), meta: { subscriber: true } },
+  { path: "/account/renewals", name: "account-renewals", component: lazy(() => import("./react/views/RenewalRequestView")), meta: { subscriber: true } },
+  { path: "/renewals", name: "renewals", component: lazy(() => import("./react/views/AdminRenewalsView")) },
   { path: "/certificates", name: "certificates", component: lazy(() => import("./react/views/CertificatesView")) },
   { path: "/access", name: "access", component: lazy(() => import("./react/views/AccessView")) },
   { path: "/", name: "overview", component: lazy(() => import("./react/views/DashboardView")) },

@@ -27,7 +27,23 @@ export interface SubscriptionAccessResponse {
   }>;
   license_required: false;
 }
-export type SubscriptionClientFormat = "clash" | "surge" | "sing-box" | "xray" | "uri-list" | "base64";
+export type SubscriptionClientFormat = "clash" | "surge" | "sing-box" | "xray" | "uri-list" | "base64"
+  | "loon" | "quantumult-x" | "shadowrocket" | "stash" | "surfboard" | "egern";
+
+export const extraSubscriptionFormats: { label: string; value: SubscriptionClientFormat }[] = [
+  { label: "Loon 节点订阅", value: "loon" },
+  { label: "Quantumult X 节点订阅", value: "quantumult-x" },
+  { label: "Shadowrocket 节点 YAML", value: "shadowrocket" },
+  { label: "Stash 配置 YAML", value: "stash" },
+  { label: "Surfboard 节点订阅", value: "surfboard" },
+  { label: "Egern 节点 YAML", value: "egern" },
+];
+
+export function subscriptionFormatHelp(format: SubscriptionClientFormat): string {
+  if (format === "stash") return "使用兼容的 Clash 模板和规则；无法转换的模板扩展会明确拒绝，不会改写规则来源或关闭 TLS 校验。";
+  if (extraSubscriptionFormats.some(item => item.value === format)) return "这是客户端专用节点订阅，不转换 Clash / Surge 的分流规则或脚本。仅包含支持的协议与选项；全部节点不兼容时订阅不可用。";
+  return "订阅仅包含所选客户端支持的节点；格式预览可查看不兼容原因。";
+}
 
 export interface SubscriptionFormatPreview {
   username: string;

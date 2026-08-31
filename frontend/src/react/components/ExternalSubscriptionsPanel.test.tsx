@@ -99,7 +99,8 @@ describe("external sources: explicit administration and secret handling", () => 
     expect(panel.getByText("自定义（不显示）")).toBeTruthy();
     expect(panel.getByText("上游信息（不参与本地计费）")).toBeTruthy();
     expect(screen.getByText(/临时链接和命名订阅配置不会自动包含/)).toBeTruthy();
-    expect(screen.getByText(/尚未启用 URI\/Base64 输入和定时刷新/)).toBeTruthy();
+    expect(screen.getByText(/URI 列表及 Base64 编码内容/)).toBeTruthy();
+    expect(screen.getByText(/尚未启用定时刷新/)).toBeTruthy();
     expect(panel.getByText(/无法撤回客户端已下载的上游凭据/)).toBeTruthy();
     fireEvent.click(panel.getByRole("button", { name: "预览外部订阅来源" })); await flush();
     expect(modal("外部订阅来源预览").getByRole("button", { name: "抓取外部订阅预览" })).toBeTruthy();

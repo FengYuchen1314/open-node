@@ -1,16 +1,19 @@
 # External Subscriptions
 
-Administrators can save a subscriber's external HTTPS subscription, preview its
-nodes and explicitly confirm changes. Confirmed nodes are merged into that
+Administrators can save a subscriber's external HTTPS subscription; subscribers
+can manage their own sources from the user center. Both workflows require a
+node preview and explicit confirmation. Confirmed nodes are merged into that
 subscriber's existing **primary subscription link**, using the upstream
 credentials. They are not added to the managed-node catalog or provisioned by
 an Agent.
 
-This first slice accepts Clash/Mihomo YAML with a `proxies` list. It does not
-accept URI lists, Base64 or Surge input, run automatic refreshes, fetch during
-downloads, or provide subscriber self-service. Rules, scripts, proxy providers
-and whole-client settings are not imported. The source review and remaining
-scope are in [external-subscriptions-plan.md](external-subscriptions-plan.md).
+The HTTPS response may contain Clash/Mihomo YAML with a `proxies` list, a URI
+list, or one Base64-encoded layer containing either format. The form still
+accepts a private HTTPS source URL, not pasted node credentials. Surge input,
+automatic refreshes and fetching during downloads are not supported. Rules,
+scripts, proxy providers and whole-client settings are not imported. The
+original source review is in
+[external-subscriptions-plan.md](external-subscriptions-plan.md).
 
 ## Administrator workflow
 
@@ -37,6 +40,22 @@ write-only: editing does not reveal the previous values. An empty URL field in
 the editor preserves the saved URL; resetting the user agent is an explicit
 choice. Changing a URL does not replace the active nodes until a new preview is
 confirmed.
+
+## Subscriber workflow and ownership
+
+Open **用户中心 → 外部订阅**, or `/account/external-subscriptions`. The same
+save, preview, confirmation, rename, disable and delete controls apply, but
+only to the signed-in subscriber's sources. The owner is taken from the
+subscriber session; the API rejects an owner field in a create or update
+request. It is not a client-selectable username.
+
+Source, node, preview and receipt operations check ownership in the database,
+including a second check after an upstream fetch finishes. Missing and foreign
+resources return 404. Source URLs and credentials remain write-only, and a
+session change discards the old page's pending replies. Subscriber cookies
+cannot access administrator source routes, and administrator cookies are not
+accepted as subscriber sessions. Mutation requests require the corresponding
+session, Origin and CSRF validation.
 
 Source details allow renaming or disabling individual saved nodes. Operator
 names and enabled states survive later refreshes. Matching uses the normalized
@@ -81,7 +100,9 @@ subscription-IP checks still apply. A confirmed external source does not grant
 access to an otherwise ineligible subscriber. Named subscription profiles and
 temporary links do not automatically include external nodes.
 
-The six existing output formats apply their normal compatibility checks. A
+The twelve output formats—Clash/Mihomo, Surge, sing-box, Xray, URI list, Base64,
+Loon, Quantumult X, Shadowrocket, Stash, Surfboard and Egern—apply their own
+compatibility checks. A
 protocol being accepted as input does not mean every output format can express
 its settings. Incompatible nodes remain visible in the administrator's format
 preview and are excluded from that output. Public export still returns 404
@@ -109,8 +130,8 @@ protocols or unsupported options are shown as unavailable rather than silently
 discarded. Malformed required fields, duplicate names or ambiguous YAML reject
 the entire preview. Credentials are not trimmed or regenerated.
 
-Input defaults follow the pinned **Mihomo v1.19.30** parser, not defaults chosen
-by another output converter:
+YAML input defaults follow the pinned **Mihomo v1.19.30** parser, not defaults
+chosen by another output converter:
 
 | Input | Omitted `udp` | Additional boundary |
 | --- | --- | --- |
@@ -134,6 +155,25 @@ official [HTTP options](https://github.com/MetaCubeX/mihomo/blob/v1.19.30/adapte
 and [SOCKS5 options](https://github.com/MetaCubeX/mihomo/blob/v1.19.30/adapter/outbound/socks5.go).
 Mieru requires explicit `transport: TCP` or `UDP`, following its
 [constructor](https://github.com/MetaCubeX/mihomo/blob/v1.19.30/adapter/outbound/mieru.go).
+
+URI preprocessing follows the fixed MMWX source's **proxyparser v0.1.7**
+dependency. Supported families are VLESS, VMess, Trojan, Shadowsocks,
+Hysteria2, AnyTLS, Snell, Mieru, SOCKS5 and HTTP/HTTPS; support remains limited
+to settings the existing node model can preserve. Shadowsocks accepts SIP002
+and legacy whole-URI Base64 credentials, while VMess uses its Base64 JSON
+form. Percent-encoded credentials are decoded exactly once. Duplicate URI
+parameters, ambiguous JSON fields, malformed encoding and duplicate node
+names reject the preview. Unknown protocols and unrepresentable options remain
+visible as unavailable rather than being silently removed.
+
+URI defaults are not substituted for YAML defaults. For example, the pinned
+URI parser defaults Snell to version 4 and Mieru to TCP. URI conversion also
+preserves the pinned parser's TLS-name fallback and protocol-specific UDP
+defaults, subject to the same strict node validation. Base64 accepts canonical
+standard or URL-safe encoding, including CRLF-wrapped subscription bodies;
+mixed alphabets, noncanonical padding and nested outer encoding are rejected.
+The 2 MiB input and 1,000-node limits still apply, with a 16 KiB limit per URI
+or decoded VMess JSON object.
 
 The separate runtime-scan requirement for **managed** Mieru nodes is unchanged.
 External nodes use the validated upstream configuration; there is no local
@@ -164,8 +204,8 @@ references. Ordinary API responses and failure messages do not contain source
 URLs, user agents, credentials or raw provider bodies. New URL/user-agent input
 exists temporarily in the form's memory and is cleared on submission or close;
 it is never read back from the server or persisted to browser storage. Mutation
-requests require the existing administrator session, Origin and CSRF checks,
-and are limited to 64 KiB of JSON.
+requests require the appropriate administrator or subscriber session, Origin
+and CSRF checks, and are limited to 64 KiB of JSON.
 
 URLs, user agents, saved proxy configurations and pending preview configurations
 are encrypted at rest. For a file-backed SQLite database, the default key
@@ -199,3 +239,11 @@ families is not a claim that this new fixture forwards all of them. The existing
 The verified deployment scope remains single-host Docker/SQLite. This feature
 does not establish PostgreSQL concurrency, automatic backups, public DNS/TLS
 or a full MMWX migration.
+
+The URI/Base64 and subscriber-source extension has 14 focused backend tests
+and eight frontend service/component tests. These cover bounded parsing,
+owner isolation, real session and CSRF guards, concurrent source changes,
+explicit confirmation and primary-link merging, plus secret clearing and late
+responses in the subscriber page. This focused extension is separate from the
+earlier browser/forwarding gate; it does not claim a new browser or forwarding
+run for every input and output combination.

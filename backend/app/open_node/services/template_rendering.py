@@ -302,6 +302,73 @@ def render_clash(content, proxies):
     return result, warnings
 
 
+def validate_stash_template(content):
+    value = parse_template(content, "clash")
+    error = "Selected Clash template is not compatible with Stash"
+    if value.keys() - {
+        "proxies", "proxy-groups", "proxy-providers", "rules", "rule-providers", "dns",
+        "hosts", "mode", "log-level", "ipv6", "mixed-port", "port", "socks-port", "allow-lan",
+    }:
+        raise TemplateError(error)
+    providers = value.get("rule-providers", {})
+    if not isinstance(providers, dict):
+        raise TemplateError(error)
+    for provider in providers.values():
+        if not isinstance(provider, dict) or provider.get("format") == "mrs":
+            raise TemplateError(error)
+        if any(str(provider.get(key, "")).endswith(".mrs") for key in ("url", "path")):
+            # A different extension is not evidence that a matching YAML resource exists.
+            raise TemplateError(error)
+    dns = value.get("dns", {})
+    if not isinstance(dns, dict) or dns.keys() - {
+        "default-nameserver", "nameserver", "nameserver-policy", "direct-nameserver",
+        "proxy-server-nameserver", "fake-ip-filter", "skip-cert-verify",
+    }:
+        raise TemplateError(error)
+    if "skip-cert-verify" in dns and type(dns["skip-cert-verify"]) is not bool:
+        raise TemplateError(error)
+    for key in ("default-nameserver", "nameserver", "direct-nameserver", "proxy-server-nameserver"):
+        if key in dns and (
+            not isinstance(dns[key], list) or any(not isinstance(item, str) for item in dns[key])
+        ):
+            raise TemplateError(error)
+    policy = dns.get("nameserver-policy", {})
+    if not isinstance(policy, dict):
+        raise TemplateError(error)
+    for key, servers in policy.items():
+        if key.startswith(("geosite:", "rule-set:")) or not (
+            isinstance(servers, str)
+            or isinstance(servers, list) and len(servers) == 1 and isinstance(servers[0], str)
+        ):
+            raise TemplateError(error)
+
+
+def render_stash(content, proxies):
+    from open_node.services.subscription_extra_clients import yaml_proxy
+
+    validate_stash_template(content)
+    rendered, warnings = render_clash(content, proxies)
+    value = checked_yaml(rendered)
+    value["proxies"] = [yaml_proxy(proxy, "stash") for proxy in proxies]
+    if "dns" in value:
+        dns = value["dns"]
+        nameservers = list(dns.get("nameserver", []))
+        for key in ("direct-nameserver", "proxy-server-nameserver"):
+            nameservers.extend(dns.pop(key, []))
+        if nameservers:
+            dns["nameserver"] = list(dict.fromkeys(nameservers))
+        if "nameserver-policy" in dns:
+            dns["nameserver-policy"] = {
+                key: servers[0] if isinstance(servers, list) else servers
+                for key, servers in dns["nameserver-policy"].items()
+            }
+    # Unlike the reference's default, never turn off DNS TLS verification implicitly.
+    result = yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
+    if len(result.encode()) > 8 * 1024 * 1024:
+        raise TemplateError("Rendered subscription exceeds 8 MiB")
+    return result, warnings
+
+
 def surge_value(value):
     if isinstance(value, bool):
         return "true" if value else "false"
