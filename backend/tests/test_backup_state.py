@@ -4,6 +4,7 @@ import hashlib
 import io
 import os
 import resource
+import stat
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
@@ -24,7 +25,15 @@ from open_node.services.backup_state import (
 
 
 def private_file(path: Path, content: bytes) -> Path:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    missing = []
+    parent = path.parent
+    while not parent.exists():
+        missing.append(parent)
+        parent = parent.parent
+    # Path.mkdir(parents=True) applies mode only to the leaf directory. Create
+    # every missing fixture parent explicitly, without repairing existing ones.
+    for parent in reversed(missing):
+        parent.mkdir(mode=0o700)
     path.write_bytes(content)
     path.chmod(0o600)
     return path
@@ -55,6 +64,47 @@ def copied(state, permit, *, layout=None, database_size=20):
         initial if layout is None else layout, permit=permit,
         staging_directory=staging, database_size=database_size,
     )
+
+
+@pytest.mark.parametrize("mask", [0o022, 0o027, 0o077])
+def test_deep_private_state_is_accepted_under_common_umasks(state, mask):
+    layout, staging, barrier = state
+    path = layout.certificates / "jobs/unfinished/http/state.json"
+    previous = os.umask(mask)
+    try:
+        private_file(path, b'{"cleanup":true}')
+    finally:
+        os.umask(previous)
+    for parent in (layout.certificates, *path.parents[:3]):
+        assert stat.S_IMODE(parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    with barrier.snapshot(timeout=0) as permit:
+        with copied(state, permit) as result:
+            assert result.sources[
+                "data/certificates/jobs/unfinished/http/state.json"
+            ].read() == b'{"cleanup":true}'
+    assert list(staging.iterdir()) == []
+
+
+@pytest.mark.parametrize("mask", [0o022, 0o027, 0o077])
+def test_fixture_does_not_repair_existing_public_state_directory(state, mask):
+    layout, staging, barrier = state
+    layout.certificates.mkdir(mode=0o700)
+    layout.certificates.chmod(0o755)
+    path = layout.certificates / "jobs/unfinished/http/state.json"
+    previous = os.umask(mask)
+    try:
+        private_file(path, b"must-not-copy")
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(layout.certificates.stat().st_mode) == 0o755
+    with barrier.snapshot(timeout=0) as permit:
+        with pytest.raises(BackupStateError):
+            with copied(state, permit):
+                pytest.fail("Existing public directories must still be rejected")
+    assert stat.S_IMODE(layout.certificates.stat().st_mode) == 0o755
+    assert path.read_bytes() == b"must-not-copy"
+    assert list(staging.iterdir()) == []
 
 
 def test_all_roles_jobs_and_independent_slices_remain_stable_after_permit_release(state):

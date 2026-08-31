@@ -2,7 +2,7 @@ import asyncio
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 from dataclasses import replace
 
 import pytest
@@ -52,7 +52,8 @@ def snapshot_value(snapshot):
 
 def update_instance(layout, barrier, value):
     with backup_operation(barrier):
-        with sqlite3.connect(layout.database) as connection:
+        # SQLite's connection context commits/rolls back but does not close.
+        with closing(sqlite3.connect(layout.database)) as connection, connection:
             connection.execute("UPDATE consistency SET value=?", (value,))
         (layout.certificates / "state").write_bytes(str(value).encode())
 
@@ -83,7 +84,7 @@ def test_snapshot_waits_until_one_writer_finishes_both_database_and_file_changes
 
     def writer():
         with backup_operation(barrier):
-            with sqlite3.connect(layout.database) as connection:
+            with closing(sqlite3.connect(layout.database)) as connection, connection:
                 connection.execute("UPDATE consistency SET value=2")
             committed.set()
             assert finish_files.wait(5)

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     session_lifetime_seconds: int = Field(default=43200, ge=60, le=604800)
     session_idle_seconds: int = Field(default=1800, ge=60, le=86400)
     subscriber_totp_key: SecretStr | None = None
+    backup_temporary_directory: Path | None = None
     external_subscriptions_state_dir: Path | None = None
     notifications_state_dir: Path | None = None
     notifications_poll_seconds: float = Field(default=1, ge=0.25, le=60)
@@ -48,6 +49,15 @@ class Settings(BaseSettings):
         from open_node.services.agent_bootstrap import normalize_control_url
 
         return normalize_control_url(value)
+
+    @field_validator("backup_temporary_directory")
+    @classmethod
+    def backup_temporary_path(cls, value: Path | None) -> Path | None:
+        if value is not None and (
+            not value.is_absolute() or value == Path(value.anchor) or ".." in value.parts
+        ):
+            raise ValueError("Backup temporary directory requires an absolute non-root path")
+        return value
 
     @field_validator("certificate_http_address")
     @classmethod

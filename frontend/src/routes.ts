@@ -18,4 +18,5 @@ export const routes: WorkspaceRoute[] = [
   { path: "/templates", name: "templates", component: lazy(() => import("./react/views/TemplatesView")) },
   { path: "/notifications", name: "notifications", component: lazy(() => import("./react/views/NotificationsView")) },
   { path: "/system-settings", name: "system-settings", component: lazy(() => import("./react/views/SystemSettingsView")) },
+  { path: "/backups", name: "backups", component: lazy(() => import("./react/views/BackupsView")) },
 ];

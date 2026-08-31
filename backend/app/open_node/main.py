@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from fastapi.responses import JSONResponse
 from open_node.api.backup import BackupHTTPMiddleware
 from open_node.api.router import api_router
 from open_node.api.routes.agents import agent_websocket
+from open_node.api.routes.backups import BACKUP_ERROR_MESSAGES
 from open_node.api.routes.public import router as public_router
 from open_node.api.routes.subscription_profiles import legacy_router
 from open_node.api.routes.system import healthz
@@ -24,8 +26,11 @@ from open_node.domain.notifications import NotificationError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.auth import AuthStore
+from open_node.services.backup_authorization import BackupAuthorizationError, BackupAuthorizer
 from open_node.services.backup_coordination import BackupWriteBarrier
+from open_node.services.backup_jobs import BackupJobError, BackupJobManager
 from open_node.services.backup_runtime import backup_operation, configured_backup_barrier
+from open_node.services.backup_snapshot import BackupSnapshotError, configured_backup_layout
 from open_node.services.branding import BrandingStore
 from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
@@ -34,7 +39,7 @@ from open_node.services.inventory import InventoryStore, ManagedNodeConflict
 from open_node.services.notification_worker import NotificationWorker
 from open_node.services.notifications import NotificationStore
 from open_node.services.probe_stream import PublicProbeStreamManager
-from open_node.services.secure_channel import AgentIdentity
+from open_node.services.secure_channel import AgentIdentity, decode_public_key
 from open_node.services.server_traffic import ServerTrafficWorker
 from open_node.services.subscriber_auth import SubscriberAuthStore
 from open_node.services.subscription_access import SubscriptionAccessWorker
@@ -102,6 +107,8 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         traffic_task = asyncio.create_task(traffic.run())
         notification_task = asyncio.create_task(notification.run())
         try:
+            if app.state.backup_jobs is not None:
+                await asyncio.to_thread(app.state.backup_jobs.start)
             yield
         finally:
             task.cancel()
@@ -116,6 +123,10 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 await traffic_task
             with contextlib.suppress(asyncio.CancelledError):
                 await notification_task
+            if app.state.backup_jobs is not None:
+                # A timeout stops admission, not the actual producer thread.
+                # It retains its barrier and closes private resources on exit.
+                await asyncio.to_thread(app.state.backup_jobs.close)
 
     app = FastAPI(
         title=active_settings.app_name,
@@ -139,6 +150,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 (
                     active_settings.api_prefix + "/migrations/mmwx/",
                     active_settings.api_prefix + "/auth/",
+                    active_settings.api_prefix + "/backups",
                     active_settings.api_prefix + "/agents/bootstrap/",
                     active_settings.api_prefix + "/external-subscriptions",
                     active_settings.api_prefix + "/notifications",
@@ -246,6 +258,21 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
 
+    @app.exception_handler(BackupJobError)
+    @app.exception_handler(BackupAuthorizationError)
+    async def invalid_backup(_request, exc):
+        code = exc.code if exc.code in BACKUP_ERROR_MESSAGES else "backup_creation_failed"
+        headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+        if exc.status_code == 429:
+            headers["Retry-After"] = "60"
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": code, "detail": BACKUP_ERROR_MESSAGES[code], "license_required": False,
+            },
+            headers=headers,
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=active_settings.cors_origins,
@@ -267,6 +294,24 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         active_settings.subscriber_totp_key,
         active_settings.app_name,
     )
+    app.state.backup_authorizer = BackupAuthorizer(
+        app.state.auth, active_settings.session_idle_seconds,
+    )
+    app.state.backup_submission_lock = threading.Lock()
+    try:
+        backup_layout = configured_backup_layout(active_settings)
+    except BackupSnapshotError:
+        app.state.backup_jobs = None
+    else:
+        app.state.backup_jobs = BackupJobManager(
+            backup_layout, backup_writes,
+            is_authorized=app.state.backup_authorizer.is_authorized,
+            totp_key=(active_settings.subscriber_totp_key.get_secret_value().encode()
+                      if active_settings.subscriber_totp_key else None),
+            agent_public_key=(decode_public_key(identity.public_metadata()["public_key"])
+                              if identity else None),
+            temporary_directory=active_settings.backup_temporary_directory,
+        )
     app.state.inventory = InventoryStore(
         active_settings.database_url,
         short_links_enabled=active_settings.short_links_enabled,

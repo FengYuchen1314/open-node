@@ -65,6 +65,13 @@ class AdministratorSecurityPolicy(AuthBase):
     require_totp: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class AdministratorBackupEpoch(AuthBase):
+    __tablename__ = "administrator_backup_epoch"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    value: Mapped[str] = mapped_column(String(64))
+
+
 class OperatorSession(AuthBase):
     __tablename__ = "operator_sessions"
 
@@ -166,6 +173,17 @@ class AuthStore:
         with self.session() as db:
             return db.get(Administrator, 1) is not None
 
+    @staticmethod
+    def _advance_backup_epoch(db) -> None:
+        # Retaining the current browser session after a security change must not
+        # retain its already-approved backup downloads. An epoch also prevents
+        # change-then-revert from reviving an earlier authorization.
+        epoch = db.get(AdministratorBackupEpoch, 1)
+        if epoch is None:
+            db.add(AdministratorBackupEpoch(id=1, value=token_hex(32)))
+        else:
+            epoch.value = token_hex(32)
+
     def set_administrator(self, username: str, password: str, *, reset: bool = False) -> None:
         hashed = password_hash.hash(password)
         with self.session.begin() as db:
@@ -184,6 +202,7 @@ class AuthStore:
                     policy.require_totp = False
             else:
                 db.add(Administrator(id=1, username=username, password_hash=hashed))
+            self._advance_backup_epoch(db)
 
     def allow_login_attempt(self, peer: str, *, max_attempts: int = 10) -> bool:
         key = sha256(peer.encode()).hexdigest()
@@ -425,6 +444,7 @@ class AuthStore:
                 raise AdministratorAuthenticationError("Invalid verification code")
             if row.kind == "enroll":
                 db.execute(delete(OperatorSession))
+                self._advance_backup_epoch(db)
             db.execute(delete(OperatorChallenge).where(OperatorChallenge.administrator_id == 1))
             issued = self._new_session(db, administrator, lifetime)
             db.commit()
@@ -528,6 +548,7 @@ class AuthStore:
                 ),
                 expires_at=datetime.fromtimestamp(factor.pending_expires_at, UTC),
             )
+            self._advance_backup_epoch(db)
             db.commit()
             return result
 
@@ -562,6 +583,7 @@ class AuthStore:
             codes = self._new_recovery_codes(administrator, factor)
             db.execute(delete(OperatorSession).where(OperatorSession.token_hash != token_hash))
             db.execute(delete(OperatorChallenge))
+            self._advance_backup_epoch(db)
             db.commit()
             return codes
 
@@ -607,6 +629,7 @@ class AuthStore:
                 codes = self._new_recovery_codes(administrator, factor)
             db.execute(delete(OperatorSession).where(OperatorSession.token_hash != token_hash))
             db.execute(delete(OperatorChallenge))
+            self._advance_backup_epoch(db)
             db.commit()
             return codes
 
@@ -643,6 +666,7 @@ class AuthStore:
                 policy.require_totp = required
             db.execute(delete(OperatorSession).where(OperatorSession.token_hash != token_hash))
             db.execute(delete(OperatorChallenge))
+            self._advance_backup_epoch(db)
             db.commit()
             return AdministratorSecurityState(
                 totp_enabled=bool(factor and factor.totp_secret),
@@ -675,5 +699,6 @@ class AuthStore:
             if factor:
                 factor.pending_secret = factor.pending_session_hash = None
                 factor.pending_expires_at = 0
+            self._advance_backup_epoch(db)
             db.commit()
             return True

@@ -6,6 +6,7 @@ from open_node.api.routes import (
     agent_bootstrap,
     agents,
     auth,
+    backups,
     branding,
     certificates,
     changes,
@@ -35,6 +36,7 @@ private_router = APIRouter(
     route_class=BackupAPIRoute, dependencies=[Depends(require_administrator)]
 )
 private_router.include_router(servers.router)
+private_router.include_router(backups.router)
 private_router.include_router(agent_bootstrap.router)
 private_router.include_router(branding.router)
 private_router.include_router(server_management.router)

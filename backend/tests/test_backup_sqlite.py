@@ -97,6 +97,36 @@ def open_fd_count():
     return len(list(Path("/proc/self/fd").iterdir()))
 
 
+def open_fd_identities():
+    identities = set()
+    for path in Path("/proc/self/fd").iterdir():
+        try:
+            fd = int(path.name)
+            info = os.fstat(fd)
+        except OSError as error:
+            if error.errno != errno.EBADF:
+                raise
+        else:
+            identities.add((fd, info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode)))
+    return identities
+
+
+def assert_no_new_file_descriptors(before):
+    # Other tests' unreachable objects may close an unrelated FD during garbage
+    # collection. Compare descriptor identities, not the process-wide total: a
+    # newly leaked snapshot FD must not be hidden by an unrelated FD closing.
+    assert not open_fd_identities() - before
+
+
+@contextmanager
+def using_sigint_handler(handler):
+    previous = signal.signal(signal.SIGINT, handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
 @contextmanager
 def track_connections(monkeypatch, *, on_progress=None, on_execute=None, on_close=None):
     real_connect = sqlite3.connect
@@ -338,7 +368,7 @@ def test_borrowed_connection_has_native_readonly_bounds_and_introspection_after_
     original_sha = digest(database)
     original = database.stat()
     before_files = set(database.parent.iterdir())
-    before_fds = open_fd_count()
+    before_fds = open_fd_identities()
     forbidden = staging / "must-not-attach.sqlite3"
     with barrier.snapshot() as permit:
         with sqlite_backup_snapshot(database, permit=permit, staging_directory=staging) as result:
@@ -397,12 +427,67 @@ def test_borrowed_connection_has_native_readonly_bounds_and_introspection_after_
                         raise
             assert len(snapshot_fds) == 2
             assert info.st_nlink == 0 and list(staging.iterdir()) == []
-    assert open_fd_count() == before_fds and set(database.parent.iterdir()) == before_files
+    assert result.stream.closed
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("SELECT 1")
+    assert_no_new_file_descriptors(before_fds)
+    assert set(database.parent.iterdir()) == before_files
     assert digest(database) == original_sha
     current = database.stat()
     assert (current.st_ino, current.st_size, current.st_mtime_ns, current.st_ctime_ns) == (
         original.st_ino, original.st_size, original.st_mtime_ns, original.st_ctime_ns,
     )
+
+
+def test_unrelated_fd_closing_during_snapshot_does_not_fail_identity_cleanup_check(
+    layout, tmp_path,
+):
+    database, staging, barrier = layout
+    with (tmp_path / "unrelated").open("xb") as unrelated:
+        before = open_fd_identities()
+        with barrier.snapshot() as permit:
+            with sqlite_backup_snapshot(
+                database, permit=permit, staging_directory=staging,
+            ) as result:
+                unrelated.close()
+                assert result.connection.execute("SELECT count(*) FROM parent").fetchone() == (1,)
+        assert result.stream.closed and list(staging.iterdir()) == []
+        with pytest.raises(sqlite3.ProgrammingError):
+            result.connection.execute("SELECT 1")
+        assert_no_new_file_descriptors(before)
+
+
+def test_descriptor_identity_check_detects_leak_despite_unrelated_fd_closing(layout, tmp_path):
+    database, staging, barrier = layout
+    leaked = None
+    with (tmp_path / "unrelated").open("xb") as unrelated:
+        info = os.fstat(unrelated.fileno())
+        unrelated_identity = (
+            unrelated.fileno(), info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode),
+        )
+        before = open_fd_identities()
+        try:
+            with barrier.snapshot() as permit:
+                with sqlite_backup_snapshot(
+                    database, permit=permit, staging_directory=staging,
+                ) as result:
+                    leaked = os.dup(result.stream.fileno())
+                    info = os.fstat(leaked)
+                    leaked_identity = (
+                        leaked, info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode),
+                    )
+                    unrelated.close()
+            current = open_fd_identities()
+            assert unrelated_identity not in current and leaked_identity in current - before
+            assert result.stream.closed and list(staging.iterdir()) == []
+            with pytest.raises(sqlite3.ProgrammingError):
+                result.connection.execute("SELECT 1")
+            with pytest.raises(AssertionError):
+                assert_no_new_file_descriptors(before)
+        finally:
+            if leaked is not None:
+                os.close(leaked)
+        assert_no_new_file_descriptors(before)
 
 
 def test_borrowed_connection_rejects_thread_migration_but_original_thread_stays_usable(layout):
@@ -1066,22 +1151,45 @@ os.close(fd)
             child.wait(timeout=5)
 
 
-def test_actual_sigint_during_paginated_backup_propagates_and_cleans_up(layout, monkeypatch):
+@pytest.mark.parametrize(
+    "inherited_handler", [signal.default_int_handler, signal.SIG_IGN],
+    ids=["default-handler", "inherited-ignore"],
+)
+def test_actual_sigint_during_paginated_backup_propagates_and_cleans_up(
+    layout, monkeypatch, inherited_handler,
+):
     database, staging, barrier = layout
-    before = open_fd_count()
+    writer = sqlite3.connect(database)
+    try:
+        writer.execute("CREATE TABLE padding(value BLOB)")
+        writer.executemany("INSERT INTO padding VALUES (zeroblob(4096))", [()] * 600)
+        writer.commit()
+    finally:
+        writer.close()
+    before = open_fd_identities()
+    original_handler = signal.getsignal(signal.SIGINT)
     sent = False
 
     def signal_self(source, target, status, remaining, total):
         nonlocal sent
+        assert remaining > 0 and total > 256
         sent = True
         os.kill(os.getpid(), signal.SIGINT)
 
-    with track_connections(monkeypatch, on_progress=signal_self) as (connections, _):
-        with barrier.snapshot() as permit:
-            with pytest.raises(KeyboardInterrupt):
-                enter_snapshot(database, staging, permit)
-        assert sent and all(connection.closed_by_module for connection in connections)
-    assert open_fd_count() == before and list(staging.iterdir()) == []
+    # Non-interactive background launchers can leave SIGINT ignored. This test
+    # exercises Python's real interrupt handler, then restores the prior policy;
+    # the backup service itself must never change the application's handler.
+    with using_sigint_handler(inherited_handler):
+        with using_sigint_handler(signal.default_int_handler):
+            with track_connections(monkeypatch, on_progress=signal_self) as (connections, _):
+                with barrier.snapshot() as permit:
+                    with pytest.raises(KeyboardInterrupt):
+                        enter_snapshot(database, staging, permit)
+                assert sent and all(connection.closed_by_module for connection in connections)
+        assert signal.getsignal(signal.SIGINT) == inherited_handler
+    assert signal.getsignal(signal.SIGINT) == original_handler
+    assert_no_new_file_descriptors(before)
+    assert list(staging.iterdir()) == []
 
 
 def test_snapshot_actual_thread_owns_permit_until_real_sqlite_work_finishes(layout, monkeypatch):

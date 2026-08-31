@@ -1,5 +1,45 @@
 # Testing
 
+## Web backup jobs — 2026-08-31
+
+The administrator Web creation/download slice passed one VPS integration run:
+**512 backend tests, zero skips**, including the corrected 419 snapshot/creator
+cases, fresh authorization, security-epoch revocation, bounded job lifecycle,
+HTTP protections, real HTTP creation/download and independent official-age
+decryption. Ruff passed. Evidence:
+`/tmp/open-node-web-backups-root.N22zbI9f/evidence-r1`.
+The Chinese Ant Design page passed **17 focused frontend tests**, both TypeScript
+checks and the production main build at
+`/tmp/open-node-backups-ui.bvumaW2W/evidence-r1`.
+This is targeted integration evidence, not a new full-project or restore gate.
+
+Earlier failures remain recorded rather than relabelled as successes:
+
+- Candidate `ef93676` CI `33398241764`: backend 4718 passed, 103 skipped, one
+  state-fixture permission failure; the other three jobs passed. Under umask022,
+  `mkdir(parents=True)` left intermediate job directories 0755. The fixture now
+  creates each missing parent as 0700 without repairing existing directories.
+  A separate old-fixture reproduction failed as expected, then all 64 corrected
+  state cases passed, including three umasks and unchanged-public-directory rejection.
+- Full candidate VPS run: 4820 passed, two SQLite-test failures. The SIGINT test
+  assumed a default handler, but the reproduced background launch inherited
+  SIG_IGN. The corrected test installs/restores the intended handler and exercises
+  an actual interrupt during paginated copying. Descriptor cleanup now identifies
+  new descriptors rather than treating an unrelated descriptor closing as a leak.
+- The next 419-case run was 418/1: its remaining descriptor belonged to the
+  previous snapshot test's database. Two fixture writers committed but did not
+  close their SQLite connections. Explicit closing fixed the fixture; the later
+  512-case integration passed without relaxing the creator cleanup assertion.
+
+The exact **ef93676** Docker image also passed its installed-code/native pipeline
+gate (27 CLI checks, 25 HTTP checks, actual creation/decryption and restart):
+`sha256:1098d6b1db1a9c00f1404d6a1f39dce0a377706ab40ba47ed242e6ca6cc710a1`.
+Its report is `/tmp/open-node-backup-creator-image.KQNJMTD5/evidence-gate-r1/report.json`.
+That image predates the Web routes and is not presented as a Web-feature image.
+Production was not upgraded. Following the user's request to prioritize delivery,
+passed checks are not repeatedly rerun; the remaining features will share a final
+integration/release run.
+
 All tests for Open Node run on the VPS at `185.99.135.224` over SSH. Local work
 is limited to editing and static inspection.
 
@@ -48,6 +88,7 @@ SQLite 83、状态文件 58、依赖检查 216、整体快照 19、创建器 34�
 源输入为 `full-source-r3.tar` 加 `creation-overlay-r2.tar`，后者 SHA-256 为
 `e83712f9b8876d85fe4238d6f32d11dc55c25d650e5692d1a322c799be46751e`，
 十文件清单为 `f664528a13d1fcd11d5ede5bd9571f2e2aa7b1af9f94f37de09dfdec31e71fa9`。
+原始 R2 JUnit 为 `a147596a398e8628157daa5059a64e43c45e3ba851bb8bfe15b91190c5a6cffb`。
 
 原联动 R1 为 402 通过、3 失败，另有三项测试 lint 问题，原记录没有覆盖。
 两项测试把 22 字节 age 标头只读了 21 字节，另一项提供互相矛盾的 Git/镜像 revision；
@@ -62,6 +103,15 @@ SQLite 83、状态文件 58、依赖检查 216、整体快照 19、创建器 34�
 其先前 lint/测试失败以及匿名 `/proc/fd` 重新开 SQLite 的真实失败均保留，
 最终采用的是先打开完成目标的只读连接再 unlink。允许的是 SQLite 自身的空 temp
 schema，不是额外 ATTACH 的数据库。
+
+另在 `/tmp/open-node-state-creation-audit.Aj5C7lzh/r2` 对状态复制与创建联动的四轮原始
+结果完成 108 项独立后核和 14 项封存复读。2434 项跨目录输入清单
+`original-cross-directory.sha256` 为
+`57abe272c660e02a98b1e55bf5be44199cae3ca97a61a908dcc018ce55aa81ec`，
+12 项最终链为 `48505eafea7c428fd80c555dcfc02526128d8e483a2267c4231c601a9f655673`。
+root 再次逐项校验了两份清单及原始 R2 JUnit。审计自己的首轮日志解析误判也原样保留。
+state 轮次没有单独的历史链接清单或外层 shell 退出文件；实际记录的是 namespace
+退出码，不能把它改称未采集的外层退出码。
 
 所有执行只在 VPS 的私有 mount/net/PID 环境进行，源码和 6344 个依赖文件只读，
 四个依赖链接不变；运行目录、数据库、证书和缓存独立。生产及共享候选前后身份一致。
