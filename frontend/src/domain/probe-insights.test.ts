@@ -85,7 +85,7 @@ describe("probe insights", () => {
     expect(healthy).toMatchObject({ score: 100, label: "Excellent", tone: "success" });
     expect(strained.score).toBeLessThan(40);
     expect(strained.tone).toBe("error");
-    expect(strained.issues).toContain("Server expires soon");
+    expect(strained.issues).toContain("服务器即将到期");
   });
 
   it("aggregates seven-day traffic and ranks live hotspots", () => {
@@ -154,7 +154,9 @@ describe("probe insights", () => {
       { ms: 50, loss: 0, level: "good" },
       { ms: 225, loss: 10, level: "critical" },
     ]);
-    expect(remainingDaysLabel("2026-08-27", now)).toBe("expires today");
+    expect(remainingDaysLabel("2026-08-27", now)).toBe("今天到期");
+    expect(remainingDaysLabel("2026-08-25", now)).toBe("已到期 2 天");
+    expect(remainingDaysLabel("2026-08-30", now)).toBe("剩余 3 天");
   });
 
   it("normalizes return route badges for three-carrier display", () => {
@@ -176,7 +178,7 @@ describe("probe insights", () => {
     expect(badges).toEqual([
       {
         carrier: "telecom",
-        carrierLabel: "Telecom",
+        carrierLabel: "电信",
         routeType: "163 PP",
         region: "Guangzhou",
         testedAt: "2026-08-27T01:02:03Z",
@@ -185,8 +187,8 @@ describe("probe insights", () => {
       },
       {
         carrier: "unicom",
-        carrierLabel: "Unicom",
-        routeType: "Unknown",
+        carrierLabel: "联通",
+        routeType: "未知",
         region: "",
         testedAt: "",
         premium: false,
@@ -194,7 +196,7 @@ describe("probe insights", () => {
       },
       {
         carrier: "mobile",
-        carrierLabel: "Mobile",
+        carrierLabel: "移动",
         routeType: "CMI",
         region: "Shanghai",
         testedAt: "",

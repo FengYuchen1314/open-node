@@ -6,6 +6,12 @@ its previous token; plan expiry, disabled users and exhausted quotas also
 prevent export. Client compatibility does not prove that a remote node is
 currently reachable or provisioned.
 
+[External sources](external-subscriptions.md) can add explicitly confirmed
+upstream nodes to the primary link without replacing their credentials. These
+nodes are not Agent-managed, are not fetched during downloads, and do not enter
+named profiles or temporary links automatically. Local plan and quota checks
+still apply; provider traffic is display metadata, not local billing.
+
 [Managed access](subscription-access.md) also revokes enrolled runtime
 credentials and restores them after renewal or traffic reset. Node application
 requires a capable Agent and restarts Xray. Metadata-only previews never enroll
@@ -34,7 +40,9 @@ listener on port 7890 and a `Proxy` selector. Xray exports a loopback SOCKS
 listener on port 1080 and native outbounds. Its **first outbound is the default**;
 listing more outbounds does not create an interactive selector. Use the Xray
 node control in the Subscriptions view, or add `&node_id={managed-node-uuid}`,
-to export a specific node. Selection is restricted to the token's active plan.
+to export a specific managed node. The same parameter can select an available,
+confirmed external node owned by the token's subscriber. Selection still
+requires the subscriber's active plan and cannot cross subscriber boundaries.
 Local listener ports can be changed in the downloaded client configuration.
 
 Administrators can also create [temporary subscription links](temporary-subscriptions.md)
@@ -51,8 +59,9 @@ returns node IDs, names, protocols, availability, reasons and catalog warnings,
 but no passwords or private configuration. The Subscriptions view shows this
 report alongside the selected URL. The public response includes
 `X-Open-Node-Included-Nodes`, `X-Open-Node-Excluded-Nodes` and
-`Cache-Control: no-store`. The excluded count concerns format compatibility,
-not nodes omitted by explicit selection.
+`Cache-Control: no-store`. The excluded count covers format incompatibility and
+currently unavailable external nodes, including disabled sources/nodes and
+confirmed missing nodes. It does not count nodes omitted by explicit selection.
 
 When nothing compatible remains, export returns 404, not an empty configuration
 or a direct-connection fallback. Unknown, out-of-plan or incompatible selected
@@ -61,14 +70,16 @@ Reserved and duplicate proxy names receive stable unique suffixes.
 Clash and Surge can use [custom templates](subscription-templates.md) selected
 per subscriber, plan or system. These files affect only rendered subscriptions.
 
-Mieru UDP target advertisement is derived from runtime evidence, not trusted
+Managed Mieru UDP target advertisement is derived from runtime evidence, not trusted
 catalog JSON. The latest Agent scan must report Xray running, be no more than
 ten minutes old, and contain the actual integer `mieru_udp_target: 1`. The
 backend overwrites the Mieru proxy's `udp` field from that evidence even when a
 node config claims support. A missing, stale or invalid report keeps
 `udp: false` and adds a catalog warning, so the node remains usable for TCP
 targets without advertising an unsupported UDP path. Runtime-node drafts and
-imports use the same gate.
+imports use the same gate. External Mieru nodes instead use the independently
+validated upstream configuration; a local Agent scan cannot establish the
+capabilities of a third-party server.
 
 ## Verified Protocols
 

@@ -261,7 +261,8 @@ def exercise(client, nodes, xray, echo_port, name):
         traffic(target, xray, echo_port, allowed=False)
         traffic(target, xray, echo_port, new=False)
     print(
-        f"PASS {name}: ordered apply, reverse traffic recovery, in-flight cancellation and automatic compensation",
+        f"PASS {name}: ordered apply, reverse traffic recovery, "
+        "in-flight cancellation and automatic compensation",
         flush=True,
     )
 
@@ -273,8 +274,10 @@ def screenshot(page, output, name):
         ui.check_layout(page)
     except Exception:
         overflow = page.evaluate("""() => [...document.querySelectorAll('body *')]
-            .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
-            .map(el => ({tag: el.tagName, class: String(el.className),
+"""
+            "            .filter(el => el.getClientRects().length"
+            " && getComputedStyle(el).visibility !== 'hidden')\n"
+            """            .map(el => ({tag: el.tagName, class: String(el.className),
                 left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right}))
             .filter(box => box.left < -1 || box.right > innerWidth + 1)""")
         (output / f"{name}-overflow.json").write_text(json.dumps(overflow, indent=2))
@@ -285,12 +288,13 @@ def screenshot(page, output, name):
 def browser(client, nodes, url, password, output, xray, echo_port):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page = browser.new_page(viewport={"width": 1440, "height": 900}, locale="zh-CN")
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(url + "/changes")
+        expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
         ui.sign_in(page, password)
-        expect(page.get_by_role("button", name="Sign out", exact=True)).to_be_visible()
+        expect(page.get_by_role("button", name="退出登录", exact=True)).to_be_visible()
         identifier = plan(client, nodes, "Browser retry")
         request(client, f"/api/v1/change-sets/{identifier}/dispatch")
         wait_state(client, identifier, "succeeded")
@@ -300,9 +304,9 @@ def browser(client, nodes, url, password, output, xray, echo_port):
         wait_state(client, identifier, "rollback_failed")
         page.reload()
         page.get_by_role("button", name="Browser retry", exact=True).click()
-        retry = page.get_by_role("button", name="Retry rollback", exact=True)
+        retry = page.get_by_role("button", name="重试回滚", exact=True)
         expect(retry).to_be_enabled()
-        expect(page.get_by_role("button", name="Dispatch", exact=True)).to_be_disabled()
+        expect(page.get_by_role("button", name="下发", exact=True)).to_be_disabled()
         page.locator(".command-inspector").last.locator(
             ".ant-collapse-header"
         ).last.click()
@@ -317,14 +321,14 @@ def browser(client, nodes, url, password, output, xray, echo_port):
             delayed["route"] = route
 
         page.route("**/api/v1/change-sets", hold_list)
-        page.get_by_role("button", name="Refresh change sets", exact=True).click()
+        page.get_by_role("button", name="刷新变更集", exact=True).click()
         runtime.poll(
             "list response held", lambda: page.wait_for_timeout(50) or bool(delayed)
         )
         failure.unlink()
         retry.click()
         expect(
-            page.get_by_text("Queued 2 rollback commands.", exact=True)
+            page.get_by_text("已排队 2 条回滚命令。", exact=True)
         ).to_be_visible()
         delayed["route"].fulfill(response=delayed["response"])
         page.unroute("**/api/v1/change-sets", hold_list)
@@ -332,7 +336,7 @@ def browser(client, nodes, url, password, output, xray, echo_port):
         expect(
             page.locator(".ant-descriptions")
             .filter(has=page.get_by_text("Browser retry", exact=True))
-            .get_by_text("rolled back", exact=True)
+            .get_by_text("已回退", exact=True)
         ).to_be_visible(timeout=10000)
         assert change(client, identifier)["steps"][1]["rollback_history"]
 
@@ -343,11 +347,11 @@ def browser(client, nodes, url, password, output, xray, echo_port):
         wait_state(client, identifier, "rollback_incomplete")
         page.reload()
         page.get_by_role("button", name="Browser partial recovery", exact=True).click()
-        page.get_by_role("button", name="Accept current state", exact=True).click()
+        page.get_by_role("button", name="接受当前状态", exact=True).click()
         dialog = page.get_by_role("dialog")
-        accept = dialog.get_by_role("button", name="Accept state", exact=True)
+        accept = dialog.get_by_role("button", name="接受状态", exact=True)
         expect(accept).to_be_disabled()
-        dialog.get_by_label("Resolution reason", exact=True).fill(
+        dialog.get_by_label("处理原因", exact=True).fill(
             "Verified remaining client on node A"
         )
         expect(accept).to_be_disabled()

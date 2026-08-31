@@ -1,4 +1,5 @@
 import { createObservableState } from "./observable-state";
+import { requestError, requestFailureMessage } from "./request-error";
 import type { RegistrationClaim, RegistrationClaimResponse } from "../domain/registration-invitations";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat, SubscriptionIpPolicy, SubscriptionQuotaStatus } from "../domain/subscriptions";
 import { authenticatedFetch } from "./auth";
@@ -61,8 +62,7 @@ export async function accountRequest<T>(path: string, init: RequestInit = {}, fe
   if (!response.ok) {
     if (response.status === 401 && current === epoch && !path.startsWith("login")) clearSubscriberSession();
     const body = await response.json().catch(() => null);
-    const detail = typeof body?.detail === "string" ? body.detail : `Request failed (${response.status})`;
-    throw new Error(detail);
+    throw requestError(typeof body?.detail === "string" ? body.detail : undefined, `账户请求失败（${response.status}）`);
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
@@ -76,7 +76,7 @@ export async function loadSubscriberSession(fetcher = fetch) {
   } catch (error) {
     if (current === epoch) {
       subscriberState.session = null;
-      subscriberState.error = error instanceof Error ? error.message : "Connection failed";
+      subscriberState.error = requestFailureMessage(error, "连接失败。");
     }
   } finally { subscriberState.ready = true; }
 }
@@ -149,7 +149,7 @@ export async function subscriberAccount(username: string, update?: { expected_re
   } : {});
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status})`);
+    throw requestError(typeof body?.detail === "string" ? body.detail : undefined, `用户账户请求失败（${response.status}）`);
   }
   return response.json() as Promise<SubscriberAccount>;
 }

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { copyUserLimits, maxSpeed, maxTraffic, validUserLimits } from "./user-limits";
+import { copyUserLimits, limitSource, maxSpeed, maxTraffic, validUserLimits } from "./user-limits";
 
 describe("user limit overrides", () => {
+  it.each([
+    ["user_node", "用户节点设置"], ["user_parent", "用户父节点设置"], ["user", "用户默认设置"],
+    ["plan_node", "套餐节点设置"], ["plan_parent", "套餐父节点设置"], ["plan", "套餐默认设置"],
+    ["unlimited", "不限制"], ["shared", "共享凭据"],
+  ] as const)("localizes the display label without changing source value %s", (source, label) => {
+    expect(limitSource(source)).toBe(label);
+  });
   it("preserves explicit unlimited and copies both node maps", () => {
     const original = copyUserLimits({ traffic_limit_gb: 0, speed_limit_mbps: 0, device_limit: 0, node_speed_limits: { node: 0 }, node_device_limits: { node: 3 } });
     const edited = copyUserLimits(original);

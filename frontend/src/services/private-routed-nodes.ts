@@ -6,14 +6,15 @@ import type {
 } from "../domain/private-routed-nodes";
 import { accountRequest } from "./subscriber-auth";
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const adminPath = `${apiBaseUrl}/api/v1/private-routed-nodes`;
 
 async function failure(response: Response) {
   const body = await response.json().catch(() => null);
-  return new Error(
-    typeof body?.detail === "string" ? body.detail : `Request failed (${response.status})`,
+  return requestError(
+    typeof body?.detail === "string" ? body.detail : undefined, `私有路由节点请求失败（${response.status}）`,
   );
 }
 

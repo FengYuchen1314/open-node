@@ -6,9 +6,9 @@ import CommandInspector from "../react/components/CommandInspector";
 
 describe("dependent commands", () => {
   it.each([
-    ["waiting", "Waiting for prerequisite"],
-    ["skipped", "Not executed"],
-  ] as const)("renders the %s state", async (status, label) => {
+    ["waiting", "等待前置命令", "等待中"],
+    ["skipped", "未执行", "已跳过"],
+  ] as const)("renders the %s state", async (status, label, statusLabel) => {
     const command: AgentCommand = {
       id: "write-config",
       server_id: "edge",
@@ -26,7 +26,7 @@ describe("dependent commands", () => {
     };
     const html = renderToStaticMarkup(createElement(CommandInspector, { commands: [command], streamFramesByCommand: {} }));
     expect(html).toContain(label);
-    expect(html).toContain(status);
+    expect(html).toContain(statusLabel);
     expect(html).toContain("/api/child/xray/config");
   });
 });

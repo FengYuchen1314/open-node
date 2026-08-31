@@ -120,8 +120,12 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
 
         assert transfer("bob") < 1
         browser = playwright.chromium.launch()
-        admin_context = browser.new_context(viewport={"width": 1440, "height": 1000})
-        portal_context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        admin_context = browser.new_context(
+            viewport={"width": 1440, "height": 1000}, locale="zh-CN"
+        )
+        portal_context = browser.new_context(
+            viewport={"width": 1440, "height": 1000}, locale="zh-CN"
+        )
         errors, requests = [], []
         try:
             admin_context.add_cookies(
@@ -141,13 +145,14 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 target.on("pageerror", lambda error: errors.append(str(error)))
                 target.on("request", lambda request: requests.append(request.url))
             page.goto(backend + "/subscriptions")
-            page.get_by_role("button", name="Edit user alice", exact=True).click()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_role("button", name="编辑用户 alice", exact=True).click()
             dialog = page.get_by_role("dialog")
-            dialog.get_by_role("tab", name="Limits", exact=True).click()
+            dialog.get_by_role("tab", name="限制", exact=True).click()
 
             def mode(label, choice, value=None):
                 selector = dialog.get_by_role(
-                    "combobox", name=label + " mode", exact=True
+                    "combobox", name=label + "模式", exact=True
                 )
                 selector.click()
                 expect(selector).to_have_attribute("aria-expanded", "true")
@@ -163,9 +168,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 expect(dropdown).not_to_be_visible()
                 if value is not None:
                     units = {
-                        "Traffic quota": " (GiB)",
-                        "Speed limit": " (Mbps)",
-                        "Node speed": " (Mbps)",
+                        "流量配额": "（GiB）",
+                        "限速": "（Mbps）",
+                        "节点速度": "（Mbps）",
                     }
                     dialog.get_by_label(label + units.get(label, ""), exact=True).fill(
                         str(value)
@@ -173,7 +178,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
 
             def save(expected=200):
                 dialog.get_by_label(
-                    "I accept runtime restarts and pending changes", exact=True
+                    "我接受运行时重启及变更待确认的影响", exact=True
                 ).check()
                 with page.expect_response(
                     lambda response: (
@@ -181,32 +186,32 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                         and response.request.method == "PUT"
                     )
                 ) as response:
-                    dialog.get_by_role("button", name="Save", exact=True).click()
+                    dialog.get_by_role("button", name="保存", exact=True).click()
                 assert response.value.status == expected, response.value.text()
                 if expected == 200:
-                    expect(dialog.get_by_text("User saved", exact=True)).to_be_visible()
+                    expect(dialog.get_by_text("用户已保存", exact=True)).to_be_visible()
                     accounts.users.wait_access(client, "alice")
 
-            mode("Speed limit", "Custom", "0.5")
+            mode("限速", "自定义", "0.5")
             api_save()
             save(409)
             expect(
                 dialog.get_by_text(
-                    "User or credentials changed; reload before saving", exact=True
+                    "用户或凭据已发生变化，请重新加载后保存。", exact=True
                 )
             ).to_be_visible()
-            dialog.get_by_role("button", name="Reload user details", exact=True).click()
-            dialog.get_by_role("tab", name="Limits", exact=True).click()
-            mode("Speed limit", "Custom", "0.5")
-            mode("Connection limit", "Custom", "1")
-            dialog.get_by_label("Speed limit (Mbps)", exact=True).fill("")
+            dialog.get_by_role("button", name="重新加载用户详情", exact=True).click()
+            dialog.get_by_role("tab", name="限制", exact=True).click()
+            mode("限速", "自定义", "0.5")
+            mode("连接数限制", "自定义", "1")
+            dialog.get_by_label("限速（Mbps）", exact=True).fill("")
             dialog.get_by_label(
-                "I accept runtime restarts and pending changes", exact=True
+                "我接受运行时重启及变更待确认的影响", exact=True
             ).check()
             expect(
-                dialog.get_by_role("button", name="Save", exact=True)
+                dialog.get_by_role("button", name="保存", exact=True)
             ).to_be_disabled()
-            dialog.get_by_label("Speed limit (Mbps)", exact=True).fill("0.5")
+            dialog.get_by_label("限速（Mbps）", exact=True).fill("0.5")
             accounts.capture(page, args.output, "limits-edit")
             save()
             limited = transfer()
@@ -250,13 +255,13 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 flush=True,
             )
 
-            dialog.get_by_role("combobox", name="Node", exact=True).click()
+            dialog.get_by_role("combobox", name="节点", exact=True).click()
             page.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text(node["name"], exact=True).click()
-            dialog.get_by_role("button", name="Add node override", exact=True).click()
-            mode("Node speed", "Unlimited")
-            mode("Node connections", "Unlimited")
+            dialog.get_by_role("button", name="添加节点单独限制", exact=True).click()
+            mode("节点速度", "不限")
+            mode("节点连接数", "不限")
             save()
             unlimited = transfer()
             assert unlimited < 1 and limited > unlimited * 2, (limited, unlimited)
@@ -273,8 +278,8 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 portal.get_by_role("heading", name="Alice", exact=True)
             ).to_be_visible()
             expect(
-                portal.get_by_role("region", name="Node limits").get_by_text(
-                    "Unlimited speed", exact=True
+                portal.get_by_role("region", name="节点限制").get_by_text(
+                    "不限速", exact=True
                 )
             ).to_be_visible()
             accounts.capture(portal, args.output, "subscriber-limits")
@@ -284,7 +289,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 flush=True,
             )
 
-            mode("Node speed", "Custom", "0.5")
+            mode("节点速度", "自定义", "0.5")
             save()
             subprocess.run(
                 ["systemctl", "restart", fixture.unit], check=True, timeout=30
@@ -296,10 +301,10 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert transfer() >= 1.5
             print("PASS native limits persist across Agent restart", flush=True)
             dialog.get_by_role(
-                "button", name="Remove override " + node["name"], exact=True
+                "button", name="移除 " + node["name"] + " 的单独限制", exact=True
             ).click()
-            mode("Speed limit", "Inherit")
-            mode("Connection limit", "Inherit")
+            mode("限速", "继承")
+            mode("连接数限制", "继承")
             save()
             assert transfer() < 1
             stored = (
@@ -323,10 +328,10 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 assert saved["access"]["servers"][0]["status"] == "pending"
                 assert client.get(links["alice"]["subscription_url"]).status_code == 404
                 transfer(size=4096)
-                portal.get_by_role("button", name="Refresh account", exact=True).click()
+                portal.get_by_role("button", name="刷新账户", exact=True).click()
                 expect(
-                    portal.get_by_role("region", name="Current plan").get_by_text(
-                        "Quota reached", exact=True
+                    portal.get_by_role("region", name="当前套餐").get_by_text(
+                        "流量已用尽", exact=True
                     )
                 ).to_be_visible()
                 portal.get_by_role("heading", name="Alice", exact=True).click()
@@ -350,7 +355,8 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 and quota["charged_usage_bytes"] >= used
             )
             print(
-                "PASS offline quota withdrawal, reconnection and unlimited restoration without resetting usage",
+                "PASS offline quota withdrawal, reconnection and unlimited restoration "
+                "without resetting usage",
                 flush=True,
             )
 

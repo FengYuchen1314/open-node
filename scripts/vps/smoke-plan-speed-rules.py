@@ -42,7 +42,7 @@ BURST = SUSTAINED | {
 
 
 def capture(page, container, output, name):
-    editor = container.get_by_role("region", name="Automatic limits", exact=True)
+    editor = container.get_by_role("region", name="自动限速", exact=True)
     for width, height, suffix in (
         (1440, 1000, "desktop"),
         (390, 844, "mobile"),
@@ -51,10 +51,10 @@ def capture(page, container, output, name):
         page.set_viewport_size({"width": width, "height": height})
         page.wait_for_timeout(200)
         editor.get_by_label(
-            "Trigger Mbps", exact=True
+            "触发速度（Mbps）", exact=True
         ).first.scroll_into_view_if_needed()
         expect(
-            editor.get_by_label("Trigger Mbps", exact=True).first
+            editor.get_by_label("触发速度（Mbps）", exact=True).first
         ).to_be_in_viewport()
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
         assert editor.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
@@ -74,17 +74,17 @@ def capture(page, container, output, name):
 
 
 def configure(row, rule):
-    choice = "Burst" if rule["type"] == "burst" else "Sustained"
+    choice = "突发限速" if rule["type"] == "burst" else "持续限速"
     row.locator(".ant-radio-group").get_by_text(choice, exact=True).click()
     expect(row.get_by_role("radio", name=choice, exact=True)).to_be_checked()
     fields = {
-        "Trigger Mbps": "threshold_mbps",
-        "Hold seconds": "sustained_seconds",
-        "Cap Mbps": "limit_mbps",
-        "Duration seconds": "limit_duration",
+        "触发速度（Mbps）": "threshold_mbps",
+        "持续时间（秒）": "sustained_seconds",
+        "限速值（Mbps）": "limit_mbps",
+        "限速时长（秒）": "limit_duration",
     }
     if rule["type"] == "burst":
-        fields |= {"Window seconds": "window_seconds", "Bursts": "burst_count"}
+        fields |= {"统计窗口（秒）": "window_seconds", "突发次数": "burst_count"}
     for label, key in fields.items():
         field = row.get_by_label(label, exact=True)
         field.fill("")
@@ -181,7 +181,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
     measurements = {}
     with native.echo_server(work) as (echo, _), sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        admin = browser.new_context(viewport={"width": 1440, "height": 1000})
+        admin = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="zh-CN")
         errors = []
         try:
             admin.add_cookies(
@@ -199,36 +199,37 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             page = admin.new_page()
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/subscriptions")
-            page.get_by_role("button", name="Edit plan Community", exact=True).click()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_role("button", name="编辑套餐 Community", exact=True).click()
             dialog = page.get_by_role("dialog")
-            editor = dialog.get_by_role("region", name="Automatic limits", exact=True)
-            editor.get_by_role("button", name="Add automatic rule", exact=True).click()
-            first = editor.get_by_label("Automatic rule 1", exact=True)
-            hold = first.get_by_label("Hold seconds", exact=True)
+            editor = dialog.get_by_role("region", name="自动限速", exact=True)
+            editor.get_by_role("button", name="添加自动限速规则", exact=True).click()
+            first = editor.get_by_label("自动限速规则 1", exact=True)
+            hold = first.get_by_label("持续时间（秒）", exact=True)
             hold.fill("0")
             hold.press("Enter")
             expect(hold).to_have_value("0")
             acknowledgment = dialog.get_by_label(
-                "I accept the runtime restart and pending changes", exact=True
+                "我接受运行时重启及变更待确认的影响", exact=True
             )
             acknowledgment.check()
             expect(hold).to_have_value("0")
             expect(
-                dialog.get_by_role("button", name="Save", exact=True)
+                dialog.get_by_role("button", name="保存", exact=True)
             ).to_be_disabled()
             configure(first, SUSTAINED)
-            editor.get_by_role("button", name="Add automatic rule", exact=True).click()
-            second = editor.get_by_label("Automatic rule 2", exact=True)
+            editor.get_by_role("button", name="添加自动限速规则", exact=True).click()
+            second = editor.get_by_label("自动限速规则 2", exact=True)
             configure(second, BURST)
-            second.get_by_role("button", name="Move rule 2 up", exact=True).click()
-            expect(first.get_by_label("Window seconds", exact=True)).to_have_value("20")
-            first.get_by_role("button", name="Move rule 1 down", exact=True).click()
-            expect(first.get_by_label("Duration seconds", exact=True)).to_have_value(
+            second.get_by_role("button", name="上移规则 2", exact=True).click()
+            expect(first.get_by_label("统计窗口（秒）", exact=True)).to_have_value("20")
+            first.get_by_role("button", name="下移规则 1", exact=True).click()
+            expect(first.get_by_label("限速时长（秒）", exact=True)).to_have_value(
                 "15"
             )
             capture(page, dialog, args.output, "plan-rules-edit")
             second.get_by_role(
-                "button", name="Remove automatic rule 2", exact=True
+                "button", name="移除自动限速规则 2", exact=True
             ).click()
 
             def save():
@@ -239,7 +240,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                         and response.request.method == "PUT"
                     )
                 ) as response:
-                    dialog.get_by_role("button", name="Save", exact=True).click()
+                    dialog.get_by_role("button", name="保存", exact=True).click()
                 assert response.value.status == 200, response.value.text()
                 accounts.users.wait_access(client, "alice")
                 return response.value.json()["plan"]
@@ -247,23 +248,23 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert save()["auto_speed_rules"] == [SUSTAINED]
             before = assert_rules([SUSTAINED])
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
 
             # Save the inbound editor without losing the package rules it does not edit.
             limits = admin.new_page()
             limits.on("pageerror", lambda error: errors.append(str(error)))
             limits.goto(backend + "/config")
-            limits.get_by_role("tab", name="Limits", exact=True).click()
-            expect(limits.get_by_label("Inbound", exact=True)).to_be_visible(
+            limits.get_by_role("tab", name="限制", exact=True).click()
+            expect(limits.get_by_label("入站", exact=True)).to_be_visible(
                 timeout=20000
             )
-            limits.get_by_role("combobox", name="Inbound", exact=True).click()
+            limits.get_by_role("combobox", name="入站", exact=True).click()
             limits.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text("subscribers", exact=True).click()
-            limits.get_by_role("button", name="Save limits", exact=True).click()
-            expect(limits.get_by_text("Limits applied.", exact=True)).to_be_visible(
+            limits.get_by_role("button", name="保存限制", exact=True).click()
+            expect(limits.get_by_text("限制已应用。", exact=True)).to_be_visible(
                 timeout=20000
             )
             after = assert_rules([SUSTAINED])
@@ -366,19 +367,19 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
 
                 page.reload()
                 page.get_by_role(
-                    "button", name="Edit plan Community", exact=True
+                    "button", name="编辑套餐 Community", exact=True
                 ).click()
-                expect(first.get_by_label("Window seconds", exact=True)).to_have_value(
+                expect(first.get_by_label("统计窗口（秒）", exact=True)).to_have_value(
                     "20"
                 )
                 capture(page, dialog, args.output, "plan-rules-saved")
                 first.get_by_role(
-                    "button", name="Remove automatic rule 1", exact=True
+                    "button", name="移除自动限速规则 1", exact=True
                 ).click()
                 assert save()["auto_speed_rules"] == []
                 assert_rules([])
                 dialog.locator(".ant-modal-footer").get_by_role(
-                    "button", name="Close", exact=True
+                    "button", name="关 闭", exact=True
                 ).click()
                 with native.connect(alice_socks, echo) as alice:
                     for _ in range(2):
@@ -387,18 +388,18 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     assert not status()["automatic_limits"]
                     assert native.transfer(alice, 65536) < 1
 
-            page.get_by_role("tab", name="Plans", exact=True).click()
+            page.get_by_role("tab", name="套餐", exact=True).click()
             form = page.locator("form").filter(
-                has=page.get_by_role("button", name="Create plan", exact=True)
+                has=page.get_by_role("button", name="创建套餐", exact=True)
             )
-            form.get_by_label("Name", exact=True).fill("Created with rules")
-            form.get_by_role("combobox", name="Nodes", exact=True).click()
+            form.get_by_label("名称", exact=True).fill("Created with rules")
+            form.get_by_role("combobox", name="节点", exact=True).click()
             page.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text(f"{node['name']} ({node['protocol']})", exact=True).click()
-            form.get_by_role("combobox", name="Nodes", exact=True).press("Escape")
-            form.get_by_role("button", name="Add automatic rule", exact=True).click()
-            configure(form.get_by_label("Automatic rule 1", exact=True), BURST)
+            form.get_by_role("combobox", name="节点", exact=True).press("Escape")
+            form.get_by_role("button", name="添加自动限速规则", exact=True).click()
+            configure(form.get_by_label("自动限速规则 1", exact=True), BURST)
             capture(page, form, args.output, "plan-rules-create")
             with page.expect_response(
                 lambda response: (
@@ -406,10 +407,10 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "POST"
                 )
             ) as created:
-                form.get_by_role("button", name="Create plan", exact=True).click()
+                form.get_by_role("button", name="创建套餐", exact=True).click()
             assert created.value.status == 201, created.value.text()
             assert created.value.json()["plan"]["auto_speed_rules"] == [BURST]
-            expect(form.get_by_text("No automatic rules", exact=True)).to_be_visible()
+            expect(form.get_by_text("暂无自动限速规则", exact=True)).to_be_visible()
             assert {name: links(name) for name in original_links} == original_links
             assert {name: exported(name) for name in original_links} == original
             assert {

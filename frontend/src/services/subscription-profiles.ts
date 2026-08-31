@@ -4,13 +4,14 @@ import type {
   SubscriptionProfileUpdate,
 } from "../domain/subscription-profiles";
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const basePath = `${apiBaseUrl}/api/v1/subscription-profiles`;
 
 async function failure(response: Response) {
   const body = await response.json().catch(() => null);
-  return new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status})`);
+  return requestError(typeof body?.detail === "string" ? body.detail : undefined, `订阅配置请求失败（${response.status}）`);
 }
 
 export async function listSubscriptionProfiles(fetcher = authenticatedFetch) {

@@ -19,6 +19,279 @@ VPS.
 
 ## Remote Test Command
 
+### External subscriptions
+
+This gate concerns the new administrator-managed, explicitly confirmed
+Clash/Mihomo YAML source workflow. It is separate from the already published
+React rewrite and does not establish full subscription-ecosystem parity.
+The **English-language baseline**, before the subsequent Chinese UI requirement,
+is frozen in
+`/tmp/open-node-external-integration.YG95YRYU/source` on the VPS, based on
+`0ffc07215244abcf69fb8e6935171082e0522747` plus the external-source changes.
+The full-suite results below belong to that frozen source. Chinese UI work is
+tested in new private directories; the English snapshot is not overwritten.
+Neither these working-source checks nor the working-tree Docker image establish
+a published Git revision or acceptance of the Chinese interface.
+
+Focused checks passed: the parser's **402 tests** and Ruff, the fetcher's
+**230 tests** including all six actual TLS cases, and the store/API integration
+suite's **48 tests**. The final TLS rerun uses a new private network namespace
+with only loopback; it does not bind the VPS public interface. Evidence:
+`parser-source-options-after.log` in `/tmp/open-node-external-parser.6U8AFhSs`,
+and `external-fetch-tls-r7.log` / `external-store-r6.log` in the integration
+directory. The 48-test focused run predates the parser's final default-field
+refinement; the complete backend run below covers the combined final source.
+
+The combined English baseline completed these independent gates:
+
+| Gate | Result and evidence |
+| --- | --- |
+| Backend | 1933 collected; **1927 passed, 6 skipped**, 853.21 s, `backend-full-r7.log`. All six opt-in real-TLS cases separately passed within the 230-test fetcher run in `external-fetch-tls-r7.log`. One Starlette/httpx warning retained. |
+| Agent | **605 passed**, 10.92 s, `agent-full-r7-shortpath.log`. An earlier deep temporary path exceeded Linux's AF_UNIX limit; the unchanged suite passed with a fresh short private basetemp. Both raw logs remain. |
+| Frontend | **570 tests / 65 files passed**, 883.85 s, `frontend-gate.E8vXRaoF/vitest.json`; SHA-256 `42bf4632e1977c67cc5275dc2e9cba93120b29a8f2212c76fb77cc584847e687`. Type checking and both production bundles passed. |
+| Probe Worker | **5 passed** and type checking passed, `worker-r7.log`. |
+| Lint/package | Backend and Agent Ruff passed, `backend-agent-ruff-r7.log`; the Agent wheel built privately without replacing any published release asset. |
+
+Paths in that table are relative to `/tmp/open-node-external-integration.YG95YRYU`.
+The backend/Agent/Worker product-and-test manifest remained identical across the
+runs (208 files; SHA-256
+`f4af434404e6ef030624b0f1585041fbd63cbf9041a9cabf95aef6d451e869ea`).
+The frontend's 170-file source/configuration manifest also remained identical;
+the 38 administrator and 3 public-Probe artifacts matched the browser bundle.
+Ant Design row-key, Probe SVG-height and bundle-size warnings are retained in
+the logs, not suppressed or counted as failed assertions.
+
+The English Docker gate in `/root/open-node-external-docker-r7.b457dZfx` passed
+using `open-node:external-working-tree-r7`, image ID
+`sha256:09f49a038d68c93462aceea862199455608b326a504498caa26d194630486b47`.
+Its OCI revision is **`working-tree-0ffc072-external-r7`**, not a Git commit.
+The final `docker-evidence-r3/report.json` SHA-256 is
+`c59673ed57db55d420bccf70247427abea7cd65a146f098b4c78745b11ecab79`.
+It checked UID/GID 10001, a read-only/capability-dropped container, all 38 assets,
+10 SPA routes, three viewport sizes, original sessions/data across restarts,
+encrypted external-source persistence in the existing private volume, a real
+verified-HTTPS child fetch with safe rejection of non-YAML input, missing raw
+secrets in logs/argv, and unchanged production identity. Only its own labeled
+temporary container and volume were removed. Earlier fixture-only header/error
+shape mistakes and their cleanup reports remain separate from this final pass.
+
+The production-bundle browser and native-client gate passed on that combined
+source in `/tmp/open-node-external-browser-r3.XaVySQeW`. Its `evidence/report.json`
+records every backend application file and frontend asset SHA-256; the report
+SHA-256 is `925896e5ff2f07daa5bd9f4dd61cbc506b5ea2e397dacf712db6c6fb406aae84`.
+The final parser fingerprint in this source is
+`681e8769f2b7751411deba917bb942c4e0c6d267a2b55b42508483ed1f66d341`.
+
+`scripts/vps/smoke-external-subscriptions.py` enters a fresh Linux network
+namespace and verifies its identity and loopback-only netlink state before
+opening any listener or assigning an address. Its local HTTPS provider uses
+the normal public-IP/TLS fetch path, with a fixture-only trusted CA; no product
+private-address or insecure-TLS bypass is enabled. It exercises:
+
+- Real browser source creation, write-only editing, explicit fetch, selecting
+  new nodes, acknowledging existing-node changes, confirmation and receipt
+  recovery. Fifteen masked screenshots cover source/node forms, preview,
+  confirmation footers and saved details at 1440/390/320 pixels.
+- Complete primary-subscription loading in Mihomo v1.19.30 and real managed and
+  external VLESS traffic through official Xray v26.3.27. The destination rejects
+  direct traffic; both the original and rotated upstream credentials work
+  through the selected proxy. Other parser-supported protocols are not claimed
+  as traffic-tested by this fixture.
+- Credential rotation, new/missing nodes, owner isolation, read-only preview,
+  identical confirmation retry, real TLS/gzip, HTML/empty/redirect/gzip-bomb
+  rejection and preservation of the active snapshot.
+- Unchanged managed catalog/credentials/ledger, encrypted database contents,
+  missing-key fail-closed without replacement, cold database plus key-directory
+  restoration and the original administrator session.
+
+The fixed native binary digests are checked before execution:
+
+```text
+Mihomo 1.19.30  8ad44e28fe72be4640254b96741b677f4074991b99186cc4486a1c28ded02b1a
+Xray 26.3.27   8255dd939c34cf966cc91517b6324dd3c8d0bcf49ffac8beca049a38c46845ed
+```
+
+Reproduce only on the isolated VPS, with the backend's browser dependencies and
+Chromium installed in a private test environment. Build the administrator
+frontend first, then use the verified native binaries and a new evidence path:
+
+```bash
+PYTHONPATH="$PWD/backend/app" /path/to/private/venv/bin/python \
+  scripts/vps/smoke-external-subscriptions.py \
+  --mihomo /path/to/verified/mihomo --xray /path/to/verified/xray \
+  --output /absolute/new/private-evidence
+```
+
+Temporary runtime processes, TLS keys, databases and the namespace are removed
+when the fixture exits; only the masked screenshots and source-bound report
+remain. Error handling emits the failure stage/type and source locations, never
+raw Playwright errors that could contain a password or provider URL. None of
+these tests upgrades the production container or proves public HTTPS,
+PostgreSQL concurrency, a customer provider's reachability, or off-site backup.
+
+### Simplified Chinese interface
+
+The later user requirement makes Simplified Chinese the default for the
+administrator console, subscriber portal, public Probe, document language/title
+and Ant Design's built-in component text. The implementation uses the official
+`antd/locale/zh_CN` provider and explicit display labels, not DOM replacement.
+API paths, enum values, protocol/configuration names, commands, raw diagnostics
+and operator-provided content are unchanged. New Probe settings use Chinese
+defaults; existing customized titles/descriptions are not rewritten.
+
+The first unified Chinese product snapshot is frozen at
+`/tmp/open-node-zh-release.fp33Igbt/source-r2`. The source archive
+`source-zh-final-r2.tar` SHA-256 is
+`e105396bbd5e215fa26f05478c2b1d760d1d9d911707f1b8a60aafbe12f10ff2`.
+Subsequent browser-fixture selector/format corrections have separate manifests;
+they do not rewrite that archive. The later certificate-message correction and
+R4 source are recorded below. Publication and an exact-commit clean image remain
+pending. The English baseline above is earlier
+evidence, not relabeled as Chinese acceptance.
+
+| Unified working-source gate | Result and evidence |
+| --- | --- |
+| Frontend | **762 tests / 70 files passed**, 819.43 s; no failed/skipped tests. `frontend-full-r2.json` SHA-256 `fe312372e1802185f446f67f68bb716f4fb0295fd1376cd65a6194eb33f8cab6`. Includes all 36 external-panel tests and the final Chinese conflict/legacy-import warnings. |
+| Frontend builds | Forced TypeScript project check and both main/Probe Vite builds passed: `typecheck-r2.log`, `build-main-r2.log`, `build-probe-r2.log`. |
+| Backend | 1933 collected, **1927 passed / 6 opt-in skipped** in `/tmp/open-node-zh-integration.3ISDjgiA/backend-full-zh-r1.log`, SHA-256 `eeef2d6a2fcbcfdf44d0b56536f4d38099169da9962d7d278ce7ba059b657129`. The progress log and node-ID cache agree; `backend-verified-source-r2-match.log` proves the frozen R2 backend is identical. Ruff passed. |
+| Real TLS fetcher | **230 passed, no skips**, 4.49 s, `external-fetch-tls-r1.log`; all six opt-in TLS cases ran in a new verified loopback-only network namespace, without a product SSRF or TLS bypass. |
+| Agent | **605 passed**, 10.07 s, `agent-full-zh-r2.log`, plus Ruff. A fresh short private basetemp avoids the known AF_UNIX path limit. Agent source and published release assets are unchanged. |
+| Probe Worker | **5 passed**, 180.996 ms, and type checking passed: `worker-tests-r2.log`, `worker-typecheck-r2.log`; private source with read-only dependency reuse. |
+
+Unless otherwise qualified, paths in this section are relative to
+`/tmp/open-node-zh-release.fp33Igbt`. The frontend source manifests before and
+after the full run both hash to
+`788b7cba49d20e9a6ff8b7929429ef6185d0a30dbcf2a1aead2472e1419e7d98`.
+Backend, Agent and Worker before/after manifests also match. The final **41
+assets** (38 main, 3 Probe) are in `frontend-assets-r2.tar.gz`, SHA-256
+`2188112fa06f80cb12692e95ac71aa60c4826bafca5c10f190019a577016fe55`;
+`frontend-assets-r2.sha256` hashes to
+`480e182eeed4c37070c0275490639626a56ab61046640956ac990408d819f662`.
+The following R2 real-browser gates use these exact assets, checked before/after:
+
+| Chinese production-bundle workflow | Passing evidence and scope |
+| --- | --- |
+| External subscriptions | `external-browser-r2/report.json`, SHA-256 `6f69dc2171d1b9c9c2ae16021749fe22c3e6abd21b367e99d37bda344edb1c24`; 15 masked 1440/390/320 screenshots, preview/confirm/receipt, credential rotation, managed plus external VLESS forwarding, ownership and key/DB restoration. All boundary checks described in the English gate were rerun in a fresh namespace. |
+| Operator UI | `operator-browser-r2.log` and `operator-browser-r2/`; 16 screenshots. Server creation, Nginx paths/sites, tunnel fields, certificate import/EAB forms/downloads, Probe tasks/tokens, Agent fingerprint, password change and expired-session handling. This is not a real certificate-issuance or tunnel-deployment gate. |
+| Administrator MFA | `/tmp/open-node-zh-admin-mfa-gate.nUeYE2Ru/gate.log`, SHA-256 `171be7c1ea13432fafb5c707d6711a5d7930f4f214bb9e5a726e2acb8a2e5707`; enrollment, acknowledgment, challenge, mandatory policy, recovery, regeneration, disable and local CLI recovery; eight masked screenshots. |
+| Subscriber account | `/tmp/open-node-zh-account-websocket.2j9JXUsQ/gate.log`, SHA-256 `ad2c9fa7806a729eab631b304df5ef25e101ff520a9edd0437bde5c2be7db41f`; 55.98 s, 12 masked screenshots. Real billing/forwarding, MFA/replay/recovery, sessions, password/link reset, administrator recovery and isolation. This Chinese rerun uses WebSocket only; prior English HTTP coverage stays separate. |
+| Legacy import | `/tmp/open-node-zh-legacy-gate.NEfsSiok/gate.log`, SHA-256 `34908bbced1aa3498a8cd8bb4e1e3be3d7d2030c3f0cb0a004c8d545d5e7cd24`; four screenshots, mapping/confirmation safeguards, visible administrator-to-subscriber warning, legacy links, real stock-Xray forwarding, TOTP/recovery and foreign-key integrity. The role value itself is asserted by backend tests. |
+| Bootstrap tickets | `/tmp/open-node-zh-bootstrap-browser.UsEJ81C4/evidence/report.json`, SHA-256 `61b1661e9dc0290f9e327318f26a31baa586f7db1cb4d5c4a9c712bcf870f3af`; 12 screenshots, replacement/reissue invalidation, revocation and synthetic registration UI. This rerun does not claim natural ticket expiry or a newly installed systemd Agent. |
+| Anonymous Probe Worker | `/tmp/open-node-zh-worker-r2.ZrdktcNX/evidence/report.json`, SHA-256 `9668465c9950edd4e9bce8716300bd22c2ed6c1770be3e2e82b7474ac06b0c3d`; nine screenshots, HTTP/WS aliases, no credentials/cookies, private/mutation rejection, malformed frames/reconnect, idle fallback polling, ranges/themes/deep links. Actual Miniflare on the VPS, not a Cloudflare account deployment. |
+
+The Chinese source-built Docker gate passed in
+`/root/open-node-zh-docker.3r5SMaqB` with image
+`open-node:zh-external-working-tree-re105396b`, ID
+`sha256:3d08d1fe00f156d56b94bf451ddf1a8c6d62a563db714f1fef0e9c733d33d702`.
+Its OCI revision is **`working-tree-0ffc072-zh-external-r2`**, not an exact Git
+commit. The `evidence-r1/report.json` SHA-256 is
+`99edc7ca6f83b91bff60a3a3b01f98b7ef4e9de35bdd99142036c2cd9b69d256`.
+Fresh `npm ci` and the image build reproduced all 38 main assets byte for byte.
+The gate checked UID/GID 10001, read-only root/capability drop, ten SPA routes
+and reserved 404s, three viewports, original sessions and rows across restart,
+encrypted-source key permissions/persistence, verified outbound HTTPS with safe
+non-YAML rejection, and no raw secrets in logs/argv. Its labeled temporary
+container and volume were removed after ownership checks; production did not
+change.
+
+The first Chinese certificate-administration browser gate stopped on a nested
+Ant Design selector. Its corrected R2 fixture passed real certificate operations,
+but visual inspection found a successful already-revoked receipt translated as
+failure. The R2 `visual-review.json` in
+`/tmp/open-node-zh-certificate-admin-r2.KG0Xt0St` explicitly records semantic
+failure; it is not a final Chinese pass. The first full subscription-client gate
+also stopped at Clash VLESS-gRPC TCP before reaching templates. Failures remain
+at `/tmp/open-node-zh-certificate-admin.eJ5qvqzH` and
+`/tmp/open-node-zh-clients.z2DJK0Gr`. The original gRPC failure's cause is unknown;
+later success must not be relabeled as a proven protocol fix or environment cause.
+
+Earlier Chinese focused runs (including the interrupted 62-test subscription
+run) and the intermediate R1 bundle remain historical, not extra tests added to
+762. Production retains its original image, data volume and service identity;
+none of these fixtures verifies public HTTPS or external account deployment.
+
+#### R4 certificate messages and final-source reruns
+
+The current product snapshot is `/tmp/open-node-zh-release.fp33Igbt/source-r4`.
+Its `source-zh-final-r4.tar` SHA-256 is
+`5c8d6008d20c692710e9e4718b935e87a3558c2172f400c5dbb6d9ccf6fdec04`.
+Relative to R2, only the Chinese message dictionary and two frontend test files
+change: 18 precise translations cover the remaining fixed certificate-worker
+outcomes; all 22 fixed/bounded values are tested, including success, skipped,
+queued, unknown and failure. No substring match accepts arbitrary provider text.
+The focused **187 tests passed**, adding **34** tests (27 service and 7 React).
+Evidence: `/tmp/open-node-zh-cert-receipt.VsZWRAxp/focused.json`, SHA-256
+`edfb3d19db3ada8b510a710efaca2c52a48a5f20ceceb60e97a4c5ace0cf562c`.
+
+Forced type checking and both R4 production builds passed. Initial type checking
+with a cross-directory dependency symlink raised TS2742 in the unchanged
+`renderUi` helper; using an identical private physical dependency copy passed,
+without changing application or helper code. Both logs remain. The frontend
+source manifest hashes to
+`612b5ad954e65cd5496f81d6b6d1c4572c0d22a935a31dc3d5aa43920d33d075`.
+The final 41-asset manifest `frontend-assets-r4.sha256` hashes to
+`9ba29231b866707dfe9afa4205bd1f2090f0e37cb761e360f3f135ef126ab6cd`;
+`frontend-assets-r4.tar.gz` hashes to
+`f9b1a53884fdae6a884f74b2377cc0ef82fbcad3470dcb04125e566cd4baa4f7`.
+`backend-verified-source-r4-match.log` proves the complete previously tested
+backend is identical. Agent and Worker code are unchanged.
+
+The following R4 gates have completed; the combined frontend full run,
+exact-commit CI/image and main-branch publication are still pending:
+
+- External subscriptions: `external-browser-r4/report.json` under the release
+  directory, SHA-256
+  `f310ce18ff5ec70abf2033eab35daed35dd7936536e3d7a7300b81ba8a5a97b6`.
+  Repeats the full real HTTPS/Mihomo/stock-Xray, secret/ownership, failure
+  preservation, rotation and cold-restore gate with 15 new masked screenshots.
+- Certificate administration: `/tmp/open-node-zh-certificate-final-r4.Iygak2KU`,
+  49.17 s; real HTTP-01/EAB, account update, renewal, version revocation,
+  unknown-result retry/reconciliation and backend restart recovery passed.
+  All 15 screenshots passed layout and Chinese semantic review, including a
+  same-row success-state/precise already-revoked receipt assertion. `report.json`
+  SHA-256 `c98aebc6231c0a727237a0f05d7657b1ecbc789d01ca8678e502f36f7777e8f8`;
+  `visual-review.json` SHA-256
+  `afeb9cc1c07bae3021581466d9ad9c5740d4a7b88e365cbb00fcf8022d3efbd3`.
+  This gate does not cover remote certificate deployment or validation-host
+  selection in the creation form. Namespace, temporary processes and data were
+  fully cleaned, with no host DNS or production changes.
+- Full subscription clients and templates:
+  `/tmp/open-node-zh-clients-r4.zcFROMyb`, 58.417 s, exit 0. All 154 labeled
+  TCP/UDP checks passed across default/custom Clash, sing-box, selected Xray,
+  URI list and Base64; the unselected full Xray export also forwarded.
+  Compatibility reports, node URLs, stale-response isolation, template
+  permissions/CAS and identity stability passed, with nine masked screenshots.
+  `gate.log` SHA-256
+  `f53e7f507859c37f2cc08f6a20c891ee13aaa17126abafb030a80c7cf2a8a4ad`.
+  New diagnostic metadata preserves the original curl command, timeouts and
+  exact response-body equality; no failed probe occurred in this run. The first
+  gRPC failure was not reproduced. All 299 product files, 49 Python fixtures,
+  41 assets and six pinned native inputs remained unchanged, and the owned
+  Agent root/unit/user were removed. A second independent full run at
+  `/tmp/open-node-zh-clients-r4.drS6Jzhj` also passed, 55.561 s, with identical
+  source, assets, native inputs, assertions and timeouts and no failed TCP probe.
+  Its `gate.log` SHA-256 is
+  `232be0e3fde2e483ea7893b1ef75b25f282c8f11b15206fb5e0da27ca6875a2a`.
+  Both complete repetitions retain the original failed run and unknown cause.
+- Operator UI: `operator-browser-r4.log` and `operator-browser-r4/` under the
+  release directory; the entire R2 operator scope was rerun with 16 new
+  screenshots, unchanged source/assets and exit 0.
+- Anonymous Probe Worker: `/tmp/open-node-zh-worker-r4.L4wUF4T5/report.json`,
+  SHA-256 `56c4bc924389a54d4f6996ae7406db0edf8d1dea9959ee1ff7fdf391f02ef854`;
+  same full local Miniflare HTTP/WS/polling/reconnect/security/range/theme/deep-link
+  scope, exit 0. Source, fixtures, assets, dependencies and production remained
+  unchanged; nine screenshots have a separate visual review. This is still not
+  a Cloudflare account deployment.
+
+All 28 changed Python browser/native fixtures pass strict E/F/I/UP/B Ruff and
+byte compilation in R4; backend and Agent Ruff also pass. The changed-fixture
+manifest SHA-256 is
+`01c8c37c7f9ecb8fcadbe74201a12866e8d7ea254f6c035f4019d47b90175352`.
+
+R3 was only an intermediate source archive; it was not built or accepted as a
+release. R2 browser evidence for unaffected workflows remains explicitly R2,
+not a claim those screenshots came from the R4 bundle.
+
 ### React and standard Ant Design migration (2026-08-31)
 
 These results belong to the new React frontend, not the 268-test Vue baseline

@@ -56,7 +56,7 @@ def forwards(socks, target):
 def browser(client, backend, output):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
         try:
             context.add_cookies(
                 [
@@ -74,12 +74,13 @@ def browser(client, backend, output):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/subscriptions")
-            page.get_by_role("combobox", name="Subscription user", exact=True).click()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_role("combobox", name="订阅用户", exact=True).click()
             page.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text("access-user", exact=True).click()
-            panel = page.get_by_label("Node access", exact=True)
-            expect(panel.get_by_text("applied", exact=True)).to_be_visible(
+            panel = page.get_by_label("节点访问", exact=True)
+            expect(panel.get_by_text("已应用", exact=True)).to_be_visible(
                 timeout=15000
             )
             for width, height, label in [
@@ -99,26 +100,26 @@ def browser(client, backend, output):
                 )
                 page.screenshot(path=str(output / (label + ".png")))
             page.set_viewport_size({"width": 1440, "height": 900})
-            panel.get_by_label("Account enabled", exact=True).click()
+            panel.get_by_label("启用账户", exact=True).click()
             dialog = page.get_by_role("dialog")
-            expect(dialog.get_by_text("Disable account?", exact=True)).to_be_visible()
-            dialog.get_by_role("button", name="Cancel", exact=True).click()
-            expect(panel.get_by_label("Account enabled", exact=True)).to_be_checked()
-            panel.get_by_label("Account enabled", exact=True).click()
-            dialog.get_by_role("button", name="Disable", exact=True).click()
+            expect(dialog.get_by_text("停用账户？", exact=True)).to_be_visible()
+            dialog.get_by_role("button", name="取 消", exact=True).click()
+            expect(panel.get_by_label("启用账户", exact=True)).to_be_checked()
+            panel.get_by_label("启用账户", exact=True).click()
+            dialog.get_by_role("button", name="停用", exact=True).click()
             access(client, enabled=False)
             expect(
-                panel.get_by_text("Account disabled", exact=True).first
+                panel.get_by_text("账户已停用", exact=True).first
             ).to_be_visible(timeout=15000)
-            panel.get_by_label("Account enabled", exact=True).click()
+            panel.get_by_label("启用账户", exact=True).click()
             access(client, enabled=True)
-            expect(panel.get_by_text("Enabled", exact=True).first).to_be_visible(
+            expect(panel.get_by_text("已启用", exact=True).first).to_be_visible(
                 timeout=15000
             )
             panel.get_by_role(
-                "button", name="Reconcile node access", exact=True
+                "button", name="同步节点访问权限", exact=True
             ).click()
-            expect(panel.get_by_text("applied", exact=True)).to_be_visible(
+            expect(panel.get_by_text("已应用", exact=True)).to_be_visible(
                 timeout=15000
             )
             assert not errors, errors

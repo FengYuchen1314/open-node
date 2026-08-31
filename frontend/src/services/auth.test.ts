@@ -40,7 +40,7 @@ describe("operator authentication", () => {
     await loadSession(vi.fn<typeof fetch>().mockRejectedValue(new Error("Offline")));
     expect(authState.ready).toBe(true);
     expect(authState.session).toBeNull();
-    expect(authState.error).toBe("Offline");
+    expect(authState.error).toBe("连接已断开。");
   });
 
   it("sends an explicit login header and preserves server errors", async () => {
@@ -49,7 +49,7 @@ describe("operator authentication", () => {
     await signIn("admin", "password", fetcher);
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("X-Open-Node-Client")).toBe("browser");
     expect(authState.session?.username).toBe("admin");
-    await expect(signIn("admin", "wrong", fetcher)).rejects.toThrow("Invalid username or password");
+    await expect(signIn("admin", "wrong", fetcher)).rejects.toThrow("用户名或密码错误。");
   });
 
   it("keeps a password-only challenge outside the authenticated session", async () => {

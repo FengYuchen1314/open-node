@@ -46,9 +46,9 @@ describe("inventory API client", () => {
 
   it("preserves server traffic permission errors", async () => {
     const fetcher: typeof fetch = async () => new Response(JSON.stringify({ detail: "Permission denied" }), { status: 403 });
-    await expect(getServerTraffic("edge", fetcher)).rejects.toThrow("Permission denied");
-    await expect(resetServerTraffic("edge", fetcher)).rejects.toThrow("Permission denied");
-    await expect(updateServerTraffic("edge", { traffic_limit: 0, traffic_reset_day: 0, traffic_source: "xray", traffic_stats_mode: "both" }, fetcher)).rejects.toThrow("Permission denied");
+    await expect(getServerTraffic("edge", fetcher)).rejects.toThrow("权限不足。");
+    await expect(resetServerTraffic("edge", fetcher)).rejects.toThrow("权限不足。");
+    await expect(updateServerTraffic("edge", { traffic_limit: 0, traffic_reset_day: 0, traffic_source: "xray", traffic_stats_mode: "both" }, fetcher)).rejects.toThrow("权限不足。");
   });
 
   it.each(["limiter", "limiter_status"] as const)("queues %s with its native policy contract", async (operation) => {
@@ -154,7 +154,7 @@ describe("inventory API client", () => {
 
   it("preserves identity access failures", async () => {
     const fetcher: typeof fetch = async () => new Response(JSON.stringify({ detail: "Sign in required" }), { status: 401 });
-    await expect(getAgentIdentity(fetcher)).rejects.toThrow("Sign in required");
+    await expect(getAgentIdentity(fetcher)).rejects.toThrow("请先登录。");
   });
 
   it("creates servers without sending license headers", async () => {

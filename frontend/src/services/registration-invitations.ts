@@ -5,14 +5,15 @@ import type {
   RegistrationInvitationsResponse,
 } from "../domain/registration-invitations";
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const basePath = `${apiBaseUrl}/api/v1/registration-invitations`;
 
 async function failure(response: Response) {
   const body = await response.json().catch(() => null);
-  return new Error(
-    typeof body?.detail === "string" ? body.detail : `Request failed (${response.status})`,
+  return requestError(
+    typeof body?.detail === "string" ? body.detail : undefined, `注册邀请请求失败（${response.status}）`,
   );
 }
 

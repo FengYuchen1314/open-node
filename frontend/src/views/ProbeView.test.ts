@@ -13,12 +13,12 @@ describe("probe surface modes", () => {
   it("omits every administrator control from the public-only surface", async () => {
     const html = await renderProbe(true);
 
-    expect(html).toContain("Public probe");
-    expect(html).toContain("Probe nodes");
-    expect(html).not.toContain("Probe settings");
-    expect(html).not.toContain("Worker access");
-    expect(html).not.toContain("Scheduled probes");
-    expect(html).not.toContain("Dispatch due");
+    expect(html).toContain("公共探针");
+    expect(html).toContain("探针节点");
+    expect(html).not.toContain("探针设置");
+    expect(html).not.toContain("Worker 访问");
+    expect(html).not.toContain("定时探针");
+    expect(html).not.toContain("下发到期任务");
   });
 
   it("keeps administrator controls in the authenticated control-plane view", async () => {
@@ -26,8 +26,8 @@ describe("probe surface modes", () => {
       accessToken: "", onSettings: () => {}, onAccessToken: () => {}, onRefresh: () => {},
     }));
 
-    expect(html).toContain("Probe settings");
-    expect(html).toContain("Worker access");
-    expect(html).toContain("Scheduled probes");
+    expect(html).toContain("探针设置");
+    expect(html).toContain("Worker 访问");
+    expect(html).toContain("定时探针");
   });
 });

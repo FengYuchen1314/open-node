@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 import type {
   ProbeAccessTokenCreateResponse,
   ProbePayload,
@@ -38,7 +39,7 @@ export async function getPublicProbePayload(
     probeAccessInit(accessToken),
   );
   if (!response.ok) {
-    throw await apiError(response, "Public probe request failed");
+    throw await apiError(response, "获取公开探针失败");
   }
   return response.json() as Promise<ProbePayload>;
 }
@@ -46,7 +47,7 @@ export async function getPublicProbePayload(
 export async function getPublicProbeSettings(fetcher = authenticatedFetch): Promise<ProbeSettingsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/public/probe-settings`);
   if (!response.ok) {
-    throw await apiError(response, "Public probe settings request failed");
+    throw await apiError(response, "获取公开探针设置失败");
   }
   return response.json() as Promise<ProbeSettingsResponse>;
 }
@@ -61,7 +62,7 @@ export async function updatePublicProbeSettings(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Public probe settings update request failed");
+    throw await apiError(response, "更新公开探针设置失败");
   }
   return response.json() as Promise<ProbeSettingsResponse>;
 }
@@ -89,7 +90,7 @@ export async function getPublicProbeSeries(
     probeAccessInit(accessToken),
   );
   if (!response.ok) {
-    throw await apiError(response, "Public probe series request failed");
+    throw await apiError(response, "获取公开探针时序数据失败");
   }
   return response.json() as Promise<ProbeSeriesResponse>;
 }
@@ -105,7 +106,7 @@ export async function getPublicProbeTargets(
     probeAccessInit(accessToken),
   );
   if (!response.ok) {
-    throw await apiError(response, "Public probe targets request failed");
+    throw await apiError(response, "获取公开探针目标失败");
   }
   return response.json() as Promise<ProbeTargetComparisonResponse>;
 }
@@ -113,7 +114,7 @@ export async function getPublicProbeTargets(
 export async function listProbeTasks(fetcher = authenticatedFetch): Promise<ProbeTaskListResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/probe/tasks`);
   if (!response.ok) {
-    throw await apiError(response, "Probe task list request failed");
+    throw await apiError(response, "获取探针任务列表失败");
   }
   return response.json() as Promise<ProbeTaskListResponse>;
 }
@@ -128,7 +129,7 @@ export async function createProbeTask(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Probe task create request failed");
+    throw await apiError(response, "创建探针任务失败");
   }
   return response.json() as Promise<ProbeTaskResponse>;
 }
@@ -144,7 +145,7 @@ export async function updateProbeTask(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Probe task update request failed");
+    throw await apiError(response, "更新探针任务失败");
   }
   return response.json() as Promise<ProbeTaskResponse>;
 }
@@ -156,7 +157,7 @@ export async function dispatchDueProbeTasks(
     method: "POST",
   });
   if (!response.ok) {
-    throw await apiError(response, "Probe task dispatch request failed");
+    throw await apiError(response, "下发探针任务失败");
   }
   return response.json() as Promise<ProbeTaskDispatchResponse>;
 }
@@ -168,7 +169,7 @@ export async function createProbeAccessToken(
     method: "POST",
   });
   if (!response.ok) {
-    throw await apiError(response, "Probe access token create request failed");
+    throw await apiError(response, "创建探针访问令牌失败");
   }
   return response.json() as Promise<ProbeAccessTokenCreateResponse>;
 }
@@ -180,7 +181,7 @@ export async function clearProbeAccessToken(
     method: "DELETE",
   });
   if (!response.ok) {
-    throw await apiError(response, "Probe access token clear request failed");
+    throw await apiError(response, "清除探针访问令牌失败");
   }
   return response.json() as Promise<ProbeSettingsResponse>;
 }
@@ -203,10 +204,10 @@ async function apiError(response: Response, fallback: string): Promise<Error> {
   try {
     const body = (await response.json()) as { detail?: unknown };
     if (typeof body.detail === "string" && body.detail.length > 0) {
-      return new Error(body.detail);
+      return requestError(body.detail, `${fallback}（${response.status}）`);
     }
   } catch {
     // Public probe aliases may return compact non-JSON errors through proxies.
   }
-  return new Error(`${fallback} with ${response.status}`);
+  return requestError(undefined, `${fallback}（${response.status}）`);
 }

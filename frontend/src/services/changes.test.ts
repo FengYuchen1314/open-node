@@ -86,7 +86,7 @@ describe("change set API client", () => {
 
   it("surfaces reservation conflicts without hiding the backend reason", async () => {
     const fetcher: typeof fetch = async () => jsonResponse({ detail: "A command is still in flight" }, 409);
-    await expect(acceptChangeSet("change_1", "Verified nodes", fetcher)).rejects.toThrow("still in flight");
+    await expect(acceptChangeSet("change_1", "Verified nodes", fetcher)).rejects.toThrow("仍有命令正在执行");
   });
   it("lists change sets without sending license headers", async () => {
     let requestUrl = "";

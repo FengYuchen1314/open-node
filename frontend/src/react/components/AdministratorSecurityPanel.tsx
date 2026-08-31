@@ -1,3 +1,4 @@
+import { zhMessage } from "../../i18n/zh-CN";
 import { CopyOutlined, CheckOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, Input, Modal, Space, Tag, Typography } from "antd";
 import QRCode from "qrcode";
@@ -28,7 +29,7 @@ export default function AdministratorSecurityPanel() {
   const [accepted, setAccepted] = useState(false);
   const [requiredTarget, setRequiredTarget] = useState(false);
   const [copied, setCopied] = useState(false);
-  const title = ({ enroll: "Enable administrator two-factor authentication", disable: "Disable administrator two-factor authentication", recovery: "Generate new administrator recovery codes", policy: requiredTarget ? "Require administrator 2FA" : "Make administrator 2FA optional" })[mode ?? "enroll"];
+  const title = ({ enroll: "启用管理员双因素认证", disable: "停用管理员双因素认证", recovery: "生成新的管理员恢复码", policy: requiredTarget ? "强制管理员使用双因素认证" : "将管理员双因素认证设为可选" })[mode ?? "enroll"];
   const canSubmit = !busy && !recoveryCodes.length && (enrollment ? Boolean(code.trim()) : Boolean(password)) && (!(enrollment || mode !== "enroll") || Boolean(code.trim()));
 
   async function load() {
@@ -37,7 +38,7 @@ export default function AdministratorSecurityPanel() {
       const result = await administratorSecurity();
       if (readScope.isCurrent(current)) setSecurity(result);
     } catch (cause) {
-      if (readScope.isCurrent(current)) setError(cause instanceof Error ? cause.message : "Administrator security settings unavailable");
+      if (readScope.isCurrent(current)) setError(cause instanceof Error ? cause.message : "无法读取管理员安全设置");
     } finally { if (readScope.isCurrent(current)) setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
@@ -77,7 +78,7 @@ export default function AdministratorSecurityPanel() {
       if (!codes.length) setMode(null);
       await load();
     } catch (cause) {
-      if (operationScope.isCurrent(current)) setDialogError(cause instanceof Error ? cause.message : "Security update failed");
+      if (operationScope.isCurrent(current)) setDialogError(cause instanceof Error ? cause.message : "更新安全设置失败");
     } finally {
       if (operationScope.isCurrent(current)) { setPassword(""); setCode(""); setBusy(false); busyRef.current = false; }
     }
@@ -85,50 +86,50 @@ export default function AdministratorSecurityPanel() {
   async function copyCodes() {
     const current = operationScope.capture();
     try { await navigator.clipboard.writeText(recoveryCodes.join("\n")); if (operationScope.isCurrent(current)) setCopied(true); }
-    catch { if (operationScope.isCurrent(current)) setDialogError("Could not copy recovery codes"); }
+    catch { if (operationScope.isCurrent(current)) setDialogError("无法复制恢复码"); }
   }
-  return <section aria-label="Administrator security">
-    <Card title="Administrator security" extra={<Button icon={<ReloadOutlined aria-hidden />} aria-label="Refresh administrator security" loading={loading} onClick={() => void load()} />}>
+  return <section aria-label="管理员安全">
+    <Card title="管理员安全" extra={<Button icon={<ReloadOutlined aria-hidden />} aria-label="刷新管理员安全设置" loading={loading} onClick={() => void load()} />}>
       <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-        <Typography.Paragraph type="secondary">Protect control-plane access with an authenticator and one-time recovery codes.</Typography.Paragraph>
-        {error && <Alert type="error" showIcon title={error} />}
+        <Typography.Paragraph type="secondary">使用验证器和一次性恢复码保护控制台访问。</Typography.Paragraph>
+        {error && <Alert type="error" showIcon title={zhMessage(error)} />}
         {security && <>
           <Flex gap="middle" justify="space-between" wrap align="center">
             <Descriptions column={1} size="small" items={[
-              { key: "totp", label: "Two-factor authentication", children: <Tag color={security.totp_enabled ? "success" : "default"}>{security.totp_enabled ? "Enabled" : "Not enabled"}</Tag> },
-              ...(security.totp_enabled ? [{ key: "remaining", label: "Recovery", children: `${security.recovery_codes_remaining} recovery codes remaining` }] : []),
+              { key: "totp", label: "双因素认证", children: <Tag color={security.totp_enabled ? "success" : "default"}>{security.totp_enabled ? "已启用" : "未启用"}</Tag> },
+              ...(security.totp_enabled ? [{ key: "remaining", label: "恢复方式", children: `剩余 ${security.recovery_codes_remaining} 个恢复码` }] : []),
             ]} />
-            <Space wrap>{security.totp_enabled ? <><Button onClick={() => open("recovery")}>New recovery codes</Button><Button danger disabled={security.require_totp} onClick={() => open("disable")}>Disable</Button></> : <Button type="primary" icon={<SafetyCertificateOutlined aria-hidden />} disabled={!security.totp_available} onClick={() => open("enroll")}>Enable</Button>}</Space>
+            <Space wrap>{security.totp_enabled ? <><Button onClick={() => open("recovery")}>生成新恢复码</Button><Button aria-label="停用" danger disabled={security.require_totp} onClick={() => open("disable")}>停用</Button></> : <Button type="primary" icon={<SafetyCertificateOutlined aria-hidden />} aria-label="启用" disabled={!security.totp_available} onClick={() => open("enroll")}>启用</Button>}</Space>
           </Flex>
-          {!security.totp_enabled && !security.totp_available && <Alert type="warning" showIcon title="Enrollment unavailable because the TOTP encryption key is not configured." />}
+          {!security.totp_enabled && !security.totp_available && <Alert type="warning" showIcon title="尚未配置 TOTP 加密密钥，无法设置双因素认证。" />}
           <Flex gap="middle" justify="space-between" wrap align="center">
-            <div><Typography.Text strong>Mandatory administrator 2FA</Typography.Text><Typography.Paragraph type="secondary">{security.require_totp ? "Every password login must complete a second-factor challenge." : "Administrators may sign in with a password when 2FA is not enrolled."}</Typography.Paragraph></div>
-            <Button disabled={!security.totp_enabled} onClick={() => open("policy", !security.require_totp)}>{security.require_totp ? "Make optional" : "Require 2FA"}</Button>
+            <div><Typography.Text strong>强制管理员双因素认证</Typography.Text><Typography.Paragraph type="secondary">{security.require_totp ? "每次使用密码登录都必须完成第二因素验证。" : "未设置双因素认证时，管理员可以仅凭密码登录。"}</Typography.Paragraph></div>
+            <Button disabled={!security.totp_enabled} onClick={() => open("policy", !security.require_totp)}>{security.require_totp ? "设为可选" : "强制双因素认证"}</Button>
           </Flex>
         </>}
       </Space>
     </Card>
     <Modal open={mode !== null} title={title} width={620} destroyOnHidden mask={{ closable: false }} keyboard={false} closable={false} onCancel={close} footer={<Space wrap>
-      <Button disabled={busy || (recoveryCodes.length > 0 && !accepted)} onClick={close}>{recoveryCodes.length ? "Done" : "Cancel"}</Button>
-      {!recoveryCodes.length && <Button type="primary" htmlType="submit" form="administrator-security-form" aria-label={mode === "enroll" && !enrollment ? "Start enrollment" : "Confirm"} loading={busy} disabled={!canSubmit}>{mode === "enroll" && !enrollment ? "Start enrollment" : "Confirm"}</Button>}
+      <Button aria-label={recoveryCodes.length ? "完成" : "取消"} disabled={busy || (recoveryCodes.length > 0 && !accepted)} onClick={close}>{recoveryCodes.length ? "完成" : "取消"}</Button>
+      {!recoveryCodes.length && <Button type="primary" htmlType="submit" form="administrator-security-form" aria-label={mode === "enroll" && !enrollment ? "开始设置" : "确认"} loading={busy} disabled={!canSubmit}>{mode === "enroll" && !enrollment ? "开始设置" : "确认"}</Button>}
     </Space>}>
-      {dialogError && <Alert className="form-alert" type="error" showIcon title={dialogError} />}
+      {dialogError && <Alert className="form-alert" type="error" showIcon title={zhMessage(dialogError)} />}
       {recoveryCodes.length ? <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-        <Alert type="success" showIcon title="Store these codes now. Existing recovery codes no longer work." />
-        <Flex justify="space-between" gap="small" wrap><Typography.Text strong>One-time recovery codes</Typography.Text><Button icon={copied ? <CheckOutlined aria-hidden /> : <CopyOutlined aria-hidden />} onClick={() => void copyCodes()}>{copied ? "Copied" : "Copy"}</Button></Flex>
-        <div className="recovery-grid" aria-label="Administrator recovery codes">{recoveryCodes.map(item => <Typography.Text code key={item}>{item}</Typography.Text>)}</div>
-        <Checkbox checked={accepted} onChange={event => setAccepted(event.target.checked)}>I have stored the recovery codes securely</Checkbox>
+        <Alert type="success" showIcon title="请立即保存这些恢复码。原有恢复码已失效。" />
+        <Flex justify="space-between" gap="small" wrap><Typography.Text strong>一次性恢复码</Typography.Text><Button icon={copied ? <CheckOutlined aria-hidden /> : <CopyOutlined aria-hidden />} onClick={() => void copyCodes()}>{copied ? "已复制" : "复制"}</Button></Flex>
+        <div className="recovery-grid" aria-label="管理员恢复码">{recoveryCodes.map(item => <Typography.Text code key={item}>{item}</Typography.Text>)}</div>
+        <Checkbox checked={accepted} onChange={event => setAccepted(event.target.checked)}>我已妥善保存恢复码</Checkbox>
       </Space> : <Form id="administrator-security-form" layout="vertical" onFinish={() => void submit()}>
         {enrollment && <>
-          <Alert className="form-alert" type="info" showIcon title="Scan the QR code, then enter the current six-digit code." />
-          {qr && <img src={qr} alt="Administrator authenticator enrollment QR code" width={240} height={240} className="totp-qr" />}
-          <Form.Item label="Authenticator secret" htmlFor="administrator-security-secret"><Input id="administrator-security-secret" readOnly value={enrollment.secret} /></Form.Item>
+          <Alert className="form-alert" type="info" showIcon title="扫描二维码，然后输入当前的六位验证码。" />
+          {qr && <img src={qr} alt="管理员验证器绑定二维码" width={240} height={240} className="totp-qr" />}
+          <Form.Item label="验证器密钥" htmlFor="administrator-security-secret"><Input id="administrator-security-secret" readOnly value={enrollment.secret} /></Form.Item>
         </>}
-        {mode === "disable" && <Alert className="form-alert" type="warning" showIcon title="Disabling 2FA removes all recovery codes. Other administrator sessions will be revoked." />}
-        {mode === "recovery" && <Alert className="form-alert" type="warning" showIcon title="Generating new codes invalidates every existing recovery code and revokes other sessions." />}
-        {mode === "policy" && <Alert className="form-alert" type="info" showIcon title="Confirm this policy change with the administrator password and a current authenticator or recovery code." />}
-        {!enrollment && <Form.Item label="Current password" htmlFor="administrator-security-password" required><Input.Password id="administrator-security-password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" required maxLength={1024} disabled={busy} /></Form.Item>}
-        {(enrollment || mode !== "enroll") && <Form.Item label={enrollment ? "Authenticator code" : "Authenticator or recovery code"} htmlFor="administrator-security-code" required><Input id="administrator-security-code" value={code} onChange={event => setCode(event.target.value)} autoComplete="one-time-code" inputMode={enrollment ? "numeric" : "text"} required maxLength={64} disabled={busy} /></Form.Item>}
+        {mode === "disable" && <Alert className="form-alert" type="warning" showIcon title="停用双因素认证会移除所有恢复码，并撤销其他管理员会话。" />}
+        {mode === "recovery" && <Alert className="form-alert" type="warning" showIcon title="生成新恢复码会使全部现有恢复码失效，并撤销其他会话。" />}
+        {mode === "policy" && <Alert className="form-alert" type="info" showIcon title="请使用管理员密码和当前验证器验证码或恢复码，确认此策略变更。" />}
+        {!enrollment && <Form.Item label="当前密码" htmlFor="administrator-security-password" required><Input.Password id="administrator-security-password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" required maxLength={1024} disabled={busy} /></Form.Item>}
+        {(enrollment || mode !== "enroll") && <Form.Item label={enrollment ? "验证器验证码" : "验证器验证码或恢复码"} htmlFor="administrator-security-code" required><Input id="administrator-security-code" value={code} onChange={event => setCode(event.target.value)} autoComplete="one-time-code" inputMode={enrollment ? "numeric" : "text"} required maxLength={64} disabled={busy} /></Form.Item>}
       </Form>}
     </Modal>
   </section>;

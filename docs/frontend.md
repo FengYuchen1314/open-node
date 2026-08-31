@@ -12,6 +12,29 @@ dark algorithm. Project CSS handles spacing, responsive layout, code blocks and
 SVG charts; it does not replace Ant Design's component appearance. V6-specific
 APIs and icon compatibility follow the [official migration guide](https://ant.design/docs/react/migration-v6/).
 
+## Interface language
+
+The current candidate defaults to Simplified Chinese throughout the administrator
+console, subscriber portal and independent public Probe. All three entry points
+use the official `antd/locale/zh_CN` locale, following
+[Ant Design's localization guide](https://ant.design/docs/react/i18n-cn/).
+Page language/title, navigation, forms, accessible labels, confirmation warnings,
+status labels, empty states and date/number display are localized explicitly.
+The prior published React rewrite used English; Chinese acceptance and publication
+are tracked separately in [testing.md](testing.md#simplified-chinese-interface).
+
+Localization does not modify API routes, payload keys, enum values, protocol names,
+commands, configuration source, user-supplied titles/names or raw diagnostic logs.
+`src/i18n/zh-CN.ts` translates display states; it is not a schema or security
+validator. API clients first retain their response/secret checks and use the
+bounded allowlist in `src/i18n/messages.ts` and `src/services/request-error.ts` for
+known errors. Unknown upstream text uses a Chinese context fallback, not raw
+provider bodies or credentials. Validation paths expose only known schema fields.
+
+The stock Ant Design two-character button spacing remains enabled. Explicit
+operation labels keep accessible names stable without changing that appearance;
+built-in confirmation/cancellation controls use the official Chinese defaults.
+
 ## Application boundaries
 
 | Route | Workspace |

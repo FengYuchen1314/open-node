@@ -4,10 +4,13 @@ import argparse
 import base64
 import copy
 import importlib.util
+import json
 import os
+import pwd
 import re
 import secrets
 import subprocess
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -169,6 +172,57 @@ def client_config(work, kind, payload, binary, ca):
     return directory, args, env, port, control, secret
 
 
+def diagnostic_forwards(socks_port, echo_port, kind, node_index):
+    """Keep runtime.forwards' exact probe; log only safe failure metadata."""
+    started = time.monotonic()
+    result = subprocess.run(
+        [
+            "curl",
+            "--silent",
+            "--show-error",
+            "--fail",
+            "--noproxy",
+            "",
+            "--socks5-hostname",
+            f"127.0.0.1:{socks_port}",
+            "--max-time",
+            "2",
+            f"http://127.0.0.1:{echo_port}/fixture",
+        ],
+        capture_output=True,
+        check=False,
+        timeout=5,
+    )
+    forwarded = result.returncode == 0 and result.stdout == runtime.RESPONSE_BODY
+    if not forwarded:
+        categories = {
+            0: "body_mismatch",
+            7: "connect_failure",
+            18: "partial_transfer",
+            22: "http_error",
+            28: "timeout",
+            35: "tls_handshake_failure",
+            52: "empty_reply",
+            55: "send_failure",
+            56: "receive_failure",
+            60: "certificate_verification_failure",
+        }
+        record = {
+            "client_format": kind
+            if kind in {"clash", "sing-box", "xray", "uri-list", "base64"}
+            else "other",
+            "node_index": node_index,
+            "category": categories.get(result.returncode, "curl_nonzero"),
+            "curl_returncode": result.returncode,
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
+            "stdout_bytes": len(result.stdout),
+            "expected_bytes": len(runtime.RESPONSE_BODY),
+            "stderr_bytes": len(result.stderr),
+        }
+        print("TCP_PROBE " + json.dumps(record, sort_keys=True), flush=True)
+    return forwarded
+
+
 def exercise_export(work, client, token, kind, binary, ca, echo, udp, reports):
     response = client.get(f"/api/v1/subscribe/{token}?format={kind}").raise_for_status()
     payload = (
@@ -207,13 +261,15 @@ def exercise_export(work, client, token, kind, binary, ca, echo, udp, reports):
                         kind,
                         selected_names,
                     )
-                    for node in nodes:
+                    for node_index, node in enumerate(nodes):
                         api.put(
                             "/proxies/Proxy", json={"name": node["name"]}
                         ).raise_for_status()
                         runtime.poll(
                             kind + " " + node["name"] + " TCP",
-                            lambda: runtime.forwards(port, echo),
+                            lambda node_index=node_index: diagnostic_forwards(
+                                port, echo, kind, node_index
+                            ),
                         )
                         runtime.poll(
                             kind + " " + node["name"] + " UDP",
@@ -222,13 +278,13 @@ def exercise_export(work, client, token, kind, binary, ca, echo, udp, reports):
             else:
                 runtime.poll(
                     "xray unselected full export forwards",
-                    lambda: runtime.forwards(port, echo),
+                    lambda: diagnostic_forwards(port, echo, kind, -1),
                 )
         except BaseException:
             print((directory / "client.log").read_text()[-18000:], flush=True)
             raise
     if kind == "xray":
-        for node in nodes:
+        for node_index, node in enumerate(nodes):
             selected = (
                 client.get(
                     f"/api/v1/subscribe/{token}?format=xray&node_id={node['node_id']}"
@@ -248,7 +304,9 @@ def exercise_export(work, client, token, kind, binary, ca, echo, udp, reports):
                     )
                     runtime.poll(
                         "xray " + node["name"] + " TCP",
-                        lambda port=port: runtime.forwards(port, echo),
+                        lambda port=port, node_index=node_index: diagnostic_forwards(
+                            port, echo, kind, node_index
+                        ),
                     )
                     runtime.poll(
                         "xray " + node["name"] + " UDP",
@@ -259,13 +317,22 @@ def exercise_export(work, client, token, kind, binary, ca, echo, udp, reports):
                     raise
 
 
+def sensitive_fields(page):
+    return [
+        page.locator('input[type="password"], input[readonly], textarea[readonly]'),
+        page.locator(".ant-qrcode"),
+    ]
+
+
 def browser_workflow(client, url, output, username, node_id):
     output.mkdir(parents=True, exist_ok=True)
     alternate = username + "-other"
     client.post("/api/v1/users", json={"username": alternate}).raise_for_status()
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 900}, locale="zh-CN"
+        )
         try:
             context.add_cookies(
                 [
@@ -283,15 +350,16 @@ def browser_workflow(client, url, output, username, node_id):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(url + "/subscriptions")
-            page.get_by_role("tab", name="Assign", exact=True).click()
-            user = page.get_by_role("combobox", name="Subscription user", exact=True)
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_role("tab", name="分配", exact=True).click()
+            user = page.get_by_role("combobox", name="订阅用户", exact=True)
             user.click()
             page.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text(username, exact=True).click()
-            page.get_by_role("button", name="Link", exact=True).click()
+            page.get_by_role("button", name="获取链接", exact=True).click()
             format_control = page.get_by_role(
-                "combobox", name="Client format", exact=True
+                "combobox", name="客户端格式", exact=True
             )
             for width, height, label in [
                 (1440, 900, "desktop"),
@@ -311,13 +379,13 @@ def browser_workflow(client, url, output, username, node_id):
                 page.locator(
                     ".ant-select-dropdown:visible .ant-select-item-option"
                 ).get_by_text("Xray JSON", exact=True).click()
-                select = page.get_by_role("combobox", name="Xray node", exact=True)
+                select = page.get_by_role("combobox", name="Xray 节点", exact=True)
                 expect(select).to_be_enabled()
                 select.click()
                 page.locator(
                     ".ant-select-dropdown:visible .ant-select-item-option"
                 ).get_by_text("subscription-clients snell6", exact=True).click()
-                expect(page.get_by_label("Format URL", exact=True)).to_have_value(
+                expect(page.get_by_label("对应格式链接", exact=True)).to_have_value(
                     re.compile(".*node_id=" + node_id)
                 )
                 lifecycle.ui.check_layout(page)
@@ -335,6 +403,7 @@ def browser_workflow(client, url, output, username, node_id):
                 page.screenshot(
                     path=output / ("subscription-xray-" + label + ".png"),
                     full_page=False,
+                    mask=sensitive_fields(page),
                 )
             pending = []
 
@@ -347,20 +416,20 @@ def browser_workflow(client, url, output, username, node_id):
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text("sing-box JSON", exact=True).click()
             expect(
-                page.get_by_role("combobox", name="Xray node", exact=True)
+                page.get_by_role("combobox", name="Xray 节点", exact=True)
             ).to_have_count(0)
             format_control.click()
             page.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text("Xray JSON", exact=True).click()
             expect(
-                page.get_by_role("combobox", name="Xray node", exact=True)
+                page.get_by_role("combobox", name="Xray 节点", exact=True)
             ).to_be_enabled()
             assert len(pending) == 1
             route, response = pending.pop()
             route.fulfill(response=response)
             page.unroute("**/subscription-preview?format=sing-box", hold_preview)
-            expect(page.get_by_label("Format URL", exact=True)).to_have_value(
+            expect(page.get_by_label("对应格式链接", exact=True)).to_have_value(
                 re.compile(".*format=xray.*")
             )
             pending = []
@@ -369,18 +438,18 @@ def browser_workflow(client, url, output, username, node_id):
                 pending.append((route, route.fetch()))
 
             page.route("**/users/" + username + "/subscription-token", hold_token)
-            page.get_by_role("button", name="Link", exact=True).click()
+            page.get_by_role("button", name="获取链接", exact=True).click()
             user.click()
             page.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text(alternate, exact=True).click()
-            expect(page.get_by_label("Subscription URL", exact=True)).to_have_count(0)
+            expect(page.get_by_label("订阅链接", exact=True)).to_have_count(0)
             assert len(pending) == 1
             route, response = pending.pop()
             route.fulfill(response=response)
             page.unroute("**/users/" + username + "/subscription-token", hold_token)
-            expect(page.get_by_role("button", name="Link", exact=True)).to_be_enabled()
-            expect(page.get_by_label("Subscription URL", exact=True)).to_have_count(0)
+            expect(page.get_by_role("button", name="获取链接", exact=True)).to_be_enabled()
+            expect(page.get_by_label("订阅链接", exact=True)).to_have_count(0)
             assert not errors, errors
             print(
                 "PASS desktop/mobile/narrow compatibility report and selected Xray URL",
@@ -406,7 +475,11 @@ def browser_workflow(client, url, output, username, node_id):
                 ),
                 flush=True,
             )
-            page.screenshot(path=output / "subscription-failure.png", full_page=True)
+            page.screenshot(
+                path=output / "subscription-failure.png",
+                full_page=True,
+                mask=sensitive_fields(page),
+            )
             raise
         finally:
             context.close()
@@ -422,7 +495,7 @@ def capture_templates(page, output, name):
         page.set_viewport_size({"width": width, "height": height})
         page.wait_for_timeout(250)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
-        for label in ("Template defaults", "Template library", "Template editor"):
+        for label in ("模板默认设置", "订阅模板库", "模板编辑器"):
             surface = page.get_by_label(label, exact=True)
             expect(surface).to_have_count(1)
             assert surface.evaluate(
@@ -432,6 +505,7 @@ def capture_templates(page, output, name):
             path=output / f"templates-{name}-{suffix}.png",
             full_page=True,
             animations="disabled",
+            mask=sensitive_fields(page),
         )
     page.set_viewport_size({"width": 1440, "height": 1000})
 
@@ -582,8 +656,12 @@ def template_workflow(
     args.output.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        admin_context = browser.new_context(viewport={"width": 1440, "height": 1000})
-        account_context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        admin_context = browser.new_context(
+            viewport={"width": 1440, "height": 1000}, locale="zh-CN"
+        )
+        account_context = browser.new_context(
+            viewport={"width": 1440, "height": 1000}, locale="zh-CN"
+        )
         errors = []
         try:
             admin_context.add_cookies(
@@ -603,32 +681,33 @@ def template_workflow(
             admin.on("pageerror", lambda error: errors.append(str(error)))
             portal.on("pageerror", lambda error: errors.append(str(error)))
             admin.goto(backend + "/templates")
+            expect(admin.locator("html")).to_have_attribute("lang", "zh-CN")
             expect(
-                admin.get_by_role("heading", name="Subscription templates", exact=True)
+                admin.get_by_role("heading", name="订阅模板", exact=True)
             ).to_be_visible()
             admin.get_by_text("vps-custom.yaml", exact=True).click()
-            expect(admin.get_by_label("Template source", exact=True)).to_have_value(
+            expect(admin.get_by_label("模板源码", exact=True)).to_have_value(
                 re.compile("x-open-node-smoke")
             )
             preview_user = admin.get_by_role(
-                "combobox", name="Preview subscriber", exact=True
+                "combobox", name="预览用户", exact=True
             )
             preview_user.click()
             admin.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text(re.compile(re.escape(username))).first.click()
-            admin.get_by_role("button", name="Preview", exact=True).click()
-            expect(admin.get_by_text(re.compile(r"\d+ included"))).to_be_visible()
+            admin.get_by_role("button", name="预览", exact=True).click()
+            expect(admin.get_by_text(re.compile(r"已包含 \d+ 个节点"))).to_be_visible()
             capture_templates(admin, args.output, "admin")
 
             subscriber_select = admin.get_by_role(
-                "combobox", name="Subscriber", exact=True
+                "combobox", name="用户", exact=True
             )
             subscriber_select.click()
             admin.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text(re.compile(re.escape(username))).first.click()
-            permission = admin.get_by_label("Allow personal templates", exact=True)
+            permission = admin.get_by_label("允许个人模板", exact=True)
             permission.check()
             with admin.expect_response(
                 lambda response: (
@@ -638,18 +717,19 @@ def template_workflow(
                     and response.request.method == "PUT"
                 )
             ) as permission_saved:
-                admin.get_by_role("button", name="Save defaults", exact=True).click()
+                admin.get_by_role("button", name="保存默认设置", exact=True).click()
             assert permission_saved.value.status == 200, permission_saved.value.text()
             assert permission_saved.value.json()["enabled"] is True
 
             portal.goto(backend + "/account")
-            portal.get_by_label("Username", exact=True).fill(username)
-            portal.get_by_label("Password", exact=True).fill(password)
-            portal.get_by_role("button", name="Sign In", exact=True).click()
-            portal.get_by_role("tab", name="Templates", exact=True).click()
-            expect(portal.get_by_text("Editing enabled", exact=True)).to_be_visible()
+            expect(portal.locator("html")).to_have_attribute("lang", "zh-CN")
+            portal.get_by_label("用户名", exact=True).fill(username)
+            portal.get_by_label("密码", exact=True).fill(password)
+            portal.get_by_role("button", name="登录", exact=True).click()
+            portal.get_by_role("tab", name="模板", exact=True).click()
+            expect(portal.get_by_text("允许编辑", exact=True)).to_be_visible()
             portal.get_by_text("vps-custom.conf", exact=True).click()
-            expect(portal.get_by_label("Template source", exact=True)).to_have_value(
+            expect(portal.get_by_label("模板源码", exact=True)).to_have_value(
                 re.compile("surge-custom")
             )
             capture_templates(portal, args.output, "account")
@@ -846,6 +926,14 @@ def exercise(work, fixture, args, client, backend, endpoint, control_ca, echo, u
 
 
 def run(args):
+    original_fixture = service.Fixture
+    owned_fixtures = []
+
+    class TrackedFixture(original_fixture):
+        def __init__(self, work):
+            super().__init__(work)
+            owned_fixtures.append(self)
+
     def callback(work, fixture, wheel, stock, client, backend, echo):
         with (
             lifecycle.gateway(work, args.nginx, backend) as (endpoint, ca, _),
@@ -868,7 +956,22 @@ def run(args):
 
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
     service.exercise = callback
-    service.run(args.wheel, args.xray_archive)
+    service.Fixture = TrackedFixture
+    try:
+        service.run(args.wheel, args.xray_archive)
+    finally:
+        service.Fixture = original_fixture
+        for fixture in owned_fixtures:
+            assert not fixture.root.exists(), "Owned Agent installation survived cleanup"
+            assert not Path("/etc/systemd/system", fixture.unit).exists(), (
+                "Owned Agent unit survived cleanup"
+            )
+            try:
+                pwd.getpwnam(fixture.user)
+            except KeyError:
+                pass
+            else:
+                raise AssertionError("Owned Agent account survived cleanup")
     print("PASS complete subscriptions in real Mihomo, sing-box and Xray", flush=True)
 
 

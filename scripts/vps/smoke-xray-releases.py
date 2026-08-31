@@ -91,7 +91,7 @@ def traffic(work, xray, port, user, echo):
 def browser(client, base, url, name, output, verify):
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
         context.add_cookies(
             [
                 {
@@ -112,30 +112,38 @@ def browser(client, base, url, name, output, verify):
         ):
             page.set_viewport_size(viewport)
             page.goto(url)
-            target = page.get_by_label("Target server", exact=True)
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            target = page.get_by_label("目标服务器", exact=True)
             target.scroll_into_view_if_needed()
-            target.press("Enter")
-            page.get_by_role("option", name=re.compile(re.escape(name))).click()
-            page.get_by_role("button", name="Install Xray", exact=True).click()
+            page.locator(".ant-select").filter(has=target).click()
+            page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter(
+                has_text=re.compile("^" + re.escape(name) + "$")
+            ).click()
+            page.get_by_role("button", name="安装 Xray", exact=True).click()
             dialog = page.get_by_role("dialog")
             expect(dialog).to_be_visible()
-            version = dialog.get_by_label("Xray version", exact=True)
+            version = dialog.get_by_label("Xray 版本", exact=True)
             version.fill("../../invalid")
-            dialog.get_by_text("Install / Upgrade Xray", exact=True).click()
+            dialog.get_by_text("安装 / 升级 Xray", exact=True).click()
             expect(
-                dialog.get_by_role("button", name="Install", exact=True)
+                dialog.get_by_role("button", name="安装", exact=True)
             ).to_be_disabled()
             version.fill("v26.2.6")
-            dialog.get_by_text("Install / Upgrade Xray", exact=True).click()
-            checksum = dialog.get_by_label("Archive SHA-256", exact=True)
+            dialog.get_by_text("安装 / 升级 Xray", exact=True).click()
+            checksum = dialog.get_by_label("压缩包 SHA-256 校验和", exact=True)
             checksum.fill(VERSIONS["v26.2.6"])
             page.wait_for_function(
-                "el => el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1",
+                "el => el.scrollWidth <= el.clientWidth + 1 "
+                "&& el.scrollHeight <= el.clientHeight + 1",
                 arg=checksum.element_handle(),
             )
             if view != "desktop":
-                dialog.get_by_label("Runtime state", exact=True).press("Enter")
-                page.get_by_role("option", name="Running", exact=True).click()
+                dialog.get_by_role(
+                    "combobox", name="运行状态", exact=True
+                ).click()
+                page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter(
+                    has_text=re.compile(r"^运行中$")
+                ).click()
             ui.check_layout(page)
             page.screenshot(path=str(output / (view + "-xray-install.png")))
             with page.expect_response(
@@ -143,7 +151,7 @@ def browser(client, base, url, name, output, verify):
                     base + "/operations/xray/install"
                 )
             ) as queued:
-                dialog.get_by_role("button", name="Install", exact=True).click()
+                dialog.get_by_role("button", name="安装", exact=True).click()
             command = queued.value.json()["command"]
             expected = {"version": "v26.2.6", "sha256": VERSIONS["v26.2.6"]}
             if view != "desktop":
@@ -152,12 +160,12 @@ def browser(client, base, url, name, output, verify):
             wait_command(client, base, command)
             expect(dialog).not_to_be_visible()
             verify()
-            page.get_by_role("button", name="Roll back Xray", exact=True).click()
+            page.get_by_role("button", name="回退 Xray", exact=True).click()
             dialog = page.get_by_role("dialog")
             expect(
-                dialog.get_by_role("button", name="Confirm", exact=True)
+                dialog.get_by_role("button", name="确认", exact=True)
             ).to_be_disabled()
-            dialog.get_by_label("Confirm runtime change", exact=True).check()
+            dialog.get_by_label("确认更改运行时", exact=True).check()
             ui.check_layout(page)
             page.screenshot(path=str(output / (view + "-xray-rollback.png")))
             with page.expect_response(
@@ -165,7 +173,7 @@ def browser(client, base, url, name, output, verify):
                     base + "/operations/xray/rollback"
                 )
             ) as queued:
-                dialog.get_by_role("button", name="Confirm", exact=True).click()
+                dialog.get_by_role("button", name="确认", exact=True).click()
             wait_command(client, base, queued.value.json()["command"])
             verify()
         context.close()

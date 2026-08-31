@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 
 export type CertificateChallenge = "dns" | "standalone" | "webroot";
 
@@ -64,8 +65,7 @@ export async function certificateRequest<T>(path = "", method = "GET", body?: un
   });
   const data = await response.json();
   if (!response.ok) {
-    const message = typeof data.detail === "string" ? data.detail : "Invalid certificate request";
-    throw new Error(message);
+    throw requestError(typeof data.detail === "string" ? data.detail : undefined, "证书请求无效。");
   }
   return data as T;
 }

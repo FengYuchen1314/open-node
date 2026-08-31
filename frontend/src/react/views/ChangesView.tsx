@@ -7,6 +7,7 @@ import { listServers } from "../../services/inventory";
 import { acceptChangeSet, createChangeSet, createRoutedOutboundChangeSet, dispatchChangeSet, listChangeSets, rollbackChangeSet } from "../../services/changes";
 import CommandInspector from "../components/CommandInspector";
 import StrictInputNumber from "../components/StrictInputNumber";
+import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 
 export interface ChangesViewProps {
   onCommands?: (commands: AgentCommand[]) => void;
@@ -23,19 +24,19 @@ const sampleSteps = (serverId: string) => JSON.stringify([{ server_id: serverId,
 const optionalText = (value: string) => value.trim() || null;
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 function jsonObject(text: string, label: string) {
-  if (!text.trim()) throw new Error(`${label} is required.`);
+  if (!text.trim()) throw new Error(`请填写${label}。`);
   const value: unknown = JSON.parse(text);
-  if (!isRecord(value)) throw new Error(`${label} must be a JSON object.`);
+  if (!isRecord(value)) throw new Error(`${label} 必须是 JSON 对象。`);
   return value;
 }
 function stepsFrom(text: string): AgentChangeSetStepCreateRequest[] {
   const value: unknown = JSON.parse(text || "[]");
-  if (!Array.isArray(value) || !value.length) throw new Error("Steps must be a non-empty JSON array.");
+  if (!Array.isArray(value) || !value.length) throw new Error("步骤必须是非空 JSON 数组。");
   value.forEach((step, index) => {
-    if (!isRecord(step)) throw new Error(`Step ${index + 1} must be a JSON object.`);
-    if (typeof step.server_id !== "string" || !step.server_id.trim()) throw new Error(`Step ${index + 1} server_id is required.`);
-    if (!isRecord(step.forward)) throw new Error(`Step ${index + 1} forward command is required.`);
-    if (step.rollback !== undefined && step.rollback !== null && !isRecord(step.rollback)) throw new Error(`Step ${index + 1} rollback must be an object or null.`);
+    if (!isRecord(step)) throw new Error(`第 ${index + 1} 步必须是 JSON 对象。`);
+    if (typeof step.server_id !== "string" || !step.server_id.trim()) throw new Error(`第 ${index + 1} 步缺少 server_id。`);
+    if (!isRecord(step.forward)) throw new Error(`第 ${index + 1} 步缺少 forward 命令。`);
+    if (step.rollback !== undefined && step.rollback !== null && !isRecord(step.rollback)) throw new Error(`第 ${index + 1} 步的 rollback 必须是对象或 null。`);
   });
   return value as AgentChangeSetStepCreateRequest[];
 }
@@ -56,9 +57,9 @@ function commandBody(command: AgentCommandCreateRequest) {
 function CommandSummary({ request, command }: { request?: AgentCommandCreateRequest | null; command?: AgentCommand | null }) {
   const color = command?.status === "succeeded" ? "success" : command?.status === "failed" ? "error" : command?.status === "leased" ? "processing" : command?.status === "pending" ? "warning" : "default";
   return <Space orientation="vertical" size="small" style={{ maxWidth: "100%" }}>
-    <Typography.Text code style={{ overflowWrap: "anywhere" }}>{request ? commandText(request) : "none"}</Typography.Text>
+    <Typography.Text code style={{ overflowWrap: "anywhere" }}>{request ? commandText(request) : "无"}</Typography.Text>
     {request && commandBody(request) && <Typography.Paragraph style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{commandBody(request)}</Typography.Paragraph>}
-    <Tag color={color}>{command?.status ?? "not queued"}</Tag>
+    <Tag color={color}>{command ? zhStatus(command.status) : "未排队"}</Tag>
   </Space>;
 }
 
@@ -107,7 +108,7 @@ export default function ChangesView(props: ChangesViewProps) {
       setRouted((value) => inventory.some((server) => server.id === value.server_id) ? value : { ...value, server_id: inventory[0]?.id ?? "" });
       setSelectedId((value) => response.change_sets.some((change) => change.id === value) ? value : response.change_sets[0]?.id ?? "");
     } catch (failure) {
-      if (mounted.current && !background && revision === refreshRevision.current) setError(failure instanceof Error ? failure.message : "Request failed.");
+      if (mounted.current && !background && revision === refreshRevision.current) setError(failure instanceof Error ? failure.message : "请求失败。");
     } finally {
       if (refreshOwner.current === revision) {
         refreshBusy.current = false;
@@ -142,35 +143,35 @@ export default function ChangesView(props: ChangesViewProps) {
     setSuccess("");
     setWarnings([]);
     try { await work(); }
-    catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : "Request failed."); }
+    catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : "请求失败。"); }
     finally { mutationBusy.current = false; if (mounted.current) setSaving(""); }
   }
   function submitRouted() {
     void mutate("routed", async () => {
-      if (!routed.server_id.trim()) throw new Error("Server is required.");
-      if (!routed.inbound_tag.trim()) throw new Error("Inbound tag is required.");
-      if (!routed.label.trim()) throw new Error("Label is required.");
-      if (!Number.isFinite(routed.command_timeout_ms) || routed.command_timeout_ms <= 0) throw new Error("Timeout must be greater than zero.");
+      if (!routed.server_id.trim()) throw new Error("请选择服务器。");
+      if (!routed.inbound_tag.trim()) throw new Error("请填写入站标签。");
+      if (!routed.label.trim()) throw new Error("请填写名称。");
+      if (!Number.isFinite(routed.command_timeout_ms) || routed.command_timeout_ms <= 0) throw new Error("超时时间必须大于 0。");
       const response = await createRoutedOutboundChangeSet({
         server_id: routed.server_id.trim(), inbound_tag: routed.inbound_tag.trim(), inbound_protocol: routed.inbound_protocol.trim() || "vless", label: routed.label.trim(),
-        outbound: jsonObject(routed.outboundText, "Outbound JSON"), parent_ref: optionalText(routed.parent_ref), admin_username: routed.admin_username.trim() || "admin", admin_email: optionalText(routed.admin_email),
-        outbound_tag: optionalText(routed.outbound_tag), marktag: optionalText(routed.marktag), node_name: optionalText(routed.node_name), client: routed.clientText.trim() ? jsonObject(routed.clientText, "Client JSON") : null,
+        outbound: jsonObject(routed.outboundText, "出站 JSON"), parent_ref: optionalText(routed.parent_ref), admin_username: routed.admin_username.trim() || "admin", admin_email: optionalText(routed.admin_email),
+        outbound_tag: optionalText(routed.outbound_tag), marktag: optionalText(routed.marktag), node_name: optionalText(routed.node_name), client: routed.clientText.trim() ? jsonObject(routed.clientText, "客户端 JSON") : null,
         sniffing_exclude_domains: splitDomains(routed.sniffingExcludeDomainsText), add_reality_sniffing_excludes: routed.add_reality_sniffing_excludes,
         command_timeout_ms: routed.command_timeout_ms, rollback_on_failure: routed.rollback_on_failure, dispatch: routed.dispatch,
       });
       if (!mounted.current) return;
       remember(response.change_set, response.commands, response.warnings);
-      setSuccess(response.commands.length ? `Created routed outbound plan and dispatched ${response.commands.length} commands.` : "Routed outbound change set created.");
+      setSuccess(response.commands.length ? `已创建路由出站方案，并下发 ${response.commands.length} 条命令。` : "已创建路由出站变更集。");
       await refresh();
     });
   }
   function submitRaw() {
     void mutate("create", async () => {
-      if (!form.name.trim()) throw new Error("Name is required.");
+      if (!form.name.trim()) throw new Error("请填写名称。");
       const response = await createChangeSet({ name: form.name.trim(), description: form.description.trim(), rollback_on_failure: form.rollback_on_failure, dispatch: form.dispatch, steps: stepsFrom(form.stepsText) });
       if (!mounted.current) return;
       remember(response.change_set, response.commands, response.warnings);
-      setSuccess(response.commands.length ? `Created and dispatched ${response.commands.length} commands.` : "Change set created.");
+      setSuccess(response.commands.length ? `已创建并下发 ${response.commands.length} 条命令。` : "变更集已创建。");
       patchForm({ name: "", description: "", rollback_on_failure: true, dispatch: false });
       await refresh();
     });
@@ -181,7 +182,7 @@ export default function ChangesView(props: ChangesViewProps) {
       const response = await dispatchChangeSet(selected.id);
       if (!mounted.current) return;
       remember(response.change_set, response.commands, response.warnings);
-      setSuccess(response.commands.length ? `Dispatched ${response.commands.length} commands.` : "No new forward commands.");
+      setSuccess(response.commands.length ? `已下发 ${response.commands.length} 条命令。` : "没有新增的正向命令。");
       await refresh();
     });
   }
@@ -191,7 +192,7 @@ export default function ChangesView(props: ChangesViewProps) {
       const response = await rollbackChangeSet(selected.id, { reason: form.rollbackReason.trim() });
       if (!mounted.current) return;
       remember(response.change_set, response.commands, response.warnings);
-      setSuccess(response.commands.length ? `Queued ${response.commands.length} rollback commands.` : "No new rollback commands.");
+      setSuccess(response.commands.length ? `已排队 ${response.commands.length} 条回滚命令。` : "没有新增的回滚命令。");
       await refresh();
     });
   }
@@ -203,80 +204,80 @@ export default function ChangesView(props: ChangesViewProps) {
       if (!mounted.current) return;
       remember(response.change_set, response.commands, response.warnings);
       setAcceptId("");
-      setSuccess("Current state accepted. Node reservations released.");
+      setSuccess("已接受当前状态并释放节点预留。");
       await refresh();
     });
   }
 
   const routedForm = <Form layout="vertical" onFinish={submitRouted} disabled={Boolean(saving)}>
-    <Form.Item label="Server"><Select aria-label="Server" value={routed.server_id || undefined} options={options} disabled={!options.length || Boolean(saving)} onChange={(server_id) => patchRouted({ server_id })} /></Form.Item>
+    <Form.Item label="服务器"><Select aria-label="服务器" value={routed.server_id || undefined} options={options} disabled={!options.length || Boolean(saving)} onChange={(server_id) => patchRouted({ server_id })} /></Form.Item>
     <Row gutter={16}>
-      <Col xs={24} sm={12}><Form.Item label="Parent inbound tag"><Input aria-label="Parent inbound tag" value={routed.inbound_tag} onChange={(event) => patchRouted({ inbound_tag: event.target.value })} /></Form.Item></Col>
-      <Col xs={24} sm={12}><Form.Item label="Protocol"><Select aria-label="Protocol" value={routed.inbound_protocol} options={protocols.map((value) => ({ value, label: value }))} onChange={(inbound_protocol) => patchRouted({ inbound_protocol })} /></Form.Item></Col>
+      <Col xs={24} sm={12}><Form.Item label="父级入站标签"><Input aria-label="父级入站标签" value={routed.inbound_tag} onChange={(event) => patchRouted({ inbound_tag: event.target.value })} /></Form.Item></Col>
+      <Col xs={24} sm={12}><Form.Item label="协议"><Select aria-label="协议" value={routed.inbound_protocol} options={protocols.map((value) => ({ value, label: value }))} onChange={(inbound_protocol) => patchRouted({ inbound_protocol })} /></Form.Item></Col>
       {([
-        ["label", "Label"], ["parent_ref", "Parent ref"], ["node_name", "Node name"], ["admin_username", "Admin username"], ["admin_email", "Admin email"], ["outbound_tag", "Outbound tag"], ["marktag", "Route mark"],
+        ["label", "名称"], ["parent_ref", "父级引用"], ["node_name", "节点名称"], ["admin_username", "管理员用户名"], ["admin_email", "管理员邮箱"], ["outbound_tag", "出站标签"], ["marktag", "路由标记"],
       ] as const).map(([field, label]) => <Col xs={24} sm={12} key={field}><Form.Item label={label}><Input aria-label={label} value={routed[field]} onChange={(event) => patchRouted({ [field]: event.target.value })} /></Form.Item></Col>)}
     </Row>
-    <Form.Item label="Outbound JSON"><Input.TextArea aria-label="Outbound JSON" value={routed.outboundText} rows={9} spellCheck={false} onChange={(event) => patchRouted({ outboundText: event.target.value })} /></Form.Item>
-    <Form.Item label="Client JSON"><Input.TextArea aria-label="Client JSON" value={routed.clientText} rows={4} spellCheck={false} onChange={(event) => patchRouted({ clientText: event.target.value })} /></Form.Item>
-    <Form.Item label="Sniffing excludes"><Input.TextArea aria-label="Sniffing excludes" value={routed.sniffingExcludeDomainsText} rows={2} onChange={(event) => patchRouted({ sniffingExcludeDomainsText: event.target.value })} /></Form.Item>
+    <Form.Item label="出站 JSON"><Input.TextArea aria-label="出站 JSON" value={routed.outboundText} rows={9} spellCheck={false} onChange={(event) => patchRouted({ outboundText: event.target.value })} /></Form.Item>
+    <Form.Item label="客户端 JSON"><Input.TextArea aria-label="客户端 JSON" value={routed.clientText} rows={4} spellCheck={false} onChange={(event) => patchRouted({ clientText: event.target.value })} /></Form.Item>
+    <Form.Item label="嗅探排除域名"><Input.TextArea aria-label="嗅探排除域名" value={routed.sniffingExcludeDomainsText} rows={2} onChange={(event) => patchRouted({ sniffingExcludeDomainsText: event.target.value })} /></Form.Item>
     <Space wrap align="start">
-      <Form.Item label="Rollback on failure"><Switch aria-label="Rollback on failure" checked={routed.rollback_on_failure} onChange={(rollback_on_failure) => patchRouted({ rollback_on_failure })} /></Form.Item>
-      <Form.Item label="Dispatch now"><Switch aria-label="Dispatch now" checked={routed.dispatch} onChange={(dispatch) => patchRouted({ dispatch })} /></Form.Item>
-      <Form.Item label="Reality SNI excludes"><Switch aria-label="Reality SNI excludes" checked={routed.add_reality_sniffing_excludes} onChange={(add_reality_sniffing_excludes) => patchRouted({ add_reality_sniffing_excludes })} /></Form.Item>
-      <Form.Item label="Timeout ms"><StrictInputNumber aria-label="Timeout ms" aria-valuemin={1} value={routed.command_timeout_ms} onChange={(value) => patchRouted({ command_timeout_ms: value ?? Number.NaN })} /></Form.Item>
+      <Form.Item label="失败时回滚"><Switch aria-label="失败时回滚" checked={routed.rollback_on_failure} onChange={(rollback_on_failure) => patchRouted({ rollback_on_failure })} /></Form.Item>
+      <Form.Item label="立即下发"><Switch aria-label="立即下发" checked={routed.dispatch} onChange={(dispatch) => patchRouted({ dispatch })} /></Form.Item>
+      <Form.Item label="排除 Reality SNI"><Switch aria-label="排除 Reality SNI" checked={routed.add_reality_sniffing_excludes} onChange={(add_reality_sniffing_excludes) => patchRouted({ add_reality_sniffing_excludes })} /></Form.Item>
+      <Form.Item label="超时时间（毫秒）"><StrictInputNumber aria-label="超时时间（毫秒）" aria-valuemin={1} value={routed.command_timeout_ms} onChange={(value) => patchRouted({ command_timeout_ms: value ?? Number.NaN })} /></Form.Item>
     </Space>
-    <Space><Button type="primary" aria-label="Create plan" icon={<PlusOutlined />} htmlType="submit" loading={saving === "routed"}>Create plan</Button><Button onClick={() => patchRouted({ outboundText: sampleOutbound() })}>Sample</Button></Space>
+    <Space><Button type="primary" aria-label="创建方案" icon={<PlusOutlined />} htmlType="submit" loading={saving === "routed"}>创建方案</Button><Button aria-label="填入示例" onClick={() => patchRouted({ outboundText: sampleOutbound() })}>填入示例</Button></Space>
   </Form>;
   const rawForm = <Form layout="vertical" onFinish={submitRaw} disabled={Boolean(saving)}>
-    <Form.Item label="Name"><Input aria-label="Name" value={form.name} onChange={(event) => patchForm({ name: event.target.value })} /></Form.Item>
-    <Form.Item label="Description"><Input.TextArea aria-label="Description" value={form.description} rows={2} onChange={(event) => patchForm({ description: event.target.value })} /></Form.Item>
-    <Space wrap><Form.Item label="Rollback on failure"><Switch aria-label="Rollback on failure" checked={form.rollback_on_failure} onChange={(rollback_on_failure) => patchForm({ rollback_on_failure })} /></Form.Item><Form.Item label="Dispatch now"><Switch aria-label="Dispatch now" checked={form.dispatch} onChange={(dispatch) => patchForm({ dispatch })} /></Form.Item></Space>
-    <Form.Item label="Sample server"><Select aria-label="Sample server" options={options} disabled={!options.length || Boolean(saving)} onChange={(serverId) => patchForm({ stepsText: sampleSteps(serverId) })} /></Form.Item>
-    <Form.Item label="Steps JSON"><Input.TextArea aria-label="Steps JSON" value={form.stepsText} rows={16} spellCheck={false} onChange={(event) => patchForm({ stepsText: event.target.value })} /></Form.Item>
-    <Space><Button type="primary" aria-label="Create" htmlType="submit" icon={<PlusOutlined />} loading={saving === "create"}>Create</Button><Button onClick={() => patchForm({ stepsText: sampleSteps(servers[0]?.id ?? "") })}>Sample</Button></Space>
+    <Form.Item label="变更集名称"><Input aria-label="变更集名称" value={form.name} onChange={(event) => patchForm({ name: event.target.value })} /></Form.Item>
+    <Form.Item label="说明"><Input.TextArea aria-label="说明" value={form.description} rows={2} onChange={(event) => patchForm({ description: event.target.value })} /></Form.Item>
+    <Space wrap><Form.Item label="失败时回滚"><Switch aria-label="失败时回滚" checked={form.rollback_on_failure} onChange={(rollback_on_failure) => patchForm({ rollback_on_failure })} /></Form.Item><Form.Item label="立即下发"><Switch aria-label="立即下发" checked={form.dispatch} onChange={(dispatch) => patchForm({ dispatch })} /></Form.Item></Space>
+    <Form.Item label="示例服务器"><Select aria-label="示例服务器" options={options} disabled={!options.length || Boolean(saving)} onChange={(serverId) => patchForm({ stepsText: sampleSteps(serverId) })} /></Form.Item>
+    <Form.Item label="步骤 JSON"><Input.TextArea aria-label="步骤 JSON" value={form.stepsText} rows={16} spellCheck={false} onChange={(event) => patchForm({ stepsText: event.target.value })} /></Form.Item>
+    <Space><Button type="primary" aria-label="创建" htmlType="submit" icon={<PlusOutlined />} loading={saving === "create"}>创建</Button><Button aria-label="填入示例" onClick={() => patchForm({ stepsText: sampleSteps(servers[0]?.id ?? "") })}>填入示例</Button></Space>
   </Form>;
 
   return <Space orientation="vertical" size="large" style={{ width: "100%" }}>
-    <Space wrap style={{ width: "100%", justifyContent: "space-between" }}><Typography.Title level={2}>Change sets and rollback</Typography.Title><Button aria-label="Refresh change sets" icon={<ReloadOutlined />} loading={loading} onClick={() => void refresh()} /></Space>
-    {error && <Alert type="error" title={error} showIcon />}
+    <Space wrap style={{ width: "100%", justifyContent: "space-between" }}><Typography.Title level={2}>变更集与回滚</Typography.Title><Button aria-label="刷新变更集" icon={<ReloadOutlined />} loading={loading} onClick={() => void refresh()} /></Space>
+    {error && <Alert type="error" title={zhMessage(error)} showIcon />}
     {success && <Alert type="success" title={success} showIcon />}
-    {warnings.filter((warning) => !selected?.warnings?.includes(warning)).map((warning) => <Alert key={warning} type="warning" title={warning} showIcon />)}
+    {warnings.filter((warning) => !selected?.warnings?.includes(warning)).map((warning) => <Alert key={warning} type="warning" title={zhMessage(warning)} showIcon />)}
     <Row gutter={[24, 24]}>
-      <Col xs={24} xl={10}><Card title="Plan"><Typography.Paragraph type="secondary">Forward and rollback command sequence</Typography.Paragraph><Tabs activeKey={planMode} onChange={setPlanMode} items={[{ key: "routed", label: "Routed outbound", children: routedForm }, { key: "raw", label: "Raw steps", children: rawForm }]} /></Card></Col>
-      <Col xs={24} xl={14}><Card title="Runs" extra={<Tag color="success">Free edition</Tag>}>
-        <Typography.Paragraph type="secondary">{changes.length} change sets</Typography.Paragraph>
-        <Table<AgentChangeSet> rowKey="id" dataSource={changes} loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} locale={{ emptyText: "No change sets yet." }} scroll={{ x: 440 }} columns={[
-          { title: "Change set", key: "name", render: (_, row) => <Button type="link" disabled={Boolean(saving) || Boolean(acceptId)} onClick={() => setSelectedId(row.id)}>{row.name}</Button> },
-          { title: "Steps", key: "steps", render: (_, row) => row.steps.length },
-          { title: "Updated", key: "updated", render: (_, row) => row.updated_at.replace("T", " ").slice(0, 19) },
-          { title: "Status", key: "status", render: (_, row) => <Tag color={statusColors[row.status]}>{row.status.replaceAll("_", " ")}</Tag> },
+      <Col xs={24} xl={10}><Card title="方案"><Typography.Paragraph type="secondary">正向与回滚命令序列</Typography.Paragraph><Tabs activeKey={planMode} onChange={setPlanMode} items={[{ key: "routed", label: "路由出站", children: routedForm }, { key: "raw", label: "原始步骤", children: rawForm }]} /></Card></Col>
+      <Col xs={24} xl={14}><Card title="执行记录" extra={<Tag color="success">免费版</Tag>}>
+        <Typography.Paragraph type="secondary">{changes.length} 个变更集</Typography.Paragraph>
+        <Table<AgentChangeSet> rowKey="id" dataSource={changes} loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} locale={{ emptyText: "暂无变更集。" }} scroll={{ x: 440 }} columns={[
+          { title: "变更集", key: "name", render: (_, row) => <Button type="link" disabled={Boolean(saving) || Boolean(acceptId)} onClick={() => setSelectedId(row.id)}>{row.name}</Button> },
+          { title: "步骤", key: "steps", render: (_, row) => row.steps.length },
+          { title: "更新时间", key: "updated", render: (_, row) => new Date(row.updated_at).toLocaleString("zh-CN", { timeZone: "UTC", hour12: false }) },
+          { title: "状态", key: "status", render: (_, row) => <Tag color={statusColors[row.status]}>{zhStatus(row.status)}</Tag> },
         ]} />
         {selected ? <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-          <Descriptions title={selected.name} column={1} items={[{ key: "description", label: "Description", children: selected.description || selected.id }, { key: "status", label: "Status", children: <Tag color={statusColors[selected.status]}>{selected.status.replaceAll("_", " ")}</Tag> }]} />
+          <Descriptions title={selected.name} column={1} items={[{ key: "description", label: "说明", children: selected.description || selected.id }, { key: "status", label: "状态", children: <Tag color={statusColors[selected.status]}>{zhStatus(selected.status)}</Tag> }]} />
           <Space wrap align="end">
-            <Button aria-label="Dispatch" icon={<SendOutlined />} disabled={!actions.dispatch || Boolean(saving)} loading={saving === "dispatch"} onClick={dispatchSelected}>Dispatch</Button>
-            <Form.Item label="Rollback reason" style={{ marginBottom: 0 }}><Input aria-label="Rollback reason" value={form.rollbackReason} disabled={Boolean(saving)} onChange={(event) => patchForm({ rollbackReason: event.target.value })} /></Form.Item>
-            <Button aria-label={actions.retry ? "Retry rollback" : selected.status === "planned" ? "Cancel plan" : "Rollback"} icon={<RollbackOutlined />} disabled={!actions.rollback || Boolean(saving)} loading={saving === "rollback"} onClick={rollbackSelected}>{actions.retry ? "Retry rollback" : selected.status === "planned" ? "Cancel plan" : "Rollback"}</Button>
-            {actions.accept && <Button disabled={Boolean(saving)} onClick={() => { setAcceptanceReason(""); setAcceptanceConfirmed(false); setAcceptId(selected.id); }}>Accept current state</Button>}
+            <Button aria-label="下发" icon={<SendOutlined />} disabled={!actions.dispatch || Boolean(saving)} loading={saving === "dispatch"} onClick={dispatchSelected}>下发</Button>
+            <Form.Item label="回滚原因" style={{ marginBottom: 0 }}><Input aria-label="回滚原因" value={form.rollbackReason} disabled={Boolean(saving)} onChange={(event) => patchForm({ rollbackReason: event.target.value })} /></Form.Item>
+            <Button aria-label={actions.retry ? "重试回滚" : selected.status === "planned" ? "取消方案" : "回滚"} icon={<RollbackOutlined />} disabled={!actions.rollback || Boolean(saving)} loading={saving === "rollback"} onClick={rollbackSelected}>{actions.retry ? "重试回滚" : selected.status === "planned" ? "取消方案" : "回滚"}</Button>
+            {actions.accept && <Button aria-label="接受当前状态" disabled={Boolean(saving)} onClick={() => { setAcceptanceReason(""); setAcceptanceConfirmed(false); setAcceptId(selected.id); }}>接受当前状态</Button>}
           </Space>
-          {Boolean(selected.held_server_ids?.length) && <Typography.Text>{selected.held_server_ids?.length} nodes reserved</Typography.Text>}
-          {Boolean(selected.blocking_command_ids?.length) && <Alert type="info" title={`Waiting for command results: ${selected.blocking_command_ids?.join(", ")}`} showIcon />}
-          {(selected.warnings ?? []).map((warning) => <Alert key={warning} type="warning" title={warning} showIcon />)}
+          {Boolean(selected.held_server_ids?.length) && <Typography.Text>已预留 {selected.held_server_ids?.length} 个节点</Typography.Text>}
+          {Boolean(selected.blocking_command_ids?.length) && <Alert type="info" title={`等待命令结果：${selected.blocking_command_ids?.join("，")}`} showIcon />}
+          {(selected.warnings ?? []).map((warning) => <Alert key={warning} type="warning" title={zhMessage(warning)} showIcon />)}
           {selected.rollback_reason && <Typography.Paragraph>{selected.rollback_reason}</Typography.Paragraph>}
           {selected.resolution_reason && <Typography.Paragraph>{selected.resolution_reason}</Typography.Paragraph>}
           {selected.steps.map((step) => <Card key={step.id} size="small" title={`${step.sequence}. ${step.label}`} extra={<Tag>{step.server_id.slice(0, 8)}</Tag>}>
-            <Typography.Paragraph type="secondary">{step.server_name || servers.find((server) => server.id === step.server_id)?.name || "Unknown server"}{step.archived ? " (archived)" : ""}</Typography.Paragraph>
-            <Descriptions column={{ xs: 1, sm: 2 }} items={[{ key: "forward", label: "Forward", children: <CommandSummary request={step.forward} command={step.forward_command} /> }, { key: "rollback", label: "Rollback", children: <CommandSummary request={step.rollback} command={step.rollback_command} /> }]} />
+            <Typography.Paragraph type="secondary">{step.server_name || servers.find((server) => server.id === step.server_id)?.name || "未知服务器"}{step.archived ? "（已归档）" : ""}</Typography.Paragraph>
+            <Descriptions column={{ xs: 1, sm: 2 }} items={[{ key: "forward", label: "正向", children: <CommandSummary request={step.forward} command={step.forward_command} /> }, { key: "rollback", label: "回滚", children: <CommandSummary request={step.rollback} command={step.rollback_command} /> }]} />
             <CommandInspector commands={[...new Map([step.forward_command, ...(step.rollback_history ?? []), step.rollback_command].filter((command): command is AgentCommand => Boolean(command)).map((command) => [command.id, command])).values()]} streamFramesByCommand={{}} />
           </Card>)}
-          {lastCommands.length > 0 && <Card size="small" title="Last commands"><CommandInspector commands={lastCommands} streamFramesByCommand={{}} /></Card>}
-        </Space> : changes.length > 0 ? <Empty description="Select a change set" /> : null}
+          {lastCommands.length > 0 && <Card size="small" title="最近命令"><CommandInspector commands={lastCommands} streamFramesByCommand={{}} /></Card>}
+        </Space> : changes.length > 0 ? <Empty description="请选择变更集" /> : null}
       </Card></Col>
     </Row>
-    <Modal title="Accept current state" open={Boolean(acceptId)} onCancel={() => { if (!saving) setAcceptId(""); }} closable={!saving} mask={{ closable: !saving }} keyboard={!saving} onOk={acceptSelected} okText="Accept state" confirmLoading={saving === "accept"} okButtonProps={{ disabled: !acceptanceConfirmed || !acceptanceReason.trim() || Boolean(saving) }} cancelButtonProps={{ disabled: Boolean(saving) }}>
-      {error && <Alert type="error" title={error} showIcon />}
-      <Form layout="vertical" disabled={Boolean(saving)}><Form.Item label="Resolution reason"><Input.TextArea aria-label="Resolution reason" rows={3} value={acceptanceReason} onChange={(event) => setAcceptanceReason(event.target.value)} /></Form.Item><Checkbox checked={acceptanceConfirmed} onChange={(event) => setAcceptanceConfirmed(event.target.checked)}>I have checked the nodes and accept any remaining changes</Checkbox></Form>
+    <Modal title="接受当前状态" open={Boolean(acceptId)} onCancel={() => { if (!saving) setAcceptId(""); }} closable={!saving} mask={{ closable: !saving }} keyboard={!saving} onOk={acceptSelected} okText="接受状态" confirmLoading={saving === "accept"} okButtonProps={{ "aria-label": "接受状态", disabled: !acceptanceConfirmed || !acceptanceReason.trim() || Boolean(saving) }} cancelButtonProps={{ disabled: Boolean(saving) }}>
+      {error && <Alert type="error" title={zhMessage(error)} showIcon />}
+      <Form layout="vertical" disabled={Boolean(saving)}><Form.Item label="处理原因"><Input.TextArea aria-label="处理原因" rows={3} value={acceptanceReason} onChange={(event) => setAcceptanceReason(event.target.value)} /></Form.Item><Checkbox checked={acceptanceConfirmed} onChange={(event) => setAcceptanceConfirmed(event.target.checked)}>我已检查节点并接受所有剩余变更</Checkbox></Form>
     </Modal>
   </Space>;
 }

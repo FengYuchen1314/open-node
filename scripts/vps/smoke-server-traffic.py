@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def browser(client, backend, base, output):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        context = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="zh-CN")
         try:
             context.add_cookies(
                 [
@@ -40,11 +40,14 @@ def browser(client, backend, base, output):
             page = context.new_page()
             errors, traffic_updates = [], []
             page.on("pageerror", lambda error: errors.append(str(error)))
-            page.on("request", lambda request: traffic_updates.append(request)
-                    if request.method == "PUT" and request.url.endswith(base + "/traffic") else None)
+            page.on(
+                "request", lambda request: traffic_updates.append(request)
+                if request.method == "PUT" and request.url.endswith(base + "/traffic") else None,
+            )
             page.goto(backend + "/")
-            panel = page.get_by_role("region", name="Server traffic", exact=True)
-            expect(panel.get_by_label("Traffic source", exact=True)).to_be_visible(
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            panel = page.get_by_role("region", name="服务器流量", exact=True)
+            expect(panel.get_by_label("流量来源", exact=True)).to_be_visible(
                 timeout=15000
             )
             def select(label, option):
@@ -57,12 +60,14 @@ def browser(client, backend, base, output):
                     has_text=re.compile("^" + re.escape(option) + "$")
                 ).click()
 
-            select("Traffic source", "Xray nodes")
-            select("Counted direction", "Larger direction")
-            select("Monthly reset day (UTC)", "31")
-            quota_input = panel.get_by_label("Quota (GiB, 0 = unlimited)", exact=True)
+            select("流量来源", "Xray 节点")
+            select("统计方向", "取较大方向")
+            select("每月重置日（UTC）", "31")
+            quota_input = panel.get_by_label("流量限额（GiB，0 表示不限额）", exact=True)
             baseline = client.get(base + "/traffic").raise_for_status().json()
-            settings = ("traffic_limit", "traffic_reset_day", "traffic_stats_mode", "traffic_source")
+            settings = (
+                "traffic_limit", "traffic_reset_day", "traffic_stats_mode", "traffic_source"
+            )
             persisted = {key: baseline[key] for key in settings}
             # The browser rejects invalid drafts; the independent API boundary
             # must continue rejecting invalid byte values as well.
@@ -80,8 +85,8 @@ def browser(client, backend, base, output):
                     elif value:
                         quota_input.fill(value)
                     quota_input.press(finish)
-                    expect(panel.get_by_role("button", name="Save", exact=True)).to_be_disabled()
-                    expect(panel).to_contain_text("Enter zero for unlimited, or a positive quota")
+                    expect(panel.get_by_role("button", name="保存", exact=True)).to_be_disabled()
+                    expect(panel).to_contain_text("输入 0 表示不限额；正数限额至少为 1 字节")
                     if value == "-1":
                         expect(quota_input).to_have_value("-1")
                     page.wait_for_timeout(100)
@@ -105,7 +110,7 @@ def browser(client, backend, base, output):
                     r.url.endswith(base + "/traffic") and r.request.method == "PUT"
                 )
             ) as saved:
-                panel.get_by_role("button", name="Save", exact=True).click()
+                panel.get_by_role("button", name="保存", exact=True).click()
             assert saved.value.status == 200
             result = client.get(base + "/traffic").raise_for_status().json()
             assert (
@@ -121,12 +126,12 @@ def browser(client, backend, base, output):
             ]:
                 page.set_viewport_size({"width": width, "height": height})
                 panel.scroll_into_view_if_needed()
-                panel.get_by_role("button", name="Reset cycle", exact=True).click()
+                panel.get_by_role("button", name="重置周期", exact=True).click()
                 dialog = page.get_by_role("dialog")
                 expect(
-                    dialog.get_by_text("Reset server traffic?", exact=True)
+                    dialog.get_by_text("重置服务器流量？", exact=True)
                 ).to_be_visible()
-                dialog.get_by_role("button", name="Cancel", exact=True).click()
+                dialog.get_by_role("button", name=re.compile(r"^取\s*消$")).click()
                 expect(dialog).not_to_be_visible()
                 assert client.get(base + "/traffic").json()["used"] > 0
                 assert panel.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
@@ -138,18 +143,19 @@ def browser(client, backend, base, output):
                     assert box["x"] + box["width"] <= width + 1
                 panel.screenshot(path=str(output / (label + "-panel.png")))
                 page.screenshot(path=str(output / (label + ".png")))
-            panel.get_by_role("button", name="Reset cycle", exact=True).click()
+            panel.get_by_role("button", name="重置周期", exact=True).click()
             with page.expect_response(
                 lambda r: r.url.endswith(base + "/traffic/reset")
             ) as reset:
                 page.get_by_role("dialog").get_by_role(
-                    "button", name="Reset", exact=True
+                    "button", name="重置", exact=True
                 ).click()
             assert reset.value.status == 200 and reset.value.json()["used"] == 0
             expect(panel.get_by_test_id("server-traffic-used")).to_have_text("0 B")
             assert not errors, errors
             print(
-                "PASS browser settings, raw/blur/Enter validation, fractional GiB, reset/cancel and 1440/390/320 layouts",
+                "PASS browser settings, raw/blur/Enter validation, fractional GiB, "
+                "reset/cancel and 1440/390/320 layouts",
                 flush=True,
             )
         finally:

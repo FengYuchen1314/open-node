@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
+import zhCN from "antd/locale/zh_CN";
+import { ConfigProvider } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SubscriptionShortCodeDialog from "./SubscriptionShortCodeDialog";
 import UserLoginDialog from "./UserLoginDialog";
@@ -13,6 +15,8 @@ import { createRegistrationInvitation, listRegistrationInvitations, revokeRegist
 import type { ProductUserSubscriptionToken, SubscriptionPlan } from "../../domain/subscriptions";
 import type { TemporarySubscription } from "../../domain/temporary-subscriptions";
 import type { RegistrationInvitation } from "../../domain/registration-invitations";
+
+const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider locale={zhCN}>{children}</ConfigProvider> });
 
 vi.mock("../../services/subscriptions", () => ({ getProductUserIpPolicy: vi.fn(), getProductUserSubscriptionToken: vi.fn(), updateProductUserIpPolicy: vi.fn(), updateProductUserShortCode: vi.fn() }));
 vi.mock("../../services/subscriber-auth", () => ({ subscriberAccount: vi.fn(), subscriberSecurity: vi.fn(), subscriberShortCode: vi.fn(), subscriberToken: vi.fn(), subscriberIpPolicy: vi.fn(), updateSubscriberIpPolicy: vi.fn() }));
@@ -39,64 +43,64 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("React subscription security dialogs", { timeout: 20_000 }, () => {
   it("requires password and MFA proof, passes the revision, and clears proof after failure", async () => {
-    vi.mocked(subscriberShortCode).mockRejectedValue(new Error("Invalid proof"));
+    vi.mocked(subscriberShortCode).mockRejectedValue(new Error("验证凭据无效"));
     render(<SubscriptionShortCodeDialog open username="alice" subscriber onOpenChange={vi.fn()} />); await flush();
-    fireEvent.change(screen.getByLabelText("Custom short code"), { target: { value: "NewCode1" } });
-    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "private-password" } });
-    fireEvent.change(screen.getByLabelText("Authenticator or recovery code"), { target: { value: "123456" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" })); await flush();
+    fireEvent.change(screen.getByLabelText("自定义短码"), { target: { value: "NewCode1" } });
+    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("当前密码"), { target: { value: "private-password" } });
+    fireEvent.change(screen.getByLabelText("验证器验证码或恢复码"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" })); await flush();
     expect(subscriberShortCode).toHaveBeenCalledWith("NewCode1", "rev-1", { password: "private-password", code: "123456" });
-    expect((screen.getByLabelText("Current password") as HTMLInputElement).value).toBe(""); expect((screen.getByLabelText("Authenticator or recovery code") as HTMLInputElement).value).toBe("");
-    expect(screen.getByText("Invalid proof")).toBeTruthy();
+    expect((screen.getByLabelText("当前密码") as HTMLInputElement).value).toBe(""); expect((screen.getByLabelText("验证器验证码或恢复码") as HTMLInputElement).value).toBe("");
+    expect(screen.getByText("验证凭据无效")).toBeTruthy();
   });
   it("does not write a late short-code response into another user's open dialog", async () => {
     let resolve!: (value: Awaited<ReturnType<typeof updateProductUserShortCode>>) => void;
     vi.mocked(updateProductUserShortCode).mockReturnValue(new Promise(done => { resolve = done; }));
     const props = { open: true, username: "alice", onOpenChange: vi.fn(), onSaved: vi.fn() };
     const { rerender } = render(<SubscriptionShortCodeDialog {...props} />); await flush();
-    fireEvent.change(screen.getByLabelText("Custom short code"), { target: { value: "NewCode1" } }); fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.change(screen.getByLabelText("自定义短码"), { target: { value: "NewCode1" } }); fireEvent.click(screen.getByRole("button", { name: "保存" }));
     vi.mocked(getProductUserSubscriptionToken).mockResolvedValue({ subscription: { ...token, username: "bob", short_url: "https://sub.example/s/bob-code" }, license_required: false });
     rerender(<SubscriptionShortCodeDialog {...props} username="bob" />); await flush();
     await act(async () => resolve({ subscription: { ...token, short_url: "https://sub.example/s/late-secret" }, license_required: false }));
-    expect(props.onSaved).not.toHaveBeenCalled(); expect((screen.getByLabelText("Short URL") as HTMLInputElement).value).toContain("bob-code");
+    expect(props.onSaved).not.toHaveBeenCalled(); expect((screen.getByLabelText("订阅短链接") as HTMLInputElement).value).toContain("bob-code");
   });
   it("keeps password reset behind matching confirmation and session-revocation acknowledgement", async () => {
     render(<UserLoginDialog open username="alice" onOpenChange={vi.fn()} />); await flush();
-    fireEvent.change(screen.getByLabelText("New login password"), { target: { value: "a-long-password" } }); fireEvent.change(screen.getByLabelText("Confirm login password"), { target: { value: "a-long-password" } });
-    expect((screen.getByRole("button", { name: "Save password" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Revoke all existing user sessions" })); fireEvent.click(screen.getByRole("checkbox", { name: "Reset two-factor authentication and recovery codes" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save password" })); await flush();
+    fireEvent.change(screen.getByLabelText("新登录密码"), { target: { value: "a-long-password" } }); fireEvent.change(screen.getByLabelText("确认登录密码"), { target: { value: "a-long-password" } });
+    expect((screen.getByRole("button", { name: "保存密码" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "撤销该用户的所有已有会话" })); fireEvent.click(screen.getByRole("checkbox", { name: "重置双因素认证及恢复码" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存密码" })); await flush();
     expect(subscriberAccount).toHaveBeenLastCalledWith("alice", { expected_revision: "account-r1", new_password: "a-long-password", reset_totp: true });
-    expect((screen.getByLabelText("New login password") as HTMLInputElement).value).toBe(""); expect((screen.getByLabelText("Confirm login password") as HTMLInputElement).value).toBe("");
-    expect(screen.getByText(/Existing sessions have been revoked/)).toBeTruthy();
+    expect((screen.getByLabelText("新登录密码") as HTMLInputElement).value).toBe(""); expect((screen.getByLabelText("确认登录密码") as HTMLInputElement).value).toBe("");
+    expect(screen.getByText(/已有会话已全部撤销/)).toBeTruthy();
   });
   it("keeps rejected network policies open and saves parsed CIDRs without erasing them", async () => {
-    vi.mocked(updateProductUserIpPolicy).mockRejectedValue(new Error("Invalid CIDR")); const onOpenChange = vi.fn();
+    vi.mocked(updateProductUserIpPolicy).mockRejectedValue(new Error("CIDR 网段无效")); const onOpenChange = vi.fn();
     render(<SubscriptionIpPolicyDialog open username="alice" onOpenChange={onOpenChange} />); await flush();
-    fireEvent.change(screen.getByLabelText("Allowed IPs and CIDRs"), { target: { value: "192.0.2.0/24, 2001:db8::/32" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" })); await flush();
-    expect(updateProductUserIpPolicy).toHaveBeenCalledWith("alice", ["192.0.2.0/24", "2001:db8::/32"]); expect(onOpenChange).not.toHaveBeenCalled(); expect(screen.getByText("Invalid CIDR")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("允许的 IP 地址和 CIDR 网段"), { target: { value: "192.0.2.0/24, 2001:db8::/32" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" })); await flush();
+    expect(updateProductUserIpPolicy).toHaveBeenCalledWith("alice", ["192.0.2.0/24", "2001:db8::/32"]); expect(onOpenChange).not.toHaveBeenCalled(); expect(screen.getByText("CIDR 网段无效")).toBeTruthy();
   });
   it("destroys temporary URLs on close and rejects a stale node scope", async () => {
     const props = { open: true, username: "alice", nodes: [{ title: "Alpha", value: "a" }], onOpenChange: vi.fn() };
     const { rerender } = render(<TemporarySubscriptionDialog {...props} />);
-    rerender(<TemporarySubscriptionDialog {...props} nodes={[]} />); expect((screen.getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true);
-    rerender(<TemporarySubscriptionDialog {...props} />); fireEvent.click(screen.getByRole("button", { name: "Create" })); await flush();
-    expect(createTemporarySubscription).toHaveBeenCalledWith({ username: "alice", label: "Temporary subscription", node_ids: ["a"], max_access: 1, expires_in_seconds: 300 });
-    expect((screen.getByLabelText("Temporary URL") as HTMLInputElement).value).toBe(temporary.subscription_url);
-    rerender(<TemporarySubscriptionDialog {...props} open={false} />); expect(screen.queryByLabelText("Temporary URL")).toBeNull();
-    rerender(<TemporarySubscriptionDialog {...props} />); expect(screen.queryByLabelText("Temporary URL")).toBeNull();
+    rerender(<TemporarySubscriptionDialog {...props} nodes={[]} />); expect((screen.getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
+    rerender(<TemporarySubscriptionDialog {...props} />); fireEvent.click(screen.getByRole("button", { name: "创建" })); await flush();
+    expect(createTemporarySubscription).toHaveBeenCalledWith({ username: "alice", label: "临时订阅", node_ids: ["a"], max_access: 1, expires_in_seconds: 300 });
+    expect((screen.getByLabelText("临时订阅链接") as HTMLInputElement).value).toBe(temporary.subscription_url);
+    rerender(<TemporarySubscriptionDialog {...props} open={false} />); expect(screen.queryByLabelText("临时订阅链接")).toBeNull();
+    rerender(<TemporarySubscriptionDialog {...props} />); expect(screen.queryByLabelText("临时订阅链接")).toBeNull();
   });
   it("discards late temporary-link creation after close", async () => {
     let resolve!: (value: TemporarySubscription) => void; vi.mocked(createTemporarySubscription).mockReturnValue(new Promise(done => { resolve = done; }));
     const props = { open: true, username: "alice", nodes: [{ title: "Alpha", value: "a" }], onOpenChange: vi.fn(), onCreated: vi.fn() };
-    const { rerender } = render(<TemporarySubscriptionDialog {...props} />); fireEvent.click(screen.getByRole("button", { name: "Create" })); rerender(<TemporarySubscriptionDialog {...props} open={false} />);
-    await act(async () => resolve(temporary)); expect(props.onCreated).not.toHaveBeenCalled(); expect(screen.queryByLabelText("Temporary URL")).toBeNull();
+    const { rerender } = render(<TemporarySubscriptionDialog {...props} />); fireEvent.click(screen.getByRole("button", { name: "创建" })); rerender(<TemporarySubscriptionDialog {...props} open={false} />);
+    await act(async () => resolve(temporary)); expect(props.onCreated).not.toHaveBeenCalled(); expect(screen.queryByLabelText("临时订阅链接")).toBeNull();
   });
   it("does not create a temporary link from invalid download counts after blur or Enter", async () => {
     render(<TemporarySubscriptionDialog open username="alice" nodes={[{ title: "Alpha", value: "a" }]} onOpenChange={vi.fn()} />);
-    const input = screen.getByLabelText("Downloads"), create = screen.getByRole("button", { name: "Create" }) as HTMLButtonElement;
+    const input = screen.getByLabelText("下载次数"), create = screen.getByRole("button", { name: "创建" }) as HTMLButtonElement;
     for (const value of ["0", "101", "0.4", "", "-", "1e-999"]) {
       fireEvent.change(input, { target: { value: "1" } }); fireEvent.change(input, { target: { value } }); fireEvent.blur(input); fireEvent.keyDown(input, { key: "Enter" });
       expect(create.disabled).toBe(true);
@@ -107,10 +111,10 @@ describe("React subscription security dialogs", { timeout: 20_000 }, () => {
     vi.mocked(createRegistrationInvitation).mockResolvedValue({ invitation, registration_url: "https://sub.example/register/private-invite", license_required: false });
     vi.mocked(revokeRegistrationInvitation).mockResolvedValue({ ...invitation, status: "revoked" });
     const props = { open: true, plans: [{ id: "p", name: "Basic" }] as SubscriptionPlan[], onOpenChange: vi.fn() };
-    const { rerender } = render(<RegistrationInvitationsDialog {...props} />); await flush(); fireEvent.click(screen.getByRole("button", { name: "Create registration invitation" })); await flush();
-    expect((screen.getByLabelText("Registration URL") as HTMLInputElement).value).toContain("private-invite");
-    fireEvent.click(screen.getByRole("button", { name: "Revoke invitation for Basic" })); expect(revokeRegistrationInvitation).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Revoke" })); await flush(); expect(revokeRegistrationInvitation).toHaveBeenCalledWith("invite"); expect(screen.queryByLabelText("Registration URL")).toBeNull();
-    rerender(<RegistrationInvitationsDialog {...props} open={false} />); rerender(<RegistrationInvitationsDialog {...props} />); await flush(); expect(screen.queryByLabelText("Registration URL")).toBeNull();
+    const { rerender } = render(<RegistrationInvitationsDialog {...props} />); await flush(); fireEvent.click(screen.getByRole("button", { name: "创建注册邀请" })); await flush();
+    expect((screen.getByLabelText("注册链接") as HTMLInputElement).value).toContain("private-invite");
+    fireEvent.click(screen.getByRole("button", { name: "撤销 Basic 的邀请" })); expect(revokeRegistrationInvitation).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "撤销" })); await flush(); expect(revokeRegistrationInvitation).toHaveBeenCalledWith("invite"); expect(screen.queryByLabelText("注册链接")).toBeNull();
+    rerender(<RegistrationInvitationsDialog {...props} open={false} />); rerender(<RegistrationInvitationsDialog {...props} />); await flush(); expect(screen.queryByLabelText("注册链接")).toBeNull();
   });
 });

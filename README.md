@@ -33,6 +33,9 @@ intentionally out of scope for this refactor.
 
 The [frontend architecture and verification guide](docs/frontend.md) describes
 the React/Ant Design workspaces and the independent read-only Probe build.
+The administrator console, subscriber portal and public Probe use Simplified
+Chinese, including Ant Design's built-in controls. Protocol names, configuration
+keys, commands and user-provided content retain their original values.
 
 ## Administrator Access
 
@@ -160,6 +163,14 @@ legacy packages to Open Node plans; multi-file assignments become selectable
 subscription profiles. Direct and combined legacy `/x` links require the
 migration-only short-link compatibility option and are unavailable by default.
 Raw uploads and legacy templates/rules/scripts require managed reconfiguration.
+
+[External subscriptions](docs/external-subscriptions.md) let administrators keep
+HTTPS Clash/Mihomo YAML sources for a subscriber, preview changes, select nodes
+and explicitly confirm a snapshot before merging it into that subscriber's main
+link. Source URLs and upstream credentials are encrypted at rest; fetching or
+parsing failures preserve the active snapshot. This first slice is manual and
+administrator-only: automatic refresh, URI/Base64 input, subscriber self-service
+and the wider provider/rule ecosystem are not implemented.
 
 [Temporary subscription links](docs/temporary-subscriptions.md) let an
 administrator share selected nodes from a subscriber's current plan with a

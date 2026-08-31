@@ -1,3 +1,4 @@
+import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Checkbox, Flex, Form, Input, Modal, Spin, Switch, Tabs, Tag, Typography } from "antd";
 import { ReloadOutlined, SyncOutlined } from "@ant-design/icons";
@@ -33,7 +34,7 @@ function UserContent({ username, mode, removalId, nodes, onOpenChange, onUpdated
         if (run !== version.current || current !== pollVersion.current) return; setAccess(value);
       }
       setStatusError("");
-    } catch (failure) { if (run === version.current && current === pollVersion.current) setStatusError(failure instanceof Error ? failure.message : "User status unavailable"); }
+    } catch (failure) { if (run === version.current && current === pollVersion.current) setStatusError(failure instanceof Error ? failure.message : "无法读取用户状态"); }
     finally {
       if (run === version.current && current === pollVersion.current) { setSyncing(false); if (!completed.current) timer.current = setTimeout(() => void poll(run), 5000); }
     }
@@ -49,7 +50,7 @@ function UserContent({ username, mode, removalId, nodes, onOpenChange, onUpdated
         if (value.user.removal_id) { const job = await getUserRemoval(value.user.removal_id); if (run !== version.current) return; acceptRemoval(job); }
       }
       if (!completed.current) timer.current = setTimeout(() => void poll(run), 5000);
-    } catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "User request failed"); }
+    } catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "请求用户信息失败"); }
     finally { if (run === version.current) setBusy(false); }
   }
   useEffect(() => { void load(); return () => { ++version.current; stop(); }; }, []);
@@ -68,43 +69,43 @@ function UserContent({ username, mode, removalId, nodes, onOpenChange, onUpdated
         acceptRemoval(value); updated.current?.();
       }
       setAcknowledgment(false); if (!completed.current) void poll(run);
-    } catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "User update failed"); }
+    } catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "更新用户失败"); }
     finally { if (run === version.current) setBusy(false); }
   }
   function patch(change: Partial<UserSettings>) { setForm(previous => previous ? { ...previous, ...change } : previous); }
-  return <Modal open title={removal ? "User removal" : mode === "edit" ? "Edit user" : "Remove user"} width={680} centered styles={{ body: { maxHeight: "calc(100dvh - 200px)", overflowY: "auto" } }} destroyOnHidden
+  return <Modal open title={removal ? "用户移除" : mode === "edit" ? "编辑用户" : "移除用户"} width={680} centered styles={{ body: { maxHeight: "calc(100dvh - 200px)", overflowY: "auto" } }} destroyOnHidden
     mask={{ closable: !busy }} keyboard={!busy} closable={!busy} onCancel={() => !busy && onOpenChange(false)}
-    footer={<Flex justify="space-between"><Button disabled={busy} onClick={() => onOpenChange(false)}>{saved || removal ? "Close" : "Cancel"}</Button>
-      {!removal && <Button type="primary" aria-label={mode === "edit" ? "Save" : "Remove"} aria-busy={busy} danger={mode === "remove"} disabled={!canSubmit} loading={busy} onClick={() => void submit()}>{mode === "edit" ? "Save" : "Remove"}</Button>}</Flex>}>
+    footer={<Flex justify="space-between"><Button disabled={busy} onClick={() => onOpenChange(false)}>{saved || removal ? "关闭" : "取消"}</Button>
+      {!removal && <Button type="primary" aria-label={mode === "edit" ? "保存" : "移除"} aria-busy={busy} danger={mode === "remove"} disabled={!canSubmit} loading={busy} onClick={() => void submit()}>{mode === "edit" ? "保存" : "移除"}</Button>}</Flex>}>
     <Flex vertical gap="middle">
-      <Flex justify="space-between" align="center"><Typography.Text strong>{username}</Typography.Text>{detail && <Tag>{detail.user.role}</Tag>}<Button icon={<ReloadOutlined />} aria-label="Reload user details" disabled={busy || completed.current} onClick={() => void (removal ? poll(version.current) : load())} /></Flex>
-      {busy && <Spin />}{error && <Alert type="error" title={error} showIcon />}{saved && <Alert type="success" title="User saved" showIcon />}
-      {removal && <Alert type={removal.status === "completed" ? "success" : removal.status === "failed" ? "error" : "info"} title={removal.status === "completed" ? "User removed" : removal.status === "failed" ? "Removal needs attention" : "Removal pending Agent confirmation"} showIcon />}
+      <Flex justify="space-between" align="center"><Typography.Text strong>{username}</Typography.Text>{detail && <Tag>{zhStatus(detail.user.role)}</Tag>}<Button icon={<ReloadOutlined />} aria-label="重新加载用户详情" disabled={busy || completed.current} onClick={() => void (removal ? poll(version.current) : load())} /></Flex>
+      {busy && <Spin />}{error && <Alert type="error" title={zhMessage(error)} showIcon />}{saved && <Alert type="success" title="用户已保存" showIcon />}
+      {removal && <Alert type={removal.status === "completed" ? "success" : removal.status === "failed" ? "error" : "info"} title={removal.status === "completed" ? "用户已移除" : removal.status === "failed" ? "移除操作需要处理" : "正在等待 Agent 确认移除"} showIcon />}
       {detail && form && !removal && (mode === "edit" ? <Tabs activeKey={tab} onChange={setTab} items={[
-        { key: "profile", label: "Profile", children: <Form layout="vertical" preserve={false} disabled={busy}>
-          <Form.Item label="Display name"><Input aria-label="Display name" value={form.display_name} maxLength={120} onChange={event => patch({ display_name: event.target.value })} /></Form.Item>
-          <Form.Item label="Email"><Input aria-label="Email" value={form.email ?? ""} maxLength={255} onChange={event => patch({ email: event.target.value || null })} /></Form.Item>
-          <Form.Item label="Remark"><Input.TextArea aria-label="Remark" value={form.remark} rows={3} maxLength={1000} onChange={event => patch({ remark: event.target.value })} /></Form.Item>
-          <Form.Item label="Active"><Switch aria-label="Active" checked={form.is_active} disabled={busy || (detail.user.role === "admin" && form.is_active)} onChange={is_active => patch({ is_active })} /></Form.Item>
+        { key: "profile", label: "用户资料", children: <Form layout="vertical" preserve={false} disabled={busy}>
+          <Form.Item label="显示名称"><Input aria-label="显示名称" value={form.display_name} maxLength={120} onChange={event => patch({ display_name: event.target.value })} /></Form.Item>
+          <Form.Item label="电子邮箱"><Input aria-label="电子邮箱" value={form.email ?? ""} maxLength={255} onChange={event => patch({ email: event.target.value || null })} /></Form.Item>
+          <Form.Item label="备注"><Input.TextArea aria-label="备注" value={form.remark} rows={3} maxLength={1000} onChange={event => patch({ remark: event.target.value })} /></Form.Item>
+          <Form.Item label="启用用户"><Switch aria-label="启用用户" checked={form.is_active} disabled={busy || (detail.user.role === "admin" && form.is_active)} onChange={is_active => patch({ is_active })} /></Form.Item>
         </Form> },
-        { key: "limits", label: "Limits", children: <UserLimitEditor key={detail.revision} value={form.limit_overrides} onChange={limit_overrides => patch({ limit_overrides })} nodes={nodes} current={detail.limits} disabled={busy} /> },
+        { key: "limits", label: "限制", children: <UserLimitEditor key={detail.revision} value={form.limit_overrides} onChange={limit_overrides => patch({ limit_overrides })} nodes={nodes} current={detail.limits} disabled={busy} /> },
       ]} /> : <>
-        <Typography.Text>{detail.credential_count} stored credentials</Typography.Text>
-        {detail.blockers.map(blocker => <Alert key={blocker} type="error" title={blocker} showIcon />)}
-        <Alert type="warning" title="Subscription links stop working immediately. The profile and user traffic ledger are removed after Agent confirmation. Command history, revocation fingerprints, plans and shared nodes remain. Removal cannot be cancelled after confirmation." showIcon />
-        <Form.Item label="Confirm username"><Input aria-label="Confirm username" value={confirmName} disabled={busy} onChange={event => setConfirmName(event.target.value)} /></Form.Item>
+        <Typography.Text>{detail.credential_count} 份已保存的凭据</Typography.Text>
+        {detail.blockers.map(blocker => <Alert key={blocker} type="error" title={zhMessage(blocker)} showIcon />)}
+        <Alert type="warning" title="订阅链接会立即失效。Agent 确认后，将移除用户资料及流量账本。命令历史、撤销指纹、套餐和共享节点会保留。确认后无法取消移除。" showIcon />
+        <Form.Item label="确认用户名"><Input aria-label="确认用户名" value={confirmName} disabled={busy} onChange={event => setConfirmName(event.target.value)} /></Form.Item>
       </>)}
-      {warnings.map(warning => <Alert key={warning} type="warning" title={warning} showIcon />)}
+      {warnings.map(warning => <Alert key={warning} type="warning" title={zhMessage(warning)} showIcon />)}
       {detail && !removal && <>
-        {mode === "remove" && !!warnings.length && <Checkbox checked={unmanaged} disabled={busy} onChange={event => setUnmanaged(event.target.checked)}>I accept responsibility for unmanaged credential cleanup</Checkbox>}
-        <Alert type="warning" title="Runtime changes can restart Xray and disconnect current clients. Offline credentials may still forward until the Agent confirms withdrawal." showIcon />
-        <Checkbox checked={acknowledgment} disabled={busy} onChange={event => setAcknowledgment(event.target.checked)}>I accept runtime restarts and pending changes</Checkbox>
+        {mode === "remove" && !!warnings.length && <Checkbox checked={unmanaged} disabled={busy} onChange={event => setUnmanaged(event.target.checked)}>我接受自行清理未托管凭据的责任</Checkbox>}
+        <Alert type="warning" title="运行时变更可能重启 Xray 并断开当前客户端。在 Agent 确认撤销前，离线节点上的凭据仍可能继续转发流量。" showIcon />
+        <Checkbox checked={acknowledgment} disabled={busy} onChange={event => setAcknowledgment(event.target.checked)}>我接受运行时重启及变更待确认的影响</Checkbox>
       </>}
-      {(access || removal) && <section aria-label="User deployment status"><Flex justify="space-between"><Typography.Title level={5}>Agent status</Typography.Title><Button icon={<SyncOutlined />} aria-label="Retry user synchronization" disabled={busy || completed.current} loading={syncing} onClick={() => void poll(version.current, true)} /></Flex>
-        {!servers.length && "No managed credentials"}{servers.map(server => <Card size="small" key={server.server_id} title={server.server_name} extra={<Tag color={server.status === "applied" ? "success" : server.status === "failed" ? "error" : "warning"}>{server.status}</Tag>}>
-          {server.entries.map(entry => <Flex key={`${entry.inbound_tag}:${entry.email}`} justify="space-between" wrap><span>{entry.inbound_tag}</span><span>{server.status === "applied" ? entry.enabled ? "Enabled" : "Disabled" : entry.enabled ? "Enable requested" : "Disable requested"}</span></Flex>)}
-          {server.error && <Alert type="error" title={server.error} showIcon />}
-        </Card>)}{statusError && <Alert type="error" title={statusError} showIcon />}
+      {(access || removal) && <section aria-label="用户部署状态"><Flex justify="space-between"><Typography.Title level={5}>Agent 状态</Typography.Title><Button icon={<SyncOutlined />} aria-label="重试同步用户" disabled={busy || completed.current} loading={syncing} onClick={() => void poll(version.current, true)} /></Flex>
+        {!servers.length && "暂无托管凭据"}{servers.map(server => <Card size="small" key={server.server_id} title={server.server_name} extra={<Tag color={server.status === "applied" ? "success" : server.status === "failed" ? "error" : "warning"}>{zhStatus(server.status)}</Tag>}>
+          {server.entries.map(entry => <Flex key={`${entry.inbound_tag}:${entry.email}`} justify="space-between" wrap><span>{entry.inbound_tag}</span><span>{server.status === "applied" ? entry.enabled ? "已启用" : "已停用" : entry.enabled ? "已请求启用" : "已请求停用"}</span></Flex>)}
+          {server.error && <Alert type="error" title={zhMessage(server.error)} showIcon />}
+        </Card>)}{statusError && <Alert type="error" title={zhMessage(statusError)} showIcon />}
       </section>}
     </Flex>
   </Modal>;

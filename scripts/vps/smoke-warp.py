@@ -239,20 +239,20 @@ def browser_install(client, base, endpoint, ca, name, output, mode):
             ("narrow", 320, 780),
         ):
             page.set_viewport_size({"width": width, "height": height})
-            page.get_by_role("button", name="Install WARP", exact=True).click()
+            page.get_by_role("button", name="安装 WARP", exact=True).click()
             dialog = page.get_by_role("dialog")
             expect(
-                dialog.get_by_role("button", name="Install", exact=True)
+                dialog.get_by_role("button", name="安装", exact=True)
             ).to_be_disabled()
             expect(
-                dialog.get_by_role("link", name="Cloudflare application terms")
+                dialog.get_by_role("link", name="Cloudflare 应用条款")
             ).to_have_attribute("href", "https://www.cloudflare.com/application/terms/")
             lifecycle.ui.check_layout(page)
             page.screenshot(
                 path=output / f"{mode}-{label}-consent.png", animations="disabled"
             )
             if label != "narrow":
-                dialog.get_by_role("button", name="Cancel", exact=True).click()
+                dialog.get_by_role("button", name="取消", exact=True).click()
             else:
                 dialog.get_by_role("checkbox").check()
                 with page.expect_response(
@@ -260,14 +260,13 @@ def browser_install(client, base, endpoint, ca, name, output, mode):
                         r.request.method == "POST" and r.url.endswith("/warp/install")
                     )
                 ) as reply:
-                    dialog.get_by_role("button", name="Install", exact=True).click()
+                    dialog.get_by_role("button", name="安装", exact=True).click()
                 result = lifecycle.wait_command(
                     client, base, reply.value.json()["command"]
                 )
                 assert result["result_body"]["installed"]
-                panel = page.locator(f'[data-command-id="{result["id"]}"]')
-                panel.get_by_role("button").first.click()
-                expect(panel.get_by_text("Free WARP", exact=True)).to_be_visible(
+                panel = lifecycle.expanded_command_panel(page, result["id"])
+                expect(panel.get_by_text("WARP 免费版", exact=True)).to_be_visible(
                     timeout=30000
                 )
                 for size, w, h in (
@@ -281,10 +280,10 @@ def browser_install(client, base, endpoint, ca, name, output, mode):
                     page.screenshot(
                         path=output / f"{mode}-{size}-status.png", animations="disabled"
                     )
-        page.get_by_role("button", name="Remove WARP", exact=True).click()
+        page.get_by_role("button", name="移除 WARP", exact=True).click()
         dialog = page.get_by_role("dialog")
-        expect(dialog.get_by_role("button", name="Remove", exact=True)).to_be_disabled()
-        dialog.get_by_role("button", name="Cancel", exact=True).click()
+        expect(dialog.get_by_role("button", name="移除", exact=True)).to_be_disabled()
+        dialog.get_by_role("button", name="取消", exact=True).click()
 
 
 def exercise_mode(work, fixture, wheel, xray, client, echo, endpoint, ca, mode, output):
@@ -326,11 +325,14 @@ def exercise_mode(work, fixture, wheel, xray, client, echo, endpoint, ca, mode, 
     runtime.write_private(xray_config, original)
     with provider(directory, xray, echo) as (cloud, api, certificate):
         # Only the fixture endpoint/CA is injected. The installed Agent and Xray code is unchanged.
-        prefix = f"""import ssl as _ssl
+        prefix = (
+            """import ssl as _ssl
 import open_node_agent.warp as _warp
 _api = _warp.WarpAPI
-_warp.WarpAPI = lambda: _api(base_url={api!r}, verify=_ssl.create_default_context(cadata={certificate!r}))
 """
+            f"_warp.WarpAPI = lambda: _api(base_url={api!r}, "
+            f"verify=_ssl.create_default_context(cadata={certificate!r}))\n"
+        )
         candidate = lifecycle.release_wheel(
             wheel, directory / "fixture-wheel", "0.2.0", main_prefix=prefix
         )

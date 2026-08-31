@@ -49,7 +49,7 @@ def browser_workflow(client, base, backend, name, output, verify):
     output.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
         context.add_cookies(
             [
                 {
@@ -74,18 +74,24 @@ def browser_workflow(client, base, backend, name, output, verify):
             ):
                 page.set_viewport_size({"width": width, "height": height})
                 page.goto(backend + "/config")
-                target = page.get_by_label("Target server", exact=True)
-                target.press("Enter")
-                page.get_by_role("option", name=name, exact=True).click()
-                page.get_by_role("button", name="Takeover external", exact=True).click()
+                expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+                target = page.get_by_label("目标服务器", exact=True)
+                page.locator(".ant-select").filter(has=target).click()
+                page.locator(".ant-select-dropdown:visible .ant-select-item-option").get_by_text(
+                    name, exact=True
+                ).click()
+                page.get_by_role("button", name="接管外部 Xray", exact=True).click()
                 dialog = page.get_by_role("dialog")
-                expect(dialog.locator(".takeover-files li")).to_have_count(
+                expect(dialog.get_by_role("list").get_by_role("listitem")).to_have_count(
                     4, timeout=60000
                 )
-                checksum = dialog.locator(".takeover-facts code")
+                checksum = dialog.locator(".ant-descriptions-row").filter(
+                    has=page.get_by_text("源文件校验和", exact=True)
+                ).locator("code")
+                expect(checksum).to_have_count(1)
                 digest = checksum.inner_text()
                 assert len(digest) == 64
-                confirm = dialog.get_by_role("button", name="Take over", exact=True)
+                confirm = dialog.get_by_role("button", name="接管", exact=True)
                 expect(confirm).to_be_disabled()
                 lifecycle.ui.check_layout(page)
                 bounds = confirm.bounding_box()
@@ -99,7 +105,7 @@ def browser_workflow(client, base, backend, name, output, verify):
                 )
                 page.screenshot(path=str(output / ("takeover-" + view + ".png")))
                 dialog.get_by_label(
-                    "Replace source fragments and restart Xray if running", exact=True
+                    "替换源配置片段，并在 Xray 正在运行时重启", exact=True
                 ).check()
                 with page.expect_response(
                     lambda response: (
@@ -273,7 +279,8 @@ def crash_and_failure_checks(
             lambda: runtime.forwards(socks, echo_port),
         )
     print(
-        "PASS actual SIGKILL, independent-edit guard, interrupted command replay and occupied-port rollback",
+        "PASS actual SIGKILL, independent-edit guard, interrupted command replay "
+        "and occupied-port rollback",
         flush=True,
     )
 

@@ -1,4 +1,5 @@
 import type { ProbePayload, ProbeSeriesResponse, ProbeTargetComparisonResponse } from "../domain/probe";
+import { requestError } from "./request-error";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 export type ProbeRange = "1h" | "6h" | "24h";
@@ -13,7 +14,8 @@ async function readPublic<T>(path: string, fetcher: typeof fetch, accessToken?: 
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: unknown } | null;
-    throw new Error(typeof body?.detail === "string" && body.detail ? body.detail : `Public probe request failed with ${response.status}`);
+    throw requestError(typeof body?.detail === "string" && body.detail ? body.detail : undefined,
+      `公开探针请求失败（${response.status}）`);
   }
   return response.json() as Promise<T>;
 }

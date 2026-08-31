@@ -59,6 +59,6 @@ describe("subscription templates", () => {
     const fetcher: typeof fetch = async () => new Response(JSON.stringify({ detail: [{ loc: ["body", "content"], msg: "Invalid YAML" }] }), { status: 422 });
     await expect(createSubscriptionTemplate({
       name: "a.yaml", format: "clash", content: "x", owner_username: null, is_public: false,
-    }, false, fetcher)).rejects.toThrow("content: Invalid YAML");
+    }, false, fetcher)).rejects.toThrow("content: YAML 格式无效。");
   });
 });

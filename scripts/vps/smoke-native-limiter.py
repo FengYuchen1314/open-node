@@ -5,6 +5,7 @@ import copy
 import importlib.util
 import json
 import os
+import re
 import socket
 import socketserver
 import ssl
@@ -188,18 +189,18 @@ def check_numeric_drafts(page, panel):
             mutations.append(request.url)
 
     page.on("request", record)
-    save = panel.get_by_role("button", name="Save limits", exact=True)
+    save = panel.get_by_role("button", name="保存限制", exact=True)
     try:
         for label, raw in (
-            ("Per-user cap Mbps", "-1"),
-            ("Per-user cap Mbps", "1e-999"),
-            ("Per-user cap Mbps", "not-a-number"),
-            ("Per-user cap Mbps", ""),
-            ("Cap Mbps", "-1"),
-            ("Cap Mbps", ""),
-            ("Connections", "-1"),
-            ("Connections", "0.4"),
-            ("Connections", "1000001"),
+            ("每用户限速（Mbps）", "-1"),
+            ("每用户限速（Mbps）", "1e-999"),
+            ("每用户限速（Mbps）", "not-a-number"),
+            ("每用户限速（Mbps）", ""),
+            ("限速值（Mbps）", "-1"),
+            ("限速值（Mbps）", ""),
+            ("连接数", "-1"),
+            ("连接数", "0.4"),
+            ("连接数", "1000001"),
         ):
             control = panel.get_by_label(label, exact=True)
             original = control.input_value()
@@ -212,7 +213,7 @@ def check_numeric_drafts(page, panel):
             control.fill(original)
             control.press("Tab")
             expect(save).to_be_enabled()
-        cap = panel.get_by_label("Per-user cap Mbps", exact=True)
+        cap = panel.get_by_label("每用户限速（Mbps）", exact=True)
         original = cap.input_value()
         cap.fill("")
         cap.press_sequentially("-")
@@ -249,7 +250,7 @@ def browser_workflow(client, base, backend, output):
     output.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
         page = None
         try:
             context.add_cookies(
@@ -268,25 +269,28 @@ def browser_workflow(client, base, backend, output):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/config")
-            page.get_by_role("tab", name="Limits", exact=True).click()
-            panel = page.get_by_role("tabpanel", name="Limits", exact=True)
-            expect(panel.get_by_label("Inbound", exact=True)).to_be_visible()
-            panel.get_by_label("Inbound", exact=True).click()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_role("tab", name="限制", exact=True).click()
+            panel = page.get_by_role("tabpanel", name="限制", exact=True)
+            expect(panel.get_by_label("入站", exact=True)).to_be_visible()
+            panel.get_by_role(
+                "combobox", name="入站", exact=True
+            ).click()
             popup = page.locator(".ant-select-dropdown:visible")
             popup.locator(".ant-select-item-option").get_by_text(
                 "vless-vision", exact=True
             ).click()
             check_numeric_drafts(page, panel)
-            panel.get_by_label("Cap Mbps", exact=True).fill("0.0000001")
+            panel.get_by_label("限速值（Mbps）", exact=True).fill("0.0000001")
             expect(
-                panel.get_by_role("button", name="Save limits", exact=True)
+                panel.get_by_role("button", name="保存限制", exact=True)
             ).to_be_disabled()
-            panel.get_by_label("Cap Mbps", exact=True).fill("0.75")
-            panel.get_by_role("button", name="Add automatic rule", exact=True).click()
-            panel.get_by_label("Rule 1 type", exact=True).get_by_text(
-                "Burst", exact=True
+            panel.get_by_label("限速值（Mbps）", exact=True).fill("0.75")
+            panel.get_by_role("button", name="添加自动限速规则", exact=True).click()
+            panel.get_by_label("规则 1 类型", exact=True).get_by_text(
+                "突发限速", exact=True
             ).click()
-            expect(panel.get_by_role("radio", name="Burst", exact=True)).to_be_checked()
+            expect(panel.get_by_role("radio", name="突发限速", exact=True)).to_be_checked()
             for width, height, label in [
                 (1440, 900, "desktop"),
                 (390, 844, "mobile"),
@@ -298,8 +302,8 @@ def browser_workflow(client, base, backend, output):
                 panel.scroll_into_view_if_needed()
                 page.screenshot(path=output / ("limiter-" + label + ".png"))
             page.set_viewport_size({"width": 1440, "height": 900})
-            panel.get_by_role("button", name="Save limits", exact=True).click()
-            expect(panel.get_by_text("Limits applied.", exact=True)).to_be_visible(
+            panel.get_by_role("button", name="保存限制", exact=True).click()
+            expect(panel.get_by_text("限制已应用。", exact=True)).to_be_visible(
                 timeout=20000
             )
             state = command(client, base, "limiter/status")
@@ -323,29 +327,29 @@ def browser_workflow(client, base, backend, output):
                 },
             )
             panel.get_by_role("row").filter(
-                has=page.get_by_label("Email", exact=True)
-            ).get_by_label("Cap Mbps", exact=True).fill("1")
-            panel.get_by_role("button", name="Save limits", exact=True).click()
+                has=page.get_by_label("用户标识（email）", exact=True)
+            ).get_by_label("限速值（Mbps）", exact=True).fill("1")
+            panel.get_by_role("button", name="保存限制", exact=True).click()
             expect(
                 panel.get_by_text(
-                    "limiter revision changed; refresh before applying", exact=False
+                    "限速设置版本已变化，请刷新后应用。", exact=False
                 )
             ).to_be_visible(timeout=20000)
-            panel.get_by_role("button", name="Refresh limits", exact=True).click()
-            expect(panel.get_by_label("Per-user cap Mbps", exact=True)).to_have_value(
+            panel.get_by_role("button", name="刷新限制", exact=True).click()
+            expect(panel.get_by_label("每用户限速（Mbps）", exact=True)).to_have_value(
                 "1", timeout=20000
             )
-            panel.get_by_role("button", name="Remove limits", exact=True).click()
+            panel.get_by_role("button", name="移除限制", exact=True).click()
             dialog = page.get_by_role("dialog")
-            expect(dialog.get_by_text("Remove limits?", exact=True)).to_be_visible()
-            dialog.get_by_role("button", name="Cancel", exact=True).click()
+            expect(dialog.get_by_text("移除限制？", exact=True)).to_be_visible()
+            dialog.get_by_role("button", name=re.compile(r"^取\s*消$")).click()
             assert any(
                 item["inbound_tag"] == "vless-vision"
                 for item in command(client, base, "limiter/status")["inbounds"]
             )
-            panel.get_by_role("button", name="Remove limits", exact=True).click()
-            dialog.get_by_role("button", name="Remove", exact=True).click()
-            expect(panel.get_by_text("Limits removed.", exact=True)).to_be_visible(
+            panel.get_by_role("button", name="移除限制", exact=True).click()
+            dialog.get_by_role("button", name="移除", exact=True).click()
+            expect(panel.get_by_text("限制已移除。", exact=True)).to_be_visible(
                 timeout=20000
             )
             assert not any(
@@ -363,13 +367,22 @@ def browser_workflow(client, base, backend, output):
                     page.screenshot(path=output / "failure.png", full_page=True)
                     (output / "failure-layout.json").write_text(
                         json.dumps(
-                            page.evaluate("""() => ({width: innerWidth,
-                                documentWidth: document.documentElement.scrollWidth,
-                                controls: [...document.querySelectorAll('.ant-input,.ant-input-number,.ant-select,.ant-btn,.ant-radio-group')]
-                                    .filter(el => el.checkVisibility({checkVisibilityCSS: true}))
-                                    .map(el => ({label: el.getAttribute('aria-label'),
-                                        className: el.className,
-                                        bounds: el.getBoundingClientRect().toJSON()}))})"""),
+                            page.evaluate(
+                                "() => ({width: innerWidth,\n"
+                                "                                documentWidth: "
+                                "document.documentElement.scrollWidth,\n"
+                                "                                controls: "
+                                "[...document.querySelectorAll("
+                                "'.ant-input,.ant-input-number,.ant-select,"
+                                ".ant-btn,.ant-radio-group')]\n"
+                                "                                    "
+                                ".filter(el => el.checkVisibility({checkVisibilityCSS: true}))\n"
+                                "                                    "
+                                ".map(el => ({label: el.getAttribute('aria-label'),\n"
+                                "                                        className: el.className,\n"
+                                "                                        "
+                                "bounds: el.getBoundingClientRect().toJSON()}))})"
+                            ),
                             indent=2,
                         )
                     )

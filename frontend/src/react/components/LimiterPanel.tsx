@@ -6,6 +6,7 @@ import type { AgentCommand, AgentLimiterOperationRequest, XrayRuntimeInbound } f
 import { listServerCommands, queueAgentOperation } from "../../services/inventory";
 import AutoSpeedRuleEditor from "./AutoSpeedRuleEditor";
 import StrictInputNumber from "./StrictInputNumber";
+import { zhMessage } from "../../i18n/zh-CN";
 
 export interface LimiterPanelProps {
   serverId: string;
@@ -89,26 +90,26 @@ export default function LimiterPanel(props: LimiterPanelProps) {
         if (!current()) return;
         live.current.onCommands?.(serverId, response.commands);
         const command = response.commands.find((item) => item.id === queued.command.id);
-        if (command?.status === "failed" || command?.status === "skipped") throw new Error(command.result_error || "Limiter command failed.");
+        if (command?.status === "failed" || command?.status === "skipped") throw new Error(command.result_error || "限速命令失败。");
         if (command?.status === "succeeded") {
           const value = command.result_body as Snapshot | null;
-          if (!value || typeof value.available !== "boolean") throw new Error("Unsupported limiter response.");
+          if (!value || typeof value.available !== "boolean") throw new Error("不支持的限速器响应。");
           setSnapshot(value);
-          if (!value.available) throw new Error(value.message || "Native limiter unavailable.");
-          if (!value.revision || !/^[0-9a-f]{64}$/.test(value.revision) || !Array.isArray(value.inbounds)) throw new Error("Invalid limiter state.");
+          if (!value.available) throw new Error(value.message || "原生限速器不可用。");
+          if (!value.revision || !/^[0-9a-f]{64}$/.test(value.revision) || !Array.isArray(value.inbounds)) throw new Error("限速器状态无效。");
           const options = tagsFor(live.current.inbounds, value);
           const tag = options.includes(live.current.selectedTag) ? live.current.selectedTag : options[0] ?? "";
           setSelectedTag(tag);
           live.current.selectedTag = tag;
           populate(tag, value);
-          if (kind === "limiter") setMessage(body?.action === "remove" ? "Limits removed." : "Limits applied.");
+          if (kind === "limiter") setMessage(body?.action === "remove" ? "限制已移除。" : "限制已应用。");
           return;
         }
         await new Promise((resolve) => window.setTimeout(resolve, 500));
       }
-      throw new Error("Limiter command is still pending. Check command history.");
+      throw new Error("限速命令仍在等待处理，请检查命令历史。");
     } catch (failure) {
-      if (current()) setError(failure instanceof Error ? failure.message : "Limiter request failed.");
+      if (current()) setError(failure instanceof Error ? failure.message : "限速请求失败。");
     } finally {
       if (current()) setBusy(false);
     }
@@ -165,36 +166,36 @@ export default function LimiterPanel(props: LimiterPanelProps) {
     void run("limiter", { action: "remove", inbound_tag: selectedTag, expected_revision: snapshot.revision });
   }
 
-  return <Card size="small" title="Limits" extra={<Space wrap><Tag>{snapshot?.available ? `${connections} active connections` : "Unavailable"}</Tag><Button icon={<ReloadOutlined />} aria-label="Refresh limits" loading={busy} disabled={!props.serverId} onClick={() => void run("limiter_status")} /></Space>}>
+  return <Card size="small" title="限制" extra={<Space wrap><Tag>{snapshot?.available ? `${connections} 个活跃连接` : "不可用"}</Tag><Button icon={<ReloadOutlined />} aria-label="刷新限制" loading={busy} disabled={!props.serverId} onClick={() => void run("limiter_status")} /></Space>}>
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-      {error && <Alert type="error" title={error} showIcon />}
+      {error && <Alert type="error" title={zhMessage(error)} showIcon />}
       {message && <Alert type="success" title={message} showIcon />}
-      <Typography.Paragraph type="secondary">Native Xray limits. Zero means unlimited. Limits use the revision returned by the latest status read.</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">Xray 原生限制。0 表示不限额。保存限制时使用最近一次状态查询返回的版本。</Typography.Paragraph>
       <Form id="native-limiter-form" layout="vertical" disabled={busy || !ready} onFinish={save}>
         <Row gutter={16}>
-          <Col xs={24} md={8}><Form.Item label="Inbound"><Select aria-label="Inbound" style={{ width: "100%" }} value={selectedTag || undefined} options={inboundOptions.map((value) => ({ value, label: value }))} onChange={(tag) => { setSelectedTag(tag); live.current.selectedTag = tag; populate(tag, snapshot); }} /></Form.Item></Col>
-          <Col xs={24} md={8}><Form.Item label="Per-user cap Mbps" extra="0 = unlimited"><StrictInputNumber aria-label="Per-user cap Mbps" aria-valuemin={0} style={{ width: "100%" }} value={nodeMbps} onChange={(value) => setNodeMbps(value ?? Number.NaN)} /></Form.Item></Col>
-          <Col xs={24} md={8}><Form.Item label="Search users"><Input aria-label="Search users" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} allowClear /></Form.Item></Col>
+          <Col xs={24} md={8}><Form.Item label="入站"><Select aria-label="入站" style={{ width: "100%" }} value={selectedTag || undefined} options={inboundOptions.map((value) => ({ value, label: value }))} onChange={(tag) => { setSelectedTag(tag); live.current.selectedTag = tag; populate(tag, snapshot); }} /></Form.Item></Col>
+          <Col xs={24} md={8}><Form.Item label="每用户限速（Mbps）" extra="0 表示不限速"><StrictInputNumber aria-label="每用户限速（Mbps）" aria-valuemin={0} style={{ width: "100%" }} value={nodeMbps} onChange={(value) => setNodeMbps(value ?? Number.NaN)} /></Form.Item></Col>
+          <Col xs={24} md={8}><Form.Item label="搜索用户"><Input aria-label="搜索用户" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} allowClear /></Form.Item></Col>
         </Row>
-        <Table<UserRow> rowKey="key" dataSource={filtered} locale={{ emptyText: "No users" }} scroll={{ x: 880 }} pagination={{ current: page, pageSize: 8, total: filtered.length, showSizeChanger: false, onChange: setPage }} columns={[
-          { title: "Email", key: "email", render: (_, row) => <Input aria-label="Email" value={row.email} onChange={(event) => updateUser(row.key, { email: event.target.value })} /> },
-          { title: "Cap Mbps", key: "rate", render: (_, row) => <StrictInputNumber aria-label="Cap Mbps" aria-valuemin={0} value={row.mbps} onChange={(value) => updateUser(row.key, { mbps: value ?? Number.NaN })} /> },
-          { title: "Connections", key: "connections", render: (_, row) => <StrictInputNumber aria-label="Connections" aria-valuemin={0} aria-valuemax={1000000} value={row.connections} onChange={(value) => updateUser(row.key, { connections: value ?? Number.NaN })} /> },
-          { title: "Connection group", key: "group", render: (_, row) => <Input aria-label="Connection group" value={row.group} onChange={(event) => updateUser(row.key, { group: event.target.value })} /> },
-          { title: "Live usage", key: "usage", render: (_, row) => {
+        <Table<UserRow> rowKey="key" dataSource={filtered} locale={{ emptyText: "暂无用户" }} scroll={{ x: 880 }} pagination={{ current: page, pageSize: 8, total: filtered.length, showSizeChanger: false, onChange: setPage }} columns={[
+          { title: "用户标识（email）", key: "email", render: (_, row) => <Input aria-label="用户标识（email）" value={row.email} onChange={(event) => updateUser(row.key, { email: event.target.value })} /> },
+          { title: "限速值（Mbps）", key: "rate", render: (_, row) => <StrictInputNumber aria-label="限速值（Mbps）" aria-valuemin={0} value={row.mbps} onChange={(value) => updateUser(row.key, { mbps: value ?? Number.NaN })} /> },
+          { title: "连接数", key: "connections", render: (_, row) => <StrictInputNumber aria-label="连接数" aria-valuemin={0} aria-valuemax={1000000} value={row.connections} onChange={(value) => updateUser(row.key, { connections: value ?? Number.NaN })} /> },
+          { title: "连接组", key: "group", render: (_, row) => <Input aria-label="连接组" value={row.group} onChange={(event) => updateUser(row.key, { group: event.target.value })} /> },
+          { title: "实时用量", key: "usage", render: (_, row) => {
             const key = `${selectedTag}\0${row.email}`;
             const automatic = snapshot?.automatic_limits?.[key];
-            return <Space orientation="vertical" size={0}><span>{snapshot?.conn_counts?.[row.group || row.email] ?? 0} active</span><span>{((snapshot?.user_speeds?.[row.email] ?? 0) / BYTES_PER_MEGABIT).toFixed(2)} Mbps</span><span>{snapshot?.connection_rejections?.[row.email] ?? 0} rejected</span>{row.auto_speed_rules.length > 0 && <span>{row.auto_speed_rules.length} automatic rules</span>}{automatic && <Tag color="warning">{(automatic.bytes_per_second / BYTES_PER_MEGABIT).toFixed(2)} Mbps until {automatic.until}</Tag>}</Space>;
+            return <Space orientation="vertical" size={0}><span>{snapshot?.conn_counts?.[row.group || row.email] ?? 0} 个活跃连接</span><span>{((snapshot?.user_speeds?.[row.email] ?? 0) / BYTES_PER_MEGABIT).toFixed(2)} Mbps</span><span>{snapshot?.connection_rejections?.[row.email] ?? 0} 次拒绝</span>{row.auto_speed_rules.length > 0 && <span>{row.auto_speed_rules.length} 条自动限速规则</span>}{automatic && <Tag color="warning">{(automatic.bytes_per_second / BYTES_PER_MEGABIT).toFixed(2)} Mbps，截止 {new Date(automatic.until).toLocaleString("zh-CN")}</Tag>}</Space>;
           } },
-          { title: "Actions", key: "actions", render: (_, row) => <Button danger icon={<DeleteOutlined />} aria-label={`Remove limit for ${row.email || "new user"}`} disabled={busy} onClick={() => setUsers((rows) => rows.filter((user) => user.key !== row.key))} /> },
+          { title: "操作", key: "actions", render: (_, row) => <Button danger icon={<DeleteOutlined />} aria-label={`移除 ${row.email || "新用户"} 的限制`} disabled={busy} onClick={() => setUsers((rows) => rows.filter((user) => user.key !== row.key))} /> },
         ]} />
-        <Button icon={<PlusOutlined />} aria-label="Add limiter user" disabled={busy || !ready || !selectedTag || users.length >= 1000} onClick={addUser}>Add user</Button>
+        <Button icon={<PlusOutlined />} aria-label="添加限速用户" disabled={busy || !ready || !selectedTag || users.length >= 1000} onClick={addUser}>添加用户</Button>
         <div style={{ marginTop: 16 }}><AutoSpeedRuleEditor value={rules} onChange={setRules} disabled={busy || !selectedTag || !ready} /></div>
-        <Space wrap style={{ marginTop: 16 }}><Button type="primary" htmlType="submit" form="native-limiter-form" loading={busy} disabled={busy || !ready || !valid}>Save limits</Button><Button danger disabled={busy || !ready || !hasPolicy} onClick={() => setRemovalOpen(true)}>Remove limits</Button></Space>
+        <Space wrap style={{ marginTop: 16 }}><Button aria-label="保存限制" type="primary" htmlType="submit" form="native-limiter-form" loading={busy} disabled={busy || !ready || !valid}>保存限制</Button><Button aria-label="移除限制" danger disabled={busy || !ready || !hasPolicy} onClick={() => setRemovalOpen(true)}>移除限制</Button></Space>
       </Form>
     </Space>
-    <Modal title="Remove limits?" open={removalOpen} onCancel={() => setRemovalOpen(false)} onOk={remove} okText="Remove" okButtonProps={{ danger: true }}>
-      <Typography.Paragraph>Remove all native limits for <Typography.Text code>{selectedTag}</Typography.Text>?</Typography.Paragraph>
+    <Modal title="移除限制？" open={removalOpen} onCancel={() => setRemovalOpen(false)} onOk={remove} okText="移除" okButtonProps={{ danger: true, "aria-label": "移除" }}>
+      <Typography.Paragraph>移除 <Typography.Text code>{selectedTag}</Typography.Text> 的全部原生限制？</Typography.Paragraph>
     </Modal>
   </Card>;
 }

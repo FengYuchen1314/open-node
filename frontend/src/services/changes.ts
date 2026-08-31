@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 import type {
   AgentChangeSetCreateRequest,
   AgentChangeSetResponse,
@@ -16,7 +17,7 @@ const jsonHeaders = {
 export async function listChangeSets(fetcher = authenticatedFetch): Promise<AgentChangeSetsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets`);
   if (!response.ok) {
-    throw await apiError(response, "Change set list request failed");
+    throw await apiError(response, "获取变更集列表失败");
   }
   return response.json() as Promise<AgentChangeSetsResponse>;
 }
@@ -27,7 +28,7 @@ export async function getChangeSet(
 ): Promise<AgentChangeSetResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/change-sets/${changeSetId}`);
   if (!response.ok) {
-    throw await apiError(response, "Change set request failed");
+    throw await apiError(response, "获取变更集失败");
   }
   return response.json() as Promise<AgentChangeSetResponse>;
 }
@@ -42,7 +43,7 @@ export async function createChangeSet(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Change set create request failed");
+    throw await apiError(response, "创建变更集失败");
   }
   return response.json() as Promise<AgentChangeSetResponse>;
 }
@@ -57,7 +58,7 @@ export async function createRoutedOutboundChangeSet(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Routed outbound change set create request failed");
+    throw await apiError(response, "创建路由出站变更集失败");
   }
   return response.json() as Promise<AgentChangeSetResponse>;
 }
@@ -70,7 +71,7 @@ export async function dispatchChangeSet(
     method: "POST",
   });
   if (!response.ok) {
-    throw await apiError(response, "Change set dispatch request failed");
+    throw await apiError(response, "下发变更集失败");
   }
   return response.json() as Promise<AgentChangeSetResponse>;
 }
@@ -86,7 +87,7 @@ export async function rollbackChangeSet(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Change set rollback request failed");
+    throw await apiError(response, "回退变更集失败");
   }
   return response.json() as Promise<AgentChangeSetResponse>;
 }
@@ -101,7 +102,7 @@ export async function acceptChangeSet(
     headers: jsonHeaders,
     body: JSON.stringify({ acknowledge: true, reason }),
   });
-  if (!response.ok) throw await apiError(response, "Change set acceptance failed");
+  if (!response.ok) throw await apiError(response, "确认接受变更集失败");
   return response.json() as Promise<AgentChangeSetResponse>;
 }
 
@@ -109,10 +110,10 @@ async function apiError(response: Response, fallback: string): Promise<Error> {
   try {
     const body = (await response.json()) as { detail?: unknown };
     if (typeof body.detail === "string" && body.detail.length > 0) {
-      return new Error(body.detail);
+      return requestError(body.detail, `${fallback}（${response.status}）`);
     }
   } catch {
     // The backend normally returns JSON errors, but network proxies may not.
   }
-  return new Error(`${fallback} with ${response.status}`);
+  return requestError(undefined, `${fallback}（${response.status}）`);
 }

@@ -1,8 +1,12 @@
-# External subscriptions: next bounded P1 slice
+# External subscriptions: first-slice design record
 
-Status: source review only; **not implemented**. This records the next work item
-after publication of the verified React/standard Ant Design rewrite, not a
-completed feature or a claim of full subscription-ecosystem parity.
+The first administrator/manual-YAML slice is now implemented. See
+[external-subscriptions.md](external-subscriptions.md) for the actual workflow,
+limits and key recovery, and [testing.md](testing.md#external-subscriptions)
+for release evidence. The original source review and implementation requirements
+below are retained as the design record; their future tense does not describe
+the current implementation status. The wider subscription ecosystem remains
+unfinished.
 
 ## Reference and intended workflow
 

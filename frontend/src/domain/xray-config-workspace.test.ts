@@ -85,13 +85,13 @@ describe("parseJsonObjectText", () => {
 
   it.each(["[]", "null", '"text"', "true"])("rejects non-object JSON %s", (value) => {
     expect(() => parseJsonObjectText(value, "Policy")).toThrow(
-      "Policy must be a JSON object.",
+      "Policy 必须是 JSON 对象。",
     );
   });
 
   it("distinguishes malformed JSON", () => {
     expect(() => parseJsonObjectText("{", "DNS")).toThrow(
-      "DNS must contain valid JSON.",
+      "DNS 必须包含有效的 JSON。",
     );
   });
 });

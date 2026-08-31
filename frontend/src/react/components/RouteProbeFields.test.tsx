@@ -17,7 +17,7 @@ describe("Return-route target numeric drafts", () => {
       return <RouteProbeFields value={targets} onChange={next => { changed(next); setTargets(next); }} />;
     }
     renderUi(<Harness />);
-    const input = screen.getByRole("spinbutton", { name: "Telecom port" });
+    const input = screen.getByRole("spinbutton", { name: "电信端口" });
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: draft } });
     fireEvent.blur(input);
@@ -25,7 +25,7 @@ describe("Return-route target numeric drafts", () => {
     const latest = changed.mock.lastCall?.[0][0].port;
     if (draft === "" || draft === "-") expect(Number.isNaN(latest)).toBe(true);
     else expect(latest).toBe(Number(draft));
-    expect(screen.getByText("Use a whole-number port from 1 to 65535.")).toBeTruthy();
+    expect(screen.getByText("请输入 1 至 65535 的整数端口。")).toBeTruthy();
     expect(changed.mock.calls.every(([targets]) => targets[0].port !== 80 && targets[0].port !== 65535 && targets[0].port !== 0)).toBe(true);
   });
 });

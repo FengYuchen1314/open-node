@@ -56,22 +56,23 @@ def capture(page, output, name, *, mask=()):
 
 
 def sign_in(page, password):
-    page.get_by_label("Username", exact=True).fill("admin")
-    page.get_by_label("Password", exact=True).fill(password)
-    page.get_by_role("button", name="Sign In", exact=True).click()
+    expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+    page.get_by_label("用户名", exact=True).fill("admin")
+    page.get_by_label("密码", exact=True).fill(password)
+    page.get_by_role("button", name="登录", exact=True).click()
 
 
 def prove(dialog, password, code):
-    dialog.get_by_label("Current password", exact=True).fill(password)
-    dialog.get_by_label("Authenticator or recovery code", exact=True).fill(code)
-    dialog.get_by_role("button", name="Confirm", exact=True).click()
+    dialog.get_by_label("当前密码", exact=True).fill(password)
+    dialog.get_by_label("验证器验证码或恢复码", exact=True).fill(code)
+    dialog.get_by_role("button", name="确认", exact=True).click()
 
 
 def accept_codes(dialog):
     codes = dialog.locator(".recovery-grid code").all_text_contents()
     assert len(codes) == len(set(codes)) == 10
-    dialog.get_by_label("I have stored the recovery codes securely", exact=True).check()
-    dialog.get_by_role("button", name="Done", exact=True).click()
+    dialog.get_by_label("我已妥善保存恢复码", exact=True).check()
+    dialog.get_by_role("button", name="完成", exact=True).click()
     expect(dialog).not_to_be_visible()
     return codes
 
@@ -79,7 +80,9 @@ def accept_codes(dialog):
 def exercise(url, password, output, *, reset_password, database):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 1000}, locale="zh-CN"
+        )
         page = context.new_page()
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -87,16 +90,16 @@ def exercise(url, password, output, *, reset_password, database):
             page.goto(url + "/access")
             sign_in(page, password)
             expect(
-                page.get_by_role("heading", name="Access", exact=True)
+                page.get_by_role("heading", name="访问管理", exact=True)
             ).to_be_visible()
             panel = page.get_by_role(
-                "region", name="Administrator security", exact=True
+                "region", name="管理员安全", exact=True
             )
-            panel.get_by_role("button", name="Enable", exact=True).click()
+            panel.get_by_role("button", name="启用", exact=True).click()
             dialog = page.get_by_role("dialog")
-            dialog.get_by_label("Current password", exact=True).fill(password)
-            dialog.get_by_role("button", name="Start enrollment", exact=True).click()
-            secret_input = dialog.get_by_label("Authenticator secret", exact=True)
+            dialog.get_by_label("当前密码", exact=True).fill(password)
+            dialog.get_by_role("button", name="开始设置", exact=True).click()
+            secret_input = dialog.get_by_label("验证器密钥", exact=True)
             expect(secret_input).to_have_value(re.compile(r"[A-Z2-7]{32}"))
             secret = secret_input.input_value()
             capture(
@@ -105,24 +108,24 @@ def exercise(url, password, output, *, reset_password, database):
                 "administrator-enrollment",
                 mask=(secret_input, dialog.locator("img")),
             )
-            dialog.get_by_label("Authenticator code", exact=True).fill(
+            dialog.get_by_label("验证器验证码", exact=True).fill(
                 pyotp.TOTP(secret).now()
             )
-            dialog.get_by_role("button", name="Confirm", exact=True).click()
+            dialog.get_by_role("button", name="确认", exact=True).click()
             expect(dialog.locator(".recovery-grid code")).to_have_count(10)
             codes = accept_codes(dialog)
-            panel.get_by_role("button", name="Require 2FA", exact=True).click()
+            panel.get_by_role("button", name="强制双因素认证", exact=True).click()
             prove(dialog, password, codes[0])
             expect(dialog).not_to_be_visible()
             expect(
-                panel.get_by_role("button", name="Disable", exact=True)
+                panel.get_by_role("button", name="停用", exact=True)
             ).to_be_disabled()
             capture(page, output, "administrator-security-enabled")
 
-            page.get_by_role("button", name="Sign out", exact=True).click()
+            page.get_by_role("button", name="退出登录", exact=True).click()
             sign_in(page, password)
             factor_input = page.get_by_label(
-                "Authenticator or recovery code", exact=True
+                "验证器验证码或恢复码", exact=True
             )
             expect(factor_input).to_be_visible()
             assert (
@@ -134,23 +137,23 @@ def exercise(url, password, output, *, reset_password, database):
             assert context.request.get(url + "/api/v1/servers").status == 401
             capture(page, output, "administrator-login-challenge")
             factor_input.fill(codes[1])
-            page.get_by_role("button", name="Verify", exact=True).click()
+            page.get_by_role("button", name="验证", exact=True).click()
             expect(
-                page.get_by_role("heading", name="Access", exact=True)
+                page.get_by_role("heading", name="访问管理", exact=True)
             ).to_be_visible()
 
-            panel.get_by_role("button", name="New recovery codes", exact=True).click()
+            panel.get_by_role("button", name="生成新恢复码", exact=True).click()
             prove(dialog, password, codes[2])
             expect(dialog.locator(".recovery-grid code")).to_have_count(10)
             replacement_codes = accept_codes(dialog)
-            panel.get_by_role("button", name="Make optional", exact=True).click()
+            panel.get_by_role("button", name="设为可选", exact=True).click()
             prove(dialog, password, replacement_codes[0])
             expect(dialog).not_to_be_visible()
-            panel.get_by_role("button", name="Disable", exact=True).click()
+            panel.get_by_role("button", name="停用", exact=True).click()
             prove(dialog, password, replacement_codes[1])
             expect(dialog).not_to_be_visible()
             expect(
-                panel.get_by_role("button", name="Enable", exact=True)
+                panel.get_by_role("button", name="启用", exact=True)
             ).to_be_visible()
             storage = page.evaluate(
                 "JSON.stringify({ ...localStorage, ...sessionStorage })"
@@ -158,14 +161,14 @@ def exercise(url, password, output, *, reset_password, database):
             for value in [password, secret, *codes, *replacement_codes]:
                 assert value not in storage
 
-            page.get_by_role("button", name="Sign out", exact=True).click()
+            page.get_by_role("button", name="退出登录", exact=True).click()
             replacement = reset_password()
             with sqlite3.connect(database) as connection:
                 connection.execute(
                     "UPDATE administrator_security_policy SET require_totp=1 WHERE id=1"
                 )
             sign_in(page, replacement)
-            mandatory_secret = page.get_by_label("Authenticator secret", exact=True)
+            mandatory_secret = page.get_by_label("验证器密钥", exact=True)
             expect(mandatory_secret).to_be_visible()
             secret = mandatory_secret.input_value()
             assert (
@@ -180,20 +183,20 @@ def exercise(url, password, output, *, reset_password, database):
                 "administrator-required-enrollment",
                 mask=(mandatory_secret, page.locator(".totp-qr")),
             )
-            page.get_by_label("Authenticator code", exact=True).fill(
+            page.get_by_label("验证器验证码", exact=True).fill(
                 pyotp.TOTP(secret).now()
             )
-            page.get_by_role("button", name="Verify", exact=True).click()
+            page.get_by_role("button", name="验证", exact=True).click()
             expect(page.locator(".recovery-grid code")).to_have_count(10)
             expect(
-                page.get_by_role("button", name="Continue to Open Node", exact=True)
+                page.get_by_role("button", name="进入 Open Node", exact=True)
             ).to_be_disabled()
             page.get_by_label(
-                "I have stored the recovery codes securely", exact=True
+                "我已妥善保存恢复码", exact=True
             ).check()
-            page.get_by_role("button", name="Continue to Open Node", exact=True).click()
+            page.get_by_role("button", name="进入 Open Node", exact=True).click()
             expect(
-                page.get_by_role("heading", name="Access", exact=True)
+                page.get_by_role("heading", name="访问管理", exact=True)
             ).to_be_visible()
             assert not errors, errors
         finally:

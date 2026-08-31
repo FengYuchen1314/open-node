@@ -58,9 +58,9 @@ class ProbeSettingsRead(BaseModel):
     show_traffic_quota: bool = True
     show_renewal_timeline: bool = False
     show_health_score: bool = True
-    title: str = Field(default="Open Node Probe", max_length=120)
+    title: str = Field(default="Open Node 探针", max_length=120)
     description: str = Field(
-        default="MMWX probe-compatible node status without license gates.",
+        default="兼容 MMWX 探针的节点状态页面，无需授权许可。",
         max_length=500,
     )
     logo: str = Field(default="", max_length=2000)

@@ -3,6 +3,7 @@ import { Alert, Button, Checkbox, Descriptions, Form, Input, Modal, Space, Spin,
 import { DeleteOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { getServerRemoval, getServerSettings, removeServer, updateServerSettings,
   type RemovalPreview, type ServerSettings } from "../../services/server-management";
+import { zhMessage } from "../../i18n/zh-CN";
 
 export interface ServerManagementDialogProps {
   open: boolean;
@@ -48,7 +49,7 @@ export default function ServerManagementDialog({ open, onOpenChange, serverId, m
         setSyncHosts(true);
       }
     } catch (failure) {
-      if (run === generation.current) setError(failure instanceof Error ? failure.message : "Server request failed");
+      if (run === generation.current) setError(failure instanceof Error ? failure.message : "服务器请求失败");
     } finally {
       if (run === generation.current) { setBusy(false); busyRef.current = false; }
     }
@@ -62,7 +63,7 @@ export default function ServerManagementDialog({ open, onOpenChange, serverId, m
       if (run !== generation.current) return;
       onUpdated?.(); onOpenChange(false);
     } catch (failure) {
-      if (run === generation.current) setError(failure instanceof Error ? failure.message : "Server update failed");
+      if (run === generation.current) setError(failure instanceof Error ? failure.message : "更新服务器失败");
     } finally {
       if (run === generation.current) { setBusy(false); busyRef.current = false; }
     }
@@ -77,7 +78,7 @@ export default function ServerManagementDialog({ open, onOpenChange, serverId, m
       onUpdated?.(); onOpenChange(false);
     } catch (failure) {
       if (run === generation.current) {
-        setError(failure instanceof Error ? failure.message : "Server removal failed");
+        setError(failure instanceof Error ? failure.message : "删除服务器失败");
         setPreview(null); setAcknowledged(false);
       }
     } finally {
@@ -92,50 +93,50 @@ export default function ServerManagementDialog({ open, onOpenChange, serverId, m
 
   return <Modal open={open} destroyOnHidden width={620} centered mask={{ closable: !busy }} keyboard={!busy}
     closable={!busy} onCancel={() => { if (!busyRef.current) onOpenChange(false); }}
-    title={<Space wrap><span>{mode === "edit" ? "Edit server" : "Remove server"}</span>
-      <Button type="text" icon={<ReloadOutlined />} aria-label="Reload server details" disabled={busy} onClick={() => void load()} /></Space>}
+    title={<Space wrap><span>{mode === "edit" ? "编辑服务器" : "删除服务器"}</span>
+      <Button type="text" icon={<ReloadOutlined />} aria-label="重新加载服务器详情" disabled={busy} onClick={() => void load()} /></Space>}
     styles={{ body: { maxHeight: "calc(100dvh - 200px)", overflowY: "auto" } }}
-    footer={<Space wrap><Button disabled={busy} onClick={() => onOpenChange(false)}>Cancel</Button>
-      {mode === "edit" ? <Button type="primary" aria-label="Save" icon={<SaveOutlined aria-hidden />} disabled={busy || !revision || !form.name.trim()}
-        onClick={() => void save()}>Save</Button> : <Button danger type="primary" aria-label="Remove" icon={<DeleteOutlined aria-hidden />}
-          disabled={!canRemove} onClick={() => void remove()}>Remove</Button>}</Space>}>
+    footer={<Space wrap><Button aria-label="取消" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button>
+      {mode === "edit" ? <Button type="primary" aria-label="保存" icon={<SaveOutlined aria-hidden />} disabled={busy || !revision || !form.name.trim()}
+        onClick={() => void save()}>保存</Button> : <Button danger type="primary" aria-label="删除" icon={<DeleteOutlined aria-hidden />}
+          disabled={!canRemove} onClick={() => void remove()}>删除</Button>}</Space>}>
     {open && <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-      {busy && <Spin aria-label="Loading server details" />}
-      {error && <Alert type="error" showIcon title={error} />}
+      {busy && <Spin aria-label="正在加载服务器详情" />}
+      {error && <Alert type="error" showIcon title={zhMessage(error)} />}
       {mode === "edit" && revision && <Form id="server-settings-form" layout="vertical" preserve={false} onFinish={() => void save()}>
-        {([ ["name", "Server name"], ["domain", "Domain"], ["ip_address", "IPv4 address"],
-          ["domain_v6", "IPv6 domain"], ["ip_address_v6", "IPv6 address"] ] as const).map(([key, label]) =>
+        {([ ["name", "服务器名称"], ["domain", "域名"], ["ip_address", "IPv4 地址"],
+          ["domain_v6", "IPv6 域名"], ["ip_address_v6", "IPv6 地址"] ] as const).map(([key, label]) =>
           <Form.Item key={key} label={label}><Input aria-label={label} value={form[key] ?? ""} disabled={busy}
             maxLength={key === "name" ? 120 : undefined} onChange={event => setForm(previous => ({ ...previous, [key]: event.target.value }))} /></Form.Item>)}
-        <Form.Item label="IPv6 enabled"><Switch aria-label="IPv6 enabled" checked={form.ipv6_enabled} disabled={busy}
+        <Form.Item label="启用 IPv6"><Switch aria-label="启用 IPv6" checked={form.ipv6_enabled} disabled={busy}
           onChange={ipv6_enabled => setForm(previous => ({ ...previous, ipv6_enabled }))} /></Form.Item>
-        <Checkbox checked={syncHosts} disabled={busy} onChange={event => setSyncHosts(event.target.checked)}>Update matching node addresses</Checkbox>
+        <Checkbox checked={syncHosts} disabled={busy} onChange={event => setSyncHosts(event.target.checked)}>更新匹配的节点地址</Checkbox>
       </Form>}
       {mode === "remove" && preview && <>
         <Typography.Text strong>{preview.server_name}</Typography.Text>
-        <Alert type="warning" showIcon title="Remote services are not stopped"
-          description="This removes control-plane records. The remote Agent, Xray and existing client access are not uninstalled or stopped." />
+        <Alert type="warning" showIcon title="不会停止远端服务"
+          description="此操作只删除控制台记录，不会卸载或停止远端 Agent、Xray，也不会中止现有客户端访问。" />
         <Descriptions column={1} size="small" items={[
-          { key: "nodes", label: "Nodes removed", children: preview.nodes.length },
-          { key: "plans", label: "Plans updated", children: preview.plans.length },
-          { key: "commands", label: "Command records removed", children: preview.command_count },
-          { key: "unfinished", label: "Unfinished commands", children: preview.unfinished_command_count },
-          { key: "telemetry", label: "Telemetry records removed", children: preview.telemetry_count },
-          { key: "users", label: "User usage retained", children: preview.user_count },
-          { key: "changes", label: "Change sets archived", children: preview.change_sets.length },
-          { key: "certificates", label: "Certificates retained", children: preview.certificates.length },
+          { key: "nodes", label: "将删除的节点", children: preview.nodes.length },
+          { key: "plans", label: "将更新的套餐", children: preview.plans.length },
+          { key: "commands", label: "将删除的命令记录", children: preview.command_count },
+          { key: "unfinished", label: "未完成的命令", children: preview.unfinished_command_count },
+          { key: "telemetry", label: "将删除的遥测记录", children: preview.telemetry_count },
+          { key: "users", label: "将保留用量记录的用户数", children: preview.user_count },
+          { key: "changes", label: "将归档的变更集", children: preview.change_sets.length },
+          { key: "certificates", label: "将保留的证书", children: preview.certificates.length },
         ]} />
-        {([["Nodes", preview.nodes], ["Plans", preview.plans], ["Change sets", preview.change_sets],
-          ["Certificates", preview.certificates]] as const).filter(([, items]) => items.length).map(([label, items]) =>
+        {([["节点", preview.nodes], ["套餐", preview.plans], ["变更集", preview.change_sets],
+          ["证书", preview.certificates]] as const).filter(([, items]) => items.length).map(([label, items]) =>
           <Space key={label} orientation="vertical"><Typography.Text strong>{label}</Typography.Text>
             {items.map(item => <Typography.Text key={item.id}>{item.name}</Typography.Text>)}</Space>)}
-        {preview.certificates.length > 0 && <Alert type="info" showIcon title="Certificates retained"
-          description="Deployment targets on this server are removed. Certificates validated by this server stop automatic renewal until a new validation server is configured." />}
-        {preview.blockers.map(blocker => <Alert key={blocker} type="error" showIcon title={blocker} />)}
-        <Form layout="vertical"><Form.Item label="Confirm server name"><Input aria-label="Confirm server name"
+        {preview.certificates.length > 0 && <Alert type="info" showIcon title="证书将保留"
+          description="此服务器上的部署目标将被删除。由此服务器完成验证的证书会停止自动续期，直到配置新的验证服务器。" />}
+        {preview.blockers.map(blocker => <Alert key={blocker} type="error" showIcon title={zhMessage(blocker)} />)}
+        <Form layout="vertical"><Form.Item label="确认服务器名称"><Input aria-label="确认服务器名称"
           value={confirmName} disabled={busy || Boolean(preview.blockers.length)} onChange={event => setConfirmName(event.target.value)} /></Form.Item>
           <Checkbox checked={acknowledged} disabled={busy || Boolean(preview.blockers.length)} onChange={event => setAcknowledged(event.target.checked)}>
-            I accept that remote services may keep running</Checkbox></Form>
+            我接受远端服务可能继续运行</Checkbox></Form>
       </>}
     </Space>}
   </Modal>;

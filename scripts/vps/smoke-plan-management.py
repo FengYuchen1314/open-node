@@ -226,7 +226,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
         old_credentials = credentials("alice")
 
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        context = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="zh-CN")
         try:
             context.add_cookies(
                 [
@@ -244,17 +244,18 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/subscriptions")
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
             page.get_by_role(
-                "button", name="Edit plan Working plan", exact=True
+                "button", name="编辑套餐 Working plan", exact=True
             ).click()
             dialog = page.get_by_role("dialog")
-            expect(dialog.get_by_label("Plan name", exact=True)).to_have_value(
+            expect(dialog.get_by_label("套餐名称", exact=True)).to_have_value(
                 "Working plan"
             )
             acknowledgment = dialog.get_by_label(
-                "I accept the runtime restart and pending changes", exact=True
+                "我接受运行时重启及变更待确认的影响", exact=True
             )
-            quota = dialog.get_by_label("Traffic quota (GiB)", exact=True)
+            quota = dialog.get_by_label("流量配额（GiB）", exact=True)
             quota.fill("")
             quota.press_sequentially("-1")
             quota.press("Enter")
@@ -267,9 +268,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "PUT"
                 )
             ) as invalid:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert invalid.value.status == 422
-            dialog.get_by_label("Traffic quota (GiB)", exact=True).fill("256")
+            dialog.get_by_label("流量配额（GiB）", exact=True).fill("256")
             read = client.get(plan_base + "/settings").raise_for_status().json()
             client.put(
                 plan_base + "/settings",
@@ -286,19 +287,19 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "PUT"
                 )
             ) as stale:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert stale.value.status == 409
-            dialog.get_by_role("button", name="Reload plan details").click()
-            expect(dialog.get_by_label("Description", exact=True)).to_have_value(
+            dialog.get_by_role("button", name="重新加载套餐详情").click()
+            expect(dialog.get_by_label("说明", exact=True)).to_have_value(
                 "Concurrent edit"
             )
-            dialog.get_by_label("Plan name", exact=True).fill("Updated plan")
-            dialog.get_by_label("Traffic quota (GiB)", exact=True).fill("256")
-            dialog.get_by_label("New duration (days)", exact=True).fill("7")
-            dialog.get_by_label("Default speed (Mbps)", exact=True).fill("2")
-            dialog.get_by_label("Default connections", exact=True).fill("3")
+            dialog.get_by_label("套餐名称", exact=True).fill("Updated plan")
+            dialog.get_by_label("流量配额（GiB）", exact=True).fill("256")
+            dialog.get_by_label("新分配的有效期（天）", exact=True).fill("7")
+            dialog.get_by_label("默认速度（Mbps）", exact=True).fill("2")
+            dialog.get_by_label("默认连接数", exact=True).fill("3")
             dialog.get_by_role(
-                "combobox", name="New reset day (UTC)", exact=True
+                "combobox", name="新分配的重置日（UTC）", exact=True
             ).click()
             dropdown = page.locator(".ant-select-dropdown:visible")
             dropdown.locator(".ant-select-dropdown-list-holder").evaluate(
@@ -307,7 +308,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             dropdown.locator(".ant-select-item-option").get_by_text(
                 "25", exact=True
             ).click()
-            selector = dialog.get_by_role("combobox", name="Plan nodes", exact=True)
+            selector = dialog.get_by_role("combobox", name="套餐节点", exact=True)
             selector.click()
             for node in nodes:
                 page.locator(
@@ -316,11 +317,11 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             selector.press("Escape")
             override = dialog.get_by_label(nodes[1]["name"], exact=True)
             expect(override).to_be_visible()
-            override.get_by_label(nodes[1]["name"] + ": speed", exact=True).fill("0.5")
-            override.get_by_label(nodes[1]["name"] + ": connections", exact=True).fill(
+            override.get_by_label(nodes[1]["name"] + "：速度", exact=True).fill("0.5")
+            override.get_by_label(nodes[1]["name"] + "：连接数", exact=True).fill(
                 "1"
             )
-            override.get_by_label(nodes[1]["name"] + ": multiplier", exact=True).fill(
+            override.get_by_label(nodes[1]["name"] + "：计费倍率", exact=True).fill(
                 "2"
             )
 
@@ -362,18 +363,18 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "PUT"
                 )
             ) as saved:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert saved.value.status == 200, saved.value.text()
             for username in ("alice", "carol"):
                 wait_access(client, username)
             expect(
-                dialog.get_by_role("region", name="Plan deployment status").get_by_text(
-                    "applied", exact=True
+                dialog.get_by_role("region", name="套餐部署状态").get_by_text(
+                    "已应用", exact=True
                 )
             ).to_have_count(2, timeout=15000)
             capture("saved")
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
             for width, height, suffix in [
                 (1440, 1000, "desktop"),
@@ -419,32 +420,33 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 transfer(bob_config, 1024)
             wait_idle()
             print(
-                "PASS browser guarded edits, membership provisioning, actual rate/connection overrides and unaffected subscriber",
+                "PASS browser guarded edits, membership provisioning, actual rate/connection "
+                "overrides and unaffected subscriber",
                 flush=True,
             )
 
             page.get_by_role(
-                "button", name="Unassign plan for alice", exact=True
+                "button", name="取消 alice 的套餐分配", exact=True
             ).click()
-            expect(dialog.get_by_label("Confirm username", exact=True)).to_be_visible()
-            dialog.get_by_role("button", name="Cancel", exact=True).click()
+            expect(dialog.get_by_label("确认用户名", exact=True)).to_be_visible()
+            dialog.get_by_role("button", name="取 消", exact=True).click()
             transfer(current_alice, 1024)
             page.get_by_role(
-                "button", name="Unassign plan for alice", exact=True
+                "button", name="取消 alice 的套餐分配", exact=True
             ).click()
-            dialog.get_by_label("Confirm username", exact=True).fill("alice")
+            dialog.get_by_label("确认用户名", exact=True).fill("alice")
             acknowledgment.check()
             before_traffic = traffic("alice")
             before_credentials = credentials("alice")
             with page.expect_response(
                 lambda response: response.url.endswith("/users/alice/plan/remove")
             ) as unassigned:
-                dialog.get_by_role("button", name="Unassign", exact=True).click()
+                dialog.get_by_role("button", name="取消分配", exact=True).click()
             assert unassigned.value.status == 200, unassigned.value.text()
             wait_access(client, "alice")
             capture("unassigned")
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
             assert rejected(current_alice)
             transfer(carol_config, 1024)
@@ -460,28 +462,29 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             transfer(current_alice, 1024)
             wait_idle()
             print(
-                "PASS explicit unassign/cancel, actual revocation, preserved credentials/usage and reactivation",
+                "PASS explicit unassign/cancel, actual revocation, "
+                "preserved credentials/usage and reactivation",
                 flush=True,
             )
 
             page.reload()
             page.get_by_role(
-                "button", name="Remove plan Updated plan", exact=True
+                "button", name="移除套餐 Updated plan", exact=True
             ).click()
-            expect(dialog.get_by_label("Confirm plan name", exact=True)).to_be_visible()
-            dialog.get_by_label("Confirm plan name", exact=True).fill("wrong")
+            expect(dialog.get_by_label("确认套餐名称", exact=True)).to_be_visible()
+            dialog.get_by_label("确认套餐名称", exact=True).fill("wrong")
             acknowledgment.check()
             expect(
-                dialog.get_by_role("button", name="Remove", exact=True)
+                dialog.get_by_role("button", name="移除", exact=True)
             ).to_be_disabled()
-            dialog.get_by_label("Confirm plan name", exact=True).fill("Updated plan")
+            dialog.get_by_label("确认套餐名称", exact=True).fill("Updated plan")
             pid = int(fixture.properties()["MainPID"])
             os.kill(pid, signal.SIGSTOP)
             try:
                 with page.expect_response(
                     lambda response: response.url.endswith(plan_base + "/remove")
                 ) as removed:
-                    dialog.get_by_role("button", name="Remove", exact=True).click()
+                    dialog.get_by_role("button", name="移除", exact=True).click()
                 assert removed.value.status == 200, removed.value.text()
                 pending = client.get("/api/v1/users/alice/access").json()
                 assert pending["servers"][0]["status"] == "pending"
@@ -496,8 +499,8 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             for username in ("alice", "carol"):
                 wait_access(client, username)
             expect(
-                dialog.get_by_role("region", name="Plan deployment status").get_by_text(
-                    "applied", exact=True
+                dialog.get_by_role("region", name="套餐部署状态").get_by_text(
+                    "已应用", exact=True
                 )
             ).to_have_count(2, timeout=15000)
             assert rejected(current_alice) and rejected(carol_config)
@@ -514,7 +517,8 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
             assert not errors, errors
             print(
-                "PASS unavailable-Agent removal, visible pending state, later confirmed revocation and unrelated plan preservation",
+                "PASS unavailable-Agent removal, visible pending state, later confirmed "
+                "revocation and unrelated plan preservation",
                 flush=True,
             )
         finally:

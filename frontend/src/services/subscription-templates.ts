@@ -7,6 +7,7 @@ import type {
   SubscriptionTemplateWrite,
 } from "../domain/subscription-templates";
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 import { accountRequest } from "./subscriber-auth";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -21,12 +22,7 @@ async function adminRequest<T>(path: string, init: RequestInit = {}, fetcher = a
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     const detail = body?.detail;
-    const message = typeof detail === "string"
-      ? detail
-      : Array.isArray(detail)
-        ? detail.map((entry: { loc?: unknown[]; msg?: string }) => `${entry.loc?.slice(1).join(".") ?? ""}: ${entry.msg ?? "Invalid value"}`).join("; ")
-        : "";
-    throw new Error(message || `Template request failed (${response.status})`);
+    throw requestError(detail, `模板请求失败（${response.status}）`);
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }

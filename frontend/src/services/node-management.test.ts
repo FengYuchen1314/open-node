@@ -37,8 +37,8 @@ describe("node management", () => {
   });
   it("surfaces conflict and validation details", async () => {
     const conflict = async () => new Response(JSON.stringify({ detail: "Reload nodes" }), { status: 409 });
-    await expect(getNodeManagement("id", conflict)).rejects.toThrow("Reload nodes");
+    await expect(getNodeManagement("id", conflict)).rejects.toThrow("请重新加载节点。");
     const invalid = async () => new Response(JSON.stringify({ detail: [{ loc: ["body", "tags"], msg: "Too long" }] }), { status: 422 });
-    await expect(getNodeManagement("id", invalid)).rejects.toThrow("tags: Too long");
+    await expect(getNodeManagement("id", invalid)).rejects.toThrow("tags: 长度超出限制。");
   });
 });

@@ -124,6 +124,7 @@ def browser_profile(client, url, mode, node, eab, output):
         context = browser.new_context(
             ignore_https_errors=True,
             viewport={"width": 1440, "height": 1000},
+            locale="zh-CN",
         )
         context.add_cookies(
             [
@@ -143,26 +144,36 @@ def browser_profile(client, url, mode, node, eab, output):
         page.on("pageerror", lambda error: errors.append(str(error)))
         try:
             page.goto(url + "/certificates")
-            page.get_by_role("button", name="New certificate", exact=True).click()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_role("button", name="新建证书", exact=True).click()
             dialog = page.get_by_role("dialog")
-            dialog.get_by_label("Certificate name", exact=True).fill(node["name"] + " " + mode)
-            dialog.get_by_label("DNS names", exact=True).fill("*.acme.test")
-            dialog.get_by_label("Account email", exact=True).fill("operator@example.com")
-            dialog.get_by_label("Validation method", exact=True).press("Enter")
-            page.get_by_role("option", name="HTTP-01 / " + mode.title(), exact=True).click()
-            dialog.get_by_label("Validation host", exact=True).press("Enter")
-            page.get_by_role("option", name=node["name"], exact=True).click()
-            submit = dialog.get_by_role("button", name="Create certificate", exact=True)
+            dialog.get_by_label("证书名称", exact=True).fill(node["name"] + " " + mode)
+            dialog.get_by_label("DNS 域名", exact=True).fill("*.acme.test")
+            dialog.get_by_label("账户邮箱", exact=True).fill("operator@example.com")
+            dialog.get_by_role(
+                "combobox", name="验证方式", exact=True
+            ).click()
+            page.locator(".ant-select-dropdown:visible .ant-select-item-option").get_by_text(
+                {"standalone": "HTTP-01 / 独立服务", "webroot": "HTTP-01 / 网站根目录"}[mode],
+                exact=True,
+            ).click()
+            dialog.get_by_role(
+                "combobox", name="验证主机", exact=True
+            ).click()
+            page.locator(".ant-select-dropdown:visible .ant-select-item-option").get_by_text(
+                node["name"], exact=True
+            ).click()
+            submit = dialog.get_by_role("button", name="创建证书", exact=True)
             expect(submit).to_be_disabled()
-            expect(dialog.get_by_text("Wildcard names require DNS-01", exact=True)).to_be_visible()
-            dialog.get_by_label("DNS names", exact=True).fill("edge.acme.test")
-            dialog.get_by_label("Auto-renew", exact=True).uncheck()
-            dialog.locator("summary").click()
-            dialog.get_by_label("EAB key ID", exact=True).fill(eab[0])
-            dialog.get_by_label("EAB HMAC key", exact=True).fill(eab[1])
-            dialog.locator("summary").click()
+            expect(dialog.get_by_text("通配符域名需要使用 DNS-01", exact=True)).to_be_visible()
+            dialog.get_by_label("DNS 域名", exact=True).fill("edge.acme.test")
+            dialog.get_by_label("自动续签", exact=True).uncheck()
+            dialog.get_by_role("button", name="外部账户绑定", exact=True).click()
+            dialog.get_by_label("EAB 密钥 ID", exact=True).fill(eab[0])
+            dialog.get_by_label("EAB HMAC 密钥", exact=True).fill(eab[1])
+            dialog.get_by_role("button", name="外部账户绑定", exact=True).click()
             expect(submit).to_be_disabled()
-            dialog.get_by_label("I accept this CA's terms of service", exact=True).check()
+            dialog.get_by_label("我接受此 CA 的服务条款", exact=True).check()
             expect(submit).to_be_enabled()
             for label, width, height in (
                 ("desktop", 1440, 1000),
@@ -181,12 +192,17 @@ def browser_profile(client, url, mode, node, eab, output):
                 submit.click()
             assert response.value.status == 201, response.value.text()
             profile = response.value.json()
+            assert profile["challenge_type"] == mode
+            assert profile["validation_server_id"] == node["id"]
             expect(dialog).not_to_be_visible()
-            row = page.locator(".certificate-row").filter(has_text=profile["name"])
-            row.get_by_role("button", name="Issue certificate", exact=True).click()
+            row = page.get_by_role("row").filter(
+                has=page.get_by_role("button", name=profile["name"], exact=True)
+            )
+            expect(row).to_have_count(1)
+            row.get_by_role("button", name="签发证书", exact=True).click()
             detail = wait_job(client, profile["id"])
             row.get_by_role("button", name=profile["name"], exact=True).click()
-            expect(page.get_by_role("button", name="Renew now", exact=True)).to_be_enabled()
+            expect(page.get_by_role("button", name="立即续签", exact=True)).to_be_enabled()
             for label, width, height in (
                 ("desktop", 1440, 1000),
                 ("mobile", 390, 844),

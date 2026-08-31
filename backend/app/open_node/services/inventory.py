@@ -1552,10 +1552,10 @@ class ProbeSettingsModel(Base):
     show_traffic_quota: Mapped[bool] = mapped_column(Boolean, default=True)
     show_renewal_timeline: Mapped[bool] = mapped_column(Boolean, default=False)
     show_health_score: Mapped[bool] = mapped_column(Boolean, default=True)
-    title: Mapped[str] = mapped_column(String(120), default="Open Node Probe")
+    title: Mapped[str] = mapped_column(String(120), default="Open Node 探针")
     description: Mapped[str] = mapped_column(
         Text,
-        default="MMWX probe-compatible node status without license gates.",
+        default="兼容 MMWX 探针的节点状态页面，无需授权许可。",
     )
     logo: Mapped[str] = mapped_column(Text, default="")
     refresh_interval_sec: Mapped[int] = mapped_column(Integer, default=5)
@@ -1593,17 +1593,38 @@ class ProbeTaskModel(Base):
 
 
 class InventoryStore:
-    def __init__(self, database_url: str, *, short_links_enabled: bool = False) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        short_links_enabled: bool = False,
+        external_subscriptions_state_dir: Path | None = None,
+    ) -> None:
         self.short_links_enabled = short_links_enabled
         self._engine = create_inventory_engine(database_url)
         self._session_factory = sessionmaker(self._engine, expire_on_commit=False)
+        self.external_subscriptions_state_dir = external_subscriptions_state_dir
+        database_file = self._engine.url.database
+        if (
+            external_subscriptions_state_dir is None
+            and self._engine.dialect.name == "sqlite"
+            and database_file not in (None, "", ":memory:")
+            and not database_file.startswith("file:")
+        ):
+            # The key lives beside the SQLite file in the same private data volume,
+            # never inside the database. Stopped-volume backup includes both.
+            self.external_subscriptions_state_dir = (
+                Path(database_file).absolute().parent / "external-subscriptions"
+            )
 
     def create_schema(self) -> None:
+        from open_node.services.external_subscriptions import ExternalSourceModel
         from open_node.services.subscriber_auth import SubscriberAccount
         from open_node.services.subscription_templates import TemplateRecord
 
         SubscriberAccount.metadata.create_all(self._engine)
         TemplateRecord.metadata.create_all(self._engine)
+        ExternalSourceModel.metadata.create_all(self._engine)
         # Historical SQLite deployments ran with FK enforcement disabled. Refuse
         # to mutate such a database until an operator repairs or restores any
         # existing orphaned rows, then verify again after our own migrations.
@@ -4038,6 +4059,7 @@ class InventoryStore:
                 plan,
                 client_format,
                 node_id=node_id,
+                include_external=True,
             )
 
     def _render_user_subscription(
@@ -4053,6 +4075,7 @@ class InventoryStore:
         title: str | None = None,
         extra_warnings: list[str] | None = None,
         include_userinfo: bool = True,
+        include_external: bool = False,
     ) -> RenderedSubscription:
         proxies, report = self._prepare_subscription_format(
             session,
@@ -4061,6 +4084,7 @@ class InventoryStore:
             client_format,
             template_override.content if template_override else None,
             selected_node_ids,
+            include_external=include_external,
         )
         if node_id is not None:
             allowed_ids = [node.node_id for node in report.nodes if node.available]
@@ -4104,7 +4128,9 @@ class InventoryStore:
             if user is None:
                 raise ProductUserNotFoundError("user not found")
             plan = self._available_subscription_plan(session, user)
-            _, report = self._prepare_subscription_format(session, user, plan, client_format)
+            _, report = self._prepare_subscription_format(
+                session, user, plan, client_format, include_external=True
+            )
             return report
 
     def _available_subscription_plan(
@@ -4132,11 +4158,28 @@ class InventoryStore:
         client_format: SubscriptionClientFormat,
         template_override: str | None = None,
         selected_node_ids: set[str] | None = None,
+        *,
+        include_external: bool = False,
     ) -> tuple[list[dict[str, Any]], SubscriptionFormatPreview]:
         candidates, warnings = self._subscription_proxy_configs(
             session, user, plan, selected_node_ids
         )
+        managed_ids = {identifier for identifier, _proxy in candidates}
         proxies, nodes = [], []
+        if include_external:
+            from open_node.services.external_subscriptions import ExternalSubscriptionError
+
+            try:
+                external, excluded, external_warnings = (
+                    self.external_subscriptions().subscription_candidates(session, user.username)
+                )
+            except ExternalSubscriptionError:
+                raise SubscriptionUnavailableError(
+                    "External subscription credentials are unavailable"
+                ) from None
+            candidates.extend(external)
+            nodes.extend(excluded)
+            warnings.extend(external_warnings)
         used_names = {
             "Proxy",
             "direct",
@@ -4178,11 +4221,14 @@ class InventoryStore:
                 suffix += 1
             used_names.add(unique)
             proxy["name"] = unique
-            for alias in {original_name, name}:
-                if alias in name_map and name_map[alias] != unique:
-                    ambiguous_names.add(alias)
-                else:
-                    name_map[alias] = unique
+            # External inputs cannot contain dialer references and must not make
+            # an existing managed reference ambiguous merely by sharing its name.
+            if identifier in managed_ids:
+                for alias in {original_name, name}:
+                    if alias in name_map and name_map[alias] != unique:
+                        ambiguous_names.add(alias)
+                    else:
+                        name_map[alias] = unique
             prepared.append((identifier, proxy, unique))
         for identifier, proxy, unique in prepared:
             reason = None
@@ -7545,6 +7591,11 @@ class InventoryStore:
         from open_node.services.subscription_templates import TemplateStore
 
         return TemplateStore(self)
+
+    def external_subscriptions(self):
+        from open_node.services.external_subscriptions import ExternalSubscriptions
+
+        return ExternalSubscriptions(self)
 
     @contextmanager
     def _coordinated_session(self):

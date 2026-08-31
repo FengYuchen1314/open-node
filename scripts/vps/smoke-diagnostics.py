@@ -34,7 +34,8 @@ def operation(client, base, name, payload=None):
 def check_layout(page, output):
     try:
         lifecycle.ui.check_layout(page)
-        page.wait_for_function("""() => [...document.querySelectorAll('.page-shell button, .page-shell input')]
+        page.wait_for_function(
+            """() => [...document.querySelectorAll('.page-shell button, .page-shell input')]
           .filter(el => el.getClientRects().length && !el.closest('[inert], [aria-hidden="true"]')
             && getComputedStyle(el).visibility !== 'hidden')
           .every(el => {
@@ -68,7 +69,7 @@ def browser_checks(client, endpoint, ca, name, base, target, output, mode):
             ("narrow", 320, 780),
         ):
             page.set_viewport_size({"width": width, "height": height})
-            page.get_by_label("Latency targets", exact=True).fill(target)
+            page.get_by_label("延迟探测目标", exact=True).fill(target)
             with page.expect_response(
                 lambda response: (
                     response.request.method == "POST"
@@ -76,17 +77,12 @@ def browser_checks(client, endpoint, ca, name, base, target, output, mode):
                 )
             ) as reply:
                 page.get_by_role(
-                    "button", name="Queue latency probe", exact=True
+                    "button", name="下发延迟探测", exact=True
                 ).click()
             command = reply.value.json()["command"]
             lifecycle.wait_command(client, base, command)
-            panel = page.locator(f'[data-command-id="{command["id"]}"]')
-            if (
-                panel.get_by_role("button").first.get_attribute("aria-expanded")
-                != "true"
-            ):
-                panel.get_by_role("button").first.click()
-            expect(panel.get_by_text("TCP port open", exact=False)).to_be_visible(
+            panel = lifecycle.expanded_command_panel(page, command["id"])
+            expect(panel.get_by_text("TCP 端口开放", exact=False)).to_be_visible(
                 timeout=30000
             )
             check_layout(page, output)
@@ -95,8 +91,8 @@ def browser_checks(client, endpoint, ca, name, base, target, output, mode):
                 path=output / f"{mode}-{label}-latency.png", animations="disabled"
             )
 
-            page.get_by_label("Telecom host", exact=True).fill("127.0.0.1")
-            page.get_by_label("Telecom port", exact=True).fill(target.rsplit(":", 1)[1])
+            page.get_by_label("电信主机", exact=True).fill("127.0.0.1")
+            page.get_by_label("电信端口", exact=True).fill(target.rsplit(":", 1)[1])
             with page.expect_response(
                 lambda response: (
                     response.request.method == "POST"
@@ -104,30 +100,25 @@ def browser_checks(client, endpoint, ca, name, base, target, output, mode):
                 )
             ) as reply:
                 page.get_by_role(
-                    "button", name="Trace return route", exact=True
+                    "button", name="追踪回程路由", exact=True
                 ).click()
             command = reply.value.json()["command"]
             lifecycle.wait_command(client, base, command)
-            panel = page.locator(f'[data-command-id="{command["id"]}"]')
-            if (
-                panel.get_by_role("button").first.get_attribute("aria-expanded")
-                != "true"
-            ):
-                panel.get_by_role("button").first.click()
-            expect(panel.get_by_text("Unknown", exact=False)).to_be_visible(
+            panel = lifecycle.expanded_command_panel(page, command["id"])
+            expect(panel.get_by_text("未知", exact=False)).to_be_visible(
                 timeout=30000
             )
-            expect(panel.get_by_text("ASN unavailable", exact=False)).to_be_visible()
+            expect(panel.get_by_text("ASN 不可用", exact=False)).to_be_visible()
             check_layout(page, output)
             panel.scroll_into_view_if_needed()
             page.screenshot(
                 path=output / f"{mode}-{label}-route.png", animations="disabled"
             )
 
-        page.get_by_label("All files", exact=True).check()
-        purge = page.get_by_role("button", name="Purge logs", exact=True)
+        page.get_by_label("全部文件", exact=True).check()
+        purge = page.get_by_role("button", name="清空日志", exact=True)
         expect(purge).to_be_disabled()
-        page.get_by_label("Confirm log deletion", exact=True).check()
+        page.get_by_label("确认删除日志", exact=True).check()
         with page.expect_response(
             lambda response: (
                 response.request.method == "POST"
@@ -143,21 +134,25 @@ def browser_checks(client, endpoint, ca, name, base, target, output, mode):
         )
 
         page.goto(endpoint + "/probe")
-        server = page.get_by_label("Server", exact=True)
-        server.press("Enter")
-        page.get_by_role("option", name=re.compile(re.escape(name))).click()
-        kind = page.get_by_label("Probe type", exact=True)
-        kind.press("Enter")
-        page.get_by_role("option", name="Return route", exact=True).click()
-        page.get_by_label("Telecom host", exact=True).fill("127.0.0.1")
-        page.get_by_label("Telecom port", exact=True).fill(target.rsplit(":", 1)[1])
+        server = page.get_by_label("服务器", exact=True)
+        page.locator(".ant-select").filter(has=server).click()
+        page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter(
+            has_text=re.compile("^" + re.escape(name) + "$")
+        ).click()
+        kind = page.get_by_label("探针类型", exact=True)
+        page.locator(".ant-select").filter(has=kind).click()
+        page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter(
+            has_text=re.compile(r"^回程路由$")
+        ).click()
+        page.get_by_label("电信主机", exact=True).fill("127.0.0.1")
+        page.get_by_label("电信端口", exact=True).fill(target.rsplit(":", 1)[1])
         with page.expect_response(
             lambda response: (
                 response.request.method == "POST"
                 and response.url.endswith("/api/v1/probe/tasks")
             )
         ) as reply:
-            page.get_by_role("button", name="Add task", exact=True).click()
+            page.get_by_role("button", name="添加任务", exact=True).click()
         assert reply.value.ok, reply.value.text()
         task = reply.value.json()["task"]
         assert task["kind"] == "return_route", task
@@ -284,7 +279,7 @@ def exercise_mode(
     )["result_body"]["results"][0]
     assert route["success"] and route["reached"], route
     assert route["hops"][0]["ip"] == "127.0.0.1"
-    assert route["route_type"] == "Unknown" and route["entry_hop"] is None
+    assert route["route_type"] == "未知" and route["entry_hop"] is None
     with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as listener:
         listener.bind(("::1", 0))
         listener.listen()

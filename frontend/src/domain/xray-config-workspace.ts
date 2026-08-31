@@ -74,10 +74,10 @@ export function parseJsonObjectText(
   try {
     parsed = JSON.parse(value) as unknown;
   } catch {
-    throw new Error(`${label} must contain valid JSON.`);
+    throw new Error(`${label} 必须包含有效的 JSON。`);
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`${label} must be a JSON object.`);
+    throw new Error(`${label} 必须是 JSON 对象。`);
   }
   return parsed as Record<string, unknown>;
 }

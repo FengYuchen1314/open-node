@@ -132,11 +132,11 @@ describe("React private Agent installation state", () => {
     let first!: Promise<void>; act(() => { first = result.current.issue(); void result.current.issue(); }); expect(issue).toHaveBeenCalledTimes(1);
     await act(async () => { pending.resolve(issued); await first; });
     revoke.mockRejectedValue(new Error("Already claimed")); await act(async () => { await result.current.revoke(); });
-    expect(result.current.error).toBe("Already claimed"); expect(result.current.command).toBe("");
+    expect(result.current.error).toBe("无法撤销安装凭据。"); expect(result.current.command).toBe("");
   });
   it("clears any displayed secret when authentication or a status request fails", async () => {
     const { result } = await readyCommand(); read.mockRejectedValue(new Error("Administrator sign-in required")); await tick();
-    expect(result.current.command).toBe(""); expect(result.current.error).toBe("Administrator sign-in required");
+    expect(result.current.command).toBe(""); expect(result.current.error).toBe("请先登录管理员账户。");
   });
   it("retains only the newest concurrent status response", async () => {
     const { result } = model(); await flush(); const old = deferred<AgentBootstrapState>(); read.mockReturnValueOnce(old.promise);

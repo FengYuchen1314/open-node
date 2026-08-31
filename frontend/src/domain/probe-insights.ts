@@ -57,9 +57,9 @@ export interface ProbeSparkline {
 
 const routeCarriers: ProbeRouteCarrier[] = ["telecom", "unicom", "mobile"];
 const routeCarrierLabels: Record<ProbeRouteCarrier, string> = {
-  telecom: "Telecom",
-  unicom: "Unicom",
-  mobile: "Mobile",
+  telecom: "电信",
+  unicom: "联通",
+  mobile: "移动",
 };
 const premiumReturnRoutes = new Set(["CN2GIA", "CTGGIA", "9929", "CMIN2", "163PP"]);
 
@@ -77,7 +77,7 @@ export function serverRegionKey(server: ProbeServer): string {
 export function serverRegionLabel(server: ProbeServer): string {
   const region = server.region_city?.trim() || server.region_name?.trim() || server.region?.trim();
   const country = server.region_country?.trim();
-  return [region, country].filter(Boolean).join(", ") || "No region";
+  return [region, country].filter(Boolean).join(", ") || "未设置地区";
 }
 
 export function buildRegionOptions(servers: ProbeServer[]): ProbeRegionOption[] {
@@ -118,15 +118,15 @@ export function filterProbeServers(
 
 export function probeHealth(server: ProbeServer, nowMs = Date.now()): ProbeHealth {
   if (!server.online) {
-    return { score: 0, label: "Critical", tone: "error", issues: ["Server is offline"] };
+    return { score: 0, label: "Critical", tone: "error", issues: ["服务器已离线"] };
   }
 
   let score = 100;
   const issues: string[] = [];
   const resources = [
     ["CPU", server.cpu_pct],
-    ["Memory", resourcePercent(server.mem_used, server.mem_total)],
-    ["Disk", resourcePercent(server.disk_used, server.disk_total)],
+    ["内存", resourcePercent(server.mem_used, server.mem_total)],
+    ["磁盘", resourcePercent(server.disk_used, server.disk_total)],
   ] as const;
   for (const [name, value] of resources) {
     if (value == null) {
@@ -134,48 +134,48 @@ export function probeHealth(server: ProbeServer, nowMs = Date.now()): ProbeHealt
     }
     if (value >= 90) {
       score -= 18;
-      issues.push(`${name} pressure is high`);
+      issues.push(`${name} 负载过高`);
     } else if (value >= 75) {
       score -= 9;
-      issues.push(`${name} pressure is rising`);
+      issues.push(`${name} 负载正在升高`);
     }
   }
 
   const latency = averageLatency(server);
   if (latency !== null && latency >= 250) {
     score -= 18;
-    issues.push("Latency is high");
+    issues.push("延迟过高");
   } else if (latency !== null && latency >= 120) {
     score -= 8;
-    issues.push("Latency is rising");
+    issues.push("延迟正在升高");
   }
 
   const loss = averageLoss(server);
   if (loss !== null && loss >= 10) {
     score -= 20;
-    issues.push("Packet loss is high");
+    issues.push("丢包率过高");
   } else if (loss !== null && loss >= 3) {
     score -= 9;
-    issues.push("Packet loss detected");
+    issues.push("检测到丢包");
   }
 
   if (server.traffic_limit) {
     const quota = percent(trafficUsed(server), server.traffic_limit);
     if (quota >= 95) {
       score -= 16;
-      issues.push("Traffic quota is almost used");
+      issues.push("流量配额即将用尽");
     } else if (quota >= 80) {
       score -= 7;
-      issues.push("Traffic quota is elevated");
+      issues.push("流量配额使用率偏高");
     }
   }
 
   if (isExpired(server, nowMs)) {
     score -= 20;
-    issues.push("Server has expired");
+    issues.push("服务器已到期");
   } else if (isExpiring(server, nowMs)) {
     score -= 8;
-    issues.push("Server expires soon");
+    issues.push("服务器即将到期");
   }
 
   const normalized = Math.max(0, Math.round(score));
@@ -262,7 +262,7 @@ export function trafficHotspots(servers: ProbeServer[], limit = 5): ProbeTraffic
   const ranked = servers
     .map((server, index) => ({
       index,
-      name: server.name?.trim() || `Node ${index + 1}`,
+      name: server.name?.trim() || `节点 ${index + 1}`,
       speed: (server.upload_speed ?? 0) + (server.download_speed ?? 0),
     }))
     .sort((left, right) => right.speed - left.speed);
@@ -291,7 +291,7 @@ export function returnRouteBadges(server: ProbeServer): ProbeReturnRouteBadge[] 
   const byCarrier = new Map((server.return_routes ?? []).map((route) => [route.carrier, route]));
   return routeCarriers.map((carrier) => {
     const route = byCarrier.get(carrier);
-    const detectedRouteType = displayReturnRoute(route?.route_type || "Unknown");
+    const detectedRouteType = displayReturnRoute(route?.route_type || "未知");
     const routeType =
       carrier === "telecom" &&
       server.telecom_paid_peer &&
@@ -311,7 +311,7 @@ export function returnRouteBadges(server: ProbeServer): ProbeReturnRouteBadge[] 
 }
 
 export function displayReturnRoute(value: string): string {
-  return normalizeReturnRoute(value) === "CMIN" ? "CMI" : value.trim() || "Unknown";
+  return normalizeReturnRoute(value) === "CMIN" ? "CMI" : value.trim() || "未知";
 }
 
 export function buildSparkline(
@@ -380,12 +380,12 @@ export function remainingDaysLabel(value?: string | null, nowMs = Date.now()): s
     return "";
   }
   if (days < 0) {
-    return `expired ${Math.abs(days)}d`;
+    return `已到期 ${Math.abs(days)} 天`;
   }
   if (days === 0) {
-    return "expires today";
+    return "今天到期";
   }
-  return `${days}d left`;
+  return `剩余 ${days} 天`;
 }
 
 export function percent(used: number | null | undefined, total: number | null | undefined): number {

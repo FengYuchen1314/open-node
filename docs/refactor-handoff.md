@@ -12,8 +12,17 @@ Agent 安装已完成 VPS 验收，Agent 0.3.0a0 已公开发布；功能代码 
 托管 CI 夹具修正 `a677280` 已进入主线。用户要求的标准 Ant Design 前端重写
 已在 `50897f9` 进入主线：管理控制台、订阅门户和公共探针均已迁入 React，
 完整 CI、VPS 浏览器及精确提交的 Docker 验收通过。生产实例保持原镜像，本轮
-只发布源码，没有升级生产。下一项是外部订阅；通知、设置、备份与完整迁移仍未
-补齐。建议在新聊天中直接说明：
+只发布源码，没有升级生产。当前工作源已接入外部订阅首期：管理员维护 HTTPS
+来源、手动预览确认、保留上游凭据并合入用户主订阅。英文候选的完整回归、
+真实浏览器、客户端及隔离 Docker 验收已完成，但尚未发布。用户随后明确要求
+界面使用中文，管理后台、用户中心、公共探针及 Ant Design 内置文案现已完成
+中文化。首轮中文 R2 前端 762 项、后端 1927 项（另验 6 个真实 TLS 用例）、
+Agent 605 项、Worker 5 项通过；中文浏览器和隔离 Docker 多项验收也已通过。
+截图复核发现证书成功回执被误译成失败，现已在 R4 补齐固定消息并新增 34 项测试，
+187 项专项检查、类型检查和双产物构建通过，证书和全客户端实机验收也已通过。
+早先一次 gRPC 转发失败在新完整运行中未复现，原因仍未知，不称为已定位修复。
+R4 完整前端复跑及精确提交 CI、镜像、主线发布尚待完成。通知、设置、应用内
+备份和完整迁移仍未补齐。建议在新聊天中直接说明：
 
 > 请先阅读 `docs/refactor-handoff.md`、`docs/mmwx-source-parity.md` 和 `docs/testing.md`，核对公开主线、候选分支、VPS 隔离测试 checkout 和生产镜像四者的实际 revision。继续参考用户提供的四个固定官方仓库，不要把受限 Preview 首发等同于完整 MMWX 替代。测试、构建、浏览器和真实流量验收都在 `185.99.135.224` 的隔离候选环境运行，不动生产服务和数据库。公开 HTTPS、Cloudflare 账户部署与异地加密备份需操作者的实际输入，不能用本地通过替代外部验证。
 
@@ -23,6 +32,9 @@ Agent 安装已完成 VPS 验收，Agent 0.3.0a0 已公开发布；功能代码 
 - 只使用一个仓库，后端、Agent、前端、探针、运行时补丁、文档和测试脚本都在本仓库。
 - 后端保留 FastAPI。前端已按用户要求重写为 React、官方 Ant Design、Vite 和
   TypeScript；已有 API、会话契约和 Docker 部署架构不变。
+- 界面统一使用简体中文，包括菜单、表单、提示、状态、无障碍名称和 Ant Design
+  内置文案。协议名、命令、配置键、URL、用户自定义内容及真实诊断日志保持原样；
+  不以修改 API 枚举或持久化用户数据的方式翻译界面。
 - 软件对所有人免费，不需要许可证、激活码、付费权限检查或商业许可证服务器。
 - `tajiaoyezi/miaomiaowuX` 固定提交
   `c12ce653bc07fe30426b7dfcb85076974b7be0e0` 是控制面业务的主要参考。
@@ -34,9 +46,13 @@ Agent 安装已完成 VPS 验收，Agent 0.3.0a0 已公开发布；功能代码 
 旧的百分比估算已经作废。当前状态必须以
 [`mmwx-source-parity.md`](mmwx-source-parity.md) 的固定源码矩阵和可执行发布门槛为准；
 套餐计费已按官方语义修正并验证，面板生成远程 Agent 安装命令也已实现。
-外部订阅、通知、完整迁移和应用内备份恢复仍有缺口。Ant Design 重写与全量
-回归已经完成，接下来补齐外部订阅。其官方源码接点和首期范围见
-[`external-subscriptions-plan.md`](external-subscriptions-plan.md)，该文件只是待实现方案。
+外部订阅已有管理员手动 YAML 导入，但 URI/Base64 输入、定时同步、用户自助和
+规则/provider 生态仍有缺口。首期用法和密钥恢复见
+[`external-subscriptions.md`](external-subscriptions.md)，官方源码接点与原设计记录见
+[`external-subscriptions-plan.md`](external-subscriptions-plan.md)。通知、完整迁移和
+应用内备份恢复也未完成。下一期管理员 Telegram 配置、测试和套餐到期提醒的
+官方源码接点、安全边界和验收设计见 [`notifications-plan.md`](notifications-plan.md)，
+目前只有方案，没有通知实现或真实 Telegram 发送。
 这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
 单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
 Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 MMWX，但它们不应
@@ -48,6 +64,8 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 | --- | --- |
 | GitHub `main` | 已包含 React/Ant Design 功能提交 `50897f928226c9fef2ab7d0f68de0c3aad46156a`，以及此前的面板 Agent 安装和托管 CI 夹具修正；后续只含文档的提交不改变该功能基线 |
 | 当前候选 | `codex/mmwx-parity-release-candidate`；精确 `50897f9` 的 GitHub run `33330624705` 四个 job 全部成功。后续文档提交与该功能测试分开记录 |
+| 外部订阅英文基线 | 在公开 `0ffc072` 上新增，尚未发布；冻结 VPS 源为 `/tmp/open-node-external-integration.YG95YRYU/source`。后端 1927 passed / 6 opt-in skipped（6 个真实 TLS 用例另行全部通过），Agent 605、前端 570/65 files、Worker 5，以及浏览器/客户端/隔离 Docker 均通过；该目录不再覆盖 |
+| 中文工作源 | 当前产品冻结于 `/tmp/open-node-zh-release.fp33Igbt/source-r4`，源码归档 SHA-256 `5c8d6008d20c692710e9e4718b935e87a3558c2172f400c5dbb6d9ccf6fdec04`。R2 全量前端 762/70 files、后端 1927 + 6 opt-in skips（230 项 fetcher 含 6 项真实 TLS 全过）、Agent 605、Worker 5 已过。R4 仅改证书消息字典及两个测试文件，新增 34 项，187 项专项、双构建、外部订阅、证书及全客户端实机通过；完整前端复跑与精确提交/CI/主线发布仍待完成。R2 和所有失败记录保留，详见 `testing.md` |
 | VPS 隔离候选 | 共享 `/opt/open-node/mmwx-parity-candidate` 保留 clean `6ca84e2`；最终 React 完整回归在 `/tmp/open-node-react-release.xaSu8WDc/source`。GitHub 精确 `50897f9` 的干净构建及 Docker 复验在 `/root/open-node-react-commit-50897.0MDZIwd3/source`，两份前端产物逐字节一致；不混用生产数据库 |
 | VPS 生产源码 | `/opt/open-node`，`27ad431dd97670076d532efa461745ac9576ee2a`；源码、公开主线和运行镜像不是同一个 revision，不要混为一谈 |
 | 持久控制面 | Compose 服务 `open-node-open-node-1` healthy，绑定 `127.0.0.1:8000 -> 8080`；数据卷为 `open-node_data` |
@@ -136,6 +154,42 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 更细的功能清单在 [`migration-map.md`](migration-map.md)，各功能的安全边界和复现方式在同目录专题文档中。
 
 ## 最新候选验证（2026-08-30/31）
+
+### 外部订阅首期：中文化之前的英文工作源验收
+
+新功能严格区分外部节点和本地托管节点，不伪造 Server，不重发上游凭据，不向
+Agent 下发命令，不把上游流量计入本地账单。只有用户主订阅显式合入已确认的
+来源；套餐、到期、停用、配额和 IP 检查继续生效，临时链接和命名 profile 不变。
+URL、自定义 UA、节点和预览配置加密存储，普通 API 不读回秘密；密钥默认位于
+SQLite 数据库旁的 `external-subscriptions`，现有 Docker 数据卷覆盖此目录。
+
+预览只读取上游，不改变在用节点。确认事务同时应用选中的新节点、现有节点
+更新和缺失状态，并保存可重复读取的回执。预览 15 分钟过期，每来源最多三个；
+已确认回执七天后不可再读或重放。来源/节点修改后旧版本不能覆盖新版本；删除
+用户后，迟到的请求不能把旧凭据转给同名新用户。
+
+官方 Mihomo v1.19.30 源码复核补齐了 UDP 默认值和各协议 TLS 字段边界，Snell
+版本、Mieru transport、HTTP 认证不明确时不自动猜测。解析器 **402** 项、抓取器
+**230** 项和先前的后台集成 **48** 项分别通过；抓取器的新一轮真实 TLS 测试在
+独立 network namespace 内完成，没有宿主公网监听。随后组合源完整回归得到
+后端 1927 passed / 6 opt-in skipped（该六项真实 TLS 已另外全部通过）、Agent
+605、前端 570/65 files、Worker 5；类型检查、双构建及 Ruff 通过。不把专项
+计数相加成另一套全量，也不将这份英文源码的通过结果归给后续中文修改。
+
+最终浏览器/流量报告 SHA-256 为
+`925896e5ff2f07daa5bd9f4dd61cbc506b5ea2e397dacf712db6c6fb406aae84`。
+真实 Ant Design 的创建、编辑、预览、确认和回执恢复通过，1440/390/320 三种
+宽度的来源/节点表单及底部操作均可见；15 张截图中的秘密已遮罩。Mihomo 加载
+完整主订阅，官方 Xray 完成托管及外部 VLESS 转发，直接访问的负控被拒绝。
+凭据轮换、错误输入保留旧配置、缺失密钥拒绝访问、不生成替代密钥、冷备份
+恢复和原管理员会话也通过。其他输入协议的解析测试不等于本轮全部协议流量实测。
+
+英文工作树 Docker 镜像也已通过独立数据卷、非 root、双重重启、HTTPS 抓取、
+密钥持久化和生产未变检查；其 OCI revision 是工作树标签，不是精确 Git 提交。
+该工作源未升级生产。中文复验、完整 CI、精确提交镜像和发布结论要在各自完成后记录；
+详细范围与复现见 [`testing.md`](testing.md#external-subscriptions)。
+
+### 上一项 React 功能的精确提交 CI
 
 精确功能提交 `50897f928226c9fef2ab7d0f68de0c3aad46156a` 的
 [GitHub run 33330624705](https://github.com/FengYuchen1314/open-node/actions/runs/33330624705)
@@ -370,6 +424,8 @@ ssh root@185.99.135.224 "git -C /opt/open-node status --short; git -C /opt/open-
 - [`deployment.md`](deployment.md)
 - [`agent-bootstrap.md`](agent-bootstrap.md)
 - [`external-subscriptions-plan.md`](external-subscriptions-plan.md)
+- [`external-subscriptions.md`](external-subscriptions.md)
+- [`notifications-plan.md`](notifications-plan.md)（下一期方案，尚未实现）
 
 工作约束：
 

@@ -1574,7 +1574,8 @@ def test_public_probe_servers_returns_sanitized_mmwx_probe_payload(tmp_path: Pat
     payload = response.json()
     assert payload["enabled"] is True
     assert payload["license_required"] is False
-    assert payload["title"] == "Open Node Probe"
+    assert payload["title"] == "Open Node 探针"
+    assert payload["description"] == "兼容 MMWX 探针的节点状态页面，无需授权许可。"
     server = payload["servers"][0]
     assert server["name"] == "edge-probe"
     assert server["online"] is True
@@ -1613,7 +1614,10 @@ def test_public_probe_settings_customize_payload_and_disable_servers(tmp_path: P
 
     defaults = client.get("/api/v1/public/probe-settings")
     assert defaults.status_code == 200
-    assert defaults.json()["settings"]["title"] == "Open Node Probe"
+    assert defaults.json()["settings"]["title"] == "Open Node 探针"
+    assert defaults.json()["settings"]["description"] == (
+        "兼容 MMWX 探针的节点状态页面，无需授权许可。"
+    )
     assert defaults.json()["license_required"] is False
 
     updated = client.put(

@@ -1,4 +1,5 @@
 import { createObservableState } from "./observable-state";
+import { requestError, requestFailureMessage } from "./request-error";
 
 export interface OperatorSession {
   configured: boolean;
@@ -51,7 +52,7 @@ async function authRequest(path: string, init: RequestInit = {}, fetcher = fetch
   if (!response.ok) {
     if (response.status === 401 && path !== "login") clearSession();
     const body = await response.json().catch(() => null);
-    throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status})`);
+    throw requestError(typeof body?.detail === "string" ? body.detail : undefined, `身份验证请求失败（${response.status}）`);
   }
   return response;
 }
@@ -63,7 +64,7 @@ export async function loadSession(fetcher = fetch) {
     authState.session = await response.json() as OperatorSession;
   } catch (error) {
     authState.session = null;
-    authState.error = error instanceof Error ? error.message : "Unable to connect";
+    authState.error = requestFailureMessage(error, "无法连接服务器。");
   } finally {
     authState.ready = true;
   }
@@ -89,7 +90,7 @@ export async function verifySignIn(challenge: string, code: string, fetcher = fe
 }
 
 export function acceptOperatorSession(session: OperatorLogin) {
-  if (!session.authenticated) throw new Error("Authentication is incomplete");
+  if (!session.authenticated) throw new Error("身份验证尚未完成。");
   authState.session = {
     configured: session.configured,
     authenticated: session.authenticated,

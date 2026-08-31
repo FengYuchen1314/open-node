@@ -25,7 +25,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function mount() { return renderUi(<ProbeAdministrationPanel accessToken="" {...callbacks} />); }
-function button(name: string) { return screen.getByRole("button", { name }) as HTMLButtonElement; }
+function button(name: string | RegExp) { return screen.getByRole("button", { name }) as HTMLButtonElement; }
 function draft(label: string, value: string) {
   const input = screen.getByLabelText(label);
   fireEvent.focus(input); fireEvent.change(input, { target: { value } });
@@ -33,7 +33,7 @@ function draft(label: string, value: string) {
   return input as HTMLInputElement;
 }
 async function selectKind(label: string) {
-  fireEvent.mouseDown(screen.getByRole("combobox", { name: "Probe type" }));
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: "探针类型" }));
   fireEvent.click(screen.getByText(label, { selector: ".ant-select-item-option-content" }));
   await flush();
 }
@@ -43,22 +43,22 @@ describe("React probe administration", () => {
     const pending = deferred<ProbeSettingsResponse>();
     vi.mocked(probe.getPublicProbeSettings).mockReturnValueOnce(pending.promise);
     mount();
-    expect(button("Generate").disabled).toBe(true); expect(button("Save settings").disabled).toBe(true);
-    fireEvent.submit(button("Save settings").closest("form")!); fireEvent.click(button("Generate")); await flush();
+    expect(button("生成").disabled).toBe(true); expect(button("保存设置").disabled).toBe(true);
+    fireEvent.submit(button("保存设置").closest("form")!); fireEvent.click(button("生成")); await flush();
     expect(probe.updatePublicProbeSettings).not.toHaveBeenCalled(); expect(probe.createProbeAccessToken).not.toHaveBeenCalled();
     await act(async () => pending.reject(new Error("Settings unavailable")));
-    expect(screen.getByText("Settings unavailable")).toBeTruthy(); expect(button("Generate").disabled).toBe(true);
-    fireEvent.click(button("Refresh probe settings")); await flush();
-    expect(button("Save settings").disabled).toBe(false);
-    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Saved probe");
+    expect(screen.getByText("暂时无法加载探针设置。")).toBeTruthy(); expect(button("生成").disabled).toBe(true);
+    fireEvent.click(button("刷新探针设置")); await flush();
+    expect(button("保存设置").disabled).toBe(false);
+    expect((screen.getByLabelText("标题") as HTMLInputElement).value).toBe("Saved probe");
   });
 
   it("requires confirmation to rotate a loaded token and ignores its response after disposal", async () => {
     const pending = deferred<ProbeAccessTokenCreateResponse>();
     vi.mocked(probe.createProbeAccessToken).mockReturnValue(pending.promise);
     const view = mount(); await flush();
-    fireEvent.click(button("Generate")); await flush(); expect(probe.createProbeAccessToken).not.toHaveBeenCalled();
-    const confirm = button("OK"); fireEvent.click(confirm); fireEvent.click(confirm); await flush();
+    fireEvent.click(button("生成")); await flush(); expect(probe.createProbeAccessToken).not.toHaveBeenCalled();
+    const confirm = button(/^确\s*定$/); fireEvent.click(confirm); fireEvent.click(confirm); await flush();
     expect(probe.createProbeAccessToken).toHaveBeenCalledTimes(1);
     view.unmount(); await act(async () => pending.resolve({ ...settings, token: "late-worker-secret" }));
     expect(callbacks.onAccessToken).not.toHaveBeenCalled(); expect(screen.queryByDisplayValue("late-worker-secret")).toBeNull();
@@ -66,77 +66,77 @@ describe("React probe administration", () => {
 
   it("rejects invalid refresh drafts after blur and Enter instead of saving a default", async () => {
     mount(); await flush();
-    const form = button("Save settings").closest("form")!;
+    const form = button("保存设置").closest("form")!;
     for (const value of ["-1", "0.4", "", "1e", "61"]) {
-      draft("Refresh seconds", value); fireEvent.submit(form); await flush();
+      draft("刷新间隔（秒）", value); fireEvent.submit(form); await flush();
       expect(probe.updatePublicProbeSettings).not.toHaveBeenCalled();
-      expect(screen.getByText("Refresh seconds must be a whole number from 1 to 60.")).toBeTruthy();
+      expect(screen.getByText("刷新间隔必须为 1 至 60 秒的整数。")).toBeTruthy();
     }
-    draft("Refresh seconds", "10"); fireEvent.submit(form); await flush();
+    draft("刷新间隔（秒）", "10"); fireEvent.submit(form); await flush();
     expect(probe.updatePublicProbeSettings).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ refresh_interval_sec: 10, require_access_token: true }));
   });
 
   it("does not create or dispatch with unknown inventory/task state and permits an explicit retry", async () => {
     vi.mocked(probe.listProbeTasks).mockRejectedValueOnce(new Error("Task list unavailable"));
     mount(); await flush();
-    const header = screen.getByText("Scheduled probes").closest<HTMLElement>(".ant-card-head-title")!;
+    const header = screen.getByText("定时探针").closest<HTMLElement>(".ant-card-head-title")!;
     expect(header.style.whiteSpace).toBe("normal");
-    expect(header.contains(button("Dispatch due"))).toBe(true);
-    expect(header.contains(button("Refresh probe tasks"))).toBe(true);
-    expect(button("Dispatch due").disabled).toBe(true); expect(button("Add task").disabled).toBe(true);
-    fireEvent.click(button("Dispatch due")); fireEvent.submit(button("Add task").closest("form")!); await flush();
+    expect(header.contains(button("下发到期任务"))).toBe(true);
+    expect(header.contains(button("刷新探针任务"))).toBe(true);
+    expect(button("下发到期任务").disabled).toBe(true); expect(button("添加任务").disabled).toBe(true);
+    fireEvent.click(button("下发到期任务")); fireEvent.submit(button("添加任务").closest("form")!); await flush();
     expect(probe.dispatchDueProbeTasks).not.toHaveBeenCalled(); expect(probe.createProbeTask).not.toHaveBeenCalled();
-    fireEvent.click(button("Refresh probe tasks")); await flush();
-    expect(button("Dispatch due").disabled).toBe(false);
-    fireEvent.click(button("Dispatch due")); await flush(); expect(probe.dispatchDueProbeTasks).toHaveBeenCalledTimes(1);
+    fireEvent.click(button("刷新探针任务")); await flush();
+    expect(button("下发到期任务").disabled).toBe(false);
+    fireEvent.click(button("下发到期任务")); await flush(); expect(probe.dispatchDueProbeTasks).toHaveBeenCalledTimes(1);
   });
 
   it("validates scheduled intervals without coercion", async () => {
     mount(); await flush();
-    const form = button("Add task").closest("form")!;
+    const form = button("添加任务").closest("form")!;
     for (const value of ["-1", "0.4", "", "86401"]) {
-      draft("Interval seconds", value); fireEvent.submit(form); await flush();
+      draft("执行间隔（秒）", value); fireEvent.submit(form); await flush();
       expect(probe.createProbeTask).not.toHaveBeenCalled();
-      expect(screen.getByText("Interval seconds must be a whole number from 60 to 86400.")).toBeTruthy();
+      expect(screen.getByText("执行间隔必须为 60 至 86400 秒的整数。")).toBeTruthy();
     }
-    draft("Interval seconds", "600"); fireEvent.submit(form); await flush();
+    draft("执行间隔（秒）", "600"); fireEvent.submit(form); await flush();
     expect(probe.createProbeTask).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: "domain_latency", interval_sec: 600 }));
   });
 
   it("validates latency timeouts without coercion", async () => {
     mount(); await flush();
-    const form = button("Add task").closest("form")!;
+    const form = button("添加任务").closest("form")!;
     for (const value of ["-1", "200.4", "", "10001"]) {
-      draft("Timeout ms", value); fireEvent.submit(form); await flush();
+      draft("超时时间（毫秒）", value); fireEvent.submit(form); await flush();
       expect(probe.createProbeTask).not.toHaveBeenCalled();
-      expect(screen.getByText("Timeout ms must be a whole number from 200 to 10000.")).toBeTruthy();
+      expect(screen.getByText("超时时间必须为 200 至 10000 毫秒的整数。")).toBeTruthy();
     }
-    draft("Timeout ms", "2500"); fireEvent.submit(form); await flush();
+    draft("超时时间（毫秒）", "2500"); fireEvent.submit(form); await flush();
     expect(probe.createProbeTask).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ server_id: "edge", kind: "domain_latency", interval_sec: 300, domain_timeout_ms: 2500, domains: ["example.com"] }));
   });
 
   it("validates selected route ports without substituting defaults", async () => {
     mount(); await flush();
-    await selectKind("Return route");
-    const form = button("Add task").closest("form")!;
-    fireEvent.change(screen.getByLabelText("Telecom host"), { target: { value: "route.example" } });
+    await selectKind("回程路由");
+    const form = button("添加任务").closest("form")!;
+    fireEvent.change(screen.getByLabelText("电信主机"), { target: { value: "route.example" } });
     for (const value of ["79999", "0.4", ""]) {
-      draft("Telecom port", value); fireEvent.submit(form); await flush();
+      draft("电信端口", value); fireEvent.submit(form); await flush();
       expect(probe.createProbeTask).not.toHaveBeenCalled();
-      expect(screen.getByText("Every selected return-route port must be a whole number from 1 to 65535.")).toBeTruthy();
+      expect(screen.getByText("所有已选回程路由目标的端口都必须为 1 至 65535 的整数。")).toBeTruthy();
     }
   });
 
   it("validates route timeouts and excludes invalid hidden drafts when switching to system probes", async () => {
-    mount(); await flush(); draft("Timeout ms", "-");
-    await selectKind("Return route");
-    const form = button("Add task").closest("form")!;
-    fireEvent.change(screen.getByLabelText("Telecom host"), { target: { value: "route.example" } });
-    draft("Route timeout seconds", "46");
+    mount(); await flush(); draft("超时时间（毫秒）", "-");
+    await selectKind("回程路由");
+    const form = button("添加任务").closest("form")!;
+    fireEvent.change(screen.getByLabelText("电信主机"), { target: { value: "route.example" } });
+    draft("回程探测超时（秒）", "46");
     fireEvent.submit(form); await flush();
     expect(probe.createProbeTask).not.toHaveBeenCalled();
-    expect(screen.getByText("Route timeout seconds must be a whole number from 10 to 45.")).toBeTruthy();
-    await selectKind("System"); fireEvent.submit(form); await flush();
+    expect(screen.getByText("回程探测超时时间必须为 10 至 45 秒的整数。")).toBeTruthy();
+    await selectKind("系统"); fireEvent.submit(form); await flush();
     expect(probe.createProbeTask).toHaveBeenCalledExactlyOnceWith({ server_id: "edge", kind: "system", interval_sec: 300, domains: [], domain_timeout_ms: 2000, allow_icmp: false, return_route_targets: [], return_route_timeout_seconds: 25, ip_version: 4, command_timeout_ms: 30000 });
   });
 });

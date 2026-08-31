@@ -22,8 +22,8 @@ describe("subscription access", () => {
 
   it("surfaces access and authorization failures", async () => {
     const fetcher = async () => new Response(JSON.stringify({ detail: "Access denied" }), { status: 403 });
-    await expect(getSubscriptionAccess("alice", fetcher)).rejects.toThrow("Access denied");
-    await expect(syncSubscriptionAccess("alice", fetcher)).rejects.toThrow("Access denied");
-    await expect(setProductUserActive("alice", false, fetcher)).rejects.toThrow("Access denied");
+    await expect(getSubscriptionAccess("alice", fetcher)).rejects.toThrow("访问被拒绝。");
+    await expect(syncSubscriptionAccess("alice", fetcher)).rejects.toThrow("访问被拒绝。");
+    await expect(setProductUserActive("alice", false, fetcher)).rejects.toThrow("访问被拒绝。");
   });
 });

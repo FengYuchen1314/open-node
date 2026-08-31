@@ -489,6 +489,23 @@ if '--check' not in sys.argv and '--version' not in sys.argv:
     )
 
 
+def expanded_command_panel(page, identifier):
+    """Open the exact React command item; data-command-id is on its label."""
+    label = page.locator(f'[data-command-id="{identifier}"]')
+    expect(label).to_have_count(1)
+    panel = label.locator(
+        "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), "
+        "' ant-collapse-item ')][1]"
+    )
+    expect(panel).to_have_count(1)
+    header = panel.locator(":scope > .ant-collapse-header")
+    expect(header).to_have_count(1)
+    if header.get_attribute("aria-expanded") != "true":
+        header.click()
+    expect(header).to_have_attribute("aria-expanded", "true")
+    return panel
+
+
 @contextmanager
 def browser_panel(client, endpoint, ca, name):
     certificate = x509.load_pem_x509_certificate(ca.read_bytes())
@@ -500,7 +517,7 @@ def browser_panel(client, endpoint, ca, name):
         browser = playwright.chromium.launch(
             args=["--ignore-certificate-errors-spki-list=" + pin]
         )
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
         try:
             context.add_cookies(
                 [
@@ -518,10 +535,13 @@ def browser_panel(client, endpoint, ca, name):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(endpoint)
-            target = page.get_by_label("Target server", exact=True)
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            target = page.get_by_label("目标服务器", exact=True)
             target.scroll_into_view_if_needed()
-            target.press("Enter")
-            page.get_by_role("option", name=re.compile(re.escape(name))).click()
+            page.locator(".ant-select").filter(has=target).click()
+            page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter(
+                has_text=re.compile("^" + re.escape(name) + "$")
+            ).click()
             yield page
             assert not errors, errors
         finally:
@@ -536,16 +556,16 @@ def browser_upgrades(page, client, base, payload, output, mode, verify):
         ("narrow", 320, 740),
     ):
         page.set_viewport_size({"width": width, "height": height})
-        page.get_by_role("button", name="Upgrade Agent", exact=True).click()
+        page.get_by_role("button", name="升级 Agent", exact=True).click()
         dialog = page.get_by_role("dialog")
-        version = dialog.get_by_label("Agent version", exact=True)
+        version = dialog.get_by_label("Agent 版本", exact=True)
         expect(version).to_be_visible(timeout=30000)
         version.fill("../../invalid")
-        checksum = dialog.get_by_label("Wheel SHA-256", exact=True)
+        checksum = dialog.get_by_label("Wheel SHA-256 校验和", exact=True)
         checksum.fill(payload["sha256"])
-        confirmed = dialog.get_by_label("Confirm Agent restart", exact=True)
+        confirmed = dialog.get_by_label("确认重启 Agent", exact=True)
         confirmed.check()
-        submit = dialog.get_by_role("button", name="Upgrade", exact=True)
+        submit = dialog.get_by_role("button", name="升级", exact=True)
         expect(submit).to_be_disabled()
         version.fill(payload["version"])
         confirmed.uncheck()
@@ -566,16 +586,18 @@ def browser_upgrades(page, client, base, payload, output, mode, verify):
         command = response.value.json()["command"]
         assert command["body"] == payload
         if label == "desktop":
-            dialog.get_by_role("button", name="Close", exact=True).click()
-            page.get_by_role("button", name="Upgrade Agent", exact=True).click()
+            dialog.locator(".ant-modal-footer").get_by_role(
+                "button", name="关闭", exact=True
+            ).click()
+            page.get_by_role("button", name="升级 Agent", exact=True).click()
         wait_command(client, base, command)
-        expect(dialog.get_by_text("Completed", exact=True)).to_be_visible(timeout=30000)
-        dialog.get_by_role("button", name="Close", exact=True).click()
+        expect(dialog.get_by_text("已完成", exact=True)).to_be_visible(timeout=30000)
+        dialog.locator(".ant-modal-footer").get_by_role("button", name="关闭", exact=True).click()
         verify()
-        page.get_by_role("button", name="Roll back Agent", exact=True).click()
-        confirm = dialog.get_by_label("Confirm Agent restart", exact=True)
+        page.get_by_role("button", name="回退 Agent", exact=True).click()
+        confirm = dialog.get_by_label("确认重启 Agent", exact=True)
         expect(confirm).to_be_visible(timeout=30000)
-        rollback = dialog.get_by_role("button", name="Roll back", exact=True)
+        rollback = dialog.get_by_role("button", name="回退", exact=True)
         expect(rollback).to_be_disabled()
         confirm.check()
         ui.check_layout(page)
@@ -587,8 +609,8 @@ def browser_upgrades(page, client, base, payload, output, mode, verify):
         ) as response:
             rollback.click()
         wait_command(client, base, response.value.json()["command"])
-        expect(dialog.get_by_text("Completed", exact=True)).to_be_visible(timeout=30000)
-        dialog.get_by_role("button", name="Close", exact=True).click()
+        expect(dialog.get_by_text("已完成", exact=True)).to_be_visible(timeout=30000)
+        dialog.locator(".ant-modal-footer").get_by_role("button", name="关闭", exact=True).click()
         verify()
     print(
         "PASS "
@@ -788,11 +810,11 @@ def exercise_mode(
 
     with browser_panel(client, endpoint, ca, name) as page:
         page.set_viewport_size({"width": 320, "height": 740})
-        page.get_by_role("button", name="Uninstall Agent", exact=True).click()
+        page.get_by_role("button", name="卸载 Agent", exact=True).click()
         dialog = page.get_by_role("dialog")
-        confirm = dialog.get_by_label("Confirm Agent removal", exact=True)
+        confirm = dialog.get_by_label("确认卸载 Agent", exact=True)
         expect(confirm).to_be_visible(timeout=30000)
-        submit = dialog.get_by_role("button", name="Uninstall", exact=True)
+        submit = dialog.get_by_role("button", name="卸载", exact=True)
         expect(submit).to_be_disabled()
         confirm.check()
         ui.check_layout(page)
@@ -815,10 +837,10 @@ def exercise_mode(
         assert (fixture.root / "state/commands.sqlite").is_file()
         assert helper_properties(fixture)["ActiveState"] == "active"
         assert command_row(client, base, removal)["status"] == "leased"
-        expect(dialog.get_by_text("Completed", exact=True)).not_to_be_visible()
-        dialog.get_by_role("button", name="Close", exact=True).click()
-        page.get_by_role("button", name="Uninstall Agent", exact=True).click()
-        expect(dialog.get_by_text("Running", exact=True)).to_be_visible(timeout=30000)
+        expect(dialog.get_by_text("已完成", exact=True)).not_to_be_visible()
+        dialog.locator(".ant-modal-footer").get_by_role("button", name="关闭", exact=True).click()
+        page.get_by_role("button", name="卸载 Agent", exact=True).click()
+        expect(dialog.get_by_text("运行中", exact=True)).to_be_visible(timeout=30000)
         page.screenshot(
             path=output / f"{mode}-uninstall-awaiting-report.png", animations="disabled"
         )
@@ -826,7 +848,7 @@ def exercise_mode(
         assert command_row(client, base, removal)["status"] == "leased"
         blocked.unlink()
         wait_command(client, base, removal)
-        expect(dialog.get_by_text("Completed", exact=True)).to_be_visible(timeout=30000)
+        expect(dialog.get_by_text("已完成", exact=True)).to_be_visible(timeout=30000)
         page.screenshot(
             path=output / f"{mode}-uninstall-completed.png", animations="disabled"
         )

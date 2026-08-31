@@ -89,9 +89,11 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
 
         forward(configs["alice"])
         browser = playwright.chromium.launch()
-        admin_context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        admin_context = browser.new_context(
+            viewport={"width": 1440, "height": 1000}, locale="zh-CN"
+        )
         portal_context = browser.new_context(
-            viewport={"width": 1440, "height": 1000}, accept_downloads=True
+            viewport={"width": 1440, "height": 1000}, accept_downloads=True, locale="zh-CN"
         )
         errors, requests = [], []
         try:
@@ -112,15 +114,16 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 target.on("pageerror", lambda error: errors.append(str(error)))
                 target.on("request", lambda request: requests.append(request.url))
             page.goto(backend + "/subscriptions")
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
             admin_context.grant_permissions(
                 ["clipboard-read", "clipboard-write"], origin=backend
             )
-            page.get_by_role("button", name="Share", exact=True).click()
+            page.get_by_role("button", name="分享", exact=True).click()
             temporary_dialog = page.get_by_role("dialog")
-            temporary_dialog.get_by_label("Label", exact=True).fill(
+            temporary_dialog.get_by_label("标签", exact=True).fill(
                 "Smoke temporary link"
             )
-            temporary_dialog.get_by_label("Downloads", exact=True).fill("2")
+            temporary_dialog.get_by_label("下载次数", exact=True).fill("2")
             accounts.capture(page, args.output, "temporary-link-create")
             with page.expect_response(
                 lambda response: (
@@ -129,17 +132,17 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 )
             ) as temporary_response:
                 temporary_dialog.get_by_role(
-                    "button", name="Create", exact=True
+                    "button", name="创建", exact=True
                 ).click()
             assert temporary_response.value.status == 201, (
                 temporary_response.value.text()
             )
             temporary = temporary_response.value.json()
             expect(
-                temporary_dialog.get_by_label("Temporary URL", exact=True)
+                temporary_dialog.get_by_label("临时订阅链接", exact=True)
             ).to_have_value(temporary["subscription_url"])
             temporary_dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
 
             temporary_path = urlsplit(temporary["subscription_url"]).path
@@ -155,10 +158,10 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 has_text="Smoke temporary link"
             )
             expect(temporary_item).to_have_count(1)
-            expect(temporary_item).to_contain_text("2/2 downloads")
-            expect(temporary_item).to_contain_text("exhausted")
+            expect(temporary_item).to_contain_text("已下载 2/2 次")
+            expect(temporary_item).to_contain_text("已耗尽")
             temporary_item.get_by_role(
-                "button", name="Copy temporary link Smoke temporary link", exact=True
+                "button", name="复制临时链接 Smoke temporary link", exact=True
             ).click()
             assert (
                 page.evaluate("navigator.clipboard.readText()")
@@ -166,9 +169,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             )
             accounts.capture(page, args.output, "temporary-link-exhausted")
             temporary_item.get_by_role(
-                "button", name="Revoke temporary link Smoke temporary link", exact=True
+                "button", name="撤销临时链接 Smoke temporary link", exact=True
             ).click()
-            revoke_dialog = page.get_by_role("dialog", name="Revoke temporary link?")
+            revoke_dialog = page.get_by_role("dialog", name="撤销临时链接？")
             expect(revoke_dialog).to_be_visible()
             with page.expect_response(
                 lambda response: (
@@ -178,7 +181,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "DELETE"
                 )
             ) as revoked_response:
-                revoke_dialog.get_by_role("button", name="Revoke", exact=True).click()
+                revoke_dialog.get_by_role("button", name="撤销", exact=True).click()
             assert revoked_response.value.status == 200, revoked_response.value.text()
             expect(temporary_item).to_have_count(0)
             print(
@@ -187,15 +190,15 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             )
 
             page.get_by_role(
-                "button", name="Edit short code for alice", exact=True
+                "button", name="编辑 alice 的订阅短码", exact=True
             ).click()
             dialog = page.get_by_role("dialog")
-            field = dialog.get_by_label("Custom short code", exact=True)
+            field = dialog.get_by_label("自定义短码", exact=True)
             expect(field).to_have_value("")
             for invalid in ("Admin", "bad/code", "a"):
                 field.fill(invalid)
                 expect(
-                    dialog.get_by_role("button", name="Save", exact=True)
+                    dialog.get_by_role("button", name="保存", exact=True)
                 ).to_be_disabled()
             external = set_code("external-code")
 
@@ -212,13 +215,13 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     )
                 ) as response:
                     target.get_by_role("dialog").get_by_role(
-                        "button", name="Save", exact=True
+                        "button", name="保存", exact=True
                     ).click()
                 assert response.value.status == expected, response.value.text()
                 if expected == 200:
                     expect(
                         target.get_by_role("dialog").get_by_text(
-                            "Short code saved", exact=True
+                            "订阅短码已保存", exact=True
                         )
                     ).to_be_visible()
                 return response.value
@@ -227,11 +230,11 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             save(page, 409)
             expect(
                 dialog.get_by_text(
-                    "Subscription links changed; reload before saving", exact=True
+                    "订阅链接已发生变化，请重新加载后保存。", exact=True
                 )
             ).to_be_visible()
             dialog.get_by_role(
-                "button", name="Reload subscription links", exact=True
+                "button", name="重新加载订阅链接", exact=True
             ).click()
             expect(field).to_have_value("external-code")
             field.fill("Alpha_Link-2")
@@ -255,7 +258,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     )
             accounts.capture(page, args.output, "admin-short-code")
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
             forward(
                 client.get(custom["short_url"], params={"format": "xray"})
@@ -288,18 +291,18 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert confirmed.status == 200, confirmed.status
             recovery = confirmed.json()["recovery_codes"]
             portal.get_by_role(
-                "button", name="Edit subscription short code", exact=True
+                "button", name="编辑订阅短码", exact=True
             ).click()
             own = portal.get_by_role("dialog")
-            own.get_by_label("Custom short code", exact=True).fill("Reader_Link")
-            own.get_by_label("Current password", exact=True).fill("wrong-password")
-            own.get_by_label("Authenticator or recovery code", exact=True).fill(
+            own.get_by_label("自定义短码", exact=True).fill("Reader_Link")
+            own.get_by_label("当前密码", exact=True).fill("wrong-password")
+            own.get_by_label("验证器验证码或恢复码", exact=True).fill(
                 recovery[0]
             )
             save(portal, 400, own=True)
-            expect(own.get_by_label("Current password", exact=True)).to_have_value("")
-            own.get_by_label("Current password", exact=True).fill(password)
-            own.get_by_label("Authenticator or recovery code", exact=True).fill(
+            expect(own.get_by_label("当前密码", exact=True)).to_have_value("")
+            own.get_by_label("当前密码", exact=True).fill(password)
+            own.get_by_label("验证器验证码或恢复码", exact=True).fill(
                 recovery[0]
             )
             save(portal, own=True)
@@ -308,24 +311,24 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert client.get(custom["short_url"]).status_code == 404
             accounts.capture(portal, args.output, "subscriber-short-code")
             own.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
-            portal.get_by_label("Subscription link type", exact=True).get_by_text(
-                "Short", exact=True
+            portal.get_by_label("订阅链接类型", exact=True).get_by_text(
+                "短链接", exact=True
             ).click()
             expect(
-                portal.get_by_role("radio", name="Short", exact=True)
+                portal.get_by_role("radio", name="短链接", exact=True)
             ).to_be_checked()
-            portal.get_by_role("combobox", name="Client format", exact=True).click()
+            portal.get_by_role("combobox", name="客户端格式", exact=True).click()
             portal.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text("Xray", exact=True).click()
-            expect(portal.get_by_label("Subscription URL", exact=True)).to_have_value(
+            expect(portal.get_by_label("订阅地址", exact=True)).to_have_value(
                 current["short_url"] + "?format=xray"
             )
             with portal.expect_download() as download:
                 portal.get_by_role(
-                    "link", name="Download subscription", exact=True
+                    "link", name="下载订阅", exact=True
                 ).click()
             path = Path(download.value.path())
             downloaded = json.loads(path.read_text())
@@ -338,7 +341,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             )
 
             page.get_by_role(
-                "button", name="Edit short code for alice", exact=True
+                "button", name="编辑 alice 的订阅短码", exact=True
             ).click()
             expect(field).to_have_value("Reader_Link")
             field.fill("")
@@ -348,29 +351,29 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert cleared["short_url"] == original["alice"]["short_url"]
             assert client.get(current["short_url"]).status_code == 404
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
             set_code("Other_Link", "bob")
             set_code("Before_Reset")
             portal.get_by_role(
-                "button", name="Edit subscription short code", exact=True
+                "button", name="编辑订阅短码", exact=True
             ).click()
-            own.get_by_label("Custom short code", exact=True).fill("OTHER_LINK")
-            own.get_by_label("Current password", exact=True).fill(password)
-            own.get_by_label("Authenticator or recovery code", exact=True).fill(
+            own.get_by_label("自定义短码", exact=True).fill("OTHER_LINK")
+            own.get_by_label("当前密码", exact=True).fill(password)
+            own.get_by_label("验证器验证码或恢复码", exact=True).fill(
                 recovery[1]
             )
             save(portal, 409, own=True)
             expect(
-                own.get_by_text("This short code is unavailable", exact=True)
+                own.get_by_text("此短码不可用。", exact=True)
             ).to_be_visible()
-            own.get_by_role("button", name="Cancel", exact=True).click()
+            own.get_by_role("button", name="取 消", exact=True).click()
             before_reset = token()
-            portal.get_by_role("tab", name="Security", exact=True).click()
-            portal.get_by_role("button", name="Reset links", exact=True).click()
+            portal.get_by_role("tab", name="安全设置", exact=True).click()
+            portal.get_by_role("button", name="重置链接", exact=True).click()
             reset = portal.get_by_role("dialog")
-            reset.get_by_label("Current password", exact=True).fill(password)
-            reset.get_by_label("Authenticator or recovery code", exact=True).fill(
+            reset.get_by_label("当前密码", exact=True).fill(password)
+            reset.get_by_label("验证器验证码或恢复码", exact=True).fill(
                 recovery[1]
             )
             with portal.expect_response(
@@ -378,7 +381,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     "/account/subscription-token/reset"
                 )
             ) as response:
-                reset.get_by_role("button", name="Confirm", exact=True).click()
+                reset.get_by_role("button", name="确认", exact=True).click()
             assert response.value.status == 200, response.value.text()
             fresh = token()
             assert fresh["custom_short_code"] is None
@@ -407,7 +410,8 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert not errors, errors
             assert all(url.startswith((backend + "/", "data:")) for url in requests)
             print(
-                "PASS clear, collision, complete link reset and unchanged Xray/credentials/Bob forwarding",
+                "PASS clear, collision, complete link reset "
+                "and unchanged Xray/credentials/Bob forwarding",
                 flush=True,
             )
         finally:

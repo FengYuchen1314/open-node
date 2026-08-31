@@ -66,7 +66,7 @@ describe("subscriber authentication", () => {
     expect(subscriberState.ready).toBe(true);
     await loadSubscriberSession(vi.fn<typeof fetch>().mockRejectedValue(new Error("Offline")));
     expect(subscriberState.session).toBeNull();
-    expect(subscriberState.error).toBe("Offline");
+    expect(subscriberState.error).toBe("连接已断开。");
   });
 
   it("cannot restore an old load after logout", async () => {
@@ -81,7 +81,7 @@ describe("subscriber authentication", () => {
     const pending = accountRequest("me", {}, vi.fn<typeof fetch>().mockReturnValue(new Promise(resolve => { finish = resolve; })));
     await subscriberSignIn("alice", "password", vi.fn<typeof fetch>().mockResolvedValue(json(session)));
     finish(json({ detail: "Subscriber sign-in required" }, 401));
-    await expect(pending).rejects.toThrow("Subscriber sign-in required");
+    await expect(pending).rejects.toThrow("请先登录订阅用户账户。");
     expect(subscriberState.session?.authenticated).toBe(true);
   });
 
@@ -97,7 +97,7 @@ describe("subscriber authentication", () => {
 
   it("retains a valid session after incorrect reauthentication or failed logout", async () => {
     subscriberState.session = { ...session };
-    await expect(accountRequest("password", {}, vi.fn<typeof fetch>().mockResolvedValue(json({ detail: "Invalid credentials" }, 400)))).rejects.toThrow("Invalid credentials");
+    await expect(accountRequest("password", {}, vi.fn<typeof fetch>().mockResolvedValue(json({ detail: "Invalid credentials" }, 400)))).rejects.toThrow("登录凭据错误。");
     await expect(subscriberSignOut(vi.fn<typeof fetch>().mockResolvedValue(json({}, 503)))).rejects.toThrow();
     expect(subscriberState.session?.authenticated).toBe(true);
     await expect(accountRequest("me", {}, vi.fn<typeof fetch>().mockResolvedValue(json({}, 401)))).rejects.toThrow();

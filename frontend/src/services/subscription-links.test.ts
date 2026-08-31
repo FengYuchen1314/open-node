@@ -33,6 +33,6 @@ describe("subscription short code requests", () => {
   });
   it("reports stale revisions and collisions without hiding the server error", async () => {
     const fetcher: typeof fetch = async () => new Response('{"detail":"Subscription links changed; reload before saving"}', { status: 409 });
-    await expect(updateProductUserShortCode("alice", "code", "old", fetcher)).rejects.toThrow("reload before saving");
+    await expect(updateProductUserShortCode("alice", "code", "old", fetcher)).rejects.toThrow("请重新加载后保存");
   });
 });

@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 import { userPath } from "./user-path";
 import type { AgentCommand } from "../domain/inventory";
 import type { SubscriptionPlan, SubscriptionPlanCreateRequest } from "../domain/subscriptions";
@@ -42,9 +43,7 @@ async function request<T>(url: string, init?: RequestInit, fetcher = authenticat
   if (!response.ok) {
     const value = await response.json().catch(() => null);
     const detail = value?.detail;
-    const message = typeof detail === "string" ? detail : Array.isArray(detail)
-      ? detail.map((entry: { loc?: unknown[]; msg?: string }) => `${entry.loc?.slice(1).join(".") ?? ""}: ${entry.msg ?? "Invalid value"}`).join("; ") : "";
-    throw new Error(message || `Plan request failed (${response.status})`);
+    throw requestError(detail, `套餐请求失败（${response.status}）`);
   }
   return response.json() as Promise<T>;
 }

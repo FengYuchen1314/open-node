@@ -22,13 +22,21 @@ describe("certificate requests", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       detail: [{ input: "private-key" }],
     }), { status: 422 })));
-    await expect(certificateRequest("/import", "POST", {})).rejects.toThrow("Invalid certificate request");
+    await expect(certificateRequest("/import", "POST", {})).rejects.toThrow("证书请求无效。");
   });
 
   it("retains actionable safe server errors", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       detail: "A certificate job is already active",
     }), { status: 409 })));
-    await expect(certificateRequest("/id/renew", "POST", {})).rejects.toThrow("A certificate job is already active");
+    await expect(certificateRequest("/id/renew", "POST", {})).rejects.toThrow("已有证书任务正在执行。");
+  });
+
+  it.each([
+    "上游密钥 private-key", "A certificate job is already active private-key",
+    [{ msg: "A certificate job is already active", input: "private-key" }],
+  ].map(detail => ({ detail })))("keeps the certificate string-only error boundary before localization", async ({ detail }) => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ detail }), { status: 422 })));
+    await expect(certificateRequest("/import", "POST", {})).rejects.toThrow("证书请求无效。");
   });
 });

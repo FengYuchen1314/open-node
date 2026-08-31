@@ -4,20 +4,21 @@ import { CloseOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FolderOp
 import { listServers } from "../../services/inventory";
 import { certificateRequest, type CertificateCapabilities, type CertificateChallenge, type CertificateDetail, type CertificateVersion, type DNSProvider, type ManagedCertificate } from "../../services/certificates";
 import type { ServerSummary } from "../../domain/inventory";
+import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 
 export interface CertificatesViewProps { onUpdated?: () => void }
 type Dialog = "" | "provider" | "certificate" | "import" | "account" | "revoke";
 const emptyCapabilities: CertificateCapabilities = { available: false, account_management: false, revocation: false, directories: [], providers: [], challenge_types: [], webroots: [] };
-const challengeLabels: Record<CertificateChallenge, string> = { dns: "DNS-01", standalone: "HTTP-01 / Standalone", webroot: "HTTP-01 / Webroot" };
-const reasons = [{ label: "Unspecified", value: 0 }, { label: "Key compromise", value: 1 }, { label: "Affiliation changed", value: 3 }, { label: "Superseded", value: 4 }, { label: "Cessation of operation", value: 5 }, { label: "Privilege withdrawn", value: 9 }];
+const challengeLabels: Record<CertificateChallenge, string> = { dns: "DNS-01", standalone: "HTTP-01 / 独立服务", webroot: "HTTP-01 / 网站根目录" };
+const reasons = [{ label: "未指定", value: 0 }, { label: "密钥泄露", value: 1 }, { label: "所属关系变更", value: 3 }, { label: "已被替代", value: 4 }, { label: "停止使用", value: 5 }, { label: "权限已撤回", value: 9 }];
 const initialCertificateForm = { name: "", domains: "", email: "", challenge_type: "dns" as CertificateChallenge, validation_server_id: "", provider_id: "", webroot_id: "", directory_url: "", accept_terms: false, auto_renew: true, eab_kid: "", eab_hmac_key: "" };
-function date(value: number | null) { return value ? new Date(value * 1000).toLocaleString() : "-"; }
+function date(value: number | null) { return value ? new Date(value * 1000).toLocaleString("zh-CN") : "-"; }
 function color(status: string) { return ["issued", "succeeded"].includes(status) ? "success" : ["failed", "interrupted", "revoked"].includes(status) ? "error" : ["unknown", "revocation_unknown"].includes(status) ? "warning" : "default"; }
-function statusLabel(status: string) { return ({ revocation_pending: "Revoking", revocation_unknown: "Unconfirmed", updating_account: "Account update", not_registered: "Not registered", unconfirmed: "Unconfirmed", unavailable: "Unavailable", registered: "Registered" } as Record<string, string>)[status] ?? status; }
+function statusLabel(status: string) { return ({ revoked: "已吊销", revocation_pending: "吊销中", revocation_unknown: "尚未确认", updating_account: "账户更新中", not_registered: "未注册", unconfirmed: "尚未确认", unavailable: "不可用", registered: "已注册" } as Record<string, string>)[status] ?? zhStatus(status); }
 function needsReissue(row: ManagedCertificate) { return ["revoked", "revocation_unknown", "revocation_pending", "revoking"].includes(row.status); }
 function validationNodesFor(capabilities: CertificateCapabilities) { return capabilities.remote_http_available ? (capabilities.validation_nodes ?? []).filter((node) => !node.cleanup_error) : []; }
 function hostsFor(capabilities: CertificateCapabilities, challenge: CertificateChallenge) {
-  return [{ label: "Control plane", value: "", disabled: !capabilities.challenge_types.includes(challenge) }, ...validationNodesFor(capabilities).filter((node) => challenge === "standalone" ? node.standalone : challenge === "webroot" && node.webroots.length > 0).map((node) => ({ label: node.name, value: node.id, disabled: false }))];
+  return [{ label: "控制台", value: "", disabled: !capabilities.challenge_types.includes(challenge) }, ...validationNodesFor(capabilities).filter((node) => challenge === "standalone" ? node.standalone : challenge === "webroot" && node.webroots.length > 0).map((node) => ({ label: node.name, value: node.id, disabled: false }))];
 }
 function normalizeValidation(form: typeof initialCertificateForm, capabilities: CertificateCapabilities) {
   const hosts = hostsFor(capabilities, form.challenge_type);
@@ -89,7 +90,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
         const response = await certificateRequest<CertificateDetail>(`/${id}`);
         if (current() && live.current.selected === id) setDetail(response);
       }
-    } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : "Certificate request failed"); }
+    } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : "证书请求失败"); }
     finally { if (current()) { loadingRef.current = false; setLoading(false); } }
   }
   async function action(work: () => Promise<unknown>) {
@@ -100,7 +101,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
     try {
       await work();
       if (mounted.current) { live.current.props.onUpdated?.(); await refresh(true); }
-    } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : "Certificate request failed"); }
+    } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : "证书请求失败"); }
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   }
   useEffect(() => {
@@ -169,7 +170,7 @@ export default function CertificatesView(props: CertificatesViewProps) {
   }
   function queue(row: ManagedCertificate, forced = false) { void action(() => certificateRequest(`/${row.id}/${row.version_id ? "renew" : "issue"}`, "POST", { force: forced })); }
   function confirmRemove(row: ManagedCertificate) {
-    setConfirmation({ title: `Delete certificate "${row.name}"?`, description: "Delete this managed certificate and its stored material?", danger: true, work: async () => { await certificateRequest(`/${row.id}`, "DELETE"); if (live.current.selected === row.id) closeDetails(); } });
+    setConfirmation({ title: `删除证书“${row.name}”？`, description: "删除此托管证书及其已存储的证书材料？", danger: true, work: async () => { await certificateRequest(`/${row.id}`, "DELETE"); if (live.current.selected === row.id) closeDetails(); } });
   }
   function download(privateKey = false) {
     const id = selected;
@@ -180,123 +181,123 @@ export default function CertificatesView(props: CertificatesViewProps) {
       try { const link = document.createElement("a"); link.href = url; link.download = filename; link.click(); }
       finally { URL.revokeObjectURL(url); }
     };
-    if (privateKey) setConfirmation({ title: "Download the private key?", description: "The downloaded PEM contains private key material. Keep it secure.", work });
+    if (privateKey) setConfirmation({ title: "下载私钥？", description: "下载的 PEM 文件含有私钥，请妥善保管。", work });
     else void action(work);
   }
   function saveTarget() {
     if (!target.server_id || !target.domain || !target.cert_name) return;
     void action(() => certificateRequest(`/${selected}/targets`, "POST", { ...target }));
   }
-  const actionLabel = (row: ManagedCertificate) => needsReissue(row) ? "Reissue certificate" : row.version_id ? "Renew certificate" : "Issue certificate";
-  const dialogTitle = dialog === "provider" ? editingProvider ? "Rotate DNS credentials" : "Add DNS provider" : dialog === "import" ? "Import PEM" : dialog === "account" ? "Edit ACME account" : dialog === "revoke" ? "Revoke certificate version" : "New certificate";
-  const dialogSaveLabel = dialog === "provider" ? "Save provider" : dialog === "certificate" ? "Create certificate" : dialog === "account" ? "Update account" : dialog === "revoke" ? "Revoke version" : "Import certificate";
+  const actionLabel = (row: ManagedCertificate) => needsReissue(row) ? "重新签发证书" : row.version_id ? "续签证书" : "签发证书";
+  const dialogTitle = dialog === "provider" ? editingProvider ? "更换 DNS 凭据" : "添加 DNS 服务商" : dialog === "import" ? "导入 PEM" : dialog === "account" ? "编辑 ACME 账户" : dialog === "revoke" ? "吊销证书版本" : "新建证书";
+  const dialogSaveLabel = dialog === "provider" ? "保存服务商" : dialog === "certificate" ? "创建证书" : dialog === "account" ? "更新账户" : dialog === "revoke" ? "吊销版本" : "导入证书";
   const saveDisabled = busy || (dialog === "provider" ? !canSaveProvider : dialog === "certificate" ? !canCreate : dialog === "account" ? !canSaveAccount : dialog === "revoke" ? !revokeForm.confirm || !revokeForm.directory_url : !importForm.name || !importForm.cert_pem || !importForm.key_pem);
 
   const certificateList = <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-    <Space wrap><Button type="primary" aria-label="New certificate" icon={<PlusOutlined />} disabled={busy || !hasChallenge} onClick={openCertificate}>New certificate</Button><Button aria-label="Import PEM" icon={<UploadOutlined />} disabled={busy} onClick={() => setDialog("import")}>Import PEM</Button>{!capabilities.available && !validationNodes.length && <Tag color="warning">ACME unavailable</Tag>}</Space>
-    <Table<ManagedCertificate> rowKey="id" dataSource={certificates} loading={loading} scroll={{ x: 800 }} locale={{ emptyText: "No certificates" }} columns={[
-      { title: "Certificate", key: "name", render: (_, row) => <Space orientation="vertical" size={0}><Button type="link" disabled={busy} onClick={() => inspect(row)}>{row.name}</Button><Typography.Text>{row.domains.join(", ")}</Typography.Text><Typography.Text type="secondary">{row.directory_url ? `${challengeLabels[row.challenge_type]}${row.validation_server_id ? ` / ${serverName(row.validation_server_id)}` : ""}${row.webroot_id ? ` / ${row.webroot_id}` : ""}` : "Imported"}</Typography.Text></Space> },
-      { title: "Status", key: "status", render: (_, row) => <Tag color={color(row.status)}>{statusLabel(row.status)}</Tag> },
-      { title: "Expires", key: "expires", render: (_, row) => date(row.expires_at) },
-      { title: "Actions", key: "actions", render: (_, row) => <Space wrap><Button icon={<FolderOpenOutlined />} aria-label="Certificate details" title="Certificate details" disabled={busy} onClick={() => inspect(row)} /><Button icon={<ReloadOutlined />} aria-label={actionLabel(row)} title={actionLabel(row)} disabled={busy || Boolean(row.active_job_id) || !row.directory_url || !issuerAvailable(row)} onClick={() => queue(row)} /><Button danger icon={<DeleteOutlined />} aria-label="Delete certificate" title="Delete certificate" disabled={busy || Boolean(row.active_job_id)} onClick={() => confirmRemove(row)} /></Space> },
+    <Space wrap><Button type="primary" aria-label="新建证书" icon={<PlusOutlined />} disabled={busy || !hasChallenge} onClick={openCertificate}>新建证书</Button><Button aria-label="导入 PEM" icon={<UploadOutlined />} disabled={busy} onClick={() => setDialog("import")}>导入 PEM</Button>{!capabilities.available && !validationNodes.length && <Tag color="warning">ACME 不可用</Tag>}</Space>
+    <Table<ManagedCertificate> rowKey="id" dataSource={certificates} loading={loading} scroll={{ x: 800 }} locale={{ emptyText: "暂无证书" }} columns={[
+      { title: "证书", key: "name", render: (_, row) => <Space orientation="vertical" size={0}><Button type="link" disabled={busy} onClick={() => inspect(row)}>{row.name}</Button><Typography.Text>{row.domains.join(", ")}</Typography.Text><Typography.Text type="secondary">{row.directory_url ? `${challengeLabels[row.challenge_type]}${row.validation_server_id ? ` / ${serverName(row.validation_server_id)}` : ""}${row.webroot_id ? ` / ${row.webroot_id}` : ""}` : "已导入"}</Typography.Text></Space> },
+      { title: "状态", key: "status", render: (_, row) => <Tag color={color(row.status)}>{statusLabel(row.status)}</Tag> },
+      { title: "到期时间", key: "expires", render: (_, row) => date(row.expires_at) },
+      { title: "操作", key: "actions", render: (_, row) => <Space wrap><Button icon={<FolderOpenOutlined />} aria-label="证书详情" title="证书详情" disabled={busy} onClick={() => inspect(row)} /><Button icon={<ReloadOutlined />} aria-label={actionLabel(row)} title={actionLabel(row)} disabled={busy || Boolean(row.active_job_id) || !row.directory_url || !issuerAvailable(row)} onClick={() => queue(row)} /><Button danger icon={<DeleteOutlined />} aria-label="删除证书" title="删除证书" disabled={busy || Boolean(row.active_job_id)} onClick={() => confirmRemove(row)} /></Space> },
     ]} />
   </Space>;
   const providerList = <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-    <Button type="primary" aria-label="Add DNS provider" icon={<PlusOutlined />} disabled={busy} onClick={() => openProvider()}>Add DNS provider</Button>
-    <Table<DNSProvider> rowKey="id" dataSource={providers} locale={{ emptyText: "No DNS providers" }} scroll={{ x: 600 }} columns={[
-      { title: "Name", dataIndex: "name" }, { title: "Provider", dataIndex: "provider" }, { title: "Credential fields", key: "fields", render: (_, row) => row.credential_fields.join(", ") },
-      { title: "Actions", key: "actions", render: (_, row) => <Space><Button icon={<EditOutlined />} aria-label="Rotate DNS credentials" title="Rotate DNS credentials" disabled={busy} onClick={() => openProvider(row)} /><Button danger icon={<DeleteOutlined />} aria-label="Delete DNS provider" title="Delete DNS provider" disabled={busy} onClick={() => setConfirmation({ title: `Delete DNS provider "${row.name}"?`, description: "Remove this DNS provider and its stored credentials?", danger: true, work: () => certificateRequest(`/providers/${row.id}`, "DELETE") })} /></Space> },
+    <Button type="primary" aria-label="添加 DNS 服务商" icon={<PlusOutlined />} disabled={busy} onClick={() => openProvider()}>添加 DNS 服务商</Button>
+    <Table<DNSProvider> rowKey="id" dataSource={providers} locale={{ emptyText: "暂无 DNS 服务商" }} scroll={{ x: 600 }} columns={[
+      { title: "名称", dataIndex: "name" }, { title: "服务商", dataIndex: "provider" }, { title: "凭据字段", key: "fields", render: (_, row) => row.credential_fields.join(", ") },
+      { title: "操作", key: "actions", render: (_, row) => <Space><Button icon={<EditOutlined />} aria-label="更换 DNS 凭据" title="更换 DNS 凭据" disabled={busy} onClick={() => openProvider(row)} /><Button danger icon={<DeleteOutlined />} aria-label="删除 DNS 服务商" title="删除 DNS 服务商" disabled={busy} onClick={() => setConfirmation({ title: `删除 DNS 服务商“${row.name}”？`, description: "删除此 DNS 服务商及其已存储的凭据？", danger: true, work: () => certificateRequest(`/providers/${row.id}`, "DELETE") })} /></Space> },
     ]} />
   </Space>;
 
   return <Space orientation="vertical" size="large" style={{ width: "100%" }}>
-    <Space wrap style={{ width: "100%", justifyContent: "space-between" }}><Typography.Title level={2}>Certificates</Typography.Title><Button icon={<ReloadOutlined />} aria-label="Refresh certificates" title="Refresh certificates" loading={loading} onClick={() => void refresh()} /></Space>
-    {error && <Alert type="error" title={error} showIcon closable={{ onClose: () => setError("") }} />}
-    <Tabs activeKey={tab} onChange={setTab} items={[{ key: "certificates", label: "Certificates", children: certificateList }, { key: "providers", label: "DNS providers", children: providerList }]} />
-    {detail && tab === "certificates" && <Card title={detail.certificate.name} extra={<Button icon={<CloseOutlined />} aria-label="Close certificate details" title="Close certificate details" onClick={closeDetails} />}>
+    <Space wrap style={{ width: "100%", justifyContent: "space-between" }}><Typography.Title level={2}>证书</Typography.Title><Button icon={<ReloadOutlined />} aria-label="刷新证书" title="刷新证书" loading={loading} onClick={() => void refresh()} /></Space>
+    {error && <Alert type="error" title={zhMessage(error)} showIcon closable={{ onClose: () => setError("") }} />}
+    <Tabs activeKey={tab} onChange={setTab} items={[{ key: "certificates", label: "证书", children: certificateList }, { key: "providers", label: "DNS 服务商", children: providerList }]} />
+    {detail && tab === "certificates" && <Card title={detail.certificate.name} extra={<Button icon={<CloseOutlined />} aria-label="关闭证书详情" title="关闭证书详情" onClick={closeDetails} />}>
       <Space orientation="vertical" size="large" style={{ width: "100%" }}>
-        {detail.certificate.last_error && <Alert type="error" title={detail.certificate.last_error} showIcon />}
-        {currentRevocation && <Alert type={currentRevocation.status === "revoked" ? "error" : "warning"} title={`${currentRevocation.status === "revoked" ? "This certificate is revoked." : "Revocation is not yet confirmed."} Deployed files remain on nodes.`} showIcon />}
+        {detail.certificate.last_error && <Alert type="error" title={zhMessage(detail.certificate.last_error)} showIcon />}
+        {currentRevocation && <Alert type={currentRevocation.status === "revoked" ? "error" : "warning"} title={`${currentRevocation.status === "revoked" ? "此证书已吊销。" : "吊销结果尚未确认。"}已部署的文件仍保留在节点上。`} showIcon />}
         <Space wrap align="center">
-          <Form.Item label="Auto-renew" style={{ marginBottom: 0 }}><Switch aria-label="Auto-renew" checked={detail.certificate.auto_renew} disabled={busy || Boolean(currentRevocation) || !detail.certificate.directory_url} onChange={(enabled) => void action(() => certificateRequest(`/${selected}`, "PATCH", { name: detail.certificate.name, auto_renew: enabled }))} /></Form.Item>
-          <Checkbox checked={force || Boolean(currentRevocation)} disabled={busy || Boolean(currentRevocation) || !detail.certificate.directory_url} onChange={(event) => setForce(event.target.checked)}>Force renewal</Checkbox>
-          <Button icon={<ReloadOutlined />} aria-label={currentRevocation ? "Reissue certificate" : "Renew now"} disabled={busy || !detail.certificate.version_id || !detail.certificate.directory_url || Boolean(detail.certificate.active_job_id) || !issuerAvailable(detail.certificate)} onClick={() => queue(detail.certificate, force)}>{currentRevocation ? "Reissue certificate" : "Renew now"}</Button>
-          <Button icon={<DownloadOutlined />} aria-label="Download certificate" disabled={busy || !detail.certificate.version_id} onClick={() => download()}>Download certificate</Button>
-          <Button icon={<DownloadOutlined />} aria-label="Download private key" disabled={busy || !detail.certificate.version_id} onClick={() => download(true)}>Download private key</Button>
+          <Form.Item label="自动续签" style={{ marginBottom: 0 }}><Switch aria-label="自动续签" checked={detail.certificate.auto_renew} disabled={busy || Boolean(currentRevocation) || !detail.certificate.directory_url} onChange={(enabled) => void action(() => certificateRequest(`/${selected}`, "PATCH", { name: detail.certificate.name, auto_renew: enabled }))} /></Form.Item>
+          <Checkbox checked={force || Boolean(currentRevocation)} disabled={busy || Boolean(currentRevocation) || !detail.certificate.directory_url} onChange={(event) => setForce(event.target.checked)}>强制续签</Checkbox>
+          <Button icon={<ReloadOutlined />} aria-label={currentRevocation ? "重新签发证书" : "立即续签"} disabled={busy || !detail.certificate.version_id || !detail.certificate.directory_url || Boolean(detail.certificate.active_job_id) || !issuerAvailable(detail.certificate)} onClick={() => queue(detail.certificate, force)}>{currentRevocation ? "重新签发证书" : "立即续签"}</Button>
+          <Button icon={<DownloadOutlined />} aria-label="下载证书" disabled={busy || !detail.certificate.version_id} onClick={() => download()}>下载证书</Button>
+          <Button icon={<DownloadOutlined />} aria-label="下载私钥" disabled={busy || !detail.certificate.version_id} onClick={() => download(true)}>下载私钥</Button>
         </Space>
-        {detail.account && <Card size="small" title="ACME account" extra={<Space wrap>{detail.account.retry_job_id && <Button aria-label="Retry account update" icon={<ReloadOutlined />} disabled={busy || Boolean(detail.certificate.active_job_id) || !capabilities.account_management} onClick={() => void action(() => certificateRequest(`/${selected}/account/jobs/${detail.account?.retry_job_id}/retry`, "POST"))} />}<Button aria-label="Edit ACME account" icon={<EditOutlined />} disabled={busy || Boolean(detail.certificate.active_job_id) || !capabilities.account_management} onClick={openAccount} /></Space>}>
-          <Descriptions column={1} items={[{ key: "email", label: "Email", children: detail.account.email }, ...(detail.account.pending_email ? [{ key: "requested", label: "Requested", children: detail.account.pending_email }] : []), { key: "eab", label: "External account binding", children: detail.account.eab_configured ? "EAB configured" : "No EAB credentials" }, { key: "state", label: "State", children: <Tag>{statusLabel(detail.account.state)}</Tag> }]} />
+        {detail.account && <Card size="small" title="ACME 账户" extra={<Space wrap>{detail.account.retry_job_id && <Button aria-label="重试账户更新" icon={<ReloadOutlined />} disabled={busy || Boolean(detail.certificate.active_job_id) || !capabilities.account_management} onClick={() => void action(() => certificateRequest(`/${selected}/account/jobs/${detail.account?.retry_job_id}/retry`, "POST"))} />}<Button aria-label="编辑 ACME 账户" icon={<EditOutlined />} disabled={busy || Boolean(detail.certificate.active_job_id) || !capabilities.account_management} onClick={openAccount} /></Space>}>
+          <Descriptions column={1} items={[{ key: "email", label: "邮箱", children: detail.account.email }, ...(detail.account.pending_email ? [{ key: "requested", label: "待更新邮箱", children: detail.account.pending_email }] : []), { key: "eab", label: "外部账户绑定", children: detail.account.eab_configured ? "已配置 EAB" : "未配置 EAB 凭据" }, { key: "state", label: "状态", children: <Tag>{statusLabel(detail.account.state)}</Tag> }]} />
         </Card>}
-        <Card size="small" title="Deployment targets">
+        <Card size="small" title="部署目标">
           <Form layout="vertical" disabled={busy} onFinish={saveTarget}>
             <Row gutter={16}>
-              <Col xs={24} md={12}><Form.Item label="Target server"><Select aria-label="Target server" value={target.server_id || undefined} options={servers.map((server) => ({ label: server.name, value: server.id }))} onChange={(server_id) => setTarget((value) => ({ ...value, server_id }))} /></Form.Item></Col>
-              <Col xs={24} md={12}><Form.Item label="Hostname"><Input aria-label="Hostname" value={target.domain} onChange={(event) => setTarget((value) => ({ ...value, domain: event.target.value }))} /></Form.Item></Col>
-              <Col xs={24} md={12}><Form.Item label="Certificate filename"><Input aria-label="Certificate filename" value={target.cert_name} onChange={(event) => setTarget((value) => ({ ...value, cert_name: event.target.value }))} /></Form.Item></Col>
-              <Col xs={24} md={12}><Form.Item label="Reload"><Select aria-label="Reload" value={target.reload} options={["nginx", "xray", "both", "none"].map((value) => ({ label: value, value }))} onChange={(reload) => setTarget((value) => ({ ...value, reload }))} /></Form.Item></Col>
+              <Col xs={24} md={12}><Form.Item label="目标服务器"><Select aria-label="目标服务器" value={target.server_id || undefined} options={servers.map((server) => ({ label: server.name, value: server.id }))} onChange={(server_id) => setTarget((value) => ({ ...value, server_id }))} /></Form.Item></Col>
+              <Col xs={24} md={12}><Form.Item label="主机名"><Input aria-label="主机名" value={target.domain} onChange={(event) => setTarget((value) => ({ ...value, domain: event.target.value }))} /></Form.Item></Col>
+              <Col xs={24} md={12}><Form.Item label="证书文件名"><Input aria-label="证书文件名" value={target.cert_name} onChange={(event) => setTarget((value) => ({ ...value, cert_name: event.target.value }))} /></Form.Item></Col>
+              <Col xs={24} md={12}><Form.Item label="重载服务"><Select aria-label="重载服务" value={target.reload} options={["nginx", "xray", "both", "none"].map((value) => ({ label: ({ nginx: "Nginx", xray: "Xray", both: "两者", none: "不重载" } as Record<string, string>)[value], value }))} onChange={(reload) => setTarget((value) => ({ ...value, reload }))} /></Form.Item></Col>
             </Row>
-            <Space wrap><Checkbox checked={target.auto_deploy} onChange={(event) => setTarget((value) => ({ ...value, auto_deploy: event.target.checked }))}>Auto-deploy</Checkbox><Button htmlType="submit" aria-label="Add target" icon={<PlusOutlined />} disabled={busy || !target.server_id || !target.domain || !target.cert_name}>Add target</Button></Space>
+            <Space wrap><Checkbox checked={target.auto_deploy} onChange={(event) => setTarget((value) => ({ ...value, auto_deploy: event.target.checked }))}>自动部署</Checkbox><Button htmlType="submit" aria-label="添加目标" icon={<PlusOutlined />} disabled={busy || !target.server_id || !target.domain || !target.cert_name}>添加目标</Button></Space>
           </Form>
           <Table<CertificateDetail["targets"][number]> style={{ marginTop: 16 }} rowKey="id" dataSource={detail.targets} pagination={false} scroll={{ x: 600 }} columns={[
-            { title: "Target", key: "target", render: (_, item) => <Space orientation="vertical" size={0}><Typography.Text strong>{serverName(item.server_id)}</Typography.Text><Typography.Text>{item.domain} / {item.cert_name}</Typography.Text>{item.error && <Typography.Text type="danger">{item.error}</Typography.Text>}</Space> },
-            { title: "Status", key: "status", render: (_, item) => <Tag color={color(item.status)}>{item.status}</Tag> },
-            { title: "Actions", key: "actions", render: (_, item) => <Space><Button icon={<UploadOutlined />} aria-label="Deploy certificate" disabled={busy || Boolean(currentRevocation) || !detail.certificate.version_id} onClick={() => void action(() => certificateRequest(`/${selected}/targets/${item.id}/deploy`, "POST"))} /><Button danger icon={<DeleteOutlined />} aria-label="Remove target" disabled={busy} onClick={() => setConfirmation({ title: "Remove deployment target?", description: `${item.domain} / ${item.cert_name}`, danger: true, work: () => certificateRequest(`/${selected}/targets/${item.id}`, "DELETE") })} /></Space> },
+            { title: "目标", key: "target", render: (_, item) => <Space orientation="vertical" size={0}><Typography.Text strong>{serverName(item.server_id)}</Typography.Text><Typography.Text>{item.domain} / {item.cert_name}</Typography.Text>{item.error && <Typography.Text type="danger">{zhMessage(item.error)}</Typography.Text>}</Space> },
+            { title: "状态", key: "status", render: (_, item) => <Tag color={color(item.status)}>{statusLabel(item.status)}</Tag> },
+            { title: "操作", key: "actions", render: (_, item) => <Space><Button icon={<UploadOutlined />} aria-label="部署证书" disabled={busy || Boolean(currentRevocation) || !detail.certificate.version_id} onClick={() => void action(() => certificateRequest(`/${selected}/targets/${item.id}/deploy`, "POST"))} /><Button danger icon={<DeleteOutlined />} aria-label="移除目标" disabled={busy} onClick={() => setConfirmation({ title: "移除部署目标？", description: `${item.domain} / ${item.cert_name}`, danger: true, work: () => certificateRequest(`/${selected}/targets/${item.id}`, "DELETE") })} /></Space> },
           ]} />
         </Card>
-        <Card size="small" title="Versions"><Table<CertificateVersion> rowKey="id" dataSource={detail.versions} pagination={false} scroll={{ x: 700 }} columns={[
-          { title: "Version", key: "version", render: (_, version) => <Space orientation="vertical" size={0}><Typography.Text strong>{date(version.created_at)}</Typography.Text><Typography.Text>{version.details.issuer}</Typography.Text><Typography.Text code>{version.details.serial}</Typography.Text></Space> },
-          { title: "Expires", key: "expires", render: (_, version) => date(version.details.expires_at) },
-          { title: "Status", key: "status", render: (_, version) => <Space wrap>{version.revocation && <Tag color={color(version.revocation.status)}>{version.revocation.status === "unknown" ? "Unconfirmed" : version.revocation.status === "pending" ? "Revoking" : "Revoked"}</Tag>}{version.id === detail.certificate.version_id && <Tag color={version.revocation ? "default" : "success"}>{version.revocation ? "Current" : "Active"}</Tag>}</Space> },
-          { title: "Actions", key: "actions", render: (_, version) => <Space wrap>{version.id !== detail.certificate.version_id && <Button aria-label="Activate version" disabled={busy || Boolean(version.revocation) || Boolean(detail.certificate.active_job_id)} onClick={() => setConfirmation({ title: "Activate this certificate version?", description: version.details.serial, work: () => certificateRequest(`/${selected}/versions/${version.id}/activate`, "POST") })}>Activate version</Button>}<Button danger icon={<StopOutlined />} aria-label={version.revocation?.status === "unknown" ? "Retry revocation" : "Revoke version"} disabled={busy || !capabilities.revocation || Boolean(detail.certificate.active_job_id) || Boolean(version.revocation && version.revocation.status !== "unknown")} onClick={() => openRevoke(version)}>{version.revocation?.status === "unknown" ? "Retry revocation" : "Revoke version"}</Button></Space> },
+        <Card size="small" title="版本"><Table<CertificateVersion> rowKey="id" dataSource={detail.versions} pagination={false} scroll={{ x: 700 }} columns={[
+          { title: "版本", key: "version", render: (_, version) => <Space orientation="vertical" size={0}><Typography.Text strong>{date(version.created_at)}</Typography.Text><Typography.Text>{version.details.issuer}</Typography.Text><Typography.Text code>{version.details.serial}</Typography.Text></Space> },
+          { title: "到期时间", key: "expires", render: (_, version) => date(version.details.expires_at) },
+          { title: "状态", key: "status", render: (_, version) => <Space wrap>{version.revocation && <Tag color={color(version.revocation.status)}>{version.revocation.status === "unknown" ? "尚未确认" : version.revocation.status === "pending" ? "吊销中" : "已吊销"}</Tag>}{version.id === detail.certificate.version_id && <Tag color={version.revocation ? "default" : "success"}>{version.revocation ? "当前" : "使用中"}</Tag>}</Space> },
+          { title: "操作", key: "actions", render: (_, version) => <Space wrap>{version.id !== detail.certificate.version_id && <Button aria-label="启用版本" disabled={busy || Boolean(version.revocation) || Boolean(detail.certificate.active_job_id)} onClick={() => setConfirmation({ title: "启用此证书版本？", description: version.details.serial, work: () => certificateRequest(`/${selected}/versions/${version.id}/activate`, "POST") })}>启用版本</Button>}<Button danger icon={<StopOutlined />} aria-label={version.revocation?.status === "unknown" ? "重试吊销" : "吊销版本"} disabled={busy || !capabilities.revocation || Boolean(detail.certificate.active_job_id) || Boolean(version.revocation && version.revocation.status !== "unknown")} onClick={() => openRevoke(version)}>{version.revocation?.status === "unknown" ? "重试吊销" : "吊销版本"}</Button></Space> },
         ]} /></Card>
-        <Card size="small" title="Jobs"><Table<CertificateDetail["jobs"][number]> rowKey="id" dataSource={detail.jobs} pagination={false} scroll={{ x: 500 }} columns={[
-          { title: "Job", key: "job", render: (_, job) => <Space orientation="vertical" size={0}><Typography.Text strong>{job.kind}</Typography.Text><Typography.Text>{job.message}</Typography.Text>{job.cleanup_pending && <Typography.Text type="warning">Node challenge cleanup pending</Typography.Text>}</Space> },
-          { title: "Created", key: "created", render: (_, job) => date(job.created_at) }, { title: "Status", key: "status", render: (_, job) => <Tag color={color(job.status)}>{job.status}</Tag> },
+        <Card size="small" title="任务"><Table<CertificateDetail["jobs"][number]> rowKey="id" dataSource={detail.jobs} pagination={false} scroll={{ x: 500 }} columns={[
+          { title: "任务", key: "job", render: (_, job) => <Space orientation="vertical" size={0}><Typography.Text strong>{zhStatus(job.kind)}</Typography.Text><Typography.Text>{job.message ? zhMessage(job.message) : ""}</Typography.Text>{job.cleanup_pending && <Typography.Text type="warning">节点验证文件待清理</Typography.Text>}</Space> },
+          { title: "创建时间", key: "created", render: (_, job) => date(job.created_at) }, { title: "状态", key: "status", render: (_, job) => <Tag color={color(job.status)}>{statusLabel(job.status)}</Tag> },
         ]} /></Card>
       </Space>
     </Card>}
-    <Modal title={dialogTitle} open={Boolean(dialog)} onCancel={() => { if (!busy) closeDialog(); }} width={620} closable={!busy} mask={{ closable: !busy }} keyboard={!busy} destroyOnHidden okText={dialogSaveLabel} confirmLoading={busy} okButtonProps={{ disabled: saveDisabled, danger: dialog === "revoke", htmlType: "submit", form: "certificate-dialog-form" }} cancelButtonProps={{ disabled: busy }} styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}>
-      {error && <Alert type="error" title={error} showIcon style={{ marginBottom: 16 }} />}
+    <Modal title={dialogTitle} open={Boolean(dialog)} onCancel={() => { if (!busy) closeDialog(); }} width={620} closable={!busy} mask={{ closable: !busy }} keyboard={!busy} destroyOnHidden okText={dialogSaveLabel} confirmLoading={busy} okButtonProps={{ "aria-label": dialogSaveLabel, disabled: saveDisabled, danger: dialog === "revoke", htmlType: "submit", form: "certificate-dialog-form" }} cancelButtonProps={{ disabled: busy }} styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}>
+      {error && <Alert type="error" title={zhMessage(error)} showIcon style={{ marginBottom: 16 }} />}
       <Form id="certificate-dialog-form" layout="vertical" disabled={busy} onFinish={saveDialog}>
         {dialog === "provider" && <>
-          <Form.Item label="Provider name"><Input aria-label="Provider name" value={providerForm.name} onChange={(event) => setProviderForm((value) => ({ ...value, name: event.target.value }))} /></Form.Item>
-          <Form.Item label="DNS provider type"><Select aria-label="DNS provider type" value={providerForm.provider} disabled={busy || Boolean(editingProvider)} options={capabilities.providers.map((item) => ({ label: item.id, value: item.id }))} onChange={(provider) => setProviderForm((value) => ({ ...value, provider, credentials: {} }))} /></Form.Item>
+          <Form.Item label="服务商名称"><Input aria-label="服务商名称" value={providerForm.name} onChange={(event) => setProviderForm((value) => ({ ...value, name: event.target.value }))} /></Form.Item>
+          <Form.Item label="DNS 服务商类型"><Select aria-label="DNS 服务商类型" value={providerForm.provider} disabled={busy || Boolean(editingProvider)} options={capabilities.providers.map((item) => ({ label: item.id, value: item.id }))} onChange={(provider) => setProviderForm((value) => ({ ...value, provider, credentials: {} }))} /></Form.Item>
           {(providerFields?.fields ?? []).map((field) => <Form.Item key={field} label={field} required={providerFields?.required.includes(field)}>{field.endsWith("ENDPOINT") ? <Input aria-label={field} type="url" autoComplete="off" value={providerForm.credentials[field] ?? ""} onChange={(event) => setProviderForm((value) => ({ ...value, credentials: { ...value.credentials, [field]: event.target.value } }))} /> : <Input.Password aria-label={field} autoComplete="off" value={providerForm.credentials[field] ?? ""} onChange={(event) => setProviderForm((value) => ({ ...value, credentials: { ...value.credentials, [field]: event.target.value } }))} />}</Form.Item>)}
         </>}
         {dialog === "certificate" && <>
-          <Form.Item label="Certificate name"><Input aria-label="Certificate name" value={form.name} onChange={(event) => patchForm({ name: event.target.value })} /></Form.Item>
-          <Form.Item label="DNS names" validateStatus={wildcardError ? "error" : undefined} help={wildcardError ? "Wildcard names require DNS-01" : undefined}><Input.TextArea aria-label="DNS names" rows={2} value={form.domains} onChange={(event) => patchForm({ domains: event.target.value })} /></Form.Item>
-          <Form.Item label="Account email"><Input aria-label="Account email" type="email" value={form.email} onChange={(event) => patchForm({ email: event.target.value })} /></Form.Item>
-          <Form.Item label="Validation method"><Select aria-label="Validation method" value={form.challenge_type} options={challengeTypes.map((value) => ({ value, label: challengeLabels[value] }))} onChange={(challenge_type) => patchForm({ challenge_type })} /></Form.Item>
-          {form.challenge_type !== "dns" && <Form.Item label="Validation host"><Select aria-label="Validation host" value={form.validation_server_id} options={validationOptions} onChange={(validation_server_id) => patchForm({ validation_server_id })} /></Form.Item>}
-          {form.challenge_type === "dns" && <Form.Item label="DNS provider"><Select aria-label="DNS provider" value={form.provider_id || undefined} options={providers.map((provider) => ({ value: provider.id, label: provider.name }))} onChange={(provider_id) => patchForm({ provider_id })} /></Form.Item>}
-          {form.challenge_type === "webroot" && <Form.Item label="Webroot"><Select aria-label="Webroot" value={form.webroot_id || undefined} options={webrootOptions.map((value) => ({ value, label: value }))} onChange={(webroot_id) => patchForm({ webroot_id })} /></Form.Item>}
-          <Form.Item label="ACME directory"><Select aria-label="ACME directory" value={form.directory_url || undefined} options={capabilities.directories.map((value) => ({ value, label: value }))} onChange={(directory_url) => patchForm({ directory_url })} /></Form.Item>
-          <Collapse items={[{ key: "eab", label: "External account binding", children: <><Form.Item label="EAB key ID"><Input.Password aria-label="EAB key ID" autoComplete="off" value={form.eab_kid} onChange={(event) => patchForm({ eab_kid: event.target.value })} /></Form.Item><Form.Item label="EAB HMAC key"><Input.Password aria-label="EAB HMAC key" autoComplete="off" value={form.eab_hmac_key} onChange={(event) => patchForm({ eab_hmac_key: event.target.value })} /></Form.Item></> }]} />
-          <Form.Item label="Auto-renew" style={{ marginTop: 16 }}><Switch aria-label="Auto-renew" checked={form.auto_renew} onChange={(auto_renew) => patchForm({ auto_renew })} /></Form.Item>
-          <Checkbox checked={form.accept_terms} onChange={(event) => patchForm({ accept_terms: event.target.checked })}>I accept this CA's terms of service</Checkbox>
+          <Form.Item label="证书名称"><Input aria-label="证书名称" value={form.name} onChange={(event) => patchForm({ name: event.target.value })} /></Form.Item>
+          <Form.Item label="DNS 域名" validateStatus={wildcardError ? "error" : undefined} help={wildcardError ? "通配符域名需要使用 DNS-01" : undefined}><Input.TextArea aria-label="DNS 域名" rows={2} value={form.domains} onChange={(event) => patchForm({ domains: event.target.value })} /></Form.Item>
+          <Form.Item label="账户邮箱"><Input aria-label="账户邮箱" type="email" value={form.email} onChange={(event) => patchForm({ email: event.target.value })} /></Form.Item>
+          <Form.Item label="验证方式"><Select aria-label="验证方式" value={form.challenge_type} options={challengeTypes.map((value) => ({ value, label: challengeLabels[value] }))} onChange={(challenge_type) => patchForm({ challenge_type })} /></Form.Item>
+          {form.challenge_type !== "dns" && <Form.Item label="验证主机"><Select aria-label="验证主机" value={form.validation_server_id} options={validationOptions} onChange={(validation_server_id) => patchForm({ validation_server_id })} /></Form.Item>}
+          {form.challenge_type === "dns" && <Form.Item label="DNS 服务商"><Select aria-label="DNS 服务商" value={form.provider_id || undefined} options={providers.map((provider) => ({ value: provider.id, label: provider.name }))} onChange={(provider_id) => patchForm({ provider_id })} /></Form.Item>}
+          {form.challenge_type === "webroot" && <Form.Item label="网站根目录"><Select aria-label="网站根目录" value={form.webroot_id || undefined} options={webrootOptions.map((value) => ({ value, label: value }))} onChange={(webroot_id) => patchForm({ webroot_id })} /></Form.Item>}
+          <Form.Item label="ACME 目录"><Select aria-label="ACME 目录" value={form.directory_url || undefined} options={capabilities.directories.map((value) => ({ value, label: value }))} onChange={(directory_url) => patchForm({ directory_url })} /></Form.Item>
+          <Collapse items={[{ key: "eab", label: "外部账户绑定", children: <><Form.Item label="EAB 密钥 ID"><Input.Password aria-label="EAB 密钥 ID" autoComplete="off" value={form.eab_kid} onChange={(event) => patchForm({ eab_kid: event.target.value })} /></Form.Item><Form.Item label="EAB HMAC 密钥"><Input.Password aria-label="EAB HMAC 密钥" autoComplete="off" value={form.eab_hmac_key} onChange={(event) => patchForm({ eab_hmac_key: event.target.value })} /></Form.Item></> }]} />
+          <Form.Item label="自动续签" style={{ marginTop: 16 }}><Switch aria-label="自动续签" checked={form.auto_renew} onChange={(auto_renew) => patchForm({ auto_renew })} /></Form.Item>
+          <Checkbox checked={form.accept_terms} onChange={(event) => patchForm({ accept_terms: event.target.checked })}>我接受此 CA 的服务条款</Checkbox>
         </>}
         {dialog === "account" && <>
-          <Form.Item label="Account email"><Input aria-label="Account email" type="email" value={accountForm.email} onChange={(event) => setAccountForm((value) => ({ ...value, email: event.target.value }))} /></Form.Item>
-          <Form.Item label="External account binding"><Select aria-label="External account binding" value={accountForm.eab_action} disabled={busy || detail?.account?.state === "registered"} options={[{ label: "Keep existing", value: "keep" }, { label: "Replace credentials", value: "replace" }, { label: "Remove credentials", value: "remove" }]} onChange={(eab_action) => setAccountForm((value) => ({ ...value, eab_action, eab_kid: "", eab_hmac_key: "" }))} /></Form.Item>
-          {accountForm.eab_action === "replace" && <><Form.Item label="EAB key ID"><Input.Password aria-label="EAB key ID" autoComplete="off" value={accountForm.eab_kid} onChange={(event) => setAccountForm((value) => ({ ...value, eab_kid: event.target.value }))} /></Form.Item><Form.Item label="EAB HMAC key"><Input.Password aria-label="EAB HMAC key" autoComplete="off" value={accountForm.eab_hmac_key} onChange={(event) => setAccountForm((value) => ({ ...value, eab_hmac_key: event.target.value }))} /></Form.Item></>}
+          <Form.Item label="账户邮箱"><Input aria-label="账户邮箱" type="email" value={accountForm.email} onChange={(event) => setAccountForm((value) => ({ ...value, email: event.target.value }))} /></Form.Item>
+          <Form.Item label="外部账户绑定"><Select aria-label="外部账户绑定" value={accountForm.eab_action} disabled={busy || detail?.account?.state === "registered"} options={[{ label: "保留现有凭据", value: "keep" }, { label: "替换凭据", value: "replace" }, { label: "移除凭据", value: "remove" }]} onChange={(eab_action) => setAccountForm((value) => ({ ...value, eab_action, eab_kid: "", eab_hmac_key: "" }))} /></Form.Item>
+          {accountForm.eab_action === "replace" && <><Form.Item label="EAB 密钥 ID"><Input.Password aria-label="EAB 密钥 ID" autoComplete="off" value={accountForm.eab_kid} onChange={(event) => setAccountForm((value) => ({ ...value, eab_kid: event.target.value }))} /></Form.Item><Form.Item label="EAB HMAC 密钥"><Input.Password aria-label="EAB HMAC 密钥" autoComplete="off" value={accountForm.eab_hmac_key} onChange={(event) => setAccountForm((value) => ({ ...value, eab_hmac_key: event.target.value }))} /></Form.Item></>}
         </>}
         {dialog === "revoke" && <>
-          <Alert type="warning" title="Revocation is irreversible. Deployed files remain on nodes." showIcon />
+          <Alert type="warning" title="吊销不可撤销。已部署的文件仍保留在节点上。" showIcon />
           <Typography.Paragraph><Typography.Text strong>{detail?.certificate.name}</Typography.Text><br /><Typography.Text code>{revokeForm.serial}</Typography.Text></Typography.Paragraph>
-          <Form.Item label="Issuing ACME directory"><Select aria-label="Issuing ACME directory" value={revokeForm.directory_url || undefined} disabled={busy || Boolean(detail?.certificate.directory_url)} options={capabilities.directories.map((value) => ({ value, label: value }))} onChange={(directory_url) => setRevokeForm((value) => ({ ...value, directory_url }))} /></Form.Item>
-          <Form.Item label="Revocation reason"><Select aria-label="Revocation reason" value={revokeForm.reason} options={reasons} onChange={(reason) => setRevokeForm((value) => ({ ...value, reason }))} /></Form.Item>
-          <Checkbox checked={revokeForm.confirm} onChange={(event) => setRevokeForm((value) => ({ ...value, confirm: event.target.checked }))}>I confirm revocation of this version</Checkbox>
+          <Form.Item label="签发证书的 ACME 目录"><Select aria-label="签发证书的 ACME 目录" value={revokeForm.directory_url || undefined} disabled={busy || Boolean(detail?.certificate.directory_url)} options={capabilities.directories.map((value) => ({ value, label: value }))} onChange={(directory_url) => setRevokeForm((value) => ({ ...value, directory_url }))} /></Form.Item>
+          <Form.Item label="吊销原因"><Select aria-label="吊销原因" value={revokeForm.reason} options={reasons} onChange={(reason) => setRevokeForm((value) => ({ ...value, reason }))} /></Form.Item>
+          <Checkbox checked={revokeForm.confirm} onChange={(event) => setRevokeForm((value) => ({ ...value, confirm: event.target.checked }))}>我确认吊销此版本</Checkbox>
         </>}
         {dialog === "import" && <>
-          <Form.Item label="Certificate name"><Input aria-label="Certificate name" value={importForm.name} onChange={(event) => setImportForm((value) => ({ ...value, name: event.target.value }))} /></Form.Item>
-          <Form.Item label="Certificate PEM"><Input.TextArea aria-label="Certificate PEM" rows={5} spellCheck={false} value={importForm.cert_pem} onChange={(event) => setImportForm((value) => ({ ...value, cert_pem: event.target.value }))} /></Form.Item>
-          <Form.Item label="Private key PEM"><Input.TextArea aria-label="Private key PEM" rows={5} autoComplete="off" spellCheck={false} value={importForm.key_pem} onChange={(event) => setImportForm((value) => ({ ...value, key_pem: event.target.value }))} /></Form.Item>
+          <Form.Item label="证书名称"><Input aria-label="证书名称" value={importForm.name} onChange={(event) => setImportForm((value) => ({ ...value, name: event.target.value }))} /></Form.Item>
+          <Form.Item label="证书 PEM"><Input.TextArea aria-label="证书 PEM" rows={5} spellCheck={false} value={importForm.cert_pem} onChange={(event) => setImportForm((value) => ({ ...value, cert_pem: event.target.value }))} /></Form.Item>
+          <Form.Item label="私钥 PEM"><Input.TextArea aria-label="私钥 PEM" rows={5} autoComplete="off" spellCheck={false} value={importForm.key_pem} onChange={(event) => setImportForm((value) => ({ ...value, key_pem: event.target.value }))} /></Form.Item>
         </>}
       </Form>
     </Modal>
-    <Modal title={confirmation?.title} open={Boolean(confirmation)} onCancel={() => { if (!busy) setConfirmation(null); }} closable={!busy} mask={{ closable: !busy }} keyboard={!busy} okText="Confirm" confirmLoading={busy} okButtonProps={{ danger: confirmation?.danger, disabled: busy }} cancelButtonProps={{ disabled: busy }} onOk={() => { if (confirmation) void action(async () => { await confirmation.work(); if (mounted.current) setConfirmation(null); }); }}>
-      <Typography.Paragraph>{confirmation?.description}</Typography.Paragraph>{error && <Alert type="error" title={error} showIcon />}
+    <Modal title={confirmation?.title} open={Boolean(confirmation)} onCancel={() => { if (!busy) setConfirmation(null); }} closable={!busy} mask={{ closable: !busy }} keyboard={!busy} okText="确认" confirmLoading={busy} okButtonProps={{ "aria-label": "确认", danger: confirmation?.danger, disabled: busy }} cancelButtonProps={{ disabled: busy }} onOk={() => { if (confirmation) void action(async () => { await confirmation.work(); if (mounted.current) setConfirmation(null); }); }}>
+      <Typography.Paragraph>{confirmation?.description}</Typography.Paragraph>{error && <Alert type="error" title={zhMessage(error)} showIcon />}
     </Modal>
   </Space>;
 }

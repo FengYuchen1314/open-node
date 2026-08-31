@@ -26,23 +26,23 @@ afterEach(async () => {
   vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 function fillCredentials() {
-  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin" } });
-  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "administrator-password" } });
+  fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "admin" } });
+  fireEvent.change(screen.getByLabelText("密码"), { target: { value: "administrator-password" } });
 }
-async function login() { fillCredentials(); fireEvent.click(screen.getByRole("button", { name: "Sign In" })); await flush(); }
+async function login() { fillCredentials(); fireEvent.click(screen.getByRole("button", { name: "登录" })); await flush(); }
 describe("React administrator sign-in", () => {
   it("keeps password and MFA steps distinct and refuses duplicate password submissions", async () => {
     const pending = deferred<OperatorLogin>(); vi.mocked(signIn).mockReturnValue(pending.promise);
     renderUi(<SignInView />); fillCredentials();
-    const form = screen.getByLabelText("Password").closest("form")!;
+    const form = screen.getByLabelText("密码").closest("form")!;
     fireEvent.submit(form); fireEvent.submit(form); await flush();
     expect(signIn).toHaveBeenCalledExactlyOnceWith("admin", "administrator-password");
     await act(async () => pending.resolve(challenge));
-    expect(screen.queryByLabelText("Password")).toBeNull();
-    expect(screen.getByLabelText("Authenticator or recovery code")).toBeTruthy();
+    expect(screen.queryByLabelText("密码")).toBeNull();
+    expect(screen.getByLabelText("验证器验证码或恢复码")).toBeTruthy();
     expect(acceptOperatorSession).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Start over" }));
-    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "重新开始" }));
+    expect((screen.getByLabelText("密码") as HTMLInputElement).value).toBe("");
   });
   it("does not accept mandatory enrollment until the user acknowledges the recovery codes", async () => {
     const enrollment = { secret: "PRIVATE-ENROLLMENT-SECRET", provisioning_uri: "otpauth://totp/private", expires_at: "2026-08-31T12:00:00Z" };
@@ -50,39 +50,39 @@ describe("React administrator sign-in", () => {
     const result = { ...authenticated, recovery_codes: ["PRIVATE-CODE-ONE", "PRIVATE-CODE-TWO"] };
     vi.mocked(verifySignIn).mockResolvedValue(result);
     renderUi(<SignInView />); await login();
-    expect((screen.getByLabelText("Authenticator secret") as HTMLInputElement).value).toBe(enrollment.secret);
-    fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verify" })); await flush();
+    expect((screen.getByLabelText("验证器密钥") as HTMLInputElement).value).toBe(enrollment.secret);
+    fireEvent.change(screen.getByLabelText("验证器验证码"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证" })); await flush();
     expect(verifySignIn).toHaveBeenCalledExactlyOnceWith(challenge.challenge, "123456");
-    expect(screen.queryByLabelText("Authenticator secret")).toBeNull();
-    expect(screen.queryByAltText("Administrator authenticator enrollment QR code")).toBeNull();
-    expect((screen.getByRole("button", { name: "Continue to Open Node" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByLabelText("验证器密钥")).toBeNull();
+    expect(screen.queryByAltText("管理员验证器绑定二维码")).toBeNull();
+    expect((screen.getByRole("button", { name: "进入 Open Node" }) as HTMLButtonElement).disabled).toBe(true);
     expect(acceptOperatorSession).not.toHaveBeenCalled();
     expect(JSON.stringify({ ...localStorage, ...sessionStorage, state: authState })).not.toMatch(/PRIVATE-/);
-    fireEvent.click(screen.getByRole("checkbox", { name: "I have stored the recovery codes securely" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue to Open Node" })); await flush();
+    fireEvent.click(screen.getByRole("checkbox", { name: "我已妥善保存恢复码" }));
+    fireEvent.click(screen.getByRole("button", { name: "进入 Open Node" })); await flush();
     expect(acceptOperatorSession).toHaveBeenCalledExactlyOnceWith(result);
     expect(document.body.textContent).not.toContain("PRIVATE-CODE");
   });
   it("clears rejected passwords and rejected one-time codes without dropping the challenge", async () => {
     vi.mocked(signIn).mockRejectedValueOnce(new Error("Invalid password"));
     renderUi(<SignInView />); await login();
-    expect(screen.getByRole("alert").textContent).toContain("Invalid password");
-    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("alert").textContent).toContain("密码错误");
+    expect((screen.getByLabelText("密码") as HTMLInputElement).value).toBe("");
     await login(); vi.mocked(verifySignIn).mockRejectedValue(new Error("Invalid second factor"));
-    fireEvent.change(screen.getByLabelText("Authenticator or recovery code"), { target: { value: "wrong-code" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verify" })); await flush();
-    expect((screen.getByLabelText("Authenticator or recovery code") as HTMLInputElement).value).toBe("");
-    expect(screen.getByRole("alert").textContent).toContain("Invalid second factor");
+    fireEvent.change(screen.getByLabelText("验证器验证码或恢复码"), { target: { value: "wrong-code" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证" })); await flush();
+    expect((screen.getByLabelText("验证器验证码或恢复码") as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("alert").textContent).toContain("双重验证失败");
   });
   it("shows connection retry and unconfigured states without a misleading login form", async () => {
     authState.error = "Connection unavailable";
     renderUi(<SignInView />);
-    expect(screen.queryByLabelText("Password")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Retry connection" })); expect(loadSession).toHaveBeenCalledOnce();
+    expect(screen.queryByLabelText("密码")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "重新连接" })); expect(loadSession).toHaveBeenCalledOnce();
     await act(async () => { authState.error = ""; authState.session = { ...anonymous, configured: false }; });
-    expect(screen.getByText("Administrator account is not configured.")).toBeTruthy();
-    expect(screen.queryByLabelText("Password")).toBeNull();
+    expect(screen.getByText("尚未配置管理员账户。")).toBeTruthy();
+    expect(screen.queryByLabelText("密码")).toBeNull();
   });
   it("discards an enrollment QR completion after the sign-in view is unmounted", async () => {
     const pending = deferred<string>(); qrDataUrl.mockReturnValue(pending.promise);

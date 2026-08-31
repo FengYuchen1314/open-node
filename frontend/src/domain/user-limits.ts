@@ -43,5 +43,5 @@ export function validUserLimits(value?: UserLimitOverrides): boolean {
     && Object.values(value.node_device_limits).every(item => item !== null && validLimit(item, 1000000, 1, true)));
 }
 export function limitSource(source: LimitSource): string {
-  return { user_node: "User node", user_parent: "User parent", user: "User default", plan_node: "Plan node", plan_parent: "Plan parent", plan: "Plan default", unlimited: "Unlimited", shared: "Shared credential" }[source];
+  return { user_node: "用户节点设置", user_parent: "用户父节点设置", user: "用户默认设置", plan_node: "套餐节点设置", plan_parent: "套餐父节点设置", plan: "套餐默认设置", unlimited: "不限制", shared: "共享凭据" }[source];
 }

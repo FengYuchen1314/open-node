@@ -22,13 +22,13 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 export async function fetchLicenseStatus(fetcher = authenticatedFetch): Promise<LicenseStatus> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/license/status`);
   if (!response.ok) {
-    throw new Error(`License status request failed with ${response.status}`);
+    throw new Error(`许可证状态请求失败（${response.status}）`);
   }
   return response.json() as Promise<LicenseStatus>;
 }
 
 export async function fetchAppMeta(fetcher = authenticatedFetch): Promise<AppMeta> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/meta`);
-  if (!response.ok) throw new Error(`Application metadata request failed with ${response.status}`);
+  if (!response.ok) throw new Error(`应用信息请求失败（${response.status}）`);
   return response.json() as Promise<AppMeta>;
 }

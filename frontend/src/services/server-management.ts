@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 import type { ServerSummary } from "../domain/inventory";
 
 export interface ServerSettings {
@@ -35,15 +36,7 @@ async function request<T>(id: string, path: string, init?: RequestInit, fetcher 
   const response = await fetcher(`${base}/api/v1/servers/${id}/${path}`, init);
   if (!response.ok) {
     const error = await response.json().catch(() => null);
-    if (Array.isArray(error?.detail)) {
-      const messages = error.detail.flatMap((item: { loc?: unknown[]; msg?: unknown }) => {
-        if (typeof item?.msg !== "string") return [];
-        const field = Array.isArray(item.loc) ? item.loc.slice(1).join(".") : "";
-        return [field ? `${field}: ${item.msg}` : item.msg];
-      });
-      if (messages.length) throw new Error(messages.join("; "));
-    }
-    throw new Error(typeof error?.detail === "string" ? error.detail : `Server request failed (${response.status})`);
+    throw requestError(error?.detail, `服务器请求失败（${response.status}）`);
   }
   return response.json() as Promise<T>;
 }

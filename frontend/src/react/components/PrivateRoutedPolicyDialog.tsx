@@ -1,3 +1,4 @@
+import { zhMessage } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Form, Modal, Switch } from "antd";
 import type { PrivateRoutedPolicy } from "../../domain/private-routed-nodes";
@@ -22,17 +23,17 @@ function PolicyContent({ policy, onOpenChange, onSaved }: PrivateRoutedPolicyDia
     if (busy || !valid) return;
     const run = ++version.current; setBusy(true); setError("");
     try { const value = await updatePrivateRoutePolicy(form); if (run === version.current) { onSaved?.(value); onOpenChange(false); } }
-    catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "Policy update failed"); }
+    catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "更新策略失败"); }
     finally { if (run === version.current) setBusy(false); }
   }
-  return <Modal open title="Private route policy" width={560} destroyOnHidden mask={{ closable: !busy }} keyboard={!busy} closable={!busy}
-    onCancel={() => !busy && onOpenChange(false)} onOk={() => void save()} okText="Save" confirmLoading={busy}
-    okButtonProps={{ "aria-label": "Save", "aria-busy": busy, disabled: !valid }} cancelButtonProps={{ disabled: busy }}>
-    {error && <Alert type="error" title={error} showIcon />}
+  return <Modal open title="私有路由策略" width={560} destroyOnHidden mask={{ closable: !busy }} keyboard={!busy} closable={!busy}
+    onCancel={() => !busy && onOpenChange(false)} onOk={() => void save()} okText="保存" confirmLoading={busy}
+    okButtonProps={{ "aria-label": "保存", "aria-busy": busy, disabled: !valid }} cancelButtonProps={{ disabled: busy }}>
+    {error && <Alert type="error" title={zhMessage(error)} showIcon />}
     <Form layout="vertical" preserve={false} onFinish={() => void save()} disabled={busy}>
-      <Form.Item label="Allow subscriber private routes"><Switch aria-label="Allow subscriber private routes" checked={form.enabled} onChange={enabled => setForm({ ...form, enabled })} /></Form.Item>
-      <Form.Item label="Routes per subscriber"><StrictInputNumber aria-label="Routes per subscriber" value={form.max_nodes} aria-valuemin={1} aria-valuemax={20} onChange={number => setForm({ ...form, max_nodes: number ?? Number.NaN })} /></Form.Item>
-      <Form.Item label="Daily actions"><StrictInputNumber aria-label="Daily actions" value={form.daily_limit} aria-valuemin={1} aria-valuemax={100} onChange={number => setForm({ ...form, daily_limit: number ?? Number.NaN })} /></Form.Item>
+      <Form.Item label="允许用户创建私有路由"><Switch aria-label="允许用户创建私有路由" checked={form.enabled} onChange={enabled => setForm({ ...form, enabled })} /></Form.Item>
+      <Form.Item label="每位用户的路由数"><StrictInputNumber aria-label="每位用户的路由数" value={form.max_nodes} aria-valuemin={1} aria-valuemax={20} onChange={number => setForm({ ...form, max_nodes: number ?? Number.NaN })} /></Form.Item>
+      <Form.Item label="每日操作次数"><StrictInputNumber aria-label="每日操作次数" value={form.daily_limit} aria-valuemin={1} aria-valuemax={100} onChange={number => setForm({ ...form, daily_limit: number ?? Number.NaN })} /></Form.Item>
     </Form>
   </Modal>;
 }

@@ -110,7 +110,7 @@ def capture(page, dialog, output, name, focus=None):
         assert dialog.locator(".ant-modal-container").evaluate_all(
             "items => items.every(item => item.scrollWidth <= item.clientWidth + 1)"
         )
-        command_field = dialog.get_by_label("Root shell installation command", exact=True)
+        command_field = dialog.get_by_label("root shell 安装命令", exact=True)
         if command_field.count():
             assert command_field.evaluate("""field => {
                 const body = field.closest('.ant-modal-body');
@@ -118,8 +118,8 @@ def capture(page, dialog, output, name, focus=None):
             }"""), "Installation command must retain the modal's full usable width"
         page.screenshot(
             path=str(output / f"{name}-{suffix}.png"), animations="disabled",
-            mask=[page.get_by_label("Agent token", exact=True),
-                  dialog.get_by_label("Root shell installation command", exact=True)],
+            mask=[page.get_by_label("Agent 令牌", exact=True),
+                  dialog.get_by_label("root shell 安装命令", exact=True)],
         )
     page.set_viewport_size({"width": 1440, "height": 1000})
 
@@ -136,15 +136,15 @@ def close_dialog(dialog):
     # Ant's standard header also has an accessible Close button. Exercise the
     # visible footer action explicitly, including its mobile pointer target.
     dialog.locator(".ant-modal-footer").get_by_role(
-        "button", name="Close", exact=True
+        "button", name="关闭", exact=True
     ).click()
 
 
 def install_from_token(page):
-    token_field = page.get_by_label("Agent token", exact=True)
+    token_field = page.get_by_label("Agent 令牌", exact=True)
     expect(token_field).to_be_visible()
     page.locator(".ant-alert").filter(has=token_field).get_by_role(
-        "button", name="Install Agent", exact=True
+        "button", name="安装 Agent", exact=True
     ).click()
 
 
@@ -153,6 +153,7 @@ def exercise(endpoint, password, output, configured, private, report):
         browser = playwright.chromium.launch()
         context = browser.new_context(
             viewport={"width": 1440, "height": 1000},
+            locale="zh-CN",
             permissions=["clipboard-read", "clipboard-write"],
         )
         page = context.new_page()
@@ -163,26 +164,27 @@ def exercise(endpoint, password, output, configured, private, report):
                 if "/bootstrap" in response.url else None)
         try:
             page.goto(endpoint + "/")
-            page.get_by_label("Username", exact=True).fill("admin")
-            page.get_by_label("Password", exact=True).fill(password)
-            page.get_by_role("button", name="Sign In", exact=True).click()
-            expect(page.get_by_role("heading", name="Open Node control plane")).to_be_visible()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_label("用户名", exact=True).fill("admin")
+            page.get_by_label("密码", exact=True).fill(password)
+            page.get_by_role("button", name="登录", exact=True).click()
+            expect(page.get_by_role("heading", name="Open Node 控制台")).to_be_visible()
             name = "Bootstrap browser configured" if configured else "Bootstrap browser disabled"
-            page.get_by_label("Name", exact=True).fill(name)
+            page.get_by_label("名称", exact=True).fill(name)
             with page.expect_response(lambda response: response.url.endswith("/api/v1/servers")
                                       and response.request.method == "POST") as created:
-                page.get_by_role("button", name="Create server", exact=True).click()
+                page.get_by_role("button", name="创建服务器", exact=True).click()
             assert created.value.status == 201
             server = created.value.json()
             token = server["agent_token"]
             private.append(token)
             server_id = server["server"]["id"]
             path = f"/api/v1/servers/{server_id}/bootstrap"
-            expect(page.get_by_label("Agent token", exact=True)).to_have_value(token)
+            expect(page.get_by_label("Agent 令牌", exact=True)).to_have_value(token)
             install_from_token(page)
-            dialog = page.get_by_role("dialog", name="Install Agent", exact=True)
+            dialog = page.get_by_role("dialog", name="安装 Agent", exact=True)
             expect(dialog.get_by_test_id("bootstrap-status")).to_contain_text(
-                "No installation ticket"
+                "尚未签发安装票据"
             )
             if not configured:
                 expect(dialog).to_contain_text("OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL")
@@ -203,15 +205,16 @@ def exercise(endpoint, password, output, configured, private, report):
             # Ant's virtual Select exposes separate offscreen ARIA options.
             # Click the visible field and rendered option, never a hidden proxy.
             dialog.locator(".ant-select").filter(
-                has=page.get_by_role("combobox", name="Connection transport", exact=True)
+                has=page.get_by_role("combobox", name="连接方式", exact=True)
             ).click()
             page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter(
-                has_text=re.compile(r"^HTTP polling$")
+                has_text=re.compile(r"^HTTP 轮询$")
             ).click()
 
             def issue_command():
                 dialog.get_by_label(
-                    "I will use a new Debian 12 amd64 host for this server only.", exact=True
+                    "我确认使用一台全新的 Debian 12 amd64 服务器，且仅用于此服务器记录。",
+                    exact=True,
                 ).check()
                 with page.expect_response(lambda response: response.url.endswith(path)
                                           and response.request.method == "POST") as issued:
@@ -222,7 +225,7 @@ def exercise(endpoint, password, output, configured, private, report):
                 command = payload["command"]
                 ticket = command_ticket(command, private)
                 assert token not in command and CANONICAL_URL in command
-                field = dialog.get_by_label("Root shell installation command", exact=True)
+                field = dialog.get_by_label("root shell 安装命令", exact=True)
                 expect(field).to_have_value(re.compile(r".*--ticket.*", re.DOTALL))
                 assert field.input_value() == command
                 return payload, ticket
@@ -236,20 +239,20 @@ def exercise(endpoint, password, output, configured, private, report):
                 script = anonymous.get("/api/v1/agents/bootstrap/installer.py")
                 assert script.status_code == 200
                 assert hashlib.sha256(script.content).hexdigest() in first["command"]
-                dialog.get_by_role("button", name="Copy command", exact=True).click()
-                expect(dialog.get_by_role("status")).to_contain_text("Copied.")
+                dialog.get_by_role("button", name="复制命令", exact=True).click()
+                expect(dialog.get_by_role("status")).to_contain_text("已复制。")
                 assert page.evaluate("navigator.clipboard.readText()") == first["command"]
                 capture(page, dialog, output, "bootstrap-command",
-                        dialog.get_by_label("Root shell installation command", exact=True))
+                        dialog.get_by_label("root shell 安装命令", exact=True))
                 close_dialog(dialog)
                 expect(dialog).not_to_be_visible()
                 assert first_ticket not in page.content()
                 storage = page.evaluate("JSON.stringify({ ...localStorage, ...sessionStorage })")
                 assert not any(value in storage for value in private)
 
-                page.get_by_role("button", name=f"Install Agent on {name}", exact=True).click()
-                expect(dialog.get_by_test_id("bootstrap-status")).to_contain_text("Ticket ready")
-                expect(dialog.get_by_label("Root shell installation command")).to_have_count(0)
+                page.get_by_role("button", name=f"在 {name} 上安装 Agent", exact=True).click()
+                expect(dialog.get_by_test_id("bootstrap-status")).to_contain_text("票据已就绪")
+                expect(dialog.get_by_label("root shell 安装命令")).to_have_count(0)
                 _, second_ticket = issue_command()
                 replay = anonymous.post("/api/v1/agents/bootstrap/redeem", json={
                     "ticket": first_ticket, "claim_nonce": secrets.token_urlsafe(32),
@@ -257,10 +260,10 @@ def exercise(endpoint, password, output, configured, private, report):
                 assert replay.status_code == 401
                 with page.expect_response(lambda response: response.url.endswith(path)
                                           and response.request.method == "DELETE") as revoked:
-                    dialog.get_by_role("button", name="Revoke installation ticket").click()
+                    dialog.get_by_role("button", name="撤销安装票据").click()
                 assert revoked.value.status == 200
-                expect(dialog.get_by_test_id("bootstrap-status")).to_contain_text("Ticket revoked")
-                expect(dialog.get_by_label("Root shell installation command")).to_have_count(0)
+                expect(dialog.get_by_test_id("bootstrap-status")).to_contain_text("票据已撤销")
+                expect(dialog.get_by_label("root shell 安装命令")).to_have_count(0)
                 assert anonymous.post("/api/v1/agents/bootstrap/redeem", json={
                     "ticket": second_ticket, "claim_nonce": secrets.token_urlsafe(32),
                 }).status_code == 401
@@ -277,13 +280,13 @@ def exercise(endpoint, password, output, configured, private, report):
                     "ticket": third_ticket, "claim_nonce": secrets.token_urlsafe(32),
                 }).status_code == 401
                 expect(dialog.get_by_test_id("bootstrap-status")).to_contain_text(
-                    "Ticket claimed", timeout=12000
+                    "票据已兑换", timeout=12000
                 )
                 expect(dialog.get_by_test_id("bootstrap-status")).to_contain_text(
-                    "Agent not yet registered"
+                    "Agent 尚未注册"
                 )
                 expect(dialog.get_by_test_id("bootstrap-issue")).to_have_count(0)
-                expect(dialog.get_by_label("Root shell installation command")).to_have_count(0)
+                expect(dialog.get_by_label("root shell 安装命令")).to_have_count(0)
                 capture(page, dialog, output, "bootstrap-claimed")
                 # This exercises the status display only; it is not a real installed Agent.
                 registered = anonymous.post("/api/v1/agents/register", json={
@@ -292,10 +295,10 @@ def exercise(endpoint, password, output, configured, private, report):
                 })
                 assert registered.status_code == 201
                 expect(dialog.get_by_test_id("bootstrap-status")).to_contain_text(
-                    "Agent registered", timeout=12000
+                    "Agent 已注册", timeout=12000
                 )
                 expect(dialog).to_contain_text(
-                    "Registration alone is not proof of a healthy installation"
+                    "仅完成注册不能证明安装正常"
                 )
                 capture(page, dialog, output, "bootstrap-registered")
                 assert anonymous.post("/api/v1/agents/bootstrap/redeem", json={
@@ -306,10 +309,10 @@ def exercise(endpoint, password, output, configured, private, report):
                 # must not be offered another installation ticket.
                 close_dialog(dialog)
                 heartbeat_name = "Existing heartbeat host"
-                page.get_by_label("Name", exact=True).fill(heartbeat_name)
+                page.get_by_label("名称", exact=True).fill(heartbeat_name)
                 with page.expect_response(lambda response: response.url.endswith("/api/v1/servers")
                                           and response.request.method == "POST") as created:
-                    page.get_by_role("button", name="Create server", exact=True).click()
+                    page.get_by_role("button", name="创建服务器", exact=True).click()
                 assert created.value.status == 201
                 heartbeat_server = created.value.json()
                 private.append(heartbeat_server["agent_token"])
@@ -317,11 +320,11 @@ def exercise(endpoint, password, output, configured, private, report):
                     "token": heartbeat_server["agent_token"],
                 })
                 assert heartbeat.status_code == 200
-                expect(page.get_by_label("Agent token", exact=True)).to_have_value(
+                expect(page.get_by_label("Agent 令牌", exact=True)).to_have_value(
                     heartbeat_server["agent_token"]
                 )
                 install_from_token(page)
-                expect(dialog).to_contain_text("This server has already reported a heartbeat")
+                expect(dialog).to_contain_text("此服务器已上报心跳")
                 expect(dialog.get_by_test_id("bootstrap-issue")).to_have_count(0)
                 capture(page, dialog, output, "bootstrap-existing-heartbeat")
 

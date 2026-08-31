@@ -187,7 +187,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             lambda: client.get("/api/v1/users/alice/traffic").json()["total"] >= 65536,
         )
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        context = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="zh-CN")
         try:
             context.add_cookies(
                 [
@@ -205,20 +205,21 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/subscriptions")
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
             expect(
-                page.get_by_role("button", name="Remove user catalog-admin", exact=True)
+                page.get_by_role("button", name="移除用户 catalog-admin", exact=True)
             ).to_be_disabled()
-            page.get_by_role("button", name="Edit user alice", exact=True).click()
+            page.get_by_role("button", name="编辑用户 alice", exact=True).click()
             dialog = page.get_by_role("dialog")
-            name = dialog.get_by_label("Display name", exact=True)
+            name = dialog.get_by_label("显示名称", exact=True)
             expect(name).to_have_value("Alice")
             acknowledgment = dialog.get_by_label(
-                "I accept runtime restarts and pending changes", exact=True
+                "我接受运行时重启及变更待确认的影响", exact=True
             )
             name.fill("")
             acknowledgment.check()
             expect(
-                dialog.get_by_role("button", name="Save", exact=True)
+                dialog.get_by_role("button", name="保存", exact=True)
             ).to_be_disabled()
             name.fill("Alice")
             read = client.get("/api/v1/users/alice/settings").json()
@@ -240,15 +241,15 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "PUT"
                 )
             ) as stale:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert stale.value.status == 409
-            dialog.get_by_role("button", name="Reload user details", exact=True).click()
-            expect(dialog.get_by_label("Remark", exact=True)).to_have_value(
+            dialog.get_by_role("button", name="重新加载用户详情", exact=True).click()
+            expect(dialog.get_by_label("备注", exact=True)).to_have_value(
                 "Concurrent note"
             )
             name.fill("Alice - regional operations")
-            dialog.get_by_label("Email", exact=True).fill("alice@example.test")
-            dialog.get_by_label("Remark", exact=True).fill(
+            dialog.get_by_label("电子邮箱", exact=True).fill("alice@example.test")
+            dialog.get_by_label("备注", exact=True).fill(
                 "Shared plan subscriber\nProfile update keeps runtime identity."
             )
 
@@ -285,9 +286,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "PUT"
                 )
             ) as saved:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert saved.value.status == 200, saved.value.text()
-            expect(dialog.get_by_text("User saved", exact=True)).to_be_visible()
+            expect(dialog.get_by_text("用户已保存", exact=True)).to_be_visible()
             assert (
                 credentials() == before_credentials
                 and subscription("alice") == old_token
@@ -308,7 +309,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 flush=True,
             )
 
-            dialog.get_by_label("Active", exact=True).uncheck()
+            dialog.get_by_label("启用用户", exact=True).uncheck()
             acknowledgment.check()
             with page.expect_response(
                 lambda response: (
@@ -316,7 +317,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "PUT"
                 )
             ) as disabled:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert disabled.value.status == 200, disabled.value.text()
             wait_access(client, "alice")
             runtime.poll(
@@ -326,7 +327,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert rejected(original)
             transfer(bob_config)
             capture("disabled")
-            dialog.get_by_label("Active", exact=True).check()
+            dialog.get_by_label("启用用户", exact=True).check()
             acknowledgment.check()
             with page.expect_response(
                 lambda response: (
@@ -334,7 +335,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "PUT"
                 )
             ) as enabled:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert enabled.value.status == 200, enabled.value.text()
             wait_access(client, "alice")
             assert (
@@ -342,24 +343,24 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             )
             transfer(original)
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
             print(
                 "PASS actual disable/reactivation and unaffected shared-plan subscriber",
                 flush=True,
             )
 
-            page.get_by_role("button", name="Remove user alice", exact=True).click()
-            expect(dialog.get_by_label("Confirm username", exact=True)).to_be_visible()
-            dialog.get_by_role("button", name="Cancel", exact=True).click()
+            page.get_by_role("button", name="移除用户 alice", exact=True).click()
+            expect(dialog.get_by_label("确认用户名", exact=True)).to_be_visible()
+            dialog.get_by_role("button", name="取 消", exact=True).click()
             transfer(original)
-            page.get_by_role("button", name="Remove user alice", exact=True).click()
-            dialog.get_by_label("Confirm username", exact=True).fill("wrong")
+            page.get_by_role("button", name="移除用户 alice", exact=True).click()
+            dialog.get_by_label("确认用户名", exact=True).fill("wrong")
             acknowledgment.check()
             expect(
-                dialog.get_by_role("button", name="Remove", exact=True)
+                dialog.get_by_role("button", name="移除", exact=True)
             ).to_be_disabled()
-            dialog.get_by_label("Confirm username", exact=True).fill("alice")
+            dialog.get_by_label("确认用户名", exact=True).fill("alice")
             capture("confirm-removal")
             pid = int(fixture.properties()["MainPID"])
             os.kill(pid, signal.SIGSTOP)
@@ -367,7 +368,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 with page.expect_response(
                     lambda response: response.url.endswith("/users/alice/remove")
                 ) as removed:
-                    dialog.get_by_role("button", name="Remove", exact=True).click()
+                    dialog.get_by_role("button", name="移除", exact=True).click()
                 assert removed.value.status == 202, removed.value.text()
                 removal = removed.value.json()
                 assert removal["status"] == "pending"
@@ -379,13 +380,13 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 transfer(original)
                 capture("pending-removal")
                 dialog.locator(".ant-modal-footer").get_by_role(
-                    "button", name="Close", exact=True
+                    "button", name="关 闭", exact=True
                 ).click()
                 page.get_by_role(
-                    "button", name="View removal for alice", exact=True
+                    "button", name="查看 alice 的移除状态", exact=True
                 ).click()
                 expect(
-                    dialog.get_by_text("Removal pending Agent confirmation", exact=True)
+                    dialog.get_by_text("正在等待 Agent 确认移除", exact=True)
                 ).to_be_visible()
             finally:
                 os.kill(pid, signal.SIGCONT)
@@ -399,15 +400,15 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 ready=lambda value: value["status"] == "completed",
                 timeout=90,
             )
-            expect(dialog.get_by_text("User removed", exact=True)).to_be_visible(
+            expect(dialog.get_by_text("用户已移除", exact=True)).to_be_visible(
                 timeout=15000
             )
             expect(
-                dialog.get_by_role("button", name="Reload user details", exact=True)
+                dialog.get_by_role("button", name="重新加载用户详情", exact=True)
             ).to_be_disabled()
             expect(
                 dialog.get_by_role(
-                    "button", name="Retry user synchronization", exact=True
+                    "button", name="重试同步用户", exact=True
                 )
             ).to_be_disabled()
             capture("removed")
@@ -417,13 +418,14 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             assert len(client.get("/api/v1/plans").json()["plans"]) == 1
             assert len(client.get("/api/v1/nodes").json()["nodes"]) == 1
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
             expect(
-                page.get_by_role("button", name="View removal for alice", exact=True)
+                page.get_by_role("button", name="查看 alice 的移除状态", exact=True)
             ).to_have_count(0)
             print(
-                "PASS unavailable-Agent removal, visible pending status, confirmed traffic withdrawal and unrelated data",
+                "PASS unavailable-Agent removal, visible pending status, "
+                "confirmed traffic withdrawal and unrelated data",
                 flush=True,
             )
 
@@ -447,7 +449,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             )
             page.reload()
             expect(
-                page.get_by_role("button", name="Edit user alice", exact=True)
+                page.get_by_role("button", name="编辑用户 alice", exact=True)
             ).to_be_visible()
             for width, height, suffix in [
                 (1440, 1000, "desktop"),
@@ -457,19 +459,22 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 page.set_viewport_size({"width": width, "height": height})
                 page.wait_for_timeout(350)
                 page.get_by_role(
-                    "button", name="Edit user alice", exact=True
+                    "button", name="编辑用户 alice", exact=True
                 ).scroll_into_view_if_needed()
                 cards = page.locator(".ant-card-small")
                 assert cards.count() > 0
                 assert cards.evaluate_all(
-                    "items => items.every(item => item.scrollWidth <= item.clientWidth + 1 && item.firstElementChild.scrollWidth <= item.firstElementChild.clientWidth + 1)"
+                    "items => items.every(item => item.scrollWidth <= item.clientWidth + 1 "
+                    "&& item.firstElementChild.scrollWidth "
+                    "<= item.firstElementChild.clientWidth + 1)"
                 )
                 page.screenshot(path=str(args.output / f"catalog-{suffix}.png"))
             with sqlite3.connect(work / "backend.db") as db:
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
             assert not errors, errors
             print(
-                "PASS same-name recreation with fresh credentials, isolated traffic and permanently dead old subscription",
+                "PASS same-name recreation with fresh credentials, "
+                "isolated traffic and permanently dead old subscription",
                 flush=True,
             )
         finally:

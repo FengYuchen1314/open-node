@@ -41,7 +41,7 @@ describe("plan management", () => {
     expect(JSON.parse(String(calls[4][1]?.body))).toEqual({ expected_revision: "r", acknowledge_runtime_restart: true, confirm_name: "a+b" });
   });
   it("keeps conflict and validation details visible", async () => {
-    await expect(getPlanManagement("id", "edit", async () => new Response(JSON.stringify({ detail: "Reload first" }), { status: 409 }))).rejects.toThrow("Reload first");
-    await expect(getPlanManagement("id", "edit", async () => new Response(JSON.stringify({ detail: [{ loc: ["body", "name"], msg: "Required" }] }), { status: 422 }))).rejects.toThrow("name: Required");
+    await expect(getPlanManagement("id", "edit", async () => new Response(JSON.stringify({ detail: "Reload first" }), { status: 409 }))).rejects.toThrow("请先重新加载。");
+    await expect(getPlanManagement("id", "edit", async () => new Response(JSON.stringify({ detail: [{ loc: ["body", "name"], msg: "Required" }] }), { status: 422 }))).rejects.toThrow("name: 此项必填。");
   });
 });

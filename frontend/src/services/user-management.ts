@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 import { userPath } from "./user-path";
 import type { AgentCommand } from "../domain/inventory";
 import type { ProductUser, SubscriptionAccessResponse } from "../domain/subscriptions";
@@ -44,9 +45,7 @@ async function request<T>(url: string, init?: RequestInit, fetcher = authenticat
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     const detail = data?.detail;
-    const message = typeof detail === "string" ? detail : Array.isArray(detail)
-      ? detail.map((item: { loc?: unknown[]; msg?: string }) => `${item.loc?.slice(1).join(".") ?? ""}: ${item.msg ?? "Invalid value"}`).join("; ") : "";
-    throw new Error(message || `User request failed (${response.status})`);
+    throw requestError(detail, `用户请求失败（${response.status}）`);
   }
   return response.json() as Promise<T>;
 }

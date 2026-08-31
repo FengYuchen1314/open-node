@@ -22,14 +22,14 @@ describe("server management API", () => {
 
   it("keeps stale-state and authentication errors visible", async () => {
     const fetcher: typeof fetch = async () => new Response(JSON.stringify({ detail: "Removal details changed" }), { status: 409 });
-    await expect(getServerRemoval("id", fetcher)).rejects.toThrow("Removal details changed");
-    await expect(removeServer("id", { revision: "old" } as RemovalPreview, "edge", fetcher)).rejects.toThrow("Removal details changed");
+    await expect(getServerRemoval("id", fetcher)).rejects.toThrow("删除详情已发生变化。");
+    await expect(removeServer("id", { revision: "old" } as RemovalPreview, "edge", fetcher)).rejects.toThrow("删除详情已发生变化。");
   });
 
   it("shows field validation without echoing submitted input", async () => {
     const fetcher: typeof fetch = async () => new Response(JSON.stringify({ detail: [
       { loc: ["body", "domain"], msg: "Use a hostname", input: "private-input" },
     ] }), { status: 422 });
-    await expect(getServerSettings("id", fetcher)).rejects.toThrow("domain: Use a hostname");
+    await expect(getServerSettings("id", fetcher)).rejects.toThrow("domain: 请输入主机名。");
   });
 });

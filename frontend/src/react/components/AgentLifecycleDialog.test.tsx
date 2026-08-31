@@ -27,44 +27,44 @@ function mount(action: AgentLifecycleAction = "agent_upgrade") {
   return { ...render(<AgentLifecycleDialog {...props} />), props };
 }
 function fillUpgrade() {
-  fireEvent.change(screen.getByLabelText("Agent version"), { target: { value: "0.4.0rc1" } });
-  fireEvent.change(screen.getByLabelText("Wheel SHA-256"), { target: { value: "c".repeat(64) } });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Confirm Agent restart" }));
+  fireEvent.change(screen.getByLabelText("Agent 版本"), { target: { value: "0.4.0rc1" } });
+  fireEvent.change(screen.getByLabelText("Wheel SHA-256 校验和"), { target: { value: "c".repeat(64) } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "确认重启 Agent" }));
 }
 describe("React Agent lifecycle", () => {
   it("reads host status before enabling a version/digest/confirmation-bound upgrade", async () => {
     mount(); await flush(); expect(queueAgentOperation).toHaveBeenCalledWith("edge", "agent_lifecycle");
-    expect((screen.getByRole("button", { name: "Upgrade" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Agent version"), { target: { value: "0.4.0rc1" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Confirm Agent restart" }));
-    expect((screen.getByRole("button", { name: "Upgrade" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Wheel SHA-256"), { target: { value: "c".repeat(64) } });
+    expect((screen.getByRole("button", { name: "升级" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Agent 版本"), { target: { value: "0.4.0rc1" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "确认重启 Agent" }));
+    expect((screen.getByRole("button", { name: "升级" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Wheel SHA-256 校验和"), { target: { value: "c".repeat(64) } });
     vi.mocked(queueAgentOperation).mockResolvedValue({ command: command({ path: "/api/child/agent/upgrade" }), license_required: false });
-    fireEvent.click(screen.getByRole("button", { name: "Upgrade" })); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "升级" })); await flush();
     expect(queueAgentOperation).toHaveBeenLastCalledWith("edge", "agent_upgrade", { version: "0.4.0rc1", sha256: "c".repeat(64) });
-    expect(screen.getByText("Completed")).toBeTruthy();
+    expect(screen.getByText("已完成")).toBeTruthy();
   });
   it("observes an existing pending operation instead of creating a duplicate", async () => {
     const pending = command({ path: "/api/child/agent/rollback", status: "pending", result_body: null });
     vi.mocked(listServerCommands).mockResolvedValue({ server_id: "edge", commands: [pending], license_required: false });
     const { props } = mount(); await flush(); expect(queueAgentOperation).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Roll back Agent" })).toBeTruthy(); expect(screen.getByText("Queued")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "回退 Agent" })).toBeTruthy(); expect(screen.getByText("排队中")).toBeTruthy();
     vi.mocked(listServerCommands).mockResolvedValue({ server_id: "edge", commands: [{ ...pending, status: "succeeded", result_body: host }], license_required: false });
-    await tick(); expect(screen.getByText("Completed")).toBeTruthy(); expect(props.onUpdated).toHaveBeenCalledOnce();
+    await tick(); expect(screen.getByText("已完成")).toBeTruthy(); expect(props.onUpdated).toHaveBeenCalledOnce();
   });
   it.each([
     ["disabled", { ...host, enabled: false }], ["recovery", { ...host, recovery_required: true }],
     ["running job", { ...host, jobs: [{ status: "running" }] }], ["removed", { ...host, installation_status: "removed" }],
   ])("fails closed for a host with %s state", async (_label, next) => {
     vi.mocked(queueAgentOperation).mockResolvedValue({ command: command({ result_body: next }), license_required: false }); mount(); await flush();
-    if (screen.queryByLabelText("Agent version")) fillUpgrade();
-    const button = screen.queryByRole("button", { name: "Upgrade" });
+    if (screen.queryByLabelText("Agent 版本")) fillUpgrade();
+    const button = screen.queryByRole("button", { name: "升级" });
     expect(!button || (button as HTMLButtonElement).disabled).toBe(true); expect(queueAgentOperation).toHaveBeenCalledTimes(1);
   });
   it("requires a previous release to roll back", async () => {
     vi.mocked(queueAgentOperation).mockResolvedValue({ command: command({ result_body: { ...host, previous: null } }), license_required: false });
-    mount("agent_rollback"); await flush(); fireEvent.click(screen.getByRole("checkbox", { name: "Confirm Agent restart" }));
-    expect((screen.getByRole("button", { name: "Roll back" }) as HTMLButtonElement).disabled).toBe(true);
+    mount("agent_rollback"); await flush(); fireEvent.click(screen.getByRole("checkbox", { name: "确认重启 Agent" }));
+    expect((screen.getByRole("button", { name: "回退" }) as HTMLButtonElement).disabled).toBe(true);
   });
   it("clears pending observation timers and discards late results after close", async () => {
     const pending = command({ path: "/api/child/agent/uninstall", status: "leased", result_body: null });
@@ -75,29 +75,29 @@ describe("React Agent lifecycle", () => {
     rerender(<AgentLifecycleDialog {...props} open={false} />);
     await act(async () => { resolve({ server_id: "edge", commands: [{ ...pending, status: "succeeded" }], license_required: false }); });
     await tick(10000); expect(props.onUpdated).not.toHaveBeenCalled(); expect(listServerCommands).toHaveBeenCalledTimes(2);
-    expect(screen.queryByText("Completed")).toBeNull();
+    expect(screen.queryByText("已完成")).toBeNull();
   });
   it("blocks duplicate upgrade submission while a request is in flight", async () => {
     mount(); await flush(); fillUpgrade();
     let resolve!: (value: Awaited<ReturnType<typeof queueAgentOperation>>) => void;
     vi.mocked(queueAgentOperation).mockReturnValueOnce(new Promise(done => { resolve = done; }));
-    const button = screen.getByRole("button", { name: "Upgrade" }); fireEvent.click(button); fireEvent.click(button); await flush();
+    const button = screen.getByRole("button", { name: "升级" }); fireEvent.click(button); fireEvent.click(button); await flush();
     expect(queueAgentOperation).toHaveBeenCalledTimes(2);
     await act(async () => { resolve({ command: command({ path: "/api/child/agent/upgrade" }), license_required: false }); });
-    expect(screen.getByText("Completed")).toBeTruthy();
+    expect(screen.getByText("已完成")).toBeTruthy();
   });
   it("requires explicit removal confirmation and does not offer host refresh after uninstall", async () => {
     mount("agent_uninstall"); await flush();
-    expect((screen.getByRole("button", { name: "Uninstall" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Confirm Agent removal" }));
+    expect((screen.getByRole("button", { name: "卸载" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "确认卸载 Agent" }));
     vi.mocked(queueAgentOperation).mockResolvedValue({ command: command({ path: "/api/child/agent/uninstall", result_body: { ...host, installation_status: "removed" } }), license_required: false });
-    fireEvent.click(screen.getByRole("button", { name: "Uninstall" })); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "卸载" })); await flush();
     expect(queueAgentOperation).toHaveBeenLastCalledWith("edge", "agent_uninstall", { confirm: true });
-    expect(screen.queryByRole("button", { name: "Refresh Agent status" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "刷新 Agent 状态" })).toBeNull();
   });
   it("reports a missing operation without submitting another mutation", async () => {
     vi.mocked(listServerCommands).mockResolvedValueOnce({ server_id: "edge", commands: [command({ status: "pending", path: "/api/child/agent/upgrade" })], license_required: false });
-    mount(); await flush(); await tick(); expect(screen.getByText("Agent command is no longer available.")).toBeTruthy();
+    mount(); await flush(); await tick(); expect(screen.getByText("Agent 命令已不可用。")).toBeTruthy();
     expect(queueAgentOperation).not.toHaveBeenCalled();
   });
 });

@@ -21,6 +21,7 @@ from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.auth import AuthStore
 from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
+from open_node.services.external_subscriptions import ExternalSubscriptionError
 from open_node.services.inventory import InventoryStore, ManagedNodeConflict
 from open_node.services.probe_stream import PublicProbeStreamManager
 from open_node.services.secure_channel import AgentIdentity
@@ -95,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     active_settings.api_prefix + "/migrations/mmwx/",
                     active_settings.api_prefix + "/auth/",
                     active_settings.api_prefix + "/agents/bootstrap/",
+                    active_settings.api_prefix + "/external-subscriptions",
                 )
             )
             or (
@@ -155,6 +157,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.exception_handler(ExternalSubscriptionError)
+    async def invalid_external_subscription(_request, exc):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": str(exc), "license_required": False},
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=active_settings.cors_origins,
@@ -172,8 +182,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.inventory = InventoryStore(
         active_settings.database_url,
         short_links_enabled=active_settings.short_links_enabled,
+        external_subscriptions_state_dir=active_settings.external_subscriptions_state_dir,
     )
     app.state.inventory.create_schema()
+    app.state.external_subscriptions = app.state.inventory.external_subscriptions()
     app.state.agent_bootstrap = AgentBootstrapStore(app.state.inventory)
     app.state.subscriber_auth = SubscriberAuthStore(app.state.inventory, active_settings)
     app.state.certificates = CertificateStore(active_settings, app.state.inventory)

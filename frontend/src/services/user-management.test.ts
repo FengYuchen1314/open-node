@@ -32,7 +32,7 @@ describe("user management", () => {
     expect(value.status).toBe("pending");
   });
   it("exposes stale revisions and field validation failures", async () => {
-    await expect(getUserManagement("alice", async () => new Response(JSON.stringify({ detail: "Reload user" }), { status: 409 }))).rejects.toThrow("Reload user");
-    await expect(getUserManagement("alice", async () => new Response(JSON.stringify({ detail: [{ loc: ["body", "email"], msg: "Invalid" }] }), { status: 422 }))).rejects.toThrow("email: Invalid");
+    await expect(getUserManagement("alice", async () => new Response(JSON.stringify({ detail: "Reload user" }), { status: 409 }))).rejects.toThrow("请重新加载用户信息。");
+    await expect(getUserManagement("alice", async () => new Response(JSON.stringify({ detail: [{ loc: ["body", "email"], msg: "Invalid" }] }), { status: 422 }))).rejects.toThrow("email: 值无效。");
   });
 });

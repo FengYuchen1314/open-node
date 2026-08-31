@@ -18,40 +18,40 @@ describe("React private routed nodes", () => {
   it("does not offer creation until a loaded policy explicitly enables it", async () => {
     const pending = deferred<PrivateRoutedNodesResponse>(); vi.mocked(listSubscriberPrivateRoutes).mockReturnValue(pending.promise);
     renderUi(<PrivateRoutedNodesPanel />);
-    expect(screen.queryByRole("button", { name: "Create" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建" })).toBeNull();
     await act(async () => pending.resolve({ ...state, policy: { ...state.policy, enabled: false } }));
-    expect(screen.getByText("Private routes are disabled.")).toBeTruthy();
+    expect(screen.getByText("私有路由已停用。")).toBeTruthy();
     expect(createSubscriberPrivateRoute).not.toHaveBeenCalled();
   });
   it("requires a second explicit delete action and blocks duplicate destructive requests", async () => {
     const pending = deferred<Awaited<ReturnType<typeof deleteSubscriberPrivateRoute>>>();
     vi.mocked(deleteSubscriberPrivateRoute).mockReturnValue(pending.promise);
     renderUi(<PrivateRoutedNodesPanel />); await flush();
-    fireEvent.click(screen.getByRole("button", { name: "Delete private route Private exit" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除私有路由 Private exit" }));
     expect(deleteSubscriberPrivateRoute).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel private route deletion" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消删除私有路由" }));
     expect(deleteSubscriberPrivateRoute).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Delete private route Private exit" }));
-    const confirm = screen.getByRole("button", { name: "Confirm" }); fireEvent.click(confirm); fireEvent.click(confirm); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "删除私有路由 Private exit" }));
+    const confirm = screen.getByRole("button", { name: "确认" }); fireEvent.click(confirm); fireEvent.click(confirm); await flush();
     expect(deleteSubscriberPrivateRoute).toHaveBeenCalledExactlyOnceWith(node.id);
-    await act(async () => pending.reject(new Error("Route removal refused")));
-    expect(screen.getByText("Route removal refused")).toBeTruthy();
+    await act(async () => pending.reject(new Error("路由移除被拒绝")));
+    expect(screen.getByText("路由移除被拒绝")).toBeTruthy();
     expect(screen.getByText(node.name)).toBeTruthy();
   });
   it("continues bounded polling after an intermediate failure and stops when deployment settles", async () => {
     vi.useFakeTimers();
     vi.mocked(listSubscriberPrivateRoutes)
       .mockResolvedValueOnce({ ...state, nodes: [{ ...node, status: "provisioning" }] })
-      .mockRejectedValueOnce(new Error("Temporary network failure"))
+      .mockRejectedValueOnce(new Error("网络暂时不可用"))
       .mockResolvedValue(state);
     renderUi(<PrivateRoutedNodesPanel />); await flush();
     expect(listSubscriberPrivateRoutes).toHaveBeenCalledTimes(1);
     await act(async () => vi.advanceTimersByTimeAsync(2000));
-    expect(screen.getByText("Temporary network failure")).toBeTruthy();
+    expect(screen.getByText("网络暂时不可用")).toBeTruthy();
     await act(async () => vi.advanceTimersByTimeAsync(2000));
     expect(listSubscriberPrivateRoutes).toHaveBeenCalledTimes(3);
-    expect(screen.getByText("active")).toBeTruthy();
-    expect(screen.queryByText("Temporary network failure")).toBeNull();
+    expect(screen.getByText("有效")).toBeTruthy();
+    expect(screen.queryByText("网络暂时不可用")).toBeNull();
     await act(async () => vi.advanceTimersByTimeAsync(10000));
     expect(listSubscriberPrivateRoutes).toHaveBeenCalledTimes(3);
   });

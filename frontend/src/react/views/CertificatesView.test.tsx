@@ -25,7 +25,7 @@ async function selectOption(label: string, option: string) {
   if (!node) throw new Error(`Missing option ${option} for ${label}`);
   fireEvent.click(node); await flush();
 }
-async function inspect() { fireEvent.click(screen.getByRole("button", { name: "Certificate details" })); await flush(); }
+async function inspect() { fireEvent.click(screen.getByRole("button", { name: "证书详情" })); await flush(); }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks();
   installDom();
@@ -43,105 +43,147 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.use
 
 describe("React certificate workflows", () => {
   it("creates DNS certificates with explicit CA terms and optional EAB", async () => {
-    render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("button", { name: "New certificate" }));
-    expect((screen.getByRole("button", { name: "Create certificate" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Certificate name"), { target: { value: "Wildcard" } });
-    fireEvent.change(screen.getByLabelText("DNS names"), { target: { value: "*.example.com, example.com" } });
-    fireEvent.change(screen.getByLabelText("Account email"), { target: { value: "owner@example.com" } });
-    fireEvent.click(screen.getByText("External account binding"));
-    fireEvent.change(screen.getByLabelText("EAB key ID"), { target: { value: "key-id" } });
-    fireEvent.change(screen.getByLabelText("EAB HMAC key"), { target: { value: "hmac-secret" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "I accept this CA's terms of service" }));
-    fireEvent.click(screen.getByRole("button", { name: "Create certificate" })); await flush();
+    render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("button", { name: "新建证书" }));
+    expect((screen.getByRole("button", { name: "创建证书" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("证书名称"), { target: { value: "Wildcard" } });
+    fireEvent.change(screen.getByLabelText("DNS 域名"), { target: { value: "*.example.com, example.com" } });
+    fireEvent.change(screen.getByLabelText("账户邮箱"), { target: { value: "owner@example.com" } });
+    fireEvent.click(screen.getByText("外部账户绑定"));
+    fireEvent.change(screen.getByLabelText("EAB 密钥 ID"), { target: { value: "key-id" } });
+    fireEvent.change(screen.getByLabelText("EAB HMAC 密钥"), { target: { value: "hmac-secret" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "我接受此 CA 的服务条款" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建证书" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("", "POST", { name: "Wildcard", domains: ["*.example.com", "example.com"], email: "owner@example.com", challenge_type: "dns", validation_server_id: null, provider_id: "provider", webroot_id: null, directory_url: directory, accept_terms: true, auto_renew: true, eab_kid: "key-id", eab_hmac_key: "hmac-secret" });
-    expect(screen.queryByLabelText("EAB HMAC key")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "New certificate" })); fireEvent.click(screen.getByText("External account binding"));
-    expect((screen.getByLabelText("EAB HMAC key") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByLabelText("EAB HMAC 密钥")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "新建证书" })); fireEvent.click(screen.getByText("外部账户绑定"));
+    expect((screen.getByLabelText("EAB HMAC 密钥") as HTMLInputElement).value).toBe("");
   });
   it.each(["standalone", "webroot"] as const)("uses eligible remote %s validation with exact host/webroot and blocks wildcard names", async (challenge) => {
     providers = []; caps.available = false; caps.challenge_types = []; caps.remote_http_available = true;
     caps.validation_nodes = [{ id: "remote", name: "Remote validation", version: 1, standalone: challenge === "standalone", webroots: challenge === "webroot" ? ["remote-public"] : [], cleanup_error: null }, { id: "unsafe", name: "Cleanup failed node", version: 1, standalone: true, webroots: ["unsafe"], cleanup_error: "cleanup pending" }];
-    render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("button", { name: "New certificate" }));
-    fireEvent.change(screen.getByLabelText("Certificate name"), { target: { value: "Remote cert" } });
-    fireEvent.change(screen.getByLabelText("Account email"), { target: { value: "owner@example.com" } });
-    fireEvent.change(screen.getByLabelText("DNS names"), { target: { value: "*.example.com" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "I accept this CA's terms of service" }));
-    expect(screen.getByText("Wildcard names require DNS-01")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Create certificate" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("DNS names"), { target: { value: "remote.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create certificate" })); await flush();
+    render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("button", { name: "新建证书" }));
+    fireEvent.change(screen.getByLabelText("证书名称"), { target: { value: "Remote cert" } });
+    fireEvent.change(screen.getByLabelText("账户邮箱"), { target: { value: "owner@example.com" } });
+    fireEvent.change(screen.getByLabelText("DNS 域名"), { target: { value: "*.example.com" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "我接受此 CA 的服务条款" }));
+    expect(screen.getByText("通配符域名需要使用 DNS-01")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "创建证书" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("DNS 域名"), { target: { value: "remote.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建证书" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("", "POST", expect.objectContaining({ challenge_type: challenge, validation_server_id: "remote", provider_id: null, webroot_id: challenge === "webroot" ? "remote-public" : null }));
   });
   it("rotates DNS credentials without echoing existing values and clears them on provider changes/close", async () => {
-    render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("tab", { name: "DNS providers" }));
-    fireEvent.click(screen.getByRole("button", { name: "Rotate DNS credentials" }));
+    render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("tab", { name: "DNS 服务商" }));
+    fireEvent.click(screen.getByRole("button", { name: "更换 DNS 凭据" }));
     expect((screen.getByLabelText("CF_API_TOKEN") as HTMLInputElement).value).toBe("");
-    expect((screen.getByRole("combobox", { name: "DNS provider type" }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "DNS 服务商类型" }) as HTMLInputElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("CF_API_TOKEN"), { target: { value: "new-secret" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save provider" })); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "保存服务商" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("/providers/provider", "PUT", { name: "Cloud DNS", provider: "cloudflare", credentials: { CF_API_TOKEN: "new-secret" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add DNS provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加 DNS 服务商" }));
     fireEvent.change(screen.getByLabelText("CF_API_TOKEN"), { target: { value: "must-clear" } });
-    await selectOption("DNS provider type", "other");
-    await selectOption("DNS provider type", "cloudflare");
+    await selectOption("DNS 服务商类型", "other");
+    await selectOption("DNS 服务商类型", "cloudflare");
     expect((screen.getByLabelText("CF_API_TOKEN") as HTMLInputElement).value).toBe("");
     fireEvent.change(screen.getByLabelText("CF_API_TOKEN"), { target: { value: "must-clear-again" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "取 消" }));
     expect(screen.queryByLabelText("CF_API_TOKEN")).toBeNull();
   });
   it("clears imported PEM on cancel and submits private material only through the import endpoint", async () => {
-    render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("button", { name: "Import PEM" }));
-    fireEvent.change(screen.getByLabelText("Certificate name"), { target: { value: "Imported" } });
-    fireEvent.change(screen.getByLabelText("Certificate PEM"), { target: { value: "public-pem" } });
-    fireEvent.change(screen.getByLabelText("Private key PEM"), { target: { value: "private-pem" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Import PEM" }));
-    expect((screen.getByLabelText("Private key PEM") as HTMLTextAreaElement).value).toBe("");
-    fireEvent.change(screen.getByLabelText("Certificate PEM"), { target: { value: "public-pem" } });
-    fireEvent.change(screen.getByLabelText("Private key PEM"), { target: { value: "private-pem" } });
-    fireEvent.click(screen.getByRole("button", { name: "Import certificate" })); await flush();
+    render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("button", { name: "导入 PEM" }));
+    fireEvent.change(screen.getByLabelText("证书名称"), { target: { value: "Imported" } });
+    fireEvent.change(screen.getByLabelText("证书 PEM"), { target: { value: "public-pem" } });
+    fireEvent.change(screen.getByLabelText("私钥 PEM"), { target: { value: "private-pem" } });
+    fireEvent.click(screen.getByRole("button", { name: "取 消" }));
+    fireEvent.click(screen.getByRole("button", { name: "导入 PEM" }));
+    expect((screen.getByLabelText("私钥 PEM") as HTMLTextAreaElement).value).toBe("");
+    fireEvent.change(screen.getByLabelText("证书 PEM"), { target: { value: "public-pem" } });
+    fireEvent.change(screen.getByLabelText("私钥 PEM"), { target: { value: "private-pem" } });
+    fireEvent.click(screen.getByRole("button", { name: "导入证书" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("/import", "POST", { name: "Imported", cert_pem: "public-pem", key_pem: "private-pem" });
-    expect(screen.queryByLabelText("Private key PEM")).toBeNull();
+    expect(screen.queryByLabelText("私钥 PEM")).toBeNull();
   });
   it("preserves account job retries and reports pending node cleanup", async () => {
     render(<CertificatesView />); await flush(); await inspect();
-    expect(screen.getByText("Node challenge cleanup pending")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Retry account update" })); await flush();
+    expect(screen.getByText("节点验证文件待清理")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重试账户更新" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("/cert/account/jobs/account-job/retry", "POST");
   });
   it("drops replacement secrets when EAB switches to keep", async () => {
     render(<CertificatesView />); await flush(); await inspect();
-    fireEvent.click(screen.getByRole("button", { name: "Edit ACME account" }));
-    expect((screen.getByLabelText("Account email") as HTMLInputElement).value).toBe("pending@example.com");
-    await selectOption("External account binding", "Replace credentials");
-    fireEvent.change(screen.getByLabelText("EAB key ID"), { target: { value: "replace-id" } });
-    fireEvent.change(screen.getByLabelText("EAB HMAC key"), { target: { value: "replace-secret" } });
-    await selectOption("External account binding", "Keep existing");
-    fireEvent.click(screen.getByRole("button", { name: "Update account" })); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "编辑 ACME 账户" }));
+    expect((screen.getByLabelText("账户邮箱") as HTMLInputElement).value).toBe("pending@example.com");
+    await selectOption("外部账户绑定", "替换凭据");
+    fireEvent.change(screen.getByLabelText("EAB 密钥 ID"), { target: { value: "replace-id" } });
+    fireEvent.change(screen.getByLabelText("EAB HMAC 密钥"), { target: { value: "replace-secret" } });
+    await selectOption("外部账户绑定", "保留现有凭据");
+    fireEvent.click(screen.getByRole("button", { name: "更新账户" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("/cert/account", "POST", { email: "pending@example.com", eab_action: "keep" });
   });
   it("binds irreversible revocation to the selected version and keeps revoked deployment disabled", async () => {
     detail.versions = [detail.versions[0]]; detail.versions[0].revocation = { status: "unknown", reason: 1, confirmed_at: null, directory_url: directory };
     render(<CertificatesView />); await flush(); await inspect();
-    expect((screen.getByRole("button", { name: "Deploy certificate" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/Revocation is not yet confirmed/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Retry revocation" }));
+    expect((screen.getByRole("button", { name: "部署证书" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/吊销结果尚未确认/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重试吊销" }));
     expect(screen.getAllByText("serial-v1").length).toBeGreaterThan(0);
-    const dialog = modal("Revoke certificate version");
-    expect((dialog.getByRole("button", { name: "Revoke version" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(dialog.getByRole("checkbox", { name: "I confirm revocation of this version" }));
-    fireEvent.click(dialog.getByRole("button", { name: "Revoke version" })); await flush();
+    const dialog = modal("吊销证书版本");
+    expect((dialog.getByRole("button", { name: "吊销版本" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog.getByRole("checkbox", { name: "我确认吊销此版本" }));
+    fireEvent.click(dialog.getByRole("button", { name: "吊销版本" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("/cert/versions/v1/revoke", "POST", { confirm: true, reason: 1, directory_url: directory });
+  });
+  it("shows the exact already-revoked receipt with success in the same job row", async () => {
+    row.status = "revoked";
+    detail.versions[0].revocation = { status: "revoked", reason: 1, confirmed_at: 1788000000, directory_url: directory };
+    detail.jobs = [{ id: "repeat-revoke", kind: "revoke", status: "succeeded", message: "CA reports this certificate is already revoked", created_at: 1788000000 }];
+    render(<CertificatesView />); await flush(); await inspect();
+    const job = within(screen.getByText("CA 已确认此证书已被吊销。").closest("tr")!);
+    expect(job.getByText("已成功")).toBeTruthy();
+    expect(job.queryByText("操作未完成，请检查当前状态后重试。")).toBeNull();
+    expect(job.queryByText("CA reports this certificate is already revoked")).toBeNull();
+    expect((screen.getByRole("button", { name: "部署证书" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+  it.each([
+    ["renew", "skipped", "The certificate is not due for renewal", "证书尚未到续期时间。", "已跳过"],
+    ["revoke", "queued", "Resuming reconciliation with the CA", "正在恢复与 CA 的结果核对。", "排队中"],
+    ["revoke", "queued", "Operation paused; reconciliation resumes after restart", "操作已暂停，重启后将继续核对结果。", "排队中"],
+  ])("keeps the %s/%s worker outcome distinct from failure or success", async (kind, status, message, translated, statusText) => {
+    row.status = status === "queued" ? "queued" : "issued";
+    row.active_job_id = status === "queued" ? "status-job" : null;
+    detail.jobs = [{ id: "status-job", kind, status, message, created_at: 1788000000 }];
+    render(<CertificatesView />); await flush(); await inspect();
+    const job = within(screen.getByText(translated).closest("tr")!);
+    expect(job.getByText(statusText)).toBeTruthy();
+    expect(job.queryByText("操作未完成，请检查当前状态后重试。")).toBeNull();
+    expect(job.queryByText("已成功")).toBeNull();
+    expect(job.queryByText("失败")).toBeNull();
+  });
+  it.each([
+    ["Provider failure: already revoked https://provider.example/?token=secret", "操作未完成，请检查当前状态后重试。"],
+    ["CA reports this certificate is already revoked: https://provider.example/?token=secret", "操作未完成，请检查当前状态后重试。"],
+    ["CA result is not confirmed; retry to reconcile (serverInternal)", "CA 结果尚未确认，请重试以核实结果（serverInternal）。"],
+  ])("keeps unknown revocation and failure safeguards for: %s", async (message, translated) => {
+    detail.versions[0].revocation = { status: "unknown", reason: 1, confirmed_at: null, directory_url: directory };
+    detail.jobs = [{ id: "unknown-revoke", kind: "revoke", status: "failed", message, created_at: 1788000000, cleanup_pending: true }];
+    render(<CertificatesView />); await flush(); await inspect();
+    const job = within(screen.getByText(translated).closest("tr")!);
+    expect(job.getByText("失败")).toBeTruthy();
+    expect(job.getByText("节点验证文件待清理")).toBeTruthy();
+    expect(job.queryByText("CA 已确认此证书已被吊销。")).toBeNull();
+    expect(screen.getByText(/吊销结果尚未确认/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "部署证书" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(document.body.textContent).not.toMatch(/already revoked|provider\.example|token=secret/u);
   });
   it("retains deployment target controls and guards target removal with confirmation", async () => {
     render(<CertificatesView />); await flush(); await inspect();
-    const targets = within(screen.getByText("Deployment targets", { selector: ".ant-card-head-title" }).closest(".ant-card")!);
-    const targetForm = within(targets.getByLabelText("Target server").closest("form")!);
-    const autoDeploy = targetForm.getByRole("checkbox", { name: "Auto-deploy" });
-    const addTarget = targetForm.getByRole("button", { name: "Add target" });
-    const deploy = targets.getByRole("button", { name: "Deploy certificate" });
-    const remove = targets.getByRole("button", { name: "Remove target" });
-    await selectOption("Target server", "Edge"); await selectOption("Reload", "both");
+    const targets = within(screen.getByText("部署目标", { selector: ".ant-card-head-title" }).closest(".ant-card")!);
+    const targetForm = within(targets.getByLabelText("目标服务器").closest("form")!);
+    const autoDeploy = targetForm.getByRole("checkbox", { name: "自动部署" });
+    const addTarget = targetForm.getByRole("button", { name: "添加目标" });
+    const deploy = targets.getByRole("button", { name: "部署证书" });
+    const remove = targets.getByRole("button", { name: "移除目标" });
+    await selectOption("目标服务器", "Edge"); await selectOption("重载服务", "两者");
     fireEvent.click(autoDeploy);
     fireEvent.click(addTarget); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("/cert/targets", "POST", { server_id: "edge", domain: "edge.example", cert_name: "edge.example", reload: "both", auto_deploy: false });
@@ -149,7 +191,7 @@ describe("React certificate workflows", () => {
     expect(certificateRequest).toHaveBeenCalledWith("/cert/targets/target/deploy", "POST");
     fireEvent.click(remove);
     expect(certificateRequest).not.toHaveBeenCalledWith("/cert/targets/target", "DELETE");
-    fireEvent.click(modal("Remove deployment target?").getByRole("button", { name: "Confirm" })); await flush();
+    fireEvent.click(modal("移除部署目标？").getByRole("button", { name: "确认" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("/cert/targets/target", "DELETE");
   });
   it("requires explicit private-key download confirmation and revokes its blob URL", async () => {
@@ -157,9 +199,9 @@ describe("React certificate workflows", () => {
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     render(<CertificatesView />); await flush(); await inspect();
-    fireEvent.click(screen.getByRole("button", { name: "Download private key" }));
+    fireEvent.click(screen.getByRole("button", { name: "下载私钥" }));
     expect(certificateRequest).not.toHaveBeenCalledWith("/cert/material?include_private_key=true");
-    fireEvent.click(modal("Download the private key?").getByRole("button", { name: "Confirm" })); await flush();
+    fireEvent.click(modal("下载私钥？").getByRole("button", { name: "确认" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("/cert/material?include_private_key=true");
     expect(click).toHaveBeenCalledOnce(); expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:certificate-test");
     expect(document.body.textContent).not.toContain("private-key-material");
@@ -169,8 +211,8 @@ describe("React certificate workflows", () => {
     const catalogCalls = () => vi.mocked(certificateRequest).mock.calls.filter(([path]) => path === undefined).length;
     expect(catalogCalls()).toBe(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); await flush(); expect(catalogCalls()).toBe(2);
-    fireEvent.click(screen.getByRole("button", { name: "Import PEM" })); await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); expect(catalogCalls()).toBe(2);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" })); vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "导入 PEM" })); await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); expect(catalogCalls()).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: "取 消" })); vi.spyOn(document, "hidden", "get").mockReturnValue(true);
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); expect(catalogCalls()).toBe(2);
     view.unmount(); await act(async () => { await vi.advanceTimersByTimeAsync(10000); }); expect(catalogCalls()).toBe(2);
   });

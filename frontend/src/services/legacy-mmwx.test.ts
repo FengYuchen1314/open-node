@@ -76,7 +76,7 @@ describe("legacy MMWX identity migration", () => {
       detail: [{ loc: ["body", "bundle", "users", 0, "password_hash"], msg: "Legacy password must be a bcrypt hash" }],
     }), { status: 422 });
     await expect(previewLegacyMMWXIdentities(bundle, false, fetcher)).rejects.toThrow(
-      "bundle.users.0.password_hash: Legacy password must be a bcrypt hash",
+      "bundle.users.0.password_hash: 旧密码必须为 bcrypt 哈希值。",
     );
   });
 });

@@ -89,7 +89,7 @@ def browser_profiles(client, url, output):
     profiles = {}
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        context = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="zh-CN")
         try:
             context.add_cookies(
                 [
@@ -107,40 +107,44 @@ def browser_profiles(client, url, output):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(url + "/certificates")
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
             expect(
-                page.get_by_role("button", name="New certificate", exact=True)
+                page.get_by_role("button", name="新建证书", exact=True)
             ).to_be_enabled()
             for mode in ("standalone", "webroot"):
-                page.get_by_role("button", name="New certificate", exact=True).click()
+                page.get_by_role("button", name="新建证书", exact=True).click()
                 dialog = page.get_by_role("dialog")
-                dialog.get_by_label("Certificate name", exact=True).fill("HTTP " + mode)
-                dialog.get_by_label("DNS names", exact=True).fill("*.acme.test")
-                dialog.get_by_label("Account email", exact=True).fill(
+                dialog.get_by_label("证书名称", exact=True).fill("HTTP " + mode)
+                dialog.get_by_label("DNS 域名", exact=True).fill("*.acme.test")
+                dialog.get_by_label("账户邮箱", exact=True).fill(
                     "operator@example.com"
                 )
-                dialog.get_by_label("Validation method", exact=True).press("Enter")
-                page.get_by_role(
-                    "option", name="HTTP-01 / " + mode.title(), exact=True
+                dialog.get_by_role(
+                    "combobox", name="验证方式", exact=True
                 ).click()
-                expect(dialog.get_by_label("DNS provider", exact=True)).to_have_count(0)
+                page.locator(".ant-select-dropdown:visible .ant-select-item-option").get_by_text(
+                    {"standalone": "HTTP-01 / 独立服务", "webroot": "HTTP-01 / 网站根目录"}[mode],
+                    exact=True,
+                ).click()
+                expect(dialog.get_by_label("DNS 服务商", exact=True)).to_have_count(0)
                 expect(
-                    dialog.get_by_text("Wildcard names require DNS-01", exact=True)
+                    dialog.get_by_text("通配符域名需要使用 DNS-01", exact=True)
                 ).to_be_visible()
                 submit = dialog.get_by_role(
-                    "button", name="Create certificate", exact=True
+                    "button", name="创建证书", exact=True
                 )
                 expect(submit).to_be_disabled()
-                dialog.get_by_label("DNS names", exact=True).fill(
+                dialog.get_by_label("DNS 域名", exact=True).fill(
                     f"edge.acme.test {mode}.acme.test"
                 )
                 if mode == "webroot":
-                    expect(dialog.get_by_label("Webroot", exact=True)).to_be_visible()
+                    expect(dialog.get_by_label("网站根目录", exact=True)).to_be_visible()
                     expect(dialog.get_by_text("site", exact=True)).to_be_visible()
                 expect(submit).to_be_disabled()
                 dialog.get_by_label(
-                    "I accept this CA's terms of service", exact=True
+                    "我接受此 CA 的服务条款", exact=True
                 ).check()
-                dialog.get_by_label("Auto-renew", exact=True).uncheck()
+                dialog.get_by_label("自动续签", exact=True).uncheck()
                 expect(submit).to_be_enabled()
                 for label, width, height in (
                     ("desktop", 1440, 1000),
@@ -153,13 +157,13 @@ def browser_profiles(client, url, output):
                     page.screenshot(
                         path=output / f"{mode}-{label}-form.png", animations="disabled"
                     )
-                dialog.locator("summary").click()
+                dialog.get_by_role("button", name="外部账户绑定", exact=True).click()
                 ui.check_layout(page)
                 expect(submit).to_be_in_viewport(ratio=1)
                 page.screenshot(
                     path=output / f"{mode}-narrow-eab.png", animations="disabled"
                 )
-                dialog.locator("summary").click()
+                dialog.get_by_role("button", name="外部账户绑定", exact=True).click()
                 with page.expect_response(
                     lambda response: (
                         response.request.method == "POST"
@@ -168,19 +172,23 @@ def browser_profiles(client, url, output):
                 ) as created:
                     submit.click()
                 profiles[mode] = created.value.json()
+                assert profiles[mode]["challenge_type"] == mode
                 expect(dialog).not_to_be_visible()
-                row = page.locator(".certificate-row").filter(has_text="HTTP " + mode)
+                row = page.get_by_role("row").filter(
+                    has=page.get_by_role("button", name="HTTP " + mode, exact=True)
+                )
+                expect(row).to_have_count(1)
                 with page.expect_response(
                     lambda response: response.url.endswith("/issue")
                 ):
                     row.get_by_role(
-                        "button", name="Issue certificate", exact=True
+                        "button", name="签发证书", exact=True
                     ).click()
                 wait_job(client, profiles[mode]["id"])
                 row.get_by_role("button", name="HTTP " + mode, exact=True).click()
-                expect(page.get_by_label("Auto-renew", exact=True)).to_be_enabled()
+                expect(page.get_by_label("自动续签", exact=True)).to_be_enabled()
                 expect(
-                    page.get_by_role("button", name="Renew now", exact=True)
+                    page.get_by_role("button", name="立即续签", exact=True)
                 ).to_be_enabled()
                 for label, width, height in (
                     ("desktop", 1440, 1000),
@@ -194,7 +202,7 @@ def browser_profiles(client, url, output):
                         animations="disabled",
                     )
                 page.get_by_role(
-                    "button", name="Close certificate details", exact=True
+                    "button", name="关闭证书详情", exact=True
                 ).click()
             assert not errors, errors
         except BaseException:
@@ -468,10 +476,11 @@ http {{
                 gate.hold = False
                 gate.release.set()
                 print(
-                    "PASS inherited worker lock and hard-crash cleanup preserve the active certificate",
+                    "PASS inherited worker lock and hard-crash cleanup "
+                    "preserve the active certificate",
                     flush=True,
                 )
-                for mode, profile in profiles.items():
+                for _mode, profile in profiles.items():
                     base = "certificates/" + profile["id"]
                     api(client, base + "/renew", "POST", {"force": True})
                     renewed = wait_job(client, profile["id"])

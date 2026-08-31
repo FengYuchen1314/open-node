@@ -49,7 +49,7 @@ def exported_client(work, xray, exported):
 def browser(client, backend, base, output, quota, before_remove):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        context = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="zh-CN")
         try:
             context.add_cookies(
                 [
@@ -67,20 +67,21 @@ def browser(client, backend, base, output, quota, before_remove):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/")
-            page.get_by_role("button", name="Edit management", exact=True).click()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_role("button", name="编辑 management", exact=True).click()
             dialog = page.get_by_role("dialog")
-            expect(dialog.get_by_label("Server name", exact=True)).to_have_value(
+            expect(dialog.get_by_label("服务器名称", exact=True)).to_have_value(
                 "management"
             )
-            dialog.get_by_label("Domain", exact=True).fill("https://localhost")
+            dialog.get_by_label("域名", exact=True).fill("https://localhost")
             with page.expect_response(
                 lambda r: (
                     r.url.endswith(base + "/settings") and r.request.method == "PUT"
                 )
             ) as invalid:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert invalid.value.status == 422
-            expect(dialog.get_by_role("alert")).to_contain_text("hostname")
+            expect(dialog.get_by_role("alert")).to_contain_text("主机名")
 
             # A second administrator changes the same profile while the dialog is open.
             current = client.get(base + "/settings").raise_for_status().json()
@@ -92,21 +93,21 @@ def browser(client, backend, base, output, quota, before_remove):
                     "name": "management-concurrent",
                 },
             ).raise_for_status()
-            dialog.get_by_label("Domain", exact=True).fill("localhost")
+            dialog.get_by_label("域名", exact=True).fill("localhost")
             with page.expect_response(
                 lambda r: (
                     r.url.endswith(base + "/settings") and r.request.method == "PUT"
                 )
             ) as stale:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert stale.value.status == 409
-            expect(dialog.get_by_role("alert")).to_contain_text("refresh")
-            dialog.get_by_role("button", name="Reload server details").click()
-            expect(dialog.get_by_label("Server name", exact=True)).to_have_value(
+            expect(dialog.get_by_role("alert")).to_contain_text("刷新")
+            dialog.get_by_role("button", name="重新加载服务器详情").click()
+            expect(dialog.get_by_label("服务器名称", exact=True)).to_have_value(
                 "management-concurrent"
             )
-            dialog.get_by_label("Server name", exact=True).fill("management-edited")
-            dialog.get_by_label("Domain", exact=True).fill("localhost")
+            dialog.get_by_label("服务器名称", exact=True).fill("management-edited")
+            dialog.get_by_label("域名", exact=True).fill("localhost")
 
             def capture(label, width, height):
                 page.set_viewport_size({"width": width, "height": height})
@@ -147,37 +148,37 @@ def browser(client, backend, base, output, quota, before_remove):
                     r.url.endswith(base + "/settings") and r.request.method == "PUT"
                 )
             ) as saved:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert saved.value.status == 200
             expect(dialog).not_to_be_visible()
             before_remove()
 
             page.get_by_role(
-                "button", name="Remove management-edited", exact=True
+                "button", name="删除 management-edited", exact=True
             ).click()
             dialog = page.get_by_role("dialog")
             expect(
-                dialog.get_by_label("Confirm server name", exact=True)
+                dialog.get_by_label("确认服务器名称", exact=True)
             ).to_be_visible()
             expect(
-                dialog.get_by_role("button", name="Remove", exact=True)
+                dialog.get_by_role("button", name="删除", exact=True)
             ).to_be_disabled()
-            dialog.get_by_role("button", name="Cancel", exact=True).click()
+            dialog.get_by_role("button", name="取消", exact=True).click()
             assert client.get(base + "/settings").status_code == 200
             page.get_by_role(
-                "button", name="Remove management-edited", exact=True
+                "button", name="删除 management-edited", exact=True
             ).click()
             expect(
-                dialog.get_by_label("Confirm server name", exact=True)
+                dialog.get_by_label("确认服务器名称", exact=True)
             ).to_be_visible()
-            dialog.get_by_label("Confirm server name", exact=True).fill("wrong")
+            dialog.get_by_label("确认服务器名称", exact=True).fill("wrong")
             dialog.get_by_label(
-                "I accept that remote services may keep running"
+                "我接受远端服务可能继续运行"
             ).check()
             expect(
-                dialog.get_by_role("button", name="Remove", exact=True)
+                dialog.get_by_role("button", name="删除", exact=True)
             ).to_be_disabled()
-            dialog.get_by_label("Confirm server name", exact=True).fill(
+            dialog.get_by_label("确认服务器名称", exact=True).fill(
                 "management-edited"
             )
             for width, height, label in sizes:
@@ -193,16 +194,17 @@ def browser(client, backend, base, output, quota, before_remove):
             with page.expect_response(
                 lambda r: r.url.endswith(base + "/remove")
             ) as removed:
-                dialog.get_by_role("button", name="Remove", exact=True).click()
+                dialog.get_by_role("button", name="删除", exact=True).click()
             assert removed.value.status == 200
             expect(dialog).not_to_be_visible()
             expect(
-                page.get_by_role("button", name="Edit management-edited", exact=True)
+                page.get_by_role("button", name="编辑 management-edited", exact=True)
             ).to_have_count(0)
             assert quota() == used
             assert not errors, errors
             print(
-                "PASS browser invalid/stale edits, selective sync, cancel, explicit removal and 1440/390/320 layouts",
+                "PASS browser invalid/stale edits, selective sync, cancel, "
+                "explicit removal and 1440/390/320 layouts",
                 flush=True,
             )
             return retained_usage
@@ -491,7 +493,8 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
         assert not fixture.root.exists()
         assert not runtime.port_open(port)
         print(
-            "PASS actual VLESS provisioning/edited export, durable quota, immutable history, Agent rejection and explicit remote cleanup",
+            "PASS actual VLESS provisioning/edited export, durable quota, immutable history, "
+            "Agent rejection and explicit remote cleanup",
             flush=True,
         )
 

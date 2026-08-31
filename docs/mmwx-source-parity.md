@@ -31,6 +31,16 @@ and a clean-source Docker gate passed; see [frontend.md](frontend.md) and
 not the remaining backend parity items below, and does not upgrade the running
 production instance.
 
+The user subsequently required a Simplified Chinese interface. Chinese labels,
+safe feedback, page metadata and the official Ant Design Chinese locale are now
+implemented on all three surfaces. The R2 Chinese source passed 762 frontend
+tests in 70 files, both builds, backend/Agent/Worker regression and the Chinese
+browser/Docker gates recorded in [testing.md](testing.md). R4 corrects misleading
+certificate-task messages, adds 34 tests and passes the 187-test focused gate,
+both builds, full native clients/templates and real certificate administration.
+The final full frontend rerun and exact-commit publication are pending. This
+remains a candidate, not evidence that every remaining parity item is complete.
+
 ## Release blockers
 
 | Priority | Area | Source-confirmed result | Release condition |
@@ -41,6 +51,7 @@ production instance.
 | P1 | Agent settings | All four high-level routes are capability-gated. Authenticated master probe/update is implemented; unsupported inbound-port and embedded-runtime switching stay disabled. | Passed Agent tests and release gates for the implemented capability surface. |
 | P1 | Administrator MFA | Published in `main` at `6ca84e2`: encrypted TOTP, one-use recovery codes, password-bound challenges, mandatory enrollment and local reset. Documented safety differences from the pinned source are explicit. | Passed the 955-test backend suite at `45515b6`, 26 focused authentication tests at `58b33af`, frontend tests/builds and isolated production-browser workflows on 2026-08-30/31. Configure the persistent encryption key before use; multi-admin RBAC remains separate. |
 | P1 | Panel-issued Agent installation | New-host workflow implemented with short-lived single-host tickets, pinned public Agent 0.3.0a0 and official Xray, private inputs and dedicated non-root systemd ownership. | Production-browser and real root-URL WebSocket/HTTP bootstrap, VLESS traffic, replay refusal, repeat-install refusal and cleanup passed on the isolated VPS. HTTPS infrastructure, existing-host migration, fork-only runtimes and general OS/architecture support remain separate. |
+| P1 | External subscriptions | Administrator-owned workflow implemented for a subscriber's HTTPS Clash/Mihomo YAML sources, encrypted snapshots, explicit preview/confirmation and primary-link merging. | English and R2 Chinese full-suite/Docker gates passed; the R4 external browser/Mihomo/Xray VLESS, rotation/key restoration and broader client/template reruns also passed. The final full frontend rerun, exact-commit image and publication remain pending. URI/Base64 input, scheduling, subscriber self-service and the provider/rule ecosystem are separate. |
 
 ## Control-plane modules
 
@@ -49,13 +60,13 @@ production instance.
 | Server/Agent inventory and telemetry | Implemented | DDNS, federation/server sharing, home speed tester and Reality sharing are absent. | P2, P1 for dependent migrations |
 | Durable Agent commands | Implemented and stronger than the reference in lease recovery, command journals, dependencies and reviewable change sets | Complete compatibility still depends on every advertised child route being executable. | P1 gate |
 | Xray/Nginx/WARP lifecycle | Implemented with explicit host ownership and rollback workflows; [panel-issued Agent bootstrap](agent-bootstrap.md) adds verified new-host Agent/official-Xray installation | Automatic existing-host takeover, embedded runtime and installation of Nginx/WARP/fork-only protocols are not part of panel bootstrap. | P1/P2 by migration scope |
-| Managed subscriptions | Users, plans, nodes, credentials, quota/reset, templates, profiles, temporary links, access reconciliation and source-compatible frozen accounting implemented | External subscription/provider/rule/script ecosystem absent. | P1/P2 |
+| Managed subscriptions | Users, plans, nodes, credentials, quota/reset, templates, profiles, temporary links, access reconciliation and source-compatible frozen accounting implemented; [external sources](external-subscriptions.md) add an administrator/manual-YAML primary-link workflow in the current candidate | Wider external input, automatic refresh, subscriber self-service and provider/rule/script ecosystem absent. | P1/P2 |
 | Subscription formats | Clash, Surge, sing-box, Xray, URI list and Base64 implemented | Loon, Quantumult X, Shadowrocket, Stash, Surfboard and Egern-specific output absent. | P2 individually, P1 as migration set |
 | Certificates | ACME account/EAB, DNS-01, HTTP-01, encrypted vault, versions, deployment and revocation implemented | One-click self-signed certificate and automatic control-plane Nginx/HTTPS takeover absent. | P2/P1 for public one-click scope |
 | Public probe data plane | Public servers/settings/series/targets/WebSocket, scheduled tasks, return routes, probe-only build and resilient polling/reconnect implemented; anonymous Worker browser gate passed | Reference theme/view parity and online IP data remain; real Cloudflare deployment needs operator inputs. | P1/P2 |
 | Account security | Subscriber sessions, TOTP, recovery codes and device revocation implemented; [administrator MFA](administrator-security.md), mandatory enrollment, replay protection and local recovery published | Multi-administrator RBAC, security events and IP-ban console absent. | P1 |
 | Setup/backup/database | CLI administrator creation and installer-level stopped-volume backup implemented | Browser setup, downloadable backup/restore, SQLite-to-PostgreSQL migration and application update UI absent. | P1 |
-| Notifications/renewals | Renewal metadata is displayed | Telegram, notification rules, renewal requests, threshold alerts and scheduler absent. | P1 |
+| Notifications/renewals | Renewal metadata is displayed; the source-reviewed [first-slice design](notifications-plan.md) is a proposal only | Telegram, notification rules, renewal requests, threshold alerts and scheduler absent. | P1 |
 | Dynamic system settings | Environment settings plus focused probe/template settings implemented | General settings store/UI, branding, announcements, silent mode, update channels and feature flags absent. | P1/P2 |
 | Legacy migration | Identity/package/profile subset preview/import implemented | Backup fetch/upload, complete node/server import, rules/scripts/external subscriptions and automated Agent takeover absent. | P1 |
 

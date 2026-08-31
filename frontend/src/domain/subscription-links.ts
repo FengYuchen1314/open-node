@@ -5,6 +5,6 @@ const reserved = new Set([
 
 export function shortCodeError(value: string | null): string {
   const code = (value ?? "").trim();
-  if (code && !/^[A-Za-z0-9_-]{2,16}$/.test(code)) return "Use 2-16 letters, digits, underscores or hyphens";
-  return reserved.has(code.toLowerCase()) ? "This short code is reserved" : "";
+  if (code && !/^[A-Za-z0-9_-]{2,16}$/.test(code)) return "请使用 2–16 个英文字母、数字、下划线或连字符";
+  return reserved.has(code.toLowerCase()) ? "此短码为保留名称" : "";
 }

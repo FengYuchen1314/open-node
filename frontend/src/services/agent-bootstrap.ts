@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 
 export type BootstrapTransport = "auto" | "websocket" | "http";
 export type BootstrapStatus = "not_issued" | "issued" | "claimed" | "expired" | "revoked";
@@ -50,8 +51,8 @@ async function request<T>(serverId: string, init: RequestInit, fetcher: typeof f
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new Error(typeof body?.detail === "string"
-      ? body.detail : `Agent installation request failed (${response.status})`);
+    throw requestError(typeof body?.detail === "string" ? body.detail : undefined,
+      `Agent 安装请求失败（${response.status}）`);
   }
   return response.json() as Promise<T>;
 }

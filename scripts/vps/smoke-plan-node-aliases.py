@@ -39,7 +39,7 @@ def capture_aliases(page, container, output, name):
         page.set_viewport_size({"width": width, "height": height})
         page.wait_for_timeout(200)
         field = container.get_by_role(
-            "textbox", name=re.compile(r": subscription name$")
+            "textbox", name=re.compile(r"：订阅名称$")
         )
         field.scroll_into_view_if_needed()
         expect(field).to_be_in_viewport()
@@ -139,9 +139,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
 
         forward(original["alice"])
         browser = playwright.chromium.launch()
-        admin = browser.new_context(viewport={"width": 1440, "height": 1000})
+        admin = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="zh-CN")
         subscriber = browser.new_context(
-            viewport={"width": 1440, "height": 1000}, accept_downloads=True
+            viewport={"width": 1440, "height": 1000}, accept_downloads=True, locale="zh-CN"
         )
         errors = []
         try:
@@ -161,21 +161,22 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             page.on("pageerror", lambda error: errors.append(str(error)))
             portal.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/subscriptions")
-            page.get_by_role("button", name="Edit plan Community", exact=True).click()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_role("button", name="编辑套餐 Community", exact=True).click()
             dialog = page.get_by_role("dialog")
-            toggle = dialog.get_by_label("Custom subscription names", exact=True)
+            toggle = dialog.get_by_label("自定义订阅名称", exact=True)
             field = dialog.get_by_label(
-                node["name"] + ": subscription name", exact=True
+                node["name"] + "：订阅名称", exact=True
             )
             expect(field).to_be_disabled()
             toggle.check()
             field.fill("x" * 129)
             acknowledgment = dialog.get_by_label(
-                "I accept the runtime restart and pending changes", exact=True
+                "我接受运行时重启及变更待确认的影响", exact=True
             )
             acknowledgment.check()
             expect(
-                dialog.get_by_role("button", name="Save", exact=True)
+                dialog.get_by_role("button", name="保存", exact=True)
             ).to_be_disabled()
             field.fill("Pending name")
             assert (
@@ -193,12 +194,12 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                         and response.request.method == "PUT"
                     )
                 ) as response:
-                    dialog.get_by_role("button", name="Save", exact=True).click()
+                    dialog.get_by_role("button", name="保存", exact=True).click()
                 assert response.value.status == expected, response.value.text()
                 return response.value.json()
 
             save(409)
-            dialog.get_by_role("button", name="Reload plan details").click()
+            dialog.get_by_role("button", name="重新加载套餐详情").click()
             expect(field).to_have_value("Concurrent name")
             expect(toggle).not_to_be_checked()
             toggle.check()
@@ -209,7 +210,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             expect(field).to_have_value(alias)
             capture_aliases(page, dialog, args.output, "plan-alias-saved")
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
 
             for target in ("clash", "sing-box", "xray", "uri-list", "base64"):
@@ -236,13 +237,13 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             expect(
                 portal.get_by_role("heading", name="Alice", exact=True)
             ).to_be_visible()
-            portal.get_by_role("combobox", name="Client format", exact=True).click()
+            portal.get_by_role("combobox", name="客户端格式", exact=True).click()
             portal.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text("Xray", exact=True).click()
             with portal.expect_download() as download:
                 portal.get_by_role(
-                    "link", name="Download subscription", exact=True
+                    "link", name="下载订阅", exact=True
                 ).click()
             downloaded = json.loads(Path(download.value.path()).read_text())
             assert downloaded == exported("alice").json()
@@ -254,7 +255,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 flush=True,
             )
 
-            page.get_by_role("button", name="Edit plan Community", exact=True).click()
+            page.get_by_role("button", name="编辑套餐 Community", exact=True).click()
             expect(field).to_have_value(alias)
             toggle.uncheck()
             assert save()["commands"] == []
@@ -270,21 +271,21 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 == {}
             )
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
 
-            page.get_by_role("tab", name="Plans", exact=True).click()
+            page.get_by_role("tab", name="套餐", exact=True).click()
             form = page.locator("form").filter(
-                has=page.get_by_role("button", name="Create plan", exact=True)
+                has=page.get_by_role("button", name="创建套餐", exact=True)
             )
-            form.get_by_label("Name", exact=True).fill("Created with alias")
-            form.get_by_role("combobox", name="Nodes", exact=True).click()
+            form.get_by_label("名称", exact=True).fill("Created with alias")
+            form.get_by_role("combobox", name="节点", exact=True).click()
             page.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text(f"{node['name']} ({node['protocol']})", exact=True).click()
-            form.get_by_role("combobox", name="Nodes", exact=True).press("Escape")
-            form.get_by_label("Custom subscription names", exact=True).check()
-            form.get_by_label(node["name"] + ": subscription name", exact=True).fill(
+            form.get_by_role("combobox", name="节点", exact=True).press("Escape")
+            form.get_by_label("自定义订阅名称", exact=True).check()
+            form.get_by_label(node["name"] + "：订阅名称", exact=True).fill(
                 "New plan name"
             )
             capture_aliases(page, form, args.output, "plan-alias-create")
@@ -294,13 +295,13 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "POST"
                 )
             ) as created:
-                form.get_by_role("button", name="Create plan", exact=True).click()
+                form.get_by_role("button", name="创建套餐", exact=True).click()
             assert created.value.status == 201, created.value.text()
             saved = created.value.json()["plan"]
             assert saved["node_name_overrides"] == {node["id"]: "New plan name"}
             assert saved["node_name_override_enabled"] is True
             expect(
-                form.get_by_label("Custom subscription names", exact=True)
+                form.get_by_label("自定义订阅名称", exact=True)
             ).not_to_be_checked()
             assert client.get("/api/v1/nodes").json() == original_nodes
             assert client.get("/api/v1/users/alice/credentials").json() == credentials

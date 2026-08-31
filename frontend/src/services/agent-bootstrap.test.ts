@@ -46,15 +46,23 @@ describe("Agent bootstrap API", () => {
 
   it.each([401, 409, 429, 503])("preserves a safe API failure (%s)", async status => {
     const fetcher: typeof fetch = async () => new Response(JSON.stringify({ detail: "Installation is unavailable" }), { status });
-    await expect(issueAgentBootstrap("server", "auto", fetcher)).rejects.toThrow("Installation is unavailable");
+    await expect(issueAgentBootstrap("server", "auto", fetcher)).rejects.toThrow("安装功能不可用。");
   });
 
   it("does not echo validation input or an HTML error page", async () => {
     const validation: typeof fetch = async () => new Response(JSON.stringify({
       detail: [{ input: "private-ticket", msg: "invalid" }],
     }), { status: 422 });
-    await expect(issueAgentBootstrap("server", "auto", validation)).rejects.toThrow("Agent installation request failed (422)");
+    await expect(issueAgentBootstrap("server", "auto", validation)).rejects.toThrow("Agent 安装请求失败（422）");
     const html: typeof fetch = async () => new Response("private proxy response", { status: 502 });
-    await expect(getAgentBootstrap("server", html)).rejects.toThrow("Agent installation request failed (502)");
+    await expect(getAgentBootstrap("server", html)).rejects.toThrow("Agent 安装请求失败（502）");
+  });
+
+  it.each([
+    "安装凭据 private-ticket", "Installation is unavailable private-ticket",
+    [{ msg: "Installation is unavailable", input: "private-ticket" }],
+  ].map(detail => ({ detail })))("keeps the bootstrap string-only error boundary before localization", async ({ detail }) => {
+    const fetcher: typeof fetch = async () => new Response(JSON.stringify({ detail }), { status: 422 });
+    await expect(issueAgentBootstrap("server", "auto", fetcher)).rejects.toThrow("Agent 安装请求失败（422）");
   });
 });

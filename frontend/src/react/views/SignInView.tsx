@@ -9,6 +9,7 @@ import {
 } from "../../services/auth";
 import { useAsyncScope } from "../hooks/useAsyncScope";
 import { useAdministratorSession } from "../hooks/useSession";
+import { zhMessage } from "../../i18n/zh-CN";
 
 export default function SignInView() {
   const auth = useAdministratorSession();
@@ -42,7 +43,7 @@ export default function SignInView() {
         } else setQr("");
       }
     } catch (cause) {
-      if (scope.isCurrent(request)) setError(cause instanceof Error ? cause.message : "Sign-in failed");
+      if (scope.isCurrent(request)) setError(zhMessage(cause, "登录失败，请稍后重试。"));
     } finally {
       if (scope.isCurrent(request)) { setPassword(""); setBusy(false); busyRef.current = false; }
     }
@@ -60,7 +61,7 @@ export default function SignInView() {
         setChallenge(""); setEnrollment(null); setQr("");
       }
     } catch (cause) {
-      if (scope.isCurrent(request)) setError(cause instanceof Error ? cause.message : "Verification failed");
+      if (scope.isCurrent(request)) setError(zhMessage(cause, "验证失败，请检查验证码后重试。"));
     } finally {
       if (scope.isCurrent(request)) { setCode(""); setBusy(false); busyRef.current = false; }
     }
@@ -79,30 +80,30 @@ export default function SignInView() {
 
   return <section className="auth-page"><Card className="auth-card">
     <Space orientation="vertical" size="large" style={{ width: "100%" }}>
-      <div><Typography.Title level={2}>Open Node</Typography.Title><Typography.Title level={4}>Administrator Sign-In</Typography.Title></div>
-      {auth.error ? <Alert type="error" showIcon title={auth.error} action={<Button aria-label="Retry connection" icon={<ReloadOutlined aria-hidden />} onClick={() => void loadSession()} />} />
-        : auth.session?.configured === false ? <Alert type="warning" showIcon title="Administrator account is not configured." />
+      <div><Typography.Title level={2}>Open Node</Typography.Title><Typography.Title level={4}>管理员登录</Typography.Title></div>
+      {auth.error ? <Alert type="error" showIcon title={zhMessage(auth.error, "暂时无法连接服务器。")} action={<Button aria-label="重新连接" icon={<ReloadOutlined aria-hidden />} onClick={() => void loadSession()} />} />
+        : auth.session?.configured === false ? <Alert type="warning" showIcon title="尚未配置管理员账户。" />
         : recoveryCodes.length ? <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-          <Alert type="success" showIcon title="Two-factor authentication is enabled. Store these one-time recovery codes before continuing." />
-          <div className="recovery-grid" aria-label="Administrator recovery codes">{recoveryCodes.map(item => <Typography.Text code key={item}>{item}</Typography.Text>)}</div>
-          <Checkbox checked={accepted} onChange={event => setAccepted(event.target.checked)}>I have stored the recovery codes securely</Checkbox>
-          <Button type="primary" disabled={!accepted} onClick={continueLogin}>Continue to Open Node</Button>
+          <Alert type="success" showIcon title="双重验证已启用。请妥善保存这些一次性恢复码后再继续。" />
+          <div className="recovery-grid" aria-label="管理员恢复码">{recoveryCodes.map(item => <Typography.Text code key={item}>{item}</Typography.Text>)}</div>
+          <Checkbox checked={accepted} onChange={event => setAccepted(event.target.checked)}>我已妥善保存恢复码</Checkbox>
+          <Button type="primary" disabled={!accepted} onClick={continueLogin}>进入 Open Node</Button>
         </Space> : challenge ? <Form layout="vertical" onFinish={() => void verify()}>
           {error && <Alert className="form-alert" type="error" showIcon title={error} role="alert" />}
           {enrollment && <>
-            <Alert className="form-alert" type="info" showIcon title="Administrator 2FA is required. Scan this code before completing sign-in." />
-            {qr && <img className="totp-qr" src={qr} alt="Administrator authenticator enrollment QR code" width={240} height={240} />}
-            <Form.Item label="Authenticator secret" htmlFor="administrator-enrollment-secret"><Input id="administrator-enrollment-secret" value={enrollment.secret} readOnly /></Form.Item>
+            <Alert className="form-alert" type="info" showIcon title="管理员必须启用双重验证。请扫描二维码后继续登录。" />
+            {qr && <img className="totp-qr" src={qr} alt="管理员验证器绑定二维码" width={240} height={240} />}
+            <Form.Item label="验证器密钥" htmlFor="administrator-enrollment-secret"><Input id="administrator-enrollment-secret" value={enrollment.secret} readOnly /></Form.Item>
           </>}
-          <Form.Item label={enrollment ? "Authenticator code" : "Authenticator or recovery code"} htmlFor="administrator-login-code" required><Input id="administrator-login-code" value={code} onChange={event => setCode(event.target.value)} autoComplete="one-time-code" inputMode={enrollment ? "numeric" : "text"} autoFocus required maxLength={64} disabled={busy} /></Form.Item>
-          <Flex justify="space-between" gap="small"><Button disabled={busy} onClick={restart}>Start over</Button><Button type="primary" htmlType="submit" aria-label="Verify" icon={<SafetyCertificateOutlined aria-hidden />} loading={busy} disabled={!code}>Verify</Button></Flex>
+          <Form.Item label={enrollment ? "验证器验证码" : "验证器验证码或恢复码"} htmlFor="administrator-login-code" required><Input id="administrator-login-code" value={code} onChange={event => setCode(event.target.value)} autoComplete="one-time-code" inputMode={enrollment ? "numeric" : "text"} autoFocus required maxLength={64} disabled={busy} /></Form.Item>
+          <Flex justify="space-between" gap="small"><Button disabled={busy} onClick={restart}>重新开始</Button><Button type="primary" htmlType="submit" aria-label="验证" icon={<SafetyCertificateOutlined aria-hidden />} loading={busy} disabled={!code}>验证</Button></Flex>
         </Form> : <Form layout="vertical" onFinish={() => void submit()}>
           {error && <Alert className="form-alert" type="error" showIcon title={error} role="alert" />}
-          <Form.Item label="Username" htmlFor="administrator-username" required><Input id="administrator-username" value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" autoFocus required maxLength={64} disabled={busy} /></Form.Item>
-          <Form.Item label="Password" htmlFor="administrator-password" required><Input.Password id="administrator-password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" required maxLength={1024} disabled={busy} /></Form.Item>
-          <Button type="primary" htmlType="submit" aria-label="Sign In" icon={<LoginOutlined aria-hidden />} loading={busy} disabled={!username || !password} block>Sign In</Button>
+          <Form.Item label="用户名" htmlFor="administrator-username" required><Input id="administrator-username" value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" autoFocus required maxLength={64} disabled={busy} /></Form.Item>
+          <Form.Item label="密码" htmlFor="administrator-password" required><Input.Password id="administrator-password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" required maxLength={1024} disabled={busy} /></Form.Item>
+          <Button type="primary" htmlType="submit" aria-label="登录" icon={<LoginOutlined aria-hidden />} loading={busy} disabled={!username || !password} block>登录</Button>
         </Form>}
-      <Link to="/account">Subscriber sign-in</Link>
+      <Link to="/account">用户登录</Link>
     </Space>
   </Card></section>;
 }

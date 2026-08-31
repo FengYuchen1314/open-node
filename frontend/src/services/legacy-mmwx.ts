@@ -4,6 +4,7 @@ import type {
   LegacyMMWXImportResponse,
 } from "../domain/legacy-mmwx";
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const basePath = `${apiBaseUrl}/api/v1/migrations/mmwx/identities`;
@@ -17,13 +18,7 @@ async function request<T>(path: string, payload: unknown, fetcher = authenticate
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     const detail = body?.detail;
-    const message = typeof detail === "string"
-      ? detail
-      : Array.isArray(detail)
-        ? detail.map((entry: { loc?: unknown[]; msg?: string }) =>
-          `${entry.loc?.slice(1).join(".") ?? ""}: ${entry.msg ?? "Invalid value"}`).join("; ")
-        : "";
-    throw new Error(message || `MMWX migration request failed (${response.status})`);
+    throw requestError(detail, `MMWX 迁移请求失败（${response.status}）`);
   }
   return response.json() as Promise<T>;
 }

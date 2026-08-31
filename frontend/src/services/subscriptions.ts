@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 import { userPath } from "./user-path";
 import type {
   ManagedNodeCreateRequest,
@@ -49,7 +50,7 @@ const jsonHeaders = {
 
 export async function getProductUserIpPolicy(username: string, fetcher = authenticatedFetch): Promise<SubscriptionIpPolicy> {
   const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "subscription-ip-policy")}`);
-  if (!response.ok) throw await apiError(response, "Subscription IP policy request failed");
+  if (!response.ok) throw await apiError(response, "获取订阅 IP 策略失败");
   return response.json() as Promise<SubscriptionIpPolicy>;
 }
 
@@ -57,7 +58,7 @@ export async function updateProductUserIpPolicy(username: string, networks: stri
   const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "subscription-ip-policy")}`, {
     method: "PUT", headers: jsonHeaders, body: JSON.stringify({ networks }),
   });
-  if (!response.ok) throw await apiError(response, "Subscription IP policy update failed");
+  if (!response.ok) throw await apiError(response, "更新订阅 IP 策略失败");
   return response.json() as Promise<SubscriptionIpPolicy>;
 }
 
@@ -65,7 +66,7 @@ export async function updateProductUserShortCode(username: string, code: string,
   const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "subscription-short-code")}`, {
     method: "PUT", headers: jsonHeaders, body: JSON.stringify({ custom_short_code: code, expected_revision: revision }),
   });
-  if (!response.ok) throw await apiError(response, "Short code update failed");
+  if (!response.ok) throw await apiError(response, "更新短码失败");
   return response.json() as Promise<ProductUserSubscriptionTokenResponse>;
 }
 
@@ -74,7 +75,7 @@ export async function getSubscriptionAccess(
   fetcher = authenticatedFetch,
 ): Promise<SubscriptionAccessResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "access")}`);
-  if (!response.ok) throw await apiError(response, "Subscription access request failed");
+  if (!response.ok) throw await apiError(response, "获取订阅访问状态失败");
   return response.json() as Promise<SubscriptionAccessResponse>;
 }
 
@@ -83,7 +84,7 @@ export async function syncSubscriptionAccess(
   fetcher = authenticatedFetch,
 ): Promise<SubscriptionAccessResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "access/sync")}`, { method: "POST" });
-  if (!response.ok) throw await apiError(response, "Subscription access sync failed");
+  if (!response.ok) throw await apiError(response, "同步订阅访问状态失败");
   return response.json() as Promise<SubscriptionAccessResponse>;
 }
 
@@ -95,7 +96,7 @@ export async function setProductUserActive(
   const response = await fetcher(`${apiBaseUrl}/api/v1${userPath(username, "active")}`, {
     method: "PATCH", headers: jsonHeaders, body: JSON.stringify({ is_active: isActive }),
   });
-  if (!response.ok) throw await apiError(response, "User status update failed");
+  if (!response.ok) throw await apiError(response, "更新用户状态失败");
   return response.json() as Promise<ProductUserResponse>;
 }
 
@@ -108,7 +109,7 @@ export async function getSubscriptionFormatPreview(
     `${apiBaseUrl}/api/v1${userPath(username, "subscription-preview", { format })}`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Subscription compatibility request failed");
+    throw await apiError(response, "获取订阅兼容性信息失败");
   }
   return response.json() as Promise<SubscriptionFormatPreview>;
 }
@@ -116,7 +117,7 @@ export async function getSubscriptionFormatPreview(
 export async function listProductUsers(fetcher = authenticatedFetch): Promise<ProductUsersResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/users`);
   if (!response.ok) {
-    throw await apiError(response, "Product users request failed");
+    throw await apiError(response, "获取用户列表失败");
   }
   return response.json() as Promise<ProductUsersResponse>;
 }
@@ -131,7 +132,7 @@ export async function createProductUser(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Product user create request failed");
+    throw await apiError(response, "创建用户失败");
   }
   return response.json() as Promise<ProductUserResponse>;
 }
@@ -144,7 +145,7 @@ export async function getProductUserSubscriptionToken(
     `${apiBaseUrl}/api/v1${userPath(username, "subscription-token")}`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Product user subscription token request failed");
+    throw await apiError(response, "获取用户订阅令牌失败");
   }
   return response.json() as Promise<ProductUserSubscriptionTokenResponse>;
 }
@@ -160,7 +161,7 @@ export async function createProductUserSubscriptionToken(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Product user subscription token create request failed");
+    throw await apiError(response, "创建用户订阅令牌失败");
   }
   return response.json() as Promise<ProductUserSubscriptionTokenResponse>;
 }
@@ -176,7 +177,7 @@ export async function resetProductUserSubscriptionToken(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Product user subscription token reset request failed");
+    throw await apiError(response, "重置用户订阅令牌失败");
   }
   return response.json() as Promise<ProductUserSubscriptionTokenResponse>;
 }
@@ -189,7 +190,7 @@ export async function listProductUserCredentials(
     `${apiBaseUrl}/api/v1${userPath(username, "credentials")}`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Product user credentials request failed");
+    throw await apiError(response, "获取用户凭据失败");
   }
   return response.json() as Promise<ProductUserCredentialsResponse>;
 }
@@ -202,7 +203,7 @@ export async function getProductUserTraffic(
     `${apiBaseUrl}/api/v1${userPath(username, "traffic")}`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Product user traffic request failed");
+    throw await apiError(response, "获取用户流量失败");
   }
   return response.json() as Promise<ProductUserTrafficResponse>;
 }
@@ -216,7 +217,7 @@ export async function getProductUserQuota(
     `${apiBaseUrl}/api/v1${userPath(username, "quota", now ? { now } : undefined)}`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Product user quota request failed");
+    throw await apiError(response, "获取用户配额失败");
   }
   return response.json() as Promise<SubscriptionQuotaStatusResponse>;
 }
@@ -233,7 +234,7 @@ export async function resetProductUserTraffic(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Product user traffic reset request failed");
+    throw await apiError(response, "重置用户流量失败");
   }
   return response.json() as Promise<SubscriptionQuotaStatusResponse>;
 }
@@ -248,7 +249,7 @@ export async function resetDueProductUserTraffic(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Due traffic reset request failed");
+    throw await apiError(response, "执行到期流量重置失败");
   }
   return response.json() as Promise<SubscriptionDueTrafficResetResponse>;
 }
@@ -258,7 +259,7 @@ export async function listSubscriptionTemplatePresets(
 ): Promise<SubscriptionTemplatePresetsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/node-presets`);
   if (!response.ok) {
-    throw await apiError(response, "Subscription template preset request failed");
+    throw await apiError(response, "获取订阅预设模板失败");
   }
   return response.json() as Promise<SubscriptionTemplatePresetsResponse>;
 }
@@ -277,7 +278,7 @@ export async function createManagedNodeFromPreset(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Subscription template preset apply request failed");
+    throw await apiError(response, "应用订阅预设模板失败");
   }
   return response.json() as Promise<ManagedNodeResponse>;
 }
@@ -290,7 +291,7 @@ export async function exportSubscriptionCatalog(
     `${apiBaseUrl}/api/v1/catalog/export?include_credentials=${includeCredentials}`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Subscription catalog export request failed");
+    throw await apiError(response, "导出订阅目录失败");
   }
   return response.json() as Promise<SubscriptionCatalogExportResponse>;
 }
@@ -305,7 +306,7 @@ export async function importSubscriptionCatalog(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Subscription catalog import request failed");
+    throw await apiError(response, "导入订阅目录失败");
   }
   return response.json() as Promise<SubscriptionCatalogImportResponse>;
 }
@@ -313,7 +314,7 @@ export async function importSubscriptionCatalog(
 export async function listManagedNodes(fetcher = authenticatedFetch): Promise<ManagedNodesResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/nodes`);
   if (!response.ok) {
-    throw await apiError(response, "Managed nodes request failed");
+    throw await apiError(response, "获取托管节点失败");
   }
   return response.json() as Promise<ManagedNodesResponse>;
 }
@@ -328,7 +329,7 @@ export async function createManagedNode(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Managed node create request failed");
+    throw await apiError(response, "创建托管节点失败");
   }
   return response.json() as Promise<ManagedNodeResponse>;
 }
@@ -341,7 +342,7 @@ export async function listXrayRuntimeNodeDrafts(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/node-drafts`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime node drafts request failed");
+    throw await apiError(response, "获取 Xray 运行时节点草稿失败");
   }
   return response.json() as Promise<XrayRuntimeNodeDraftsResponse>;
 }
@@ -357,7 +358,7 @@ export async function createManagedNodeFromRuntimeInbound(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime node create request failed");
+    throw await apiError(response, "创建 Xray 运行时节点失败");
   }
   return response.json() as Promise<ManagedNodeResponse>;
 }
@@ -376,7 +377,7 @@ export async function importManagedNodesFromRuntimeInbounds(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime nodes import request failed");
+    throw await apiError(response, "导入 Xray 运行时节点失败");
   }
   return response.json() as Promise<XrayRuntimeNodeImportResponse>;
 }
@@ -389,7 +390,7 @@ export async function getXrayRuntimeNodeReconciliation(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/nodes/reconciliation`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime node reconciliation request failed");
+    throw await apiError(response, "核对 Xray 运行时节点失败");
   }
   return response.json() as Promise<XrayRuntimeNodeReconciliationResponse>;
 }
@@ -409,7 +410,7 @@ export async function syncManagedNodeFromRuntime(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime node sync request failed");
+    throw await apiError(response, "同步 Xray 运行时节点失败");
   }
   return response.json() as Promise<XrayRuntimeNodeSyncResponse>;
 }
@@ -422,7 +423,7 @@ export async function getXrayRuntimeCredentialReconciliation(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/credentials/reconciliation`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime credential reconciliation request failed");
+    throw await apiError(response, "核对 Xray 运行时凭据失败");
   }
   return response.json() as Promise<XrayRuntimeCredentialReconciliationResponse>;
 }
@@ -441,7 +442,7 @@ export async function repairMissingXrayRuntimeCredentials(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime credential repair request failed");
+    throw await apiError(response, "修复 Xray 运行时凭据失败");
   }
   return response.json() as Promise<XrayRuntimeCredentialRepairResponse>;
 }
@@ -460,7 +461,7 @@ export async function cleanupExtraXrayRuntimeCredentials(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime credential cleanup request failed");
+    throw await apiError(response, "清理 Xray 运行时凭据失败");
   }
   return response.json() as Promise<XrayRuntimeCredentialCleanupResponse>;
 }
@@ -470,7 +471,7 @@ export async function listSubscriptionPlans(
 ): Promise<SubscriptionPlansResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/plans`);
   if (!response.ok) {
-    throw await apiError(response, "Subscription plans request failed");
+    throw await apiError(response, "获取订阅套餐失败");
   }
   return response.json() as Promise<SubscriptionPlansResponse>;
 }
@@ -485,7 +486,7 @@ export async function createSubscriptionPlan(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Subscription plan create request failed");
+    throw await apiError(response, "创建订阅套餐失败");
   }
   return response.json() as Promise<SubscriptionPlanResponse>;
 }
@@ -501,7 +502,7 @@ export async function assignSubscriptionPlan(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Subscription plan assignment request failed");
+    throw await apiError(response, "分配订阅套餐失败");
   }
   return response.json() as Promise<SubscriptionPlanAssignResponse>;
 }
@@ -510,10 +511,10 @@ async function apiError(response: Response, fallback: string): Promise<Error> {
   try {
     const body = (await response.json()) as { detail?: unknown };
     if (typeof body.detail === "string" && body.detail.length > 0) {
-      return new Error(body.detail);
+      return requestError(body.detail, `${fallback}（${response.status}）`);
     }
   } catch {
     // The backend normally returns JSON errors, but network proxies may not.
   }
-  return new Error(`${fallback} with ${response.status}`);
+  return requestError(undefined, `${fallback}（${response.status}）`);
 }

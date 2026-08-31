@@ -31,7 +31,7 @@ describe("anonymous public Probe client", () => {
     expect(getPublicProbeStreamUrl({ origin: "http://localhost:8000" })).toBe("ws://localhost:8000/api/v1/public/probe-ws");
   });
   it("preserves bounded API errors and handles a non-JSON denial", async () => {
-    await expect(getPublicProbePayload(vi.fn<typeof fetch>().mockResolvedValue(json({ detail: "Probe access denied" }, 403)))).rejects.toThrow("Probe access denied");
+    await expect(getPublicProbePayload(vi.fn<typeof fetch>().mockResolvedValue(json({ detail: "Probe access denied" }, 403)))).rejects.toThrow("无权访问此探针。");
     await expect(getPublicProbePayload(vi.fn<typeof fetch>().mockResolvedValue(new Response("Unavailable", { status: 503 })))).rejects.toThrow("503");
   });
 });

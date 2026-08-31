@@ -4,13 +4,14 @@ import { ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import type { ServerSummary, ServerTraffic, TrafficSource, TrafficStatsMode } from "../../domain/inventory";
 import { getServerTraffic, resetServerTraffic, updateServerTraffic } from "../../services/inventory";
 import StrictInputNumber from "./StrictInputNumber";
+import { zhMessage } from "../../i18n/zh-CN";
 
 export interface ServerTrafficPanelProps { servers: ServerSummary[] }
 type Action = "read" | "save" | "reset";
-const sources = [{ label: "Xray nodes", value: "xray" }, { label: "System network", value: "system" }];
-const modes = [{ label: "Upload + download", value: "both" }, { label: "Upload", value: "upload" },
-  { label: "Download", value: "download" }, { label: "Larger direction", value: "max" }];
-const days = [{ label: "Off", value: 0 }, ...Array.from({ length: 31 }, (_, i) => ({ label: String(i + 1), value: i + 1 }))];
+const sources = [{ label: "Xray 节点", value: "xray" }, { label: "系统网络", value: "system" }];
+const modes = [{ label: "上传 + 下载", value: "both" }, { label: "上传", value: "upload" },
+  { label: "下载", value: "download" }, { label: "取较大方向", value: "max" }];
+const days = [{ label: "关闭", value: 0 }, ...Array.from({ length: 31 }, (_, i) => ({ label: String(i + 1), value: i + 1 }))];
 function bytes(value: number) {
   if (value < 1024) return `${value} B`;
   const unit = Math.min(4, Math.floor(Math.log(value) / Math.log(1024)));
@@ -18,7 +19,7 @@ function bytes(value: number) {
 }
 function date(value: string | null) {
   return value && Number.isFinite(Date.parse(value))
-    ? `${new Date(value).toISOString().replace("T", " ").slice(0, 16)} UTC` : "None";
+    ? `${new Date(value).toLocaleString("zh-CN", { timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })} UTC` : "无";
 }
 
 export default function ServerTrafficPanel({ servers }: ServerTrafficPanelProps) {
@@ -59,7 +60,7 @@ export default function ServerTrafficPanel({ servers }: ServerTrafficPanelProps)
       setState(response);
     } catch (failure) {
       if (!model.current.disposed && run === model.current.version) {
-        setError(failure instanceof Error ? failure.message : "Server traffic request failed");
+        setError(failure instanceof Error ? failure.message : "服务器流量请求失败");
       }
     } finally {
       if (!model.current.disposed && run === model.current.version) {
@@ -93,58 +94,58 @@ export default function ServerTrafficPanel({ servers }: ServerTrafficPanelProps)
     };
   }, [selected]);
 
-  return <section aria-label="Server traffic">
-    <Card title="Server traffic" extra={<Button type="text" icon={<ReloadOutlined />}
-      aria-label="Refresh server traffic" title="Refresh traffic and settings" disabled={busy || !selected}
+  return <section aria-label="服务器流量">
+    <Card title="服务器流量" extra={<Button type="text" icon={<ReloadOutlined />}
+      aria-label="刷新服务器流量" title="刷新流量和设置" disabled={busy || !selected}
       onClick={() => void request("read", true)} />}>
       <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-        <Form.Item label="Traffic server" style={{ marginBottom: 0 }}>
-          <Select aria-label="Traffic server" value={selected || undefined} disabled={busy || !servers.length}
+        <Form.Item label="流量服务器" style={{ marginBottom: 0 }}>
+          <Select aria-label="流量服务器" value={selected || undefined} disabled={busy || !servers.length}
             options={servers.map(server => ({ label: server.name, value: server.id }))} onChange={setSelected} />
         </Form.Item>
-        {error && <Alert type="error" showIcon title={error} />}
+        {error && <Alert type="error" showIcon title={zhMessage(error)} />}
         {state && <>
           <Space wrap aria-live="polite">
             <Typography.Text strong data-testid="server-traffic-used">{bytes(state.used)}</Typography.Text>
-            <Typography.Text>/ {state.traffic_limit ? bytes(state.traffic_limit) : "Unlimited"}</Typography.Text>
+            <Typography.Text>/ {state.traffic_limit ? bytes(state.traffic_limit) : "不限额"}</Typography.Text>
             <TaglessSource source={state.traffic_source} />
           </Space>
           <Progress percent={quota} status={quota >= 100 ? "exception" : "normal"} showInfo={false} />
           <Descriptions column={1} size="small" items={[
-            { key: "traffic", label: "Upload / download", children: `${bytes(state.upload)} / ${bytes(state.download)}` },
-            { key: "report", label: "Last report", children: date(state.last_reported_at) },
-            { key: "reset", label: "Last reset", children: date(state.last_reset_at) },
-            { key: "next", label: "Next reset", children: date(state.next_reset_at) },
+            { key: "traffic", label: "上传 / 下载", children: `${bytes(state.upload)} / ${bytes(state.download)}` },
+            { key: "report", label: "最近上报", children: date(state.last_reported_at) },
+            { key: "reset", label: "上次重置", children: date(state.last_reset_at) },
+            { key: "next", label: "下次重置", children: date(state.next_reset_at) },
           ]} />
           <Form layout="vertical" onFinish={() => void request("save", true)}>
             <Row gutter={16}>
-              <Col xs={24} sm={12}><Form.Item label="Traffic source"><Select aria-label="Traffic source"
+              <Col xs={24} sm={12}><Form.Item label="流量来源"><Select aria-label="流量来源"
                 value={form.source} options={sources} disabled={busy} onChange={source => setForm(previous => ({ ...previous, source }))} /></Form.Item></Col>
-              <Col xs={24} sm={12}><Form.Item label="Counted direction"><Select aria-label="Counted direction"
+              <Col xs={24} sm={12}><Form.Item label="统计方向"><Select aria-label="统计方向"
                 value={form.mode} options={modes} disabled={busy} onChange={mode => setForm(previous => ({ ...previous, mode }))} /></Form.Item></Col>
-              <Col xs={24} sm={12}><Form.Item label="Quota (GiB, 0 = unlimited)" validateStatus={valid ? undefined : "error"}
-                help={valid ? undefined : "Enter zero for unlimited, or a positive quota of at least one byte within the safe integer range."}>
-                <StrictInputNumber aria-label="Quota (GiB, 0 = unlimited)" value={form.limit} aria-valuemin={0}
+              <Col xs={24} sm={12}><Form.Item label="流量限额（GiB，0 表示不限额）" validateStatus={valid ? undefined : "error"}
+                help={valid ? undefined : "输入 0 表示不限额；正数限额至少为 1 字节，且须在安全整数范围内。"}>
+                <StrictInputNumber aria-label="流量限额（GiB，0 表示不限额）" value={form.limit} aria-valuemin={0}
                   aria-valuemax={Number.MAX_SAFE_INTEGER / 1024 ** 3} aria-invalid={!valid} disabled={busy}
                   style={{ width: "100%" }}
                   onChange={limit => setForm(previous => ({ ...previous, limit }))} /></Form.Item></Col>
-              <Col xs={24} sm={12}><Form.Item label="Monthly reset day (UTC)"><Select aria-label="Monthly reset day (UTC)"
+              <Col xs={24} sm={12}><Form.Item label="每月重置日（UTC）"><Select aria-label="每月重置日（UTC）"
                 value={form.day} options={days} disabled={busy} onChange={day => setForm(previous => ({ ...previous, day }))} /></Form.Item></Col>
             </Row>
-            <Space wrap><Button type="primary" htmlType="submit" aria-label="Save" icon={<SaveOutlined aria-hidden />} disabled={busy || !valid}>Save</Button>
-              <Button disabled={busy} onClick={() => setConfirmation(true)}>Reset cycle</Button></Space>
+            <Space wrap><Button type="primary" htmlType="submit" aria-label="保存" icon={<SaveOutlined aria-hidden />} disabled={busy || !valid}>保存</Button>
+              <Button aria-label="重置周期" disabled={busy} onClick={() => setConfirmation(true)}>重置周期</Button></Space>
           </Form>
         </>}
       </Space>
     </Card>
-    <Modal title="Reset server traffic?" open={confirmation} destroyOnHidden onCancel={() => setConfirmation(false)}
-      okText="Reset" okButtonProps={{ danger: true, disabled: busy, "aria-label": "Reset" }} onOk={() => void request("reset")}>
-      The current traffic cycle for {servers.find(server => server.id === selected)?.name} will start at zero for both sources.
-      {" "}Historical counters and user quotas stay unchanged.
+    <Modal title="重置服务器流量？" open={confirmation} destroyOnHidden onCancel={() => setConfirmation(false)}
+      okText="重置" okButtonProps={{ danger: true, disabled: busy, "aria-label": "重置" }} onOk={() => void request("reset")}>
+      将把 {servers.find(server => server.id === selected)?.name} 当前流量周期的两种来源用量均从零重新计数。
+      {" "}历史计数和用户流量限额保持不变。
     </Modal>
   </section>;
 }
 
 function TaglessSource({ source }: { source: TrafficSource }) {
-  return <Typography.Text type="secondary">{source === "system" ? "System network" : "Xray nodes"}</Typography.Text>;
+  return <Typography.Text type="secondary">{source === "system" ? "系统网络" : "Xray 节点"}</Typography.Text>;
 }

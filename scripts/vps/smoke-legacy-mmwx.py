@@ -131,7 +131,8 @@ def legacy_database(path, password, totp_secret, recovery_code, token):
         )
         database.execute("INSERT INTO packages VALUES (7, 'Legacy Package', 'pkg')")
         database.executemany(
-            "INSERT INTO subscribe_files VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO subscribe_files VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     11,
@@ -263,7 +264,7 @@ def capture_dialog(page, output):
 def browser_import(url, admin_password, bundle, output, secrets_to_hide):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
         page = context.new_page()
         errors = []
         requests = []
@@ -271,10 +272,11 @@ def browser_import(url, admin_password, bundle, output, secrets_to_hide):
         page.on("request", lambda request: requests.append(request.url))
         try:
             page.goto(url + "/subscriptions")
-            page.get_by_label("Username", exact=True).fill("admin")
-            page.get_by_label("Password", exact=True).fill(admin_password)
-            page.get_by_role("button", name="Sign In", exact=True).click()
-            button = page.get_by_role("button", name="MMWX identities", exact=True)
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_label("用户名", exact=True).fill("admin")
+            page.get_by_label("密码", exact=True).fill(admin_password)
+            page.get_by_role("button", name="登录", exact=True).click()
+            button = page.get_by_role("button", name="MMWX 身份", exact=True)
             expect(button).to_be_visible(timeout=15000)
             button.click()
             dialog = page.get_by_role("dialog")
@@ -284,32 +286,32 @@ def browser_import(url, admin_password, bundle, output, secrets_to_hide):
             page.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text("Legacy", exact=True).click()
-            dialog.get_by_role("button", name="Preview", exact=True).click()
-            expect(dialog.get_by_text("Users 1", exact=True)).to_be_visible()
+            dialog.get_by_role("button", name="预览", exact=True).click()
+            expect(dialog.get_by_text("用户 1", exact=True)).to_be_visible()
             expect(dialog.get_by_text("TOTP 1", exact=True)).to_be_visible()
-            expect(dialog.get_by_text("Profiles 2", exact=True)).to_be_visible()
-            expect(dialog.get_by_text("Mappings 1", exact=True)).to_be_visible()
+            expect(dialog.get_by_text("订阅配置 2", exact=True)).to_be_visible()
+            expect(dialog.get_by_text("套餐映射 1", exact=True)).to_be_visible()
             expect(
                 dialog.get_by_text(
-                    "alice: source administrator will import as subscriber"
+                    "来源管理员将按普通用户导入。"
                 )
             ).to_be_visible()
             capture_dialog(page, output)
-            count = dialog.get_by_label("Confirm user count (1)", exact=True)
+            count = dialog.get_by_label("确认用户数（1）", exact=True)
             for invalid in ("2", "0.6", "", "-", "1e-999"):
                 count.fill(invalid)
                 count.press("Tab")
                 count.press("Enter")
                 expect(
-                    dialog.get_by_role("button", name="Import", exact=True)
+                    dialog.get_by_role("button", name="导入", exact=True)
                 ).to_be_disabled()
             count.fill("1")
-            dialog.get_by_role("button", name="Import", exact=True).click()
+            dialog.get_by_role("button", name="导入", exact=True).click()
             expect(
-                dialog.get_by_text("Imported 1 identities", exact=True)
+                dialog.get_by_text("已导入 1 个身份", exact=True)
             ).to_be_visible()
             expect(dialog.locator('input[type="file"]')).to_have_value("")
-            assert dialog.get_by_text("No file selected", exact=True).is_visible()
+            assert dialog.get_by_text("尚未选择文件", exact=True).is_visible()
             content = page.content()
             storage = page.evaluate(
                 "JSON.stringify({ ...localStorage, ...sessionStorage })"
@@ -319,7 +321,7 @@ def browser_import(url, admin_password, bundle, output, secrets_to_hide):
                 for secret in secrets_to_hide
             )
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
             expect(page.get_by_text("Legacy Alice", exact=True).last).to_be_visible()
             assert not errors, errors
@@ -332,29 +334,30 @@ def browser_import(url, admin_password, bundle, output, secrets_to_hide):
 def browser_subscriber(url, password, totp_secret, output):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 390, "height": 844})
+        context = browser.new_context(viewport={"width": 390, "height": 844}, locale="zh-CN")
         page = context.new_page()
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         try:
             page.goto(url + "/account")
-            page.get_by_label("Username", exact=True).fill("alice")
-            page.get_by_label("Password", exact=True).fill(password)
-            page.get_by_role("button", name="Sign In", exact=True).click()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            page.get_by_label("用户名", exact=True).fill("alice")
+            page.get_by_label("密码", exact=True).fill(password)
+            page.get_by_role("button", name="登录", exact=True).click()
             expect(
-                page.get_by_role("heading", name="Two-Factor Verification")
+                page.get_by_role("heading", name="双重验证")
             ).to_be_visible()
-            page.get_by_label("Authenticator or recovery code", exact=True).fill(
+            page.get_by_label("验证器验证码或恢复码", exact=True).fill(
                 pyotp.TOTP(totp_secret).now()
             )
-            page.get_by_role("button", name="Verify", exact=True).click()
+            page.get_by_role("button", name="验证", exact=True).click()
             expect(
-                page.get_by_role("region", name="Current plan", exact=True).get_by_text(
+                page.get_by_role("region", name="当前套餐", exact=True).get_by_text(
                     "Legacy", exact=True
                 )
             ).to_be_visible()
-            expect(page.get_by_label("Configuration", exact=True)).to_be_visible()
-            page.get_by_role("combobox", name="Configuration", exact=True).click()
+            expect(page.get_by_label("配置", exact=True)).to_be_visible()
+            page.get_by_role("combobox", name="配置", exact=True).click()
             page.locator(
                 ".ant-select-dropdown:visible .ant-select-item-option"
             ).get_by_text("Mobile", exact=True).click()
@@ -368,6 +371,7 @@ def browser_subscriber(url, password, totp_secret, output):
                 path=output / "legacy-account-mobile.png",
                 full_page=True,
                 animations="disabled",
+                mask=[page.locator("#account-subscription-url")],
             )
             assert not errors, errors
         finally:
@@ -570,7 +574,8 @@ def run(args):
                     assert json.loads(recovery) == []
                     assert database.execute("PRAGMA foreign_key_check").fetchall() == []
                 print(
-                    "PASS MMWX packages/profiles, browser mapping, legacy /x links, auth and live forwarding",
+                    "PASS MMWX packages/profiles, browser mapping, legacy /x links, "
+                    "auth and live forwarding",
                     flush=True,
                 )
             except Exception:

@@ -17,28 +17,29 @@ import RouteProbeFields from "../components/RouteProbeFields";
 import ServerManagementDialog from "../components/ServerManagementDialog";
 import ServerTrafficPanel from "../components/ServerTrafficPanel";
 import StrictInputNumber from "../components/StrictInputNumber";
+import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 
 export interface DashboardViewProps { }
 type Operation = { title: string; kind: AgentOperationKind; workspace?: boolean };
-const quickOperations: Operation[] = [{ title: "System info", kind: "system_info" }, { title: "Traffic", kind: "traffic" }, { title: "Speed", kind: "speed" }];
-const diagnosticOperations: Operation[] = [{ title: "Services", kind: "services_status" }, { title: "NICs", kind: "system_nics" },
-  { title: "Scan", kind: "scan" }, { title: "Log files", kind: "log_files_list" }];
+const quickOperations: Operation[] = [{ title: "系统信息", kind: "system_info" }, { title: "流量", kind: "traffic" }, { title: "速率", kind: "speed" }];
+const diagnosticOperations: Operation[] = [{ title: "服务", kind: "services_status" }, { title: "网卡", kind: "system_nics" },
+  { title: "扫描", kind: "scan" }, { title: "日志文件", kind: "log_files_list" }];
 const maintenanceOperations: Operation[] = [
-  { title: "Install Xray", kind: "xray_install" }, { title: "Remove Xray", kind: "xray_remove" },
-  { title: "Xray release", kind: "xray_release" }, { title: "Roll back Xray", kind: "xray_rollback" },
-  { title: "Install Nginx", kind: "nginx_install" }, { title: "Remove Nginx", kind: "nginx_remove" },
-  { title: "Install WARP", kind: "warp_install" }, { title: "WARP status", kind: "warp_status" },
-  { title: "Remove WARP", kind: "warp_remove" }, { title: "Upgrade Agent", kind: "agent_upgrade" },
-  { title: "Roll back Agent", kind: "agent_rollback" }, { title: "Uninstall Agent", kind: "agent_uninstall" },
+  { title: "安装 Xray", kind: "xray_install" }, { title: "移除 Xray", kind: "xray_remove" },
+  { title: "Xray 发布版本", kind: "xray_release" }, { title: "回退 Xray", kind: "xray_rollback" },
+  { title: "安装 Nginx", kind: "nginx_install" }, { title: "移除 Nginx", kind: "nginx_remove" },
+  { title: "安装 WARP", kind: "warp_install" }, { title: "WARP 状态", kind: "warp_status" },
+  { title: "移除 WARP", kind: "warp_remove" }, { title: "升级 Agent", kind: "agent_upgrade" },
+  { title: "回退 Agent", kind: "agent_rollback" }, { title: "卸载 Agent", kind: "agent_uninstall" },
 ];
-const configOperations: Operation[] = [{ title: "Xray config", kind: "xray_config_read" },
-  { title: "Xray system", kind: "xray_system_config_read", workspace: true },
-  { title: "Xray files", kind: "xray_config_files_list", workspace: true },
-  { title: "Nginx config", kind: "nginx_config_read" }, { title: "Nginx files", kind: "nginx_config_files_list" }];
+const configOperations: Operation[] = [{ title: "Xray 配置", kind: "xray_config_read" },
+  { title: "Xray 系统配置", kind: "xray_system_config_read", workspace: true },
+  { title: "Xray 文件", kind: "xray_config_files_list", workspace: true },
+  { title: "Nginx 配置", kind: "nginx_config_read" }, { title: "Nginx 文件", kind: "nginx_config_files_list" }];
 const connectionOptions = ["auto", "websocket", "http", "pull"].map(value => ({ value,
-  label: { auto: "Auto", websocket: "WebSocket", http: "HTTP", pull: "Pull" }[value] }));
-const xrayOptions = [{ value: "external", label: "External" }, { value: "embedded", label: "Embedded" }];
-const cycleNames: Record<RenewalCycle, string> = { month: "Month", quarter: "Quarter", half_year: "Half year", year: "Year" };
+  label: { auto: "自动", websocket: "WebSocket", http: "HTTP", pull: "拉取" }[value] }));
+const xrayOptions = [{ value: "external", label: "外部" }, { value: "embedded", label: "嵌入式" }];
+const cycleNames: Record<RenewalCycle, string> = { month: "月", quarter: "季度", half_year: "半年", year: "年" };
 const cycleOptions = Object.entries(cycleNames).map(([value, label]) => ({ value, label }));
 const lifecyclePaths = /^\/api\/child\/agent\/(upgrade(?:-stream)?|uninstall(?:-stream)?|rollback)$/;
 const textOrNull = (value: string | null | undefined) => value?.trim() || null;
@@ -70,17 +71,17 @@ function speed(value: number) {
 function telemetryLabel(item?: AgentTelemetry | null) {
   const parts: string[] = []; const metrics = item?.sysmetrics;
   if (metrics?.has_cpu) parts.push(`${metrics.cpu_pct.toFixed(1)}% CPU`);
-  if (metrics?.has_mem && metrics.mem_total > 0) parts.push(`${(metrics.mem_used / metrics.mem_total * 100).toFixed(0)}% mem`);
-  return parts.join(" · ") || "No telemetry";
+  if (metrics?.has_mem && metrics.mem_total > 0) parts.push(`${(metrics.mem_used / metrics.mem_total * 100).toFixed(0)}% 内存`);
+  return parts.join(" · ") || "暂无遥测数据";
 }
 function latencyLabel(item?: AgentTelemetry | null) {
-  if (!item?.latency.length) return "No probe";
+  if (!item?.latency.length) return "暂无探测";
   const successful = item.latency.filter(sample => sample.success);
-  return successful.length ? `${(successful.reduce((sum, sample) => sum + sample.latency_ms, 0) / successful.length).toFixed(0)} ms` : "Probe failed";
+  return successful.length ? `${(successful.reduce((sum, sample) => sum + sample.latency_ms, 0) / successful.length).toFixed(0)} ms` : "探测失败";
 }
 function renewalLabel(server: ServerSummary) {
-  return [server.expires_at?.slice(0, 10), server.renewal_price == null ? "" : `${server.renewal_price} ${server.renewal_currency ?? ""}`.trim(),
-    server.renewal_cycle ? cycleNames[server.renewal_cycle] : ""].filter(Boolean).join(" · ") || "No renewal";
+  return [server.expires_at ? new Date(server.expires_at).toLocaleDateString("zh-CN", { timeZone: "UTC" }) : "", server.renewal_price == null ? "" : `${server.renewal_price} ${server.renewal_currency ?? ""}`.trim(),
+    server.renewal_cycle ? cycleNames[server.renewal_cycle] : ""].filter(Boolean).join(" · ") || "暂无续费信息";
 }
 
 export default function DashboardView(_props: DashboardViewProps) {
@@ -120,15 +121,15 @@ export default function DashboardView(_props: DashboardViewProps) {
   const selectedAgent = agents[command.server_id];
   const workspace = selectedAgent?.capabilities.xray_config_workspace === true;
   const capabilities = selectedAgent?.capabilities;
-  const workspaceMessage = !command.server_id ? "Select a server to manage its Xray configuration files."
-    : !selectedAgent ? "Install and connect an upgraded Agent before managing Xray configuration files."
-      : "This Agent version does not advertise the xray_config_workspace capability. Upgrade the Agent first.";
-  const settingsMessage = !command.server_id ? "Select a server to manage its Agent settings." : !selectedAgent
-    ? "Connect an Agent before managing Agent settings." : "Unsupported controls are disabled from the Agent's advertised capabilities.";
+  const workspaceMessage = !command.server_id ? "请选择服务器以管理其 Xray 配置文件。"
+    : !selectedAgent ? "请先安装并连接升级后的 Agent，再管理 Xray 配置文件。"
+      : "此 Agent 版本未上报 xray_config_workspace 能力，请先升级 Agent。";
+  const settingsMessage = !command.server_id ? "请选择服务器以管理其 Agent 设置。" : !selectedAgent
+    ? "请先连接 Agent，再管理 Agent 设置。" : "根据 Agent 上报的能力，已禁用不支持的控件。";
   const options = servers.map(server => ({ value: server.id, label: server.name }));
   const blocked = !command.server_id || Boolean(savingOperation);
   const current = (epoch: number) => control.current.active && control.current.epoch === epoch;
-  function report(failure: unknown) { setError(failure instanceof Error ? failure.message : "Request failed."); }
+  function report(failure: unknown) { setError(failure instanceof Error ? failure.message : "请求失败。"); }
 
   async function refreshCommands(items: ServerSummary[]) {
     const epoch = control.current.epoch; const sequence = ++control.current.commandSequence;
@@ -193,9 +194,9 @@ export default function DashboardView(_props: DashboardViewProps) {
 
   async function submitServer() {
     if (control.current.saving || !form.name.trim()) return;
-    if (!integerInRange(form.listen_port, 0, 65535)) { setError("Port must be an integer between 0 and 65535."); return; }
-    if (!integerInRange(form.traffic_limit, 0, Number.MAX_SAFE_INTEGER)) { setError("Traffic limit must be a non-negative safe integer in bytes."); return; }
-    if (!validPrice(form.renewal_price) || !validPrice(form.renewal_price_cny)) { setError("Renewal prices must be blank or finite non-negative numbers."); return; }
+    if (!integerInRange(form.listen_port, 0, 65535)) { setError("端口必须是 0 至 65535 之间的整数。"); return; }
+    if (!integerInRange(form.traffic_limit, 0, Number.MAX_SAFE_INTEGER)) { setError("流量限额必须是非负安全整数，单位为字节。"); return; }
+    if (!validPrice(form.renewal_price) || !validPrice(form.renewal_price_cny)) { setError("续费价格可留空；填写时必须是有限的非负数。"); return; }
     const epoch = control.current.epoch;
     control.current.saving = true; setSaving(true); setError(""); setSuccess(""); setToken(null);
     try {
@@ -209,7 +210,7 @@ export default function DashboardView(_props: DashboardViewProps) {
   }
   async function submitMetadata() {
     if (!metadataTarget || control.current.savingMetadata) return;
-    if (!validPrice(metadata.renewal_price) || !validPrice(metadata.renewal_price_cny)) { setError("Renewal prices must be blank or finite non-negative numbers."); return; }
+    if (!validPrice(metadata.renewal_price) || !validPrice(metadata.renewal_price_cny)) { setError("续费价格可留空；填写时必须是有限的非负数。"); return; }
     const target = metadataTarget; const epoch = control.current.epoch;
     control.current.savingMetadata = true; setSavingMetadata(true); setError(""); setSuccess("");
     try {
@@ -220,7 +221,7 @@ export default function DashboardView(_props: DashboardViewProps) {
         control.current.servers = next; return next;
       });
       if (control.current.metadataTarget === target) setMetadata(metadataFor(response.server));
-      setSuccess("Probe metadata saved.");
+      setSuccess("探针元数据已保存。");
     } catch (failure) { if (current(epoch)) report(failure); }
     finally { if (current(epoch)) { control.current.savingMetadata = false; setSavingMetadata(false); } }
   }
@@ -273,7 +274,7 @@ export default function DashboardView(_props: DashboardViewProps) {
   }
   async function purgeLogs() {
     if (!logs.confirmed) return;
-    if (!logs.all && !logs.name.trim()) { setError("Enter a log file name or select All files."); return; }
+    if (!logs.all && !logs.name.trim()) { setError("请输入日志文件名，或选择全部文件。"); return; }
     const target = command.server_id;
     if (await queue("log_files_delete", logs.all ? { all: true } : { name: logs.name.trim() })) {
       if (control.current.target === target) setLogs(previous => ({ ...previous, name: previous.all ? previous.name : "", confirmed: false }));
@@ -283,14 +284,14 @@ export default function DashboardView(_props: DashboardViewProps) {
     if (capabilities?.[kind] !== true) { setError(settingsMessage); return; }
     if (kind === "agent_switch_xray_mode") { void queue(kind, { xray_mode: settings.xray_mode }); return; }
     if (kind === "agent_switch_listen_port") {
-      if (!integerInRange(settings.listen_port, 0, 65535)) { setError("Listen port must be an integer between 0 and 65535."); return; }
+      if (!integerInRange(settings.listen_port, 0, 65535)) { setError("监听端口必须是 0 至 65535 之间的整数。"); return; }
       void queue(kind, { listen_port: settings.listen_port }); return;
     }
-    if (!settings.master_url.trim()) { setError("Enter a Master URL."); return; }
+    if (!settings.master_url.trim()) { setError("请输入控制台地址。"); return; }
     void queue(kind, { master_url: settings.master_url.trim(), ...(kind === "agent_update_master_url" ? { only_if_recovery: settings.only_if_recovery } : {}) });
   }
   async function updateWarpCredential() {
-    if (!settings.warp_license.trim()) { setError("Enter a WARP+ credential."); return; }
+    if (!settings.warp_license.trim()) { setError("请输入 WARP+ 凭据。"); return; }
     const target = command.server_id;
     if (await queue("warp_license", { license: settings.warp_license.trim() })) {
       if (control.current.target === target) setSettings(previous => ({ ...previous, warp_license: "" }));
@@ -298,8 +299,8 @@ export default function DashboardView(_props: DashboardViewProps) {
   }
   async function submitLatency() {
     const domains = domainProbe.domainsText.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
-    if (!domains.length) { setError("Enter at least one latency target."); return; }
-    if (!integerInRange(domainProbe.timeout_ms, 200, 10000)) { setError("Latency timeout must be an integer between 200 and 10000 milliseconds."); return; }
+    if (!domains.length) { setError("请至少输入一个延迟探测目标。"); return; }
+    if (!integerInRange(domainProbe.timeout_ms, 200, 10000)) { setError("延迟探测超时必须是 200 至 10000 之间的整数，单位为毫秒。"); return; }
     const target = command.server_id;
     if (await queue("domain_latency", { domains, timeout_ms: domainProbe.timeout_ms, allow_icmp: domainProbe.allow_icmp,
       command_timeout_ms: latencyCommandTimeout(domains.length, domainProbe.timeout_ms, domainProbe.allow_icmp) })) {
@@ -308,20 +309,20 @@ export default function DashboardView(_props: DashboardViewProps) {
   }
   function submitRoute() {
     if (route.targets.some(target => target.host.trim() && !integerInRange(target.port, 1, 65535))) {
-      setError("Return route ports must be integers between 1 and 65535."); return;
+      setError("回程路由端口必须是 1 至 65535 之间的整数。"); return;
     }
     const targets = selectedRouteTargets(route.targets);
-    if (!targets.length) { setError("Enter at least one return route target."); return; }
-    if (!integerInRange(route.timeout_seconds, 10, 45)) { setError("Route timeout must be an integer between 10 and 45 seconds."); return; }
+    if (!targets.length) { setError("请至少输入一个回程路由目标。"); return; }
+    if (!integerInRange(route.timeout_seconds, 10, 45)) { setError("路由探测超时必须是 10 至 45 之间的整数，单位为秒。"); return; }
     void queue("return_route_test", { targets, ip_version: route.ip_version, timeout_seconds: route.timeout_seconds,
       command_timeout_ms: targets.length * route.timeout_seconds * 1000 + 5000 });
   }
   async function submitCommand() {
     if (!command.server_id || !command.path.trim() || control.current.savingCommand) return;
-    if (!integerInRange(command.timeout_ms, 1000, 300000)) { setError("Command timeout must be an integer between 1000 and 300000 milliseconds."); return; }
+    if (!integerInRange(command.timeout_ms, 1000, 300000)) { setError("命令超时必须是 1000 至 300000 之间的整数，单位为毫秒。"); return; }
     let body: unknown = null;
     try { if (command.bodyText.trim()) body = JSON.parse(command.bodyText); }
-    catch { setError("Command body must be valid JSON."); return; }
+    catch { setError("命令请求体必须是有效的 JSON。"); return; }
     const epoch = control.current.epoch; const target = command.server_id;
     control.current.savingCommand = true; setSavingCommand(true); setError("");
     try {
@@ -335,28 +336,28 @@ export default function DashboardView(_props: DashboardViewProps) {
   }
 
   const columns: ColumnsType<ServerSummary> = [
-    { title: "Name", key: "name", width: 200, render: (_, server) => <Space orientation="vertical" size={2}>
-      <Typography.Text strong>{server.name}</Typography.Text><Typography.Text type="secondary">{server.xray_mode} Xray</Typography.Text>
-      <Space size={0}><Button type="text" icon={<DownloadOutlined />} aria-label={`Install Agent on ${server.name}`}
+    { title: "名称", key: "name", width: 200, render: (_, server) => <Space orientation="vertical" size={2}>
+      <Typography.Text strong>{server.name}</Typography.Text><Typography.Text type="secondary">{server.xray_mode === "embedded" ? "嵌入式" : zhStatus(server.xray_mode)} Xray</Typography.Text>
+      <Space size={0}><Button type="text" icon={<DownloadOutlined />} aria-label={`在 ${server.name} 上安装 Agent`}
         onClick={() => setBootstrap({ open: true, serverId: server.id, serverName: server.name })} />
-        <Button type="text" icon={<EditOutlined />} aria-label={`Edit ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "edit" })} />
-        <Button type="text" danger icon={<DeleteOutlined />} aria-label={`Remove ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "remove" })} /></Space>
+        <Button type="text" icon={<EditOutlined />} aria-label={`编辑 ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "edit" })} />
+        <Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除 ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "remove" })} /></Space>
     </Space> },
-    { title: "Status", key: "status", width: 110, render: (_, server) => <Tag color={{ pending: "gold", connected: "green", offline: "default" }[server.status]}>
-      {{ pending: "Pending", connected: "Connected", offline: "Offline" }[server.status]}</Tag> },
-    { title: "Endpoint", key: "endpoint", width: 180, render: (_, server) => server.domain || server.ip_address || server.domain_v6 || server.ip_address_v6 || "Unassigned" },
-    { title: "Probe", key: "probe", width: 220, render: (_, server) => <Space orientation="vertical" size={0}>
-      <span>{[server.region_city || server.region_name || server.region, server.region_country].filter(Boolean).join(" · ") || "No region"}</span>
-      <Typography.Text type="secondary">{server.provider_name || "No provider"} · {renewalLabel(server)}</Typography.Text></Space> },
-    { title: "Telemetry", key: "telemetry", width: 180, render: (_, server) => <Space orientation="vertical" size={0}>
+    { title: "状态", key: "status", width: 110, render: (_, server) => <Tag color={{ pending: "gold", connected: "green", offline: "default" }[server.status]}>
+      {{ pending: "待连接", connected: "已连接", offline: "离线" }[server.status]}</Tag> },
+    { title: "连接地址", key: "endpoint", width: 180, render: (_, server) => server.domain || server.ip_address || server.domain_v6 || server.ip_address_v6 || "未分配" },
+    { title: "探针", key: "probe", width: 220, render: (_, server) => <Space orientation="vertical" size={0}>
+      <span>{[server.region_city || server.region_name || server.region, server.region_country].filter(Boolean).join(" · ") || "暂无地区"}</span>
+      <Typography.Text type="secondary">{server.provider_name || "暂无服务商"} · {renewalLabel(server)}</Typography.Text></Space> },
+    { title: "遥测数据", key: "telemetry", width: 180, render: (_, server) => <Space orientation="vertical" size={0}>
       <span>{telemetryLabel(telemetry[server.id])}</span><Typography.Text type="secondary">{latencyLabel(telemetry[server.id])}</Typography.Text></Space> },
     { title: "Xray", key: "scan", width: 180, render: (_, server) => { const scan = scans[server.id]; return <Space orientation="vertical" size={0}>
-      <span>{scan ? scan.xray_running ? "Running" : "Stopped" : "No scan"}</span><Typography.Text type="secondary">{scan
-        ? [scan.xray_version, `${scan.inbounds.length} inbounds`, scan.api_port ? `API ${scan.api_port}` : ""].filter(Boolean).join(" · ")
-          || scan.message?.slice(0, 80) : ""}</Typography.Text></Space>; } },
-    { title: "Mode", dataIndex: "connection_mode", width: 110 }, { title: "Port", dataIndex: "listen_port", width: 80 },
-    { title: "Up", key: "up", width: 110, render: (_, server) => speed(server.current_upload_speed) },
-    { title: "Down", key: "down", width: 110, render: (_, server) => speed(server.current_download_speed) },
+      <span>{scan ? scan.xray_running ? "运行中" : "已停止" : "暂无扫描"}</span><Typography.Text type="secondary">{scan
+        ? [scan.xray_version, `${scan.inbounds.length} 个入站`, scan.api_port ? `API ${scan.api_port}` : ""].filter(Boolean).join(" · ")
+          || (scan.message ? zhMessage(scan.message).slice(0, 80) : "") : ""}</Typography.Text></Space>; } },
+    { title: "模式", dataIndex: "connection_mode", width: 110, render: value => connectionOptions.find(option => option.value === value)?.label ?? value }, { title: "端口", dataIndex: "listen_port", width: 80 },
+    { title: "上传", key: "up", width: 110, render: (_, server) => speed(server.current_upload_speed) },
+    { title: "下载", key: "down", width: 110, render: (_, server) => speed(server.current_download_speed) },
   ];
   function operationButtons(items: Operation[]) {
     return <Space wrap>{items.map(item => <Button key={item.kind} size="small" aria-label={item.title} disabled={blocked || (item.workspace && !workspace)}
@@ -368,131 +369,131 @@ export default function DashboardView(_props: DashboardViewProps) {
 
   return <Space orientation="vertical" size="large" style={{ width: "100%" }}>
     <Space align="start" wrap style={{ width: "100%", justifyContent: "space-between" }}><div>
-      <Typography.Title level={2}>Open Node control plane</Typography.Title>
-      <Typography.Paragraph type="secondary">Manage servers, inspect Agent telemetry and queue operations. No license required.</Typography.Paragraph>
-    </div><Button aria-label="Refresh" icon={<ReloadOutlined aria-hidden />} loading={loading} onClick={() => void refreshServers()}>Refresh</Button></Space>
-    {error && <Alert type="error" showIcon title={error} closable onClose={() => setError("")} />}
+      <Typography.Title level={2}>Open Node 控制台</Typography.Title>
+      <Typography.Paragraph type="secondary">管理服务器、查看 Agent 遥测数据并下发操作，无需许可证。</Typography.Paragraph>
+    </div><Button aria-label="刷新" icon={<ReloadOutlined aria-hidden />} loading={loading} onClick={() => void refreshServers()}>刷新</Button></Space>
+    {error && <Alert type="error" showIcon title={zhMessage(error)} closable onClose={() => setError("")} />}
     {success && <Alert type="success" showIcon title={success} closable onClose={() => setSuccess("")} />}
-    <Row gutter={[16, 16]}><Col xs={24} sm={8}><Card><Statistic title="Servers" value={servers.length} /></Card></Col>
-      <Col xs={24} sm={8}><Card><Statistic title="Connected" value={servers.filter(server => server.status === "connected").length} /></Card></Col>
-      <Col xs={24} sm={8}><Card><Statistic title="Speed" value={`${speed(servers.reduce((sum, server) => sum + server.current_upload_speed, 0))} ↑ / ${speed(servers.reduce((sum, server) => sum + server.current_download_speed, 0))} ↓`} styles={{ content: { fontSize: 18 } }} />
-        <Typography.Text type="secondary">{Object.values(telemetry).filter(Boolean).length} telemetry reports</Typography.Text></Card></Col></Row>
-    <Card title="Servers" styles={{ body: { padding: 0 } }}><Table rowKey="id" columns={columns} dataSource={servers}
-      loading={loading} pagination={false} scroll={{ x: 1480 }} locale={{ emptyText: <Empty description="No servers yet." /> }} /></Card>
+    <Row gutter={[16, 16]}><Col xs={24} sm={8}><Card><Statistic title="服务器" value={servers.length} /></Card></Col>
+      <Col xs={24} sm={8}><Card><Statistic title="已连接" value={servers.filter(server => server.status === "connected").length} /></Card></Col>
+      <Col xs={24} sm={8}><Card><Statistic title="速率" value={`${speed(servers.reduce((sum, server) => sum + server.current_upload_speed, 0))} ↑ / ${speed(servers.reduce((sum, server) => sum + server.current_download_speed, 0))} ↓`} styles={{ content: { fontSize: 18 } }} />
+        <Typography.Text type="secondary">{Object.values(telemetry).filter(Boolean).length} 份遥测报告</Typography.Text></Card></Col></Row>
+    <Card title="服务器" styles={{ body: { padding: 0 } }}><Table rowKey="id" columns={columns} dataSource={servers}
+      loading={loading} pagination={false} scroll={{ x: 1480 }} locale={{ emptyText: <Empty description="暂无服务器。" /> }} /></Card>
     {servers.length > 0 && <ServerTrafficPanel servers={servers} />}
     <Row gutter={[24, 24]}>
       <Col xs={24} xl={9}><Space orientation="vertical" size="large" style={{ width: "100%" }}>
-        <Card title="Add server"><Form layout="vertical" onFinish={() => void submitServer()} disabled={saving}>
-          <Form.Item label="Name" required><Input aria-label="Name" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></Form.Item>
+        <Card title="添加服务器"><Form layout="vertical" onFinish={() => void submitServer()} disabled={saving}>
+          <Form.Item label="名称" required><Input aria-label="名称" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></Form.Item>
           <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="IPv4"><Input aria-label="IPv4" value={form.ip_address ?? ""} onChange={event => setForm({ ...form, ip_address: event.target.value })} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="Connection"><Select aria-label="Connection" value={form.connection_mode} options={connectionOptions} onChange={(value: ConnectionMode) => setForm({ ...form, connection_mode: value })} /></Form.Item></Col></Row>
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="Port"><StrictInputNumber aria-label="Port" aria-valuemin={0} aria-valuemax={65535}
+            <Col xs={24} sm={12}><Form.Item label="连接方式"><Select aria-label="连接方式" value={form.connection_mode} options={connectionOptions} onChange={(value: ConnectionMode) => setForm({ ...form, connection_mode: value })} /></Form.Item></Col></Row>
+          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="端口"><StrictInputNumber aria-label="端口" aria-valuemin={0} aria-valuemax={65535}
             value={form.listen_port ?? Number.NaN} onChange={value => setForm(previous => ({ ...previous, listen_port: value ?? Number.NaN }))} style={{ width: "100%" }} /></Form.Item></Col>
             <Col xs={24} sm={12}><Form.Item label="Xray"><Select aria-label="Xray" value={form.xray_mode} options={xrayOptions} onChange={(value: XrayMode) => setForm({ ...form, xray_mode: value })} /></Form.Item></Col></Row>
-          <Form.Item label="Traffic limit (bytes)"><StrictInputNumber aria-label="Traffic limit (bytes)" aria-valuemin={0} aria-valuemax={Number.MAX_SAFE_INTEGER}
+          <Form.Item label="流量限额（字节）"><StrictInputNumber aria-label="流量限额（字节）" aria-valuemin={0} aria-valuemax={Number.MAX_SAFE_INTEGER}
             value={form.traffic_limit ?? Number.NaN} onChange={value => setForm(previous => ({ ...previous, traffic_limit: value ?? Number.NaN }))} style={{ width: "100%" }} /></Form.Item>
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="Probe city"><Input aria-label="Probe city" value={form.region_city ?? ""} onChange={event => setForm({ ...form, region_city: event.target.value })} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="Provider"><Input aria-label="New server provider" value={form.provider_name ?? ""} onChange={event => setForm({ ...form, provider_name: event.target.value })} /></Form.Item></Col></Row>
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="Expires"><Input aria-label="New server expires" type="date" value={form.expires_at ?? ""} onChange={event => setForm({ ...form, expires_at: event.target.value })} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="Renewal"><StrictInputNumber aria-label="Renewal" aria-valuemin={0} allowEmpty
+          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="探针城市"><Input aria-label="探针城市" value={form.region_city ?? ""} onChange={event => setForm({ ...form, region_city: event.target.value })} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label="服务商"><Input aria-label="新服务器服务商" value={form.provider_name ?? ""} onChange={event => setForm({ ...form, provider_name: event.target.value })} /></Form.Item></Col></Row>
+          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="到期日期"><Input aria-label="新服务器到期日期" type="date" value={form.expires_at ?? ""} onChange={event => setForm({ ...form, expires_at: event.target.value })} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label="续费价格"><StrictInputNumber aria-label="新服务器续费价格" aria-valuemin={0} allowEmpty
               value={form.renewal_price ?? null} onChange={renewal_price => setForm(previous => ({ ...previous, renewal_price }))} style={{ width: "100%" }} /></Form.Item></Col></Row>
           <Form.Item label="IPv6"><Switch aria-label="IPv6" checked={form.ipv6_enabled} onChange={checked => setForm({ ...form, ipv6_enabled: checked })} /></Form.Item>
-          <Button htmlType="submit" type="primary" aria-label="Create server" icon={<PlusOutlined aria-hidden />} loading={saving} disabled={!form.name.trim()}>Create server</Button>
+          <Button htmlType="submit" type="primary" aria-label="创建服务器" icon={<PlusOutlined aria-hidden />} loading={saving} disabled={!form.name.trim()}>创建服务器</Button>
         </Form>
-        {token && <Alert style={{ marginTop: 16 }} type="success" showIcon title={`Agent token for ${token.serverName}`}
+        {token && <Alert style={{ marginTop: 16 }} type="success" showIcon title={`${token.serverName} 的 Agent 令牌`}
           description={<Space orientation="vertical" style={{ width: "100%" }}>
-            <Typography.Text>Save this token securely for manual Agent setup. It is shown only here.</Typography.Text>
-            <Input.TextArea aria-label="Agent token" value={token.value} readOnly rows={2} autoComplete="off" spellCheck={false} style={{ fontFamily: "monospace" }} />
-            <Space wrap><Button onClick={() => setBootstrap({ open: true, serverId: token.serverId, serverName: token.serverName })}>Install Agent</Button>
-              <Button onClick={() => setToken(null)}>Hide token</Button></Space></Space>} />}
+            <Typography.Text>请妥善保存此令牌，用于手动配置 Agent。令牌仅在此处显示。</Typography.Text>
+            <Input.TextArea aria-label="Agent 令牌" value={token.value} readOnly rows={2} autoComplete="off" spellCheck={false} style={{ fontFamily: "monospace" }} />
+            <Space wrap><Button aria-label="安装 Agent" onClick={() => setBootstrap({ open: true, serverId: token.serverId, serverName: token.serverName })}>安装 Agent</Button>
+              <Button aria-label="隐藏令牌" onClick={() => setToken(null)}>隐藏令牌</Button></Space></Space>} />}
         </Card>
-        <Card title="Probe metadata"><Form layout="vertical" onFinish={() => void submitMetadata()}>
-          <Form.Item label="Server"><Select aria-label="Metadata server" value={metadataTarget || undefined} options={options} disabled={!servers.length || savingMetadata}
+        <Card title="探针元数据"><Form layout="vertical" onFinish={() => void submitMetadata()}>
+          <Form.Item label="服务器"><Select aria-label="元数据服务器" value={metadataTarget || undefined} options={options} disabled={!servers.length || savingMetadata}
             onChange={value => { control.current.metadataTarget = value; setMetadataTarget(value); setMetadata(metadataFor(servers.find(server => server.id === value))); }} /></Form.Item>
           <Row gutter={12}>{([
-            ["region", "Region code"], ["region_country", "Country"], ["region_name", "Region"], ["region_city", "City"],
-            ["provider_name", "Provider"], ["provider_url", "Provider URL"],
+            ["region", "地区代码"], ["region_country", "国家"], ["region_name", "地区"], ["region_city", "城市"],
+            ["provider_name", "服务商"], ["provider_url", "服务商地址"],
           ] as const).map(([key, label]) => <Col key={key} xs={24} sm={12}><Form.Item label={label}><Input aria-label={label} value={metadata[key] ?? ""}
             onChange={event => setMetadata({ ...metadata, [key]: event.target.value })} /></Form.Item></Col>)}</Row>
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="Expires"><Input aria-label="Expires" type="date" value={metadata.expires_at ?? ""} onChange={event => setMetadata({ ...metadata, expires_at: event.target.value })} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="Cycle"><Select aria-label="Cycle" allowClear value={metadata.renewal_cycle ?? undefined} options={cycleOptions}
+          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="到期日期"><Input aria-label="到期日期" type="date" value={metadata.expires_at ?? ""} onChange={event => setMetadata({ ...metadata, expires_at: event.target.value })} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label="周期"><Select aria-label="周期" allowClear value={metadata.renewal_cycle ?? undefined} options={cycleOptions}
               onChange={(value: RenewalCycle | undefined) => setMetadata({ ...metadata, renewal_cycle: value ?? null })} /></Form.Item></Col></Row>
-          <Row gutter={12}>{([["renewal_price", "Renewal price"], ["renewal_price_cny", "CNY price"]] as const).map(([key, label]) =>
+          <Row gutter={12}>{([["renewal_price", "续费价格"], ["renewal_price_cny", "人民币价格"]] as const).map(([key, label]) =>
             <Col key={key} xs={24} sm={12}><Form.Item label={label}><StrictInputNumber aria-label={label} aria-valuemin={0} allowEmpty
               value={metadata[key] ?? null} onChange={value => setMetadata(previous => ({ ...previous, [key]: value }))} style={{ width: "100%" }} /></Form.Item></Col>)}</Row>
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="Currency"><Input aria-label="Currency" value={metadata.renewal_currency ?? ""} onChange={event => setMetadata({ ...metadata, renewal_currency: event.target.value })} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="Telecom peer"><Select aria-label="Telecom peer" value={metadata.telecom_paid_peer == null ? "unknown" : metadata.telecom_paid_peer ? "paid" : "standard"}
-              options={[{ value: "unknown", label: "Unknown" }, { value: "paid", label: "Paid" }, { value: "standard", label: "Standard" }]}
+          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="币种"><Input aria-label="币种" value={metadata.renewal_currency ?? ""} onChange={event => setMetadata({ ...metadata, renewal_currency: event.target.value })} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label="电信互联"><Select aria-label="电信互联" value={metadata.telecom_paid_peer == null ? "unknown" : metadata.telecom_paid_peer ? "paid" : "standard"}
+              options={[{ value: "unknown", label: "未知" }, { value: "paid", label: "付费" }, { value: "standard", label: "标准" }]}
               onChange={value => setMetadata({ ...metadata, telecom_paid_peer: value === "unknown" ? null : value === "paid" })} /></Form.Item></Col></Row>
-          <Space wrap><Button htmlType="submit" type="primary" aria-label="Save metadata" loading={savingMetadata} disabled={!metadataTarget}>Save metadata</Button>
-            <Button disabled={!metadataTarget || savingMetadata} onClick={() => setMetadata(metadataFor(servers.find(server => server.id === metadataTarget)))}>Reload</Button></Space>
+          <Space wrap><Button htmlType="submit" type="primary" aria-label="保存元数据" loading={savingMetadata} disabled={!metadataTarget}>保存元数据</Button>
+            <Button aria-label="重新加载" disabled={!metadataTarget || savingMetadata} onClick={() => setMetadata(metadataFor(servers.find(server => server.id === metadataTarget)))}>重新加载</Button></Space>
         </Form></Card>
       </Space></Col>
-      <Col xs={24} xl={15}><Card title="Command queue"><Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-        <Form layout="vertical"><Form.Item label="Target server"><Select aria-label="Target server" value={command.server_id || undefined} options={options} disabled={!servers.length}
+      <Col xs={24} xl={15}><Card title="命令队列"><Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+        <Form layout="vertical"><Form.Item label="目标服务器"><Select aria-label="目标服务器" value={command.server_id || undefined} options={options} disabled={!servers.length}
           onChange={value => { control.current.target = value; setCommand(previous => ({ ...previous, server_id: value })); }} /></Form.Item></Form>
         {operationButtons(quickOperations)}
-        <Typography.Title level={5}>Diagnostics</Typography.Title>{operationButtons(diagnosticOperations)}
-        <Typography.Title level={5}>Maintenance workflows</Typography.Title>{operationButtons(maintenanceOperations)}
+        <Typography.Title level={5}>诊断</Typography.Title>{operationButtons(diagnosticOperations)}
+        <Typography.Title level={5}>维护操作</Typography.Title>{operationButtons(maintenanceOperations)}
         <Divider />
-        <Typography.Title level={5}>Nginx stream cleanup</Typography.Title>
+        <Typography.Title level={5}>Nginx 流转发清理</Typography.Title>
         <Form layout="vertical" onFinish={() => {
-          if (!integerInRange(streamPort, 1, 65535)) { setError("Stream port must be an integer between 1 and 65535."); return; }
+          if (!integerInRange(streamPort, 1, 65535)) { setError("流转发端口必须是 1 至 65535 之间的整数。"); return; }
           void queue("nginx_clear_stream_port", { port: streamPort });
-        }}><Space wrap align="end"><Form.Item label="Stream port"><StrictInputNumber aria-label="Stream port" aria-valuemin={1} aria-valuemax={65535}
+        }}><Space wrap align="end"><Form.Item label="流转发端口"><StrictInputNumber aria-label="流转发端口" aria-valuemin={1} aria-valuemax={65535}
           value={streamPort} onChange={value => setStreamPort(value ?? Number.NaN)} /></Form.Item>
-          <Form.Item><Button htmlType="submit" aria-label="Clear stream" disabled={blocked} loading={savingOperation === "nginx_clear_stream_port"}>Clear stream</Button></Form.Item></Space></Form>
-        <Typography.Title level={5}>Service control</Typography.Title><Space wrap>{(["xray", "nginx"] as const).map(service => <Button key={service} size="small" aria-label={`Restart ${service === "xray" ? "Xray" : "Nginx"}`} disabled={blocked}
-          loading={savingOperation === "service_control"} onClick={() => void queue("service_control", { service, action: "restart" })}>Restart {service === "xray" ? "Xray" : "Nginx"}</Button>)}</Space>
-        <Typography.Title level={5}>Logs</Typography.Title><Space wrap>{(["agent", "xray", "nginx"] as const).map(service => <Button key={service} size="small" aria-label={`${service === "agent" ? "Agent" : service === "xray" ? "Xray" : "Nginx"} logs`} disabled={blocked}
-          loading={savingOperation === "logs"} onClick={() => void queue("logs", { service, lines: 200 })}>{service === "agent" ? "Agent" : service === "xray" ? "Xray" : "Nginx"} logs</Button>)}</Space>
-        <Form layout="vertical" onFinish={() => void purgeLogs()}><Form.Item label="Log file"><Input aria-label="Log file" value={logs.name} disabled={logs.all}
+          <Form.Item><Button htmlType="submit" aria-label="清理流转发" disabled={blocked} loading={savingOperation === "nginx_clear_stream_port"}>清理流转发</Button></Form.Item></Space></Form>
+        <Typography.Title level={5}>服务控制</Typography.Title><Space wrap>{(["xray", "nginx"] as const).map(service => <Button key={service} size="small" aria-label={`重启 ${service === "xray" ? "Xray" : "Nginx"}`} disabled={blocked}
+          loading={savingOperation === "service_control"} onClick={() => void queue("service_control", { service, action: "restart" })}>重启 {service === "xray" ? "Xray" : "Nginx"}</Button>)}</Space>
+        <Typography.Title level={5}>日志</Typography.Title><Space wrap>{(["agent", "xray", "nginx"] as const).map(service => <Button key={service} size="small" aria-label={`${service === "agent" ? "Agent" : service === "xray" ? "Xray" : "Nginx"} 日志`} disabled={blocked}
+          loading={savingOperation === "logs"} onClick={() => void queue("logs", { service, lines: 200 })}>{service === "agent" ? "Agent" : service === "xray" ? "Xray" : "Nginx"} 日志</Button>)}</Space>
+        <Form layout="vertical" onFinish={() => void purgeLogs()}><Form.Item label="日志文件名"><Input aria-label="日志文件名" value={logs.name} disabled={logs.all}
           onChange={event => setLogs({ ...logs, name: event.target.value, confirmed: false })} /></Form.Item>
-          <Space wrap><Switch aria-label="All files" checked={logs.all} onChange={value => setLogs({ ...logs, all: value, confirmed: false })} /><span>All files</span>
-            <Checkbox checked={logs.confirmed} onChange={event => setLogs({ ...logs, confirmed: event.target.checked })}>Confirm log deletion</Checkbox>
-            <Button danger htmlType="submit" aria-label="Purge logs" disabled={blocked || !logs.confirmed} loading={savingOperation === "log_files_delete"}>Purge logs</Button></Space></Form>
-        <Typography.Title level={5}>Config reads</Typography.Title>
+          <Space wrap><Switch aria-label="全部文件" checked={logs.all} onChange={value => setLogs({ ...logs, all: value, confirmed: false })} /><span>全部文件</span>
+            <Checkbox checked={logs.confirmed} onChange={event => setLogs({ ...logs, confirmed: event.target.checked })}>确认删除日志</Checkbox>
+            <Button danger htmlType="submit" aria-label="清空日志" disabled={blocked || !logs.confirmed} loading={savingOperation === "log_files_delete"}>清空日志</Button></Space></Form>
+        <Typography.Title level={5}>读取配置</Typography.Title>
         {command.server_id && !workspace && <Alert type="warning" showIcon title={workspaceMessage} />}{operationButtons(configOperations)}
-        <Divider /><Typography.Title level={5}>Agent settings</Typography.Title>
+        <Divider /><Typography.Title level={5}>Agent 设置</Typography.Title>
         {command.server_id && (!capabilities?.agent_switch_xray_mode || !capabilities?.agent_switch_listen_port || !capabilities?.agent_probe_master_url || !capabilities?.agent_update_master_url)
           && <Alert type="info" showIcon title={settingsMessage} />}
         <Form layout="vertical" onFinish={() => switchSetting("agent_update_master_url")}>
-          <Row gutter={12}><Col xs={24} sm={16}><Form.Item label="Xray mode"><Select aria-label="Xray mode" value={settings.xray_mode} options={xrayOptions} onChange={(value: XrayMode) => setSettings({ ...settings, xray_mode: value })} /></Form.Item></Col>
-            <Col xs={24} sm={8}><Form.Item label=" "><Button aria-label="Switch Xray mode" disabled={blocked || !capabilities?.agent_switch_xray_mode} loading={savingOperation === "agent_switch_xray_mode"} onClick={() => switchSetting("agent_switch_xray_mode")}>Switch</Button></Form.Item></Col></Row>
-          <Row gutter={12}><Col xs={24} sm={16}><Form.Item label="Listen port"><StrictInputNumber aria-label="Listen port" aria-valuemin={0} aria-valuemax={65535}
+          <Row gutter={12}><Col xs={24} sm={16}><Form.Item label="Xray 模式"><Select aria-label="Xray 模式" value={settings.xray_mode} options={xrayOptions} onChange={(value: XrayMode) => setSettings({ ...settings, xray_mode: value })} /></Form.Item></Col>
+            <Col xs={24} sm={8}><Form.Item label=" "><Button aria-label="切换 Xray 模式" disabled={blocked || !capabilities?.agent_switch_xray_mode} loading={savingOperation === "agent_switch_xray_mode"} onClick={() => switchSetting("agent_switch_xray_mode")}>切换</Button></Form.Item></Col></Row>
+          <Row gutter={12}><Col xs={24} sm={16}><Form.Item label="监听端口"><StrictInputNumber aria-label="监听端口" aria-valuemin={0} aria-valuemax={65535}
             value={settings.listen_port} onChange={value => setSettings(previous => ({ ...previous, listen_port: value ?? Number.NaN }))}
             onPressEnter={event => { event.preventDefault(); switchSetting("agent_switch_listen_port"); }} style={{ width: "100%" }} /></Form.Item></Col>
-            <Col xs={24} sm={8}><Form.Item label=" "><Button aria-label="Apply listen port" disabled={blocked || !capabilities?.agent_switch_listen_port} loading={savingOperation === "agent_switch_listen_port"} onClick={() => switchSetting("agent_switch_listen_port")}>Apply</Button></Form.Item></Col></Row>
-          <Form.Item label="Master URL"><Input aria-label="Master URL" value={settings.master_url} onChange={event => setSettings({ ...settings, master_url: event.target.value })} /></Form.Item>
-          <Form.Item label="Recovery only"><Switch aria-label="Recovery only" checked={settings.only_if_recovery} onChange={value => setSettings({ ...settings, only_if_recovery: value })} /></Form.Item>
-          <Space wrap><Button aria-label="Probe" disabled={blocked || !capabilities?.agent_probe_master_url} loading={savingOperation === "agent_probe_master_url"} onClick={() => switchSetting("agent_probe_master_url")}>Probe</Button>
-            <Button htmlType="submit" aria-label="Update" disabled={blocked || !capabilities?.agent_update_master_url} loading={savingOperation === "agent_update_master_url"}>Update</Button></Space>
-          <Form.Item label="WARP+ credential (optional)" style={{ marginTop: 16 }}><Input.Password aria-label="WARP+ credential (optional)" autoComplete="off" value={settings.warp_license} onChange={event => setSettings({ ...settings, warp_license: event.target.value })} /></Form.Item>
-          <Button aria-label="Update WARP+" disabled={blocked} loading={savingOperation === "warp_license"} onClick={() => void updateWarpCredential()}>Update WARP+</Button>
+            <Col xs={24} sm={8}><Form.Item label=" "><Button aria-label="应用监听端口" disabled={blocked || !capabilities?.agent_switch_listen_port} loading={savingOperation === "agent_switch_listen_port"} onClick={() => switchSetting("agent_switch_listen_port")}>应用</Button></Form.Item></Col></Row>
+          <Form.Item label="控制台地址"><Input aria-label="控制台地址" value={settings.master_url} onChange={event => setSettings({ ...settings, master_url: event.target.value })} /></Form.Item>
+          <Form.Item label="仅限恢复模式"><Switch aria-label="仅限恢复模式" checked={settings.only_if_recovery} onChange={value => setSettings({ ...settings, only_if_recovery: value })} /></Form.Item>
+          <Space wrap><Button aria-label="探测" disabled={blocked || !capabilities?.agent_probe_master_url} loading={savingOperation === "agent_probe_master_url"} onClick={() => switchSetting("agent_probe_master_url")}>探测</Button>
+            <Button htmlType="submit" aria-label="更新" disabled={blocked || !capabilities?.agent_update_master_url} loading={savingOperation === "agent_update_master_url"}>更新</Button></Space>
+          <Form.Item label="WARP+ 凭据（选填）" style={{ marginTop: 16 }}><Input.Password aria-label="WARP+ 凭据（选填）" autoComplete="off" value={settings.warp_license} onChange={event => setSettings({ ...settings, warp_license: event.target.value })} /></Form.Item>
+          <Button aria-label="更新 WARP+" disabled={blocked} loading={savingOperation === "warp_license"} onClick={() => void updateWarpCredential()}>更新 WARP+</Button>
         </Form>
         <Divider />
-        <Form layout="vertical" onFinish={() => void submitLatency()}><Form.Item label="Latency targets"><Input.TextArea aria-label="Latency targets" value={domainProbe.domainsText} rows={2} onChange={event => setDomainProbe({ ...domainProbe, domainsText: event.target.value })} /></Form.Item>
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="Timeout"><StrictInputNumber aria-label="Latency timeout" aria-valuemin={200} aria-valuemax={10000}
+        <Form layout="vertical" onFinish={() => void submitLatency()}><Form.Item label="延迟探测目标"><Input.TextArea aria-label="延迟探测目标" value={domainProbe.domainsText} rows={2} onChange={event => setDomainProbe({ ...domainProbe, domainsText: event.target.value })} /></Form.Item>
+          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="超时"><StrictInputNumber aria-label="延迟探测超时" aria-valuemin={200} aria-valuemax={10000}
             value={domainProbe.timeout_ms} onChange={value => setDomainProbe(previous => ({ ...previous, timeout_ms: value ?? Number.NaN }))} /></Form.Item></Col>
             <Col xs={24} sm={12}><Form.Item label="ICMP"><Switch aria-label="ICMP" checked={domainProbe.allow_icmp} onChange={value => setDomainProbe({ ...domainProbe, allow_icmp: value })} /></Form.Item></Col></Row>
-          <Button htmlType="submit" aria-label="Queue latency probe" disabled={blocked} loading={savingOperation === "domain_latency"}>Queue latency probe</Button></Form>
-        <Form layout="vertical" onFinish={submitRoute}><Typography.Title level={5}>Return route</Typography.Title>
+          <Button htmlType="submit" aria-label="下发延迟探测" disabled={blocked} loading={savingOperation === "domain_latency"}>下发延迟探测</Button></Form>
+        <Form layout="vertical" onFinish={submitRoute}><Typography.Title level={5}>回程路由</Typography.Title>
           <RouteProbeFields value={route.targets} onChange={value => setRoute({ ...route, targets: value })} />
-          <Form.Item label="IP version"><Radio.Group optionType="button" value={route.ip_version} options={[{ value: 4, label: "IPv4" }, { value: 6, label: "IPv6" }]}
+          <Form.Item label="IP 版本"><Radio.Group optionType="button" value={route.ip_version} options={[{ value: 4, label: "IPv4" }, { value: 6, label: "IPv6" }]}
             onChange={event => setRoute({ ...route, ip_version: event.target.value as 4 | 6 })} /></Form.Item>
-          <Form.Item label="Route timeout seconds"><StrictInputNumber aria-label="Route timeout seconds" aria-valuemin={10} aria-valuemax={45}
+          <Form.Item label="路由探测超时（秒）"><StrictInputNumber aria-label="路由探测超时（秒）" aria-valuemin={10} aria-valuemax={45}
             value={route.timeout_seconds} onChange={value => setRoute(previous => ({ ...previous, timeout_seconds: value ?? Number.NaN }))} /></Form.Item>
-          <Button htmlType="submit" aria-label="Trace return route" disabled={blocked} loading={savingOperation === "return_route_test"}>Trace return route</Button></Form>
-        <Divider /><Typography.Title level={5}>Custom command</Typography.Title>
+          <Button htmlType="submit" aria-label="追踪回程路由" disabled={blocked} loading={savingOperation === "return_route_test"}>追踪回程路由</Button></Form>
+        <Divider /><Typography.Title level={5}>自定义命令</Typography.Title>
         <Form layout="vertical" onFinish={() => void submitCommand()}><Row gutter={12}>
-          <Col xs={24} sm={12}><Form.Item label="Method"><Select aria-label="Method" value={command.method} options={["GET", "POST", "PUT", "PATCH", "DELETE"].map(value => ({ value, label: value }))} onChange={value => setCommand({ ...command, method: value })} /></Form.Item></Col>
-          <Col xs={24} sm={12}><Form.Item label="Timeout"><StrictInputNumber aria-label="Command timeout" aria-valuemin={1000} aria-valuemax={300000}
+          <Col xs={24} sm={12}><Form.Item label="请求方法"><Select aria-label="请求方法" value={command.method} options={["GET", "POST", "PUT", "PATCH", "DELETE"].map(value => ({ value, label: value }))} onChange={value => setCommand({ ...command, method: value })} /></Form.Item></Col>
+          <Col xs={24} sm={12}><Form.Item label="超时"><StrictInputNumber aria-label="命令超时" aria-valuemin={1000} aria-valuemax={300000}
             value={command.timeout_ms} onChange={value => setCommand(previous => ({ ...previous, timeout_ms: value ?? Number.NaN }))} style={{ width: "100%" }} /></Form.Item></Col></Row>
-          <Form.Item label="Path"><Input aria-label="Path" value={command.path} onChange={event => setCommand({ ...command, path: event.target.value })} /></Form.Item>
-          <Form.Item label="Query"><Input aria-label="Query" value={command.query} onChange={event => setCommand({ ...command, query: event.target.value })} /></Form.Item>
-          <Form.Item label="JSON body"><Input.TextArea aria-label="JSON body" value={command.bodyText} rows={2} onChange={event => setCommand({ ...command, bodyText: event.target.value })} style={{ fontFamily: "monospace" }} /></Form.Item>
-          <Form.Item label="Stream"><Switch aria-label="Stream" checked={command.stream} onChange={value => setCommand({ ...command, stream: value })} /></Form.Item>
-          <Button htmlType="submit" type="primary" aria-label="Queue command" disabled={!command.server_id || savingCommand} loading={savingCommand}>Queue command</Button>
+          <Form.Item label="路径"><Input aria-label="路径" value={command.path} onChange={event => setCommand({ ...command, path: event.target.value })} /></Form.Item>
+          <Form.Item label="查询参数"><Input aria-label="查询参数" value={command.query} onChange={event => setCommand({ ...command, query: event.target.value })} /></Form.Item>
+          <Form.Item label="JSON 请求体"><Input.TextArea aria-label="JSON 请求体" value={command.bodyText} rows={2} onChange={event => setCommand({ ...command, bodyText: event.target.value })} style={{ fontFamily: "monospace" }} /></Form.Item>
+          <Form.Item label="流式输出"><Switch aria-label="流式输出" checked={command.stream} onChange={value => setCommand({ ...command, stream: value })} /></Form.Item>
+          <Button htmlType="submit" type="primary" aria-label="下发命令" disabled={!command.server_id || savingCommand} loading={savingCommand}>下发命令</Button>
         </Form>
         <CommandInspector commands={commands[command.server_id] ?? []} streamFramesByCommand={frames} />
       </Space></Card></Col>
@@ -501,34 +502,34 @@ export default function DashboardView(_props: DashboardViewProps) {
     <AgentBootstrapDialog {...bootstrap} onOpenChange={open => setBootstrap(previous => ({ ...previous, open }))} onUpdated={() => void refreshServers()} />
     <AgentLifecycleDialog {...lifecycle} serverName={servers.find(server => server.id === lifecycle.serverId)?.name ?? ""}
       onOpenChange={open => setLifecycle(previous => ({ ...previous, open }))} onUpdated={() => void refreshLifecycleCommands()} />
-    <Modal open={Boolean(warp.action)} title={warp.action === "warp_install" ? "Install free WARP" : "Remove WARP"} destroyOnHidden
+    <Modal open={Boolean(warp.action)} title={warp.action === "warp_install" ? "安装 WARP 免费版" : "移除 WARP"} destroyOnHidden
       mask={{ closable: !savingOperation }} keyboard={!savingOperation} closable={!savingOperation} onCancel={closeWarp}
-      footer={<Space><Button disabled={Boolean(savingOperation)} onClick={closeWarp}>Cancel</Button><Button type="primary" aria-label={warp.action === "warp_install" ? "Install" : "Remove"} danger={warp.action === "warp_remove"}
-        disabled={!warp.confirmed || Boolean(savingOperation)} loading={Boolean(savingOperation)} onClick={() => void confirmWarp()}>{warp.action === "warp_install" ? "Install" : "Remove"}</Button></Space>}>
+      footer={<Space><Button aria-label="取消" disabled={Boolean(savingOperation)} onClick={closeWarp}>取消</Button><Button type="primary" aria-label={warp.action === "warp_install" ? "安装" : "移除"} danger={warp.action === "warp_remove"}
+        disabled={!warp.confirmed || Boolean(savingOperation)} loading={Boolean(savingOperation)} onClick={() => void confirmWarp()}>{warp.action === "warp_install" ? "安装" : "移除"}</Button></Space>}>
       <Space orientation="vertical" style={{ width: "100%" }}><Typography.Text>{servers.find(server => server.id === warp.target)?.name}</Typography.Text>
-        {error && <Alert type="error" title={error} showIcon />}<Checkbox checked={warp.confirmed} disabled={Boolean(savingOperation)} onChange={event => setWarp({ ...warp, confirmed: event.target.checked })}>
-          {warp.action === "warp_install" ? <>I accept the <a href="https://www.cloudflare.com/application/terms/" target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()}>Cloudflare application terms</a></>
-            : "Confirm WARP device and outbound removal"}</Checkbox></Space>
+        {error && <Alert type="error" title={zhMessage(error)} showIcon />}<Checkbox checked={warp.confirmed} disabled={Boolean(savingOperation)} onChange={event => setWarp({ ...warp, confirmed: event.target.checked })}>
+          {warp.action === "warp_install" ? <>我接受 <a href="https://www.cloudflare.com/application/terms/" target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()}>Cloudflare 应用条款</a></>
+            : "确认移除 WARP 设备和出站"}</Checkbox></Space>
     </Modal>
-    <Modal open={xrayDialog.action === "xray_install"} title="Install / Upgrade Xray" width={560} destroyOnHidden
+    <Modal open={xrayDialog.action === "xray_install"} title="安装 / 升级 Xray" width={560} destroyOnHidden
       mask={{ closable: !savingOperation }} keyboard={!savingOperation} closable={!savingOperation} onCancel={closeXray}
-      footer={<Space><Button disabled={Boolean(savingOperation)} onClick={closeXray}>Cancel</Button><Button type="primary" aria-label="Install" htmlType="submit" form="xray-release-form"
-        disabled={!xrayValid || Boolean(savingOperation)} loading={savingOperation === "xray_install"}>Install</Button></Space>}>
-      <Typography.Paragraph>{servers.find(server => server.id === xrayDialog.target)?.name}</Typography.Paragraph>{error && <Alert type="error" title={error} showIcon />}
+      footer={<Space><Button aria-label="取消" disabled={Boolean(savingOperation)} onClick={closeXray}>取消</Button><Button type="primary" aria-label="安装" htmlType="submit" form="xray-release-form"
+        disabled={!xrayValid || Boolean(savingOperation)} loading={savingOperation === "xray_install"}>安装</Button></Space>}>
+      <Typography.Paragraph>{servers.find(server => server.id === xrayDialog.target)?.name}</Typography.Paragraph>{error && <Alert type="error" title={zhMessage(error)} showIcon />}
       <Form id="xray-release-form" layout="vertical" preserve={false} disabled={Boolean(savingOperation)} onFinish={() => void installXray()}>
-        <Form.Item label="Xray version"><AutoComplete aria-label="Xray version" value={xrayRelease.version} options={[{ value: "v26.3.27" }, { value: "v26.2.6" }]}
+        <Form.Item label="Xray 版本"><AutoComplete aria-label="Xray 版本" value={xrayRelease.version} options={[{ value: "v26.3.27" }, { value: "v26.2.6" }]}
           onChange={value => setXrayRelease({ ...xrayRelease, version: value })} /></Form.Item>
-        <Form.Item label="Archive SHA-256"><Input.TextArea aria-label="Archive SHA-256" value={xrayRelease.sha256} rows={2} maxLength={64} onChange={event => setXrayRelease({ ...xrayRelease, sha256: event.target.value })} style={{ fontFamily: "monospace" }} /></Form.Item>
-        <Form.Item label="Runtime state"><Select aria-label="Runtime state" value={xrayRelease.state} options={[{ value: "preserve", label: "Keep current state" }, { value: "start", label: "Running" }, { value: "stop", label: "Stopped" }]}
+        <Form.Item label="压缩包 SHA-256 校验和"><Input.TextArea aria-label="压缩包 SHA-256 校验和" value={xrayRelease.sha256} rows={2} maxLength={64} onChange={event => setXrayRelease({ ...xrayRelease, sha256: event.target.value })} style={{ fontFamily: "monospace" }} /></Form.Item>
+        <Form.Item label="运行状态"><Select aria-label="运行状态" value={xrayRelease.state} options={[{ value: "preserve", label: "保持当前状态" }, { value: "start", label: "运行中" }, { value: "stop", label: "已停止" }]}
           onChange={(value: "preserve" | "start" | "stop") => setXrayRelease({ ...xrayRelease, state: value })} /></Form.Item>
       </Form>
     </Modal>
-    <Modal open={xrayDialog.action === "xray_remove" || xrayDialog.action === "xray_rollback"} title={xrayDialog.action === "xray_remove" ? "Remove Xray" : "Roll back Xray"} destroyOnHidden
+    <Modal open={xrayDialog.action === "xray_remove" || xrayDialog.action === "xray_rollback"} title={xrayDialog.action === "xray_remove" ? "移除 Xray" : "回退 Xray"} destroyOnHidden
       mask={{ closable: !savingOperation }} keyboard={!savingOperation} closable={!savingOperation} onCancel={closeXray}
-      footer={<Space><Button disabled={Boolean(savingOperation)} onClick={closeXray}>Cancel</Button><Button type="primary" aria-label="Confirm" danger={xrayDialog.action === "xray_remove"}
-        disabled={!xrayDialog.confirmed || Boolean(savingOperation)} loading={Boolean(savingOperation)} onClick={() => void confirmXray()}>Confirm</Button></Space>}>
-      {error && <Alert type="error" title={error} showIcon />}<Typography.Paragraph>{servers.find(server => server.id === xrayDialog.target)?.name}</Typography.Paragraph>
-      <Checkbox checked={xrayDialog.confirmed} disabled={Boolean(savingOperation)} onChange={event => setXrayDialog({ ...xrayDialog, confirmed: event.target.checked })}>Confirm runtime change</Checkbox>
+      footer={<Space><Button aria-label="取消" disabled={Boolean(savingOperation)} onClick={closeXray}>取消</Button><Button type="primary" aria-label="确认" danger={xrayDialog.action === "xray_remove"}
+        disabled={!xrayDialog.confirmed || Boolean(savingOperation)} loading={Boolean(savingOperation)} onClick={() => void confirmXray()}>确认</Button></Space>}>
+      {error && <Alert type="error" title={zhMessage(error)} showIcon />}<Typography.Paragraph>{servers.find(server => server.id === xrayDialog.target)?.name}</Typography.Paragraph>
+      <Checkbox checked={xrayDialog.confirmed} disabled={Boolean(savingOperation)} onChange={event => setXrayDialog({ ...xrayDialog, confirmed: event.target.checked })}>确认更改运行时</Checkbox>
     </Modal>
   </Space>;
 }

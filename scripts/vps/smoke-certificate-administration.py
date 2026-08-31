@@ -303,7 +303,9 @@ def run(args):
 
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch()
-                context = browser.new_context(viewport={"width": 1440, "height": 1000})
+                context = browser.new_context(
+                    viewport={"width": 1440, "height": 1000}, locale="zh-CN"
+                )
                 context.add_cookies(
                     [
                         {
@@ -322,40 +324,41 @@ def run(args):
 
                 def inspect(name="CA administration"):
                     page.goto(url + "/certificates")
+                    expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
                     page.get_by_role("button", name=name, exact=True).click()
                     expect(
-                        page.locator('.ant-card-head-title:text-is("Versions")')
+                        page.locator('.ant-card-head-title:text-is("版本")')
                     ).to_be_visible()
 
                 def edit(email, *, eab=False, shots=False):
                     page.get_by_role(
-                        "button", name="Edit ACME account", exact=True
+                        "button", name="编辑 ACME 账户", exact=True
                     ).click()
                     dialog = page.get_by_role("dialog")
-                    dialog.get_by_label("Account email", exact=True).fill(email)
+                    dialog.get_by_label("账户邮箱", exact=True).fill(email)
                     if eab:
-                        dialog.get_by_label(
-                            "External account binding", exact=True
+                        dialog.get_by_role(
+                            "combobox", name="外部账户绑定", exact=True
                         ).click()
                         page.locator(".ant-select-dropdown:visible").get_by_text(
-                            "Replace credentials", exact=True
+                            "替换凭据", exact=True
                         ).click()
                         expect(
                             dialog.get_by_role(
-                                "button", name="Update account", exact=True
+                                "button", name="更新账户", exact=True
                             )
                         ).to_be_disabled()
-                        dialog.get_by_label("EAB key ID", exact=True).fill(eab_kid)
-                        dialog.get_by_label("EAB HMAC key", exact=True).fill(eab_hmac)
+                        dialog.get_by_label("EAB 密钥 ID", exact=True).fill(eab_kid)
+                        dialog.get_by_label("EAB HMAC 密钥", exact=True).fill(eab_hmac)
                         assert (
                             dialog.get_by_label(
-                                "EAB HMAC key", exact=True
+                                "EAB HMAC 密钥", exact=True
                             ).get_attribute("type")
                             == "password"
                         )
                     else:
                         expect(
-                            dialog.get_by_label("External account binding", exact=True)
+                            dialog.get_by_label("外部账户绑定", exact=True)
                         ).to_be_disabled()
                     if shots:
                         screenshot(
@@ -364,7 +367,7 @@ def run(args):
                             "account-eab" if eab else "account-contact",
                         )
                     dialog.get_by_role(
-                        "button", name="Update account", exact=True
+                        "button", name="更新账户", exact=True
                     ).click()
                     expect(dialog).to_be_hidden()
 
@@ -416,7 +419,8 @@ def run(args):
                 assert current_data["key_pem"] != first_data["key_pem"]
                 assert current["account"]["uri"] == registration_uri
                 print(
-                    "PASS orphaned key preservation, EAB editing, real CA contact update and subsequent lego renewal",
+                    "PASS orphaned key preservation, EAB editing, "
+                    "real CA contact update and subsequent lego renewal",
                     flush=True,
                 )
 
@@ -430,14 +434,14 @@ def run(args):
 
                 inspect()
                 versions = page.locator(
-                    '.ant-card:has(> .ant-card-head .ant-card-head-title:text-is("Versions"))'
+                    '.ant-card:has(> .ant-card-head .ant-card-head-title:text-is("版本"))'
                 )
                 version_row = versions.get_by_role("row").filter(
                     has_text=first_data["serial"]
                 )
                 expect(version_row).to_have_count(1)
                 revoke = version_row.get_by_role(
-                    "button", name="Revoke version", exact=True
+                    "button", name="吊销版本", exact=True
                 )
                 glyph = revoke.locator("svg")
                 expect(glyph).to_be_visible()
@@ -448,17 +452,19 @@ def run(args):
                 revoke.click()
                 dialog = page.get_by_role("dialog")
                 expect(
-                    dialog.get_by_role("button", name="Revoke version", exact=True)
+                    dialog.get_by_role("button", name="吊销版本", exact=True)
                 ).to_be_disabled()
-                dialog.get_by_label("Revocation reason", exact=True).click()
+                dialog.get_by_role(
+                    "combobox", name="吊销原因", exact=True
+                ).click()
                 page.locator(".ant-select-dropdown:visible").get_by_text(
-                    "Superseded", exact=True
+                    "已被替代", exact=True
                 ).click()
                 screenshot(page, args.screenshots, "revoke-confirm")
                 dialog.get_by_label(
-                    "I confirm revocation of this version", exact=True
+                    "我确认吊销此版本", exact=True
                 ).check()
-                dialog.get_by_role("button", name="Revoke version", exact=True).click()
+                dialog.get_by_role("button", name="吊销版本", exact=True).click()
                 expect(dialog).to_be_hidden()
                 historical = wait_job(client, identifier)
                 assert (
@@ -489,7 +495,7 @@ def run(args):
                 updates = sum(path == account_path for _, path, _ in gate.events)
                 inspect()
                 page.get_by_role(
-                    "button", name="Retry account update", exact=True
+                    "button", name="重试账户更新", exact=True
                 ).click()
                 reconciled = wait_job(client, identifier)
                 assert reconciled["account"]["email"] == "reconciled@example.com"
@@ -551,7 +557,8 @@ def run(args):
                 child_pid = None
                 assert not list(vault.root.glob("*/jobs/*/request.json"))
                 print(
-                    "PASS hard restart, inherited lock and durable receipt reconcile confirmed revocation once",
+                    "PASS hard restart, inherited lock and durable receipt "
+                    "reconcile confirmed revocation once",
                     flush=True,
                 )
 
@@ -594,29 +601,43 @@ def run(args):
                 )
                 assert ca_status(fresh_data) == "Revoked"
                 inspect("Imported copy")
-                page.get_by_role("button", name="Retry revocation", exact=True).click()
+                page.get_by_role("button", name="重试吊销", exact=True).click()
                 dialog = page.get_by_role("dialog")
                 expect(
-                    dialog.get_by_role("button", name="Revoke version", exact=True)
+                    dialog.get_by_role("button", name="吊销版本", exact=True)
                 ).to_be_disabled()
                 dialog.get_by_label(
-                    "I confirm revocation of this version", exact=True
+                    "我确认吊销此版本", exact=True
                 ).check()
-                dialog.get_by_role("button", name="Revoke version", exact=True).click()
+                dialog.get_by_role("button", name="吊销版本", exact=True).click()
                 expect(dialog).to_be_hidden()
                 confirmed = wait_job(client, copy["id"])
                 assert "already revoked" in confirmed["jobs"][0]["message"]
                 assert api(client, base)["certificate"]["status"] == "revoked"
                 inspect("Imported copy")
-                expect(page.get_by_label("Auto-renew", exact=True)).to_be_disabled()
+                completed_job = page.locator(
+                    '.ant-card:has(> .ant-card-head .ant-card-head-title:text-is("任务"))'
+                ).get_by_role("row").filter(
+                    has=page.get_by_text("CA 已确认此证书已被吊销。", exact=True)
+                )
+                expect(completed_job).to_have_count(1)
                 expect(
-                    page.get_by_role("button", name="Revoke version", exact=True)
+                    completed_job.get_by_text("已成功", exact=True)
+                ).to_be_visible()
+                expect(
+                    completed_job.get_by_text(
+                        "操作未完成，请检查当前状态后重试。", exact=True
+                    )
+                ).to_have_count(0)
+                expect(page.get_by_label("自动续签", exact=True)).to_be_disabled()
+                expect(
+                    page.get_by_role("button", name="吊销版本", exact=True)
                 ).to_be_disabled()
                 screenshot(page, args.screenshots, "revoked-copy")
                 inspect()
                 expect(
                     page.get_by_role(
-                        "button", name="Activate version", exact=True
+                        "button", name="启用版本", exact=True
                     ).first
                 ).to_be_disabled()
                 screenshot(page, args.screenshots, "revoked-history")
@@ -624,7 +645,8 @@ def run(args):
                 context.close()
                 browser.close()
                 print(
-                    "PASS forced new-key issuance, imported-key revocation, unknown-result retry and duplicate protection",
+                    "PASS forced new-key issuance, imported-key revocation, "
+                    "unknown-result retry and duplicate protection",
                     flush=True,
                 )
             for path in (base, copy_base):
@@ -649,7 +671,8 @@ def run(args):
                     0o700 if path.is_dir() else 0o600
                 )
             print(
-                "PASS persistent revocation ledger survives profile deletion; secrets and request files stay private",
+                "PASS persistent revocation ledger survives profile deletion; "
+                "secrets and request files stay private",
                 flush=True,
             )
         except BaseException:

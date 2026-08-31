@@ -534,13 +534,13 @@ def websocket_boundary(url: str, state: Fixture):
 def check_layout(page: Page):
     page.wait_for_function("document.documentElement.scrollWidth <= innerWidth + 1")
     refresh = page.get_by_role(
-        "button", name="Refresh probe status", exact=True
+        "button", name="刷新探针状态", exact=True
     ).bounding_box()
     assert refresh and refresh["width"] >= 28, (
         "Probe refresh control was squeezed on a narrow screen"
     )
     title = (
-        page.get_by_role("region", name="Target comparison", exact=True)
+        page.get_by_role("region", name="目标对比", exact=True)
         .locator(".ant-card-head-title")
         .first
     )
@@ -591,7 +591,8 @@ def screenshot_pair(page: Page, output: Path, name: str):
 
 
 def assert_public_surface(page: Page):
-    expect(page.get_by_text("Public read-only view", exact=True)).to_be_visible()
+    expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+    expect(page.get_by_text("公开只读视图", exact=True)).to_be_visible()
     text = page.locator("body").inner_text()
     for forbidden in (
         "Administrator Sign-In",
@@ -602,6 +603,14 @@ def assert_public_surface(page: Page):
         "Sign out",
         "Create server",
         "Generate access token",
+        "管理员登录",
+        "探针设置",
+        "Worker 访问",
+        "定时探针",
+        "下发到期任务",
+        "退出登录",
+        "创建服务器",
+        "生成访问令牌",
     ):
         assert forbidden not in text, (
             f"Administrator UI leaked into public bundle: {forbidden}"
@@ -628,7 +637,9 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
     errors, requests, responses, frames, upgrades = [], [], [], [], []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 1000}, locale="zh-CN"
+        )
         page = context.new_page()
         page.set_default_timeout(10_000)
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -687,11 +698,11 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 "Anonymous Worker Probe"
             )
             expect(
-                page.get_by_text("Live stream connected", exact=True)
+                page.get_by_text("实时连接已建立", exact=True)
             ).to_be_visible()
             expect(
                 page.get_by_role(
-                    "button", name="Open probe details for worker-edge", exact=True
+                    "button", name="查看 worker-edge 的探针详情", exact=True
                 )
             ).to_be_visible()
             assert_public_surface(page)
@@ -724,7 +735,7 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 "Socket must remain idle"
             )
             expect(
-                page.get_by_text("Live stream connected", exact=True)
+                page.get_by_text("实时连接已建立", exact=True)
             ).to_be_visible()
             print(
                 "PASS anonymous browser and continuous polling while WebSocket stays silent",
@@ -742,9 +753,9 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 for frame in frames
             )
             assert state.snapshot()["accepted_ws"] == initial["accepted_ws"]
-            compare = page.get_by_role("region", name="Target comparison", exact=True)
-            compare.get_by_text("6h", exact=True).click()
-            expect(compare.get_by_role("radio", name="6h", exact=True)).to_be_checked()
+            compare = page.get_by_role("region", name="目标对比", exact=True)
+            compare.get_by_text("6 小时", exact=True).click()
+            expect(compare.get_by_role("radio", name="6 小时", exact=True)).to_be_checked()
             wait_until(
                 lambda: any(
                     event["path"].endswith("/probe-targets")
@@ -759,19 +770,19 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
 
             row = page.locator(".server-table tbody tr").filter(has_text="worker-edge")
             row.get_by_role(
-                "button", name="Open probe details for worker-edge", exact=True
+                "button", name="查看 worker-edge 的探针详情", exact=True
             ).click()
             drawer = page.locator(".probe-detail-drawer")
             expect(
                 drawer.get_by_role("heading", name="worker-edge", exact=True)
             ).to_be_visible()
             expect(drawer.locator(".probe-trend-grid polyline").first).to_be_visible()
-            drawer.get_by_text("System", exact=True).click()
+            drawer.get_by_text("系统", exact=True).click()
             expect(
-                drawer.get_by_role("radio", name="System", exact=True)
+                drawer.get_by_role("radio", name="系统", exact=True)
             ).to_be_checked()
-            drawer.get_by_text("24h", exact=True).click()
-            expect(drawer.get_by_role("radio", name="24h", exact=True)).to_be_checked()
+            drawer.get_by_text("24 小时", exact=True).click()
+            expect(drawer.get_by_role("radio", name="24 小时", exact=True)).to_be_checked()
             wait_until(
                 lambda: any(
                     event["path"].endswith("/probe-series")
@@ -785,7 +796,7 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
             )
             expect(drawer.locator(".probe-trend-grid polyline").first).to_be_visible()
             screenshot_pair(page, output, "public-probe-series")
-            drawer.get_by_role("button", name="Close", exact=True).click()
+            drawer.get_by_role("button", name="关闭", exact=True).click()
             print(
                 "PASS target range selection and real ping/system series on desktop/mobile",
                 flush=True,
@@ -799,7 +810,7 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 state.close_generation += 1
                 state.http_title = "Polling survives WebSocket disconnect"
             expect(
-                page.get_by_text("Live stream connected", exact=True)
+                page.get_by_text("实时连接已建立", exact=True)
             ).not_to_be_visible()
             expect(page.get_by_role("heading", level=1)).to_have_text(
                 "Polling survives WebSocket disconnect", timeout=10_000
@@ -821,7 +832,7 @@ def browser_surface(url: str, state: Fixture, output: Path) -> dict:
                 page=page,
             )
             expect(
-                page.get_by_text("Live stream connected", exact=True)
+                page.get_by_text("实时连接已建立", exact=True)
             ).to_be_visible()
             publish_and_observe(page, state, "Reconnected live snapshot")
             assert any(

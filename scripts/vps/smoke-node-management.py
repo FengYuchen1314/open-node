@@ -23,7 +23,7 @@ servers, native, runtime, service, lifecycle = (
     users.lifecycle,
 )
 ROOT = Path(__file__).resolve().parents[2]
-ACK = "I accept Xray restarts, disconnected clients and pending remote changes"
+ACK = "我接受 Xray 重启、客户端断开及远程变更待确认的影响"
 
 
 def exercise(work, fixture, args, client, backend, endpoint, ca):
@@ -290,7 +290,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
         )
 
         browser = playwright.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        context = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="zh-CN")
         try:
             context.add_cookies(
                 [
@@ -308,8 +308,9 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(backend + "/subscriptions")
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
             page.get_by_role(
-                "button", name="Edit node " + parent["name"], exact=True
+                "button", name="编辑节点 " + parent["name"], exact=True
             ).click()
             dialog = page.get_by_role("dialog")
 
@@ -339,15 +340,15 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     )
                 page.set_viewport_size({"width": 1440, "height": 1000})
 
-            name = dialog.get_by_label("Node name", exact=True)
+            name = dialog.get_by_label("节点名称", exact=True)
             expect(name).to_have_value(parent["name"])
-            dialog.get_by_label("Node config", exact=True).fill("[]")
+            dialog.get_by_label("节点配置", exact=True).fill("[]")
             dialog.get_by_label(ACK, exact=True).check()
-            dialog.get_by_role("button", name="Save", exact=True).click()
+            dialog.get_by_role("button", name="保存", exact=True).click()
             expect(
-                dialog.get_by_text("Node config must be a JSON object", exact=True)
+                dialog.get_by_text("节点配置 必须是 JSON 对象", exact=True)
             ).to_be_visible()
-            dialog.get_by_label("Node config", exact=True).fill(
+            dialog.get_by_label("节点配置", exact=True).fill(
                 json.dumps(parent["config"], indent=2)
             )
             name.fill("Managed physical node")
@@ -357,12 +358,12 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     and response.request.method == "PUT"
                 )
             ) as saved:
-                dialog.get_by_role("button", name="Save", exact=True).click()
+                dialog.get_by_role("button", name="保存", exact=True).click()
             assert saved.value.status == 200
-            expect(dialog.get_by_text("Node saved", exact=True)).to_be_visible()
+            expect(dialog.get_by_text("节点已保存", exact=True)).to_be_visible()
             capture("edited")
             dialog.locator(".ant-modal-footer").get_by_role(
-                "button", name="Close", exact=True
+                "button", name="关 闭", exact=True
             ).click()
             assert (
                 client.get("/api/v1/users/alice/settings").json()["user"]
@@ -376,18 +377,18 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
             )
 
             page.get_by_role(
-                "button", name="Remove node Managed physical node", exact=True
+                "button", name="移除节点 Managed physical node", exact=True
             ).click()
             expect(
-                dialog.get_by_role("heading", name="Remote resources", exact=True)
+                dialog.get_by_role("heading", name="远程资源", exact=True)
             ).to_be_visible()
             expect(
-                dialog.get_by_label("Affected nodes").get_by_text(
+                dialog.get_by_label("受影响的节点").get_by_text(
                     "Routed child", exact=True
                 )
             ).to_be_visible()
             capture("impact")
-            dialog.get_by_label("Confirm node name", exact=True).fill(
+            dialog.get_by_label("确认节点名称", exact=True).fill(
                 "Managed physical node"
             )
             dialog.get_by_label(ACK, exact=True).check()
@@ -399,7 +400,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                         f"/nodes/{parent['id']}/remove"
                     )
                 ) as started:
-                    dialog.get_by_role("button", name="Remove", exact=True).click()
+                    dialog.get_by_role("button", name="移除", exact=True).click()
                 assert started.value.status == 202
                 job = started.value.json()
                 assert job["status"] == "pending" and set(job["node_ids"]) == {
@@ -407,7 +408,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     child["id"],
                 }
                 expect(
-                    dialog.get_by_text("Removal pending Agent confirmation", exact=True)
+                    dialog.get_by_text("正在等待 Agent 确认移除", exact=True)
                 ).to_be_visible()
                 assert (
                     client.get(
@@ -419,15 +420,15 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 transfer(original)
                 capture("pending")
                 dialog.locator(".ant-modal-footer").get_by_role(
-                    "button", name="Close", exact=True
+                    "button", name="关 闭", exact=True
                 ).click()
                 page.get_by_role(
                     "button",
-                    name="Node removal status Managed physical node",
+                    name="节点移除状态 Managed physical node",
                     exact=True,
                 ).click()
                 expect(
-                    dialog.get_by_text("Removal pending Agent confirmation", exact=True)
+                    dialog.get_by_text("正在等待 Agent 确认移除", exact=True)
                 ).to_be_visible()
                 old_restore = (
                     client.post(
@@ -473,11 +474,11 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                     pass
             done = wait_removal(job["id"])
             assert all(step["phase"] == "completed" for step in done["servers"])
-            expect(dialog.get_by_text("Node removed", exact=True)).to_be_visible(
+            expect(dialog.get_by_text("节点已移除", exact=True)).to_be_visible(
                 timeout=15000
             )
             expect(
-                dialog.get_by_role("button", name="Retry node removal", exact=True)
+                dialog.get_by_role("button", name="重试移除节点", exact=True)
             ).to_be_disabled()
             capture("completed")
             assert rejected(original) and rejected(routed)
@@ -522,7 +523,8 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
                 ).fetchone()[0]
             assert not errors, errors
             print(
-                "PASS offline pending removal, Agent crash recovery, routed closure, dead old clients and preserved traffic/links",
+                "PASS offline pending removal, Agent crash recovery, routed closure, "
+                "dead old clients and preserved traffic/links",
                 flush=True,
             )
         finally:

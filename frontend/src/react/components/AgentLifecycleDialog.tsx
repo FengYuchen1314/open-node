@@ -3,6 +3,7 @@ import { Alert, Button, Checkbox, Descriptions, Form, Input, Modal, Space, Spin,
 import { ReloadOutlined } from "@ant-design/icons";
 import type { AgentCommand } from "../../domain/inventory";
 import { listServerCommands, queueAgentOperation } from "../../services/inventory";
+import { zhMessage } from "../../i18n/zh-CN";
 
 export type AgentLifecycleAction = "agent_upgrade" | "agent_rollback" | "agent_uninstall";
 export interface AgentLifecycleDialogProps {
@@ -63,7 +64,7 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
       const rows = await listServerCommands(target);
       if (!current(run)) return null;
       const found = rows.commands.find(row => row.id === command.id);
-      if (!found) throw new Error("Agent command is no longer available.");
+      if (!found) throw new Error("Agent 命令已不可用。");
       latest = found;
       if (control.current.phase === "working") setOperation(latest);
     }
@@ -78,10 +79,10 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
         setHost(previous => previous ? { ...previous, ...result.result_body as Partial<HostStatus> } : null);
       }
       setPhase("finished");
-      if (result.status !== "succeeded") setError(result.result_error || "Agent operation failed.");
+      if (result.status !== "succeeded") setError(result.result_error || "Agent 操作失败。");
       updated.current?.();
     } catch (failure) {
-      if (current(run)) setError(failure instanceof Error ? failure.message : "Command status is unavailable.");
+      if (current(run)) setError(failure instanceof Error ? failure.message : "命令状态不可用。");
     }
   }
   async function loadStatus() {
@@ -105,14 +106,14 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
       if (!current(run)) return;
       const result = await waitForCommand(queued.command, target, run);
       if (!result || !current(run)) return;
-      if (result.status !== "succeeded") throw new Error(result.result_error || "Agent status failed.");
+      if (result.status !== "succeeded") throw new Error(result.result_error || "获取 Agent 状态失败。");
       const next = result.result_body as HostStatus | null;
-      if (!next?.enabled) throw new Error("Remote Agent lifecycle is not enabled.");
+      if (!next?.enabled) throw new Error("尚未启用远程 Agent 生命周期管理。");
       setHost(next); setPhase("ready");
       updated.current?.();
     } catch (failure) {
       if (current(run)) {
-        setError(failure instanceof Error ? failure.message : "Agent status is unavailable.");
+        setError(failure instanceof Error ? failure.message : "Agent 状态不可用。");
         setPhase("error");
       }
     }
@@ -135,7 +136,7 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
       setOperation(queued.command); setPhase("working");
       await pollOperation(run, target, queued.command);
     } catch (failure) {
-      if (current(run)) setError(failure instanceof Error ? failure.message : "Agent request failed.");
+      if (current(run)) setError(failure instanceof Error ? failure.message : "Agent 请求失败。");
     } finally {
       if (current(run)) { control.current.submitting = false; setSubmitting(false); }
     }
@@ -156,36 +157,36 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
     ? operation.path.includes("/uninstall") ? "agent_uninstall"
       : operation.path.endsWith("/rollback") ? "agent_rollback" : "agent_upgrade" : action;
   const removed = (operation?.result_body as Partial<HostStatus> | null)?.installation_status === "removed";
-  const title = { agent_upgrade: "Upgrade Agent", agent_rollback: "Roll back Agent", agent_uninstall: "Uninstall Agent" }[displayedAction];
-  const commandLabel = { agent_upgrade: "Upgrade", agent_rollback: "Roll back", agent_uninstall: "Uninstall" }[action];
+  const title = { agent_upgrade: "升级 Agent", agent_rollback: "回退 Agent", agent_uninstall: "卸载 Agent" }[displayedAction];
+  const commandLabel = { agent_upgrade: "升级", agent_rollback: "回退", agent_uninstall: "卸载" }[action];
   return <Modal open={open} title={title} width={560} destroyOnHidden onCancel={() => onOpenChange(false)}
-    footer={<Space wrap><Button onClick={() => onOpenChange(false)}>Close</Button>
+    footer={<Space wrap><Button aria-label="关闭" onClick={() => onOpenChange(false)}>关闭</Button>
       {!removed && (error || phase === "finished") && <Button type="text" icon={<ReloadOutlined />}
-        title="Refresh Agent status" aria-label="Refresh Agent status" onClick={() => void refresh()} />}
+        title="刷新 Agent 状态" aria-label="刷新 Agent 状态" onClick={() => void refresh()} />}
       {phase === "ready" && <Button type="primary" aria-label={commandLabel} danger={action === "agent_uninstall"} htmlType="submit"
         form="agent-lifecycle-form" disabled={!valid || submitting} loading={submitting}>{commandLabel}</Button>}</Space>}>
     {open && <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-      {["loading", "working"].includes(phase) && <Spin aria-label={phase === "loading" ? "Checking Agent" : "Agent operation in progress"} />}
+      {["loading", "working"].includes(phase) && <Spin aria-label={phase === "loading" ? "正在检查 Agent" : "Agent 操作进行中"} />}
       <Typography.Text>{serverName}</Typography.Text>
-      {error ? <Alert type="error" showIcon title={error} /> : phase === "finished" && operation?.status === "succeeded"
-        ? <Alert type="success" showIcon title="Completed" /> : null}
+      {error ? <Alert type="error" showIcon title={zhMessage(error)} /> : phase === "finished" && operation?.status === "succeeded"
+        ? <Alert type="success" showIcon title="已完成" /> : null}
       {host && <Descriptions column={1} size="small" items={[
-        { key: "current", label: "Current version", children: host.current?.version ?? "Removed" },
-        { key: "previous", label: "Previous version", children: host.previous?.version ?? "None" },
-        { key: "source", label: "Release source", children: host.release_base_url },
+        { key: "current", label: "当前版本", children: host.current?.version ?? "已移除" },
+        { key: "previous", label: "上一版本", children: host.previous?.version ?? "无" },
+        { key: "source", label: "发布来源", children: host.release_base_url },
       ]} />}
-      {host?.recovery_required && <Alert type="warning" showIcon title="Host recovery required" />}
+      {host?.recovery_required && <Alert type="warning" showIcon title="需要在服务器本机恢复" />}
       {phase === "ready" && <Form id="agent-lifecycle-form" layout="vertical" preserve={false} onFinish={() => void submit()}>
         {action === "agent_upgrade" && <>
-          <Form.Item label="Agent version"><Input aria-label="Agent version" value={version} maxLength={64}
+          <Form.Item label="Agent 版本"><Input aria-label="Agent 版本" value={version} maxLength={64}
             disabled={submitting} onChange={event => setVersion(event.target.value)} /></Form.Item>
-          <Form.Item label="Wheel SHA-256"><Input.TextArea aria-label="Wheel SHA-256" value={checksum} maxLength={64}
+          <Form.Item label="Wheel SHA-256 校验和"><Input.TextArea aria-label="Wheel SHA-256 校验和" value={checksum} maxLength={64}
             rows={2} disabled={submitting} onChange={event => setChecksum(event.target.value)} style={{ fontFamily: "monospace" }} /></Form.Item>
         </>}
         <Checkbox checked={confirmed} disabled={submitting} onChange={event => setConfirmed(event.target.checked)}>
-          {action === "agent_uninstall" ? "Confirm Agent removal" : "Confirm Agent restart"}</Checkbox>
+          {action === "agent_uninstall" ? "确认卸载 Agent" : "确认重启 Agent"}</Checkbox>
       </Form>}
-      {operation && phase === "working" && <Tag>{operation.status === "pending" ? "Queued" : "Running"}</Tag>}
+      {operation && phase === "working" && <Tag>{operation.status === "pending" ? "排队中" : "运行中"}</Tag>}
     </Space>}
   </Modal>;
 }

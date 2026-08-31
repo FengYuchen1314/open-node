@@ -1,5 +1,6 @@
 import { act, configure, render } from "@testing-library/react";
 import { ConfigProvider } from "antd";
+import zhCN from "antd/locale/zh_CN";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
@@ -15,7 +16,7 @@ export function installDom() {
 }
 
 export function renderUi(children: ReactNode) {
-  return render(children, { wrapper: ({ children }) => <MemoryRouter><ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider></MemoryRouter> });
+  return render(children, { wrapper: ({ children }) => <MemoryRouter><ConfigProvider locale={zhCN} theme={{ token: { motion: false } }}>{children}</ConfigProvider></MemoryRouter> });
 }
 
 export async function flush() {

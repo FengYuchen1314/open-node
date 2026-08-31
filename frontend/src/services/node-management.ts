@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 import type { AgentCommand } from "../domain/inventory";
 import type { ManagedNode, SubscriptionAccessResponse } from "../domain/subscriptions";
 
@@ -58,8 +59,8 @@ export function nodeSettings(node: ManagedNode): NodeSettings {
 }
 export function parseNodeObject(value: string, label: string): Record<string, unknown> {
   let parsed: unknown;
-  try { parsed = JSON.parse(value); } catch { throw new Error(label + " must be valid JSON"); }
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error(label + " must be a JSON object");
+  try { parsed = JSON.parse(value); } catch { throw new Error(label + " 必须是有效的 JSON"); }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error(label + " 必须是 JSON 对象");
   return parsed as Record<string, unknown>;
 }
 const base = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -68,9 +69,7 @@ async function request<T>(path: string, init?: RequestInit, fetcher = authentica
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     const detail = data?.detail;
-    const message = typeof detail === "string" ? detail : Array.isArray(detail)
-      ? detail.map((item: { loc?: unknown[]; msg?: string }) => `${item.loc?.slice(1).join(".") ?? ""}: ${item.msg ?? "Invalid value"}`).join("; ") : "";
-    throw new Error(message || `Node request failed (${response.status})`);
+    throw requestError(detail, `节点请求失败（${response.status}）`);
   }
   return response.json() as Promise<T>;
 }

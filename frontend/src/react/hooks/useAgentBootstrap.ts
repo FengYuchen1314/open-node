@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { zhMessage } from "../../i18n/zh-CN";
 import {
   getAgentBootstrap, issueAgentBootstrap, revokeAgentBootstrap,
   type AgentBootstrapState, type BootstrapTransport,
@@ -81,7 +82,7 @@ export function useAgentBootstrap(open: boolean, serverId: string, onUpdated?: (
     } catch (cause) {
       if (!current(run) || sequence !== control.current.sequence) return;
       clearCommand();
-      patch({ error: cause instanceof Error ? cause.message : "Agent installation status is unavailable." });
+      patch({ error: zhMessage(cause, "暂时无法获取 Agent 安装状态。") });
     } finally {
       if (current(run) && sequence === control.current.sequence) {
         patch({ loading: false });
@@ -103,8 +104,7 @@ export function useAgentBootstrap(open: boolean, serverId: string, onUpdated?: (
       control.current.issuedAt = result.issued.issued_at;
       patch({ command: result.command, confirmed: false });
     } catch (cause) {
-      if (current(run)) patch({ error: cause instanceof Error ? cause.message
-        : "Installation command could not be generated." });
+      if (current(run)) patch({ error: zhMessage(cause, "无法生成安装命令。") });
     } finally {
       if (current(run)) {
         patch({ busy: false });
@@ -125,8 +125,7 @@ export function useAgentBootstrap(open: boolean, serverId: string, onUpdated?: (
       const next = await revokeAgentBootstrap(control.current.serverId);
       if (current(run)) accept(next);
     } catch (cause) {
-      if (current(run)) patch({ error: cause instanceof Error ? cause.message
-        : "Installation ticket could not be revoked." });
+      if (current(run)) patch({ error: zhMessage(cause, "无法撤销安装凭据。") });
     } finally {
       if (current(run)) {
         patch({ busy: false });

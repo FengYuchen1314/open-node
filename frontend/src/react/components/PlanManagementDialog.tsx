@@ -1,3 +1,4 @@
+import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Checkbox, Col, Flex, Form, Input, Modal, Row, Select, Spin, Switch, Tag, Typography } from "antd";
 import { ReloadOutlined, SyncOutlined } from "@ant-design/icons";
@@ -20,7 +21,7 @@ function PlanContent({ id, mode, nodes, onOpenChange, onUpdated }: PlanManagemen
   const [states, setStates] = useState<Record<string, SubscriptionAccessResponse>>({}), [stateErrors, setStateErrors] = useState<Record<string, string>>({});
   const version = useRef(0), pollVersion = useRef(0), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const updated = useRef(onUpdated); updated.current = onUpdated;
-  const title = mode === "edit" ? "Edit plan" : mode === "remove" ? "Remove plan" : "Unassign plan";
+  const title = mode === "edit" ? "编辑套餐" : mode === "remove" ? "移除套餐" : "取消套餐分配";
   const removed = !!result && mode !== "edit";
   const expectedName = mode === "unassign" ? id : detail?.plan.name ?? "";
   const canSubmit = !busy && !!detail && !!form && acknowledgment && !removed
@@ -32,7 +33,7 @@ function PlanContent({ id, mode, nodes, onOpenChange, onUpdated }: PlanManagemen
     try {
       const [value, library] = await Promise.all([getPlanManagement(id, mode), listSubscriptionTemplates()]);
       if (run === version.current) { setTemplates(library.templates); setDetail(value); setForm(planSettings(value.plan)); }
-    } catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "Plan request failed"); }
+    } catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "请求套餐信息失败"); }
     finally { if (run === version.current) setBusy(false); }
   }
   useEffect(() => { void load(); return () => { ++version.current; stop(); }; }, []);
@@ -45,7 +46,7 @@ function PlanContent({ id, mode, nodes, onOpenChange, onUpdated }: PlanManagemen
         setStates(previous => ({ ...previous, [username]: value }));
         setStateErrors(previous => { const next = { ...previous }; delete next[username]; return next; });
       } catch (failure) {
-        if (run === version.current && current === pollVersion.current) setStateErrors(previous => ({ ...previous, [username]: failure instanceof Error ? failure.message : "Access status unavailable" }));
+        if (run === version.current && current === pollVersion.current) setStateErrors(previous => ({ ...previous, [username]: failure instanceof Error ? failure.message : "无法读取访问状态" }));
       }
     }));
     if (run === version.current && current === pollVersion.current) timer.current = setTimeout(() => void poll(run, names), 5000);
@@ -59,7 +60,7 @@ function PlanContent({ id, mode, nodes, onOpenChange, onUpdated }: PlanManagemen
       setResult(value); setAcknowledgment(false); updated.current?.();
       if (value.plan && value.revision) { setDetail({ ...detail, plan: value.plan, revision: value.revision }); setForm(planSettings(value.plan)); }
       void poll(run, value.affected_users);
-    } catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "Plan update failed"); }
+    } catch (failure) { if (run === version.current) setError(failure instanceof Error ? failure.message : "更新套餐失败"); }
     finally { if (run === version.current) setBusy(false); }
   }
   function patch(change: Partial<PlanSettings>) { setForm(previous => previous ? { ...previous, ...change } : previous); }
@@ -72,45 +73,45 @@ function PlanContent({ id, mode, nodes, onOpenChange, onUpdated }: PlanManagemen
     if (!form) return; const next = { ...form[field] }; if (value === null) delete next[nodeId]; else next[nodeId] = value; patch({ [field]: next });
   }
   return <Modal open title={title} width={760} centered styles={{ body: { maxHeight: "calc(100dvh - 200px)", overflowY: "auto" } }} destroyOnHidden mask={{ closable: !busy }} closable={!busy} keyboard={!busy} onCancel={() => !busy && onOpenChange(false)}
-    footer={<Flex justify="space-between"><Button disabled={busy} onClick={() => onOpenChange(false)}>{result ? "Close" : "Cancel"}</Button>
-      {!removed && <Button type="primary" aria-label={mode === "edit" ? "Save" : mode === "remove" ? "Remove" : "Unassign"} aria-busy={busy} danger={mode !== "edit"} disabled={!canSubmit} loading={busy} onClick={() => void submit()}>{mode === "edit" ? "Save" : mode === "remove" ? "Remove" : "Unassign"}</Button>}</Flex>}>
+    footer={<Flex justify="space-between"><Button disabled={busy} onClick={() => onOpenChange(false)}>{result ? "关闭" : "取消"}</Button>
+      {!removed && <Button type="primary" aria-label={mode === "edit" ? "保存" : mode === "remove" ? "移除" : "取消分配"} aria-busy={busy} danger={mode !== "edit"} disabled={!canSubmit} loading={busy} onClick={() => void submit()}>{mode === "edit" ? "保存" : mode === "remove" ? "移除" : "取消分配"}</Button>}</Flex>}>
     <Flex vertical gap="middle">
-      <Button icon={<ReloadOutlined />} aria-label="Reload plan details" disabled={busy || removed} onClick={() => void load()}>Reload</Button>
-      {busy && <Spin />}{error && <Alert type="error" title={error} showIcon />}
+      <Button icon={<ReloadOutlined />} aria-label="重新加载套餐详情" disabled={busy || removed} onClick={() => void load()}>重新加载</Button>
+      {busy && <Spin />}{error && <Alert type="error" title={zhMessage(error)} showIcon />}
       {detail && form && <>
-        {result && <Alert type="info" title={`${mode === "edit" ? "Plan saved" : mode === "remove" ? "Plan removed" : "Plan unassigned"}. ${result.commands.length} Agent commands tracked.`} showIcon />}
+        {result && <Alert type="info" title={`${mode === "edit" ? "套餐已保存" : mode === "remove" ? "套餐已移除" : "套餐分配已取消"}。正在跟踪 ${result.commands.length} 条 Agent 命令。`} showIcon />}
         {mode === "edit" ? <Form layout="vertical" style={{ paddingInline: 8 }} preserve={false} disabled={busy} onFinish={() => void submit()}>
-          <Form.Item label="Plan name"><Input aria-label="Plan name" value={form.name} onChange={event => patch({ name: event.target.value })} maxLength={120} /></Form.Item>
-          <Form.Item label="Description"><Input.TextArea aria-label="Description" value={form.description} onChange={event => patch({ description: event.target.value })} rows={2} maxLength={1000} /></Form.Item>
+          <Form.Item label="套餐名称"><Input aria-label="套餐名称" value={form.name} onChange={event => patch({ name: event.target.value })} maxLength={120} /></Form.Item>
+          <Form.Item label="说明"><Input.TextArea aria-label="说明" value={form.description} onChange={event => patch({ description: event.target.value })} rows={2} maxLength={1000} /></Form.Item>
           <Row gutter={16}>
-            {([{ field: "traffic_limit_gb", label: "Traffic quota (GiB)", min: 0.000001 }, { field: "cycle_days", label: "New duration (days)", min: 1 }, { field: "speed_limit_mbps", label: "Default speed (Mbps)", min: 0 }, { field: "device_limit", label: "Default connections", min: 0 }] as const).map(item => <Col xs={24} sm={12} key={item.field}><Form.Item label={item.label}>
+            {([{ field: "traffic_limit_gb", label: "流量配额（GiB）", min: 0.000001 }, { field: "cycle_days", label: "新分配的有效期（天）", min: 1 }, { field: "speed_limit_mbps", label: "默认速度（Mbps）", min: 0 }, { field: "device_limit", label: "默认连接数", min: 0 }] as const).map(item => <Col xs={24} sm={12} key={item.field}><Form.Item label={item.label}>
               <StrictInputNumber aria-label={item.label} value={form[item.field]} aria-valuemin={item.min} style={{ width: "100%" }} onChange={number => patch({ [item.field]: number ?? Number.NaN })} />
             </Form.Item></Col>)}
-            <Col xs={24} sm={12}><Form.Item label="Traffic billing factor"><Select aria-label="Traffic billing factor" value={form.traffic_mode} options={[{ label: "One-way billing (x1)", value: "oneway" }, { label: "Two-way billing (x2)", value: "twoway" }]} onChange={traffic_mode => patch({ traffic_mode })} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="New reset day (UTC)"><Select aria-label="New reset day (UTC)" value={form.reset_day} disabled={busy || !form.is_reset} options={Array.from({ length: 31 }, (_, i) => ({ label: i + 1, value: i + 1 }))} onChange={reset_day => patch({ reset_day })} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label="流量计费系数"><Select aria-label="流量计费系数" value={form.traffic_mode} options={[{ label: "单向计费（×1）", value: "oneway" }, { label: "双向计费（×2）", value: "twoway" }]} onChange={traffic_mode => patch({ traffic_mode })} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label="新分配的重置日（UTC）"><Select aria-label="新分配的重置日（UTC）" value={form.reset_day} disabled={busy || !form.is_reset} options={Array.from({ length: 31 }, (_, i) => ({ label: i + 1, value: i + 1 }))} onChange={reset_day => patch({ reset_day })} /></Form.Item></Col>
           </Row>
-          <Form.Item label="Monthly reset for new assignments"><Switch aria-label="Monthly reset for new assignments" checked={form.is_reset} onChange={is_reset => patch({ is_reset })} /></Form.Item>
-          <Row gutter={16}>{(["clash", "surge"] as const).map(format => <Col xs={24} sm={12} key={format}><Form.Item label={format === "clash" ? "Clash template" : "Surge template"}>
-            <Select aria-label={format === "clash" ? "Clash template" : "Surge template"} value={form[`${format}_template_id`] ?? undefined} allowClear options={templates.filter(item => item.format === format).map(item => ({ label: item.name, value: item.id }))} onChange={value => patch({ [`${format}_template_id`]: value ?? null })} />
+          <Form.Item label="新分配的套餐按月重置"><Switch aria-label="新分配的套餐按月重置" checked={form.is_reset} onChange={is_reset => patch({ is_reset })} /></Form.Item>
+          <Row gutter={16}>{(["clash", "surge"] as const).map(format => <Col xs={24} sm={12} key={format}><Form.Item label={format === "clash" ? "Clash 模板" : "Surge 模板"}>
+            <Select aria-label={format === "clash" ? "Clash 模板" : "Surge 模板"} value={form[`${format}_template_id`] ?? undefined} allowClear options={templates.filter(item => item.format === format).map(item => ({ label: item.name, value: item.id }))} onChange={value => patch({ [`${format}_template_id`]: value ?? null })} />
           </Form.Item></Col>)}</Row>
-          <Form.Item label="Plan nodes"><Select aria-label="Plan nodes" mode="multiple" optionFilterProp="label" value={form.node_ids} options={nodes.filter(node => !node.removal_id).map(node => ({ label: node.name, value: node.id }))} onChange={selectNodes} /></Form.Item>
+          <Form.Item label="套餐节点"><Select aria-label="套餐节点" mode="multiple" optionFilterProp="label" value={form.node_ids} options={nodes.filter(node => !node.removal_id).map(node => ({ label: node.name, value: node.id }))} onChange={selectNodes} /></Form.Item>
           <PlanNodeAliases nodes={form.node_ids.map(nodeId => ({ id: nodeId, name: nodes.find(node => node.id === nodeId)?.name ?? nodeId }))}
             value={form.node_name_overrides} onChange={node_name_overrides => patch({ node_name_overrides })} enabled={form.node_name_override_enabled} onEnabledChange={node_name_override_enabled => patch({ node_name_override_enabled })} onValid={setAliasesValid} disabled={busy}
-            renderNode={node => <Row gutter={16}>{([{ field: "node_multipliers", label: "Billing multiplier", suffix: "multiplier", placeholder: "1", min: 0.000001 }, { field: "node_speed_limits", label: "Speed (Mbps)", suffix: "speed", placeholder: "Inherit", min: 0 }, { field: "node_device_limits", label: "Connections", suffix: "connections", placeholder: "Inherit", min: 0 }] as const).map(item => <Col xs={24} sm={8} key={item.field}><Form.Item label={item.label}><StrictInputNumber aria-label={`${node.name}: ${item.suffix}`} allowEmpty value={form[item.field][node.id] ?? null} aria-valuemin={item.min} placeholder={item.placeholder} style={{ width: "100%" }} disabled={busy} onChange={number => override(item.field, node.id, number)} /></Form.Item></Col>)}</Row>} />
+            renderNode={node => <Row gutter={16}>{([{ field: "node_multipliers", label: "计费倍率", suffix: "计费倍率", placeholder: "1", min: 0.000001 }, { field: "node_speed_limits", label: "速度（Mbps）", suffix: "速度", placeholder: "继承", min: 0 }, { field: "node_device_limits", label: "连接数", suffix: "连接数", placeholder: "继承", min: 0 }] as const).map(item => <Col xs={24} sm={8} key={item.field}><Form.Item label={item.label}><StrictInputNumber aria-label={`${node.name}：${item.suffix}`} allowEmpty value={form[item.field][node.id] ?? null} aria-valuemin={item.min} placeholder={item.placeholder} style={{ width: "100%" }} disabled={busy} onChange={number => override(item.field, node.id, number)} /></Form.Item></Col>)}</Row>} />
           <AutoSpeedRuleEditor value={form.auto_speed_rules} onChange={auto_speed_rules => patch({ auto_speed_rules })} onValid={setRulesValid} disabled={busy} />
         </Form> : <Typography.Title level={5}>{detail.plan.name}</Typography.Title>}
-        <section aria-label="Affected subscribers"><Typography.Title level={5}>Subscribers</Typography.Title>{!detail.users.length && "None"}{detail.users.map(user => <Flex key={user.username} justify="space-between"><span>{user.username}</span><Tag>{user.managed ? "Managed" : "Preview only"}</Tag></Flex>)}</section>
-        {(result?.warnings ?? (mode === "edit" ? detail.warnings : [])).map(warning => <Alert key={warning} type="warning" title={warning} showIcon />)}
+        <section aria-label="受影响的用户"><Typography.Title level={5}>用户</Typography.Title>{!detail.users.length && "无"}{detail.users.map(user => <Flex key={user.username} justify="space-between"><span>{user.username}</span><Tag>{user.managed ? "托管" : "仅预览"}</Tag></Flex>)}</section>
+        {(result?.warnings ?? (mode === "edit" ? detail.warnings : [])).map(warning => <Alert key={warning} type="warning" title={zhMessage(warning)} showIcon />)}
         {!removed && <>
-          <Alert type="warning" title={`${mode === "edit" ? "Node and limit changes are applied to managed subscribers." : "The subscription becomes unavailable. Stored credentials and usage are retained; remote revocation needs Agent confirmation."} Applying runtime changes can restart Xray and disconnect its current clients. Offline or failed Agents remain pending or failed.`} showIcon />
-          {mode !== "edit" && <Form.Item label={mode === "unassign" ? "Confirm username" : "Confirm plan name"}><Input aria-label={mode === "unassign" ? "Confirm username" : "Confirm plan name"} value={confirmName} onChange={event => setConfirmName(event.target.value)} disabled={busy} /></Form.Item>}
-          <Checkbox checked={acknowledgment} onChange={event => setAcknowledgment(event.target.checked)} disabled={busy}>I accept the runtime restart and pending changes</Checkbox>
+          <Alert type="warning" title={`${mode === "edit" ? "节点和限制变更会应用于托管用户。" : "订阅将不可用。已保存的凭据和用量会保留；远程撤销需要 Agent 确认。"}应用运行时变更可能重启 Xray 并断开当前客户端。离线或失败的 Agent 会继续保持待处理或失败状态。`} showIcon />
+          {mode !== "edit" && <Form.Item label={mode === "unassign" ? "确认用户名" : "确认套餐名称"}><Input aria-label={mode === "unassign" ? "确认用户名" : "确认套餐名称"} value={confirmName} onChange={event => setConfirmName(event.target.value)} disabled={busy} /></Form.Item>}
+          <Checkbox checked={acknowledgment} onChange={event => setAcknowledgment(event.target.checked)} disabled={busy}>我接受运行时重启及变更待确认的影响</Checkbox>
         </>}
-        {!!result?.affected_users.length && <section aria-label="Plan deployment status"><Typography.Title level={5}>Agent status</Typography.Title>
-          {result.affected_users.map(username => <Card key={username} size="small" title={username} extra={<Button icon={<SyncOutlined />} aria-label={`Retry access for ${username}`} disabled={busy} onClick={() => void poll(version.current, result.affected_users, username)} />}>
-            {!states[username] && !stateErrors[username] && <Spin />}{states[username] && !states[username].managed && "No managed credentials"}
-            {states[username]?.servers.map(server => <Flex key={server.server_id} vertical gap="small"><Flex justify="space-between"><span>{server.server_name}</span><Tag color={server.status === "applied" ? "success" : server.status === "failed" ? "error" : "warning"}>{server.status}</Tag></Flex>{server.error && <Alert type="error" title={server.error} />}</Flex>)}
-            {stateErrors[username] && <Alert type="error" title={stateErrors[username]} showIcon />}
+        {!!result?.affected_users.length && <section aria-label="套餐部署状态"><Typography.Title level={5}>Agent 状态</Typography.Title>
+          {result.affected_users.map(username => <Card key={username} size="small" title={username} extra={<Button icon={<SyncOutlined />} aria-label={`重试 ${username} 的访问同步`} disabled={busy} onClick={() => void poll(version.current, result.affected_users, username)} />}>
+            {!states[username] && !stateErrors[username] && <Spin />}{states[username] && !states[username].managed && "暂无托管凭据"}
+            {states[username]?.servers.map(server => <Flex key={server.server_id} vertical gap="small"><Flex justify="space-between"><span>{server.server_name}</span><Tag color={server.status === "applied" ? "success" : server.status === "failed" ? "error" : "warning"}>{zhStatus(server.status)}</Tag></Flex>{server.error && <Alert type="error" title={zhMessage(server.error)} />}</Flex>)}
+            {stateErrors[username] && <Alert type="error" title={zhMessage(stateErrors[username])} showIcon />}
           </Card>)}
         </section>}
       </>}

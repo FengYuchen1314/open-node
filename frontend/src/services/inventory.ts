@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 import type {
   AgentRead,
   AgentIdentityInfo,
@@ -108,20 +109,20 @@ const operationPaths: Record<AgentOperationKind, string> = {
 
 export async function getAgentIdentity(fetcher = authenticatedFetch): Promise<AgentIdentityInfo> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/agents/identity`);
-  if (!response.ok) throw await apiError(response, "Agent identity request failed");
+  if (!response.ok) throw await apiError(response, "获取 Agent 身份失败");
   return response.json() as Promise<AgentIdentityInfo>;
 }
 
 export async function listAgents(fetcher = authenticatedFetch): Promise<AgentRead[]> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/agents`);
-  if (!response.ok) throw await apiError(response, "Agent list request failed");
+  if (!response.ok) throw await apiError(response, "获取 Agent 列表失败");
   return response.json() as Promise<AgentRead[]>;
 }
 
 export async function listServers(fetcher = authenticatedFetch): Promise<ServerSummary[]> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers`);
   if (!response.ok) {
-    throw await apiError(response, "Server list request failed");
+    throw await apiError(response, "获取服务器列表失败");
   }
   return response.json() as Promise<ServerSummary[]>;
 }
@@ -136,7 +137,7 @@ export async function createServer(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Server create request failed");
+    throw await apiError(response, "创建服务器失败");
   }
   return response.json() as Promise<ServerCreateResponse>;
 }
@@ -152,7 +153,7 @@ export async function updateServerProbeMetadata(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Server probe metadata update failed");
+    throw await apiError(response, "更新服务器探针信息失败");
   }
   return response.json() as Promise<ServerResponse>;
 }
@@ -163,14 +164,14 @@ export async function getLatestTelemetry(
 ): Promise<ServerTelemetryResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/telemetry/latest`);
   if (!response.ok) {
-    throw await apiError(response, "Server telemetry request failed");
+    throw await apiError(response, "获取服务器遥测数据失败");
   }
   return response.json() as Promise<ServerTelemetryResponse>;
 }
 
 export async function getServerTraffic(serverId: string, fetcher = authenticatedFetch): Promise<ServerTraffic> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/traffic`);
-  if (!response.ok) throw await apiError(response, "Server traffic request failed");
+  if (!response.ok) throw await apiError(response, "获取服务器流量失败");
   return response.json() as Promise<ServerTraffic>;
 }
 
@@ -178,13 +179,13 @@ export async function updateServerTraffic(serverId: string, payload: ServerTraff
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/traffic`, {
     method: "PUT", headers: jsonHeaders, body: JSON.stringify(payload),
   });
-  if (!response.ok) throw await apiError(response, "Server traffic update failed");
+  if (!response.ok) throw await apiError(response, "更新服务器流量设置失败");
   return response.json() as Promise<ServerTraffic>;
 }
 
 export async function resetServerTraffic(serverId: string, fetcher = authenticatedFetch): Promise<ServerTraffic> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/traffic/reset`, { method: "POST" });
-  if (!response.ok) throw await apiError(response, "Server traffic reset failed");
+  if (!response.ok) throw await apiError(response, "重置服务器流量失败");
   return response.json() as Promise<ServerTraffic>;
 }
 
@@ -194,7 +195,7 @@ export async function getLatestScanResult(
 ): Promise<ServerScanResultResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/scan/latest`);
   if (!response.ok) {
-    throw await apiError(response, "Server scan result request failed");
+    throw await apiError(response, "获取服务器扫描结果失败");
   }
   return response.json() as Promise<ServerScanResultResponse>;
 }
@@ -205,7 +206,7 @@ export async function getXrayRuntimeInventory(
 ): Promise<XrayRuntimeInventoryResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime`);
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime inventory request failed");
+    throw await apiError(response, "获取 Xray 运行时清单失败");
   }
   return response.json() as Promise<XrayRuntimeInventoryResponse>;
 }
@@ -216,7 +217,7 @@ export async function getXrayRuntimeTunnelInventory(
 ): Promise<XrayRuntimeTunnelInventoryResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/xray/runtime/tunnels`);
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime tunnel inventory request failed");
+    throw await apiError(response, "获取 Xray 运行时隧道清单失败");
   }
   return response.json() as Promise<XrayRuntimeTunnelInventoryResponse>;
 }
@@ -235,7 +236,7 @@ export async function deleteXrayRuntimeTunnel(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime tunnel delete request failed");
+    throw await apiError(response, "删除 Xray 运行时隧道失败");
   }
   return response.json() as Promise<XrayRuntimeTunnelDeleteResponse>;
 }
@@ -250,7 +251,7 @@ export async function createXrayRuntimeTunnelChain(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime tunnel chain create request failed");
+    throw await apiError(response, "创建 Xray 运行时隧道链失败");
   }
   return response.json() as Promise<XrayRuntimeTunnelChainCreateResponse>;
 }
@@ -269,7 +270,7 @@ export async function deployXrayRuntimeTunnel(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray runtime tunnel deploy request failed");
+    throw await apiError(response, "部署 Xray 运行时隧道失败");
   }
   return response.json() as Promise<XrayRuntimeTunnelDeployResponse>;
 }
@@ -297,7 +298,7 @@ export async function listXrayConfigSnapshots(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots${suffix}`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray config snapshot request failed");
+    throw await apiError(response, "获取 Xray 配置快照失败");
   }
   return response.json() as Promise<ServerXrayConfigSnapshotsResponse>;
 }
@@ -317,7 +318,7 @@ export async function getXrayConfigSnapshotRecovery(
     `${apiBaseUrl}/api/v1/servers/${serverId}/xray/config-snapshots/recovery${suffix}`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray config recovery status request failed");
+    throw await apiError(response, "获取 Xray 配置恢复状态失败");
   }
   return response.json() as Promise<XrayConfigSnapshotRecoveryStatusResponse>;
 }
@@ -331,7 +332,7 @@ export async function acceptXrayConfigPendingRecovery(
     { method: "POST" },
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray config pending recovery accept request failed");
+    throw await apiError(response, "确认待处理的 Xray 配置恢复失败");
   }
   return response.json() as Promise<XrayConfigSnapshotRecoveryAcceptResponse>;
 }
@@ -350,7 +351,7 @@ export async function applyXrayConfigRecovery(
     },
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray config recovery apply request failed");
+    throw await apiError(response, "应用 Xray 配置恢复失败");
   }
   return response.json() as Promise<XrayConfigSnapshotRecoveryApplyResponse>;
 }
@@ -361,7 +362,7 @@ export async function listServerCommands(
 ): Promise<ServerCommandsResponse> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/commands`);
   if (!response.ok) {
-    throw await apiError(response, "Server command list request failed");
+    throw await apiError(response, "获取服务器命令列表失败");
   }
   return response.json() as Promise<ServerCommandsResponse>;
 }
@@ -377,7 +378,7 @@ export async function createServerCommand(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw await apiError(response, "Server command create request failed");
+    throw await apiError(response, "创建服务器命令失败");
   }
   return response.json() as Promise<AgentCommandCreateResponse>;
 }
@@ -399,7 +400,7 @@ export async function queueAgentOperation(
     request,
   );
   if (!response.ok) {
-    throw await apiError(response, "Server operation request failed");
+    throw await apiError(response, "服务器操作请求失败");
   }
   return response.json() as Promise<AgentCommandCreateResponse>;
 }
@@ -414,7 +415,7 @@ export async function restoreXrayConfigSnapshot(
     { method: "POST" },
   );
   if (!response.ok) {
-    throw await apiError(response, "Xray config snapshot restore request failed");
+    throw await apiError(response, "恢复 Xray 配置快照失败");
   }
   return response.json() as Promise<AgentCommandCreateResponse>;
 }
@@ -428,7 +429,7 @@ export async function listCommandStreamFrames(
     `${apiBaseUrl}/api/v1/servers/${serverId}/commands/${commandId}/stream`,
   );
   if (!response.ok) {
-    throw await apiError(response, "Command stream frame request failed");
+    throw await apiError(response, "获取命令输出流帧失败");
   }
   return response.json() as Promise<AgentCommandStreamFramesResponse>;
 }
@@ -437,10 +438,10 @@ async function apiError(response: Response, fallback: string): Promise<Error> {
   try {
     const body = (await response.json()) as { detail?: unknown };
     if (typeof body.detail === "string" && body.detail.length > 0) {
-      return new Error(body.detail);
+      return requestError(body.detail, `${fallback}（${response.status}）`);
     }
   } catch {
     // The backend normally returns JSON errors, but network proxies may not.
   }
-  return new Error(`${fallback} with ${response.status}`);
+  return requestError(undefined, `${fallback}（${response.status}）`);
 }

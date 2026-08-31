@@ -4,13 +4,14 @@ import type {
   TemporarySubscriptionsResponse,
 } from "../domain/temporary-subscriptions";
 import { authenticatedFetch } from "./auth";
+import { requestError } from "./request-error";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const basePath = `${apiBaseUrl}/api/v1/temporary-subscriptions`;
 
 async function failure(response: Response) {
   const body = await response.json().catch(() => null);
-  return new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status})`);
+  return requestError(typeof body?.detail === "string" ? body.detail : undefined, `临时订阅请求失败（${response.status}）`);
 }
 
 export async function listTemporarySubscriptions(fetcher = authenticatedFetch) {
