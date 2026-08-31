@@ -19,6 +19,154 @@ VPS.
 
 ## Remote Test Command
 
+### Administrator Telegram notifications — unpublished integration
+
+This is the first administrator-only notification slice described in the
+[operator guide](notifications.md), not full Telegram Bot or renewal parity.
+It is working-tree code after public `caf016c`; no notification code is in that
+published commit and the production container has not been upgraded.
+No real Telegram credentials or destination have been used.
+
+The new root integration environment is
+`/tmp/open-node-notifications-integration.v2sQeZ5w`. Its private Python virtualenv
+was installed from the public baseline plus `tzdata`; other candidates' environments
+are not installed into or rewritten. Source archives and failed rounds are retained.
+
+| Component gate | Verified result |
+| --- | --- |
+| Durable store and domain | 108 passed, no skips, 16.804 s; strict Ruff and compile passed in `/tmp/open-node-notifications-store.CpeUz24C/source-r5`. Store SHA-256 `e36d28f43d299b42499d58c566777883717fb95a75c658ffebf1f840d1b6ed84`; test SHA-256 `e38977aa3c8529962db240d6d353ea36a40f617b5cad7f5b037dad8c4b8afc00`. Includes concurrent claims/CAS, full-expiry/user-incarnation dedupe, DST, quota-independent eligibility, unknown/late receipts, bounded safe retries, and missing/wrong-key refusal to clear ciphertext. |
+| Telegram transport | 206 passed, no skips, 9.53 s; Ruff and compile passed in `/tmp/open-node-telegram-transport.w31Bc3jN/r3`. Real loopback HTTP/TLS fixtures run inside a fresh network namespace with no external route. Module SHA-256 `ac7d323cd34bfd8b8a64136df935742b76a20de9abbd111b68094983f4b0d9a6`; test SHA-256 `cd701429e5091266fe97adc7d22a90373c4de38da8e7efaa97f239a181e29bb3`. |
+| API and worker integration | Root `source-r2`: 77 passed, 57.43 s, `evidence/root-focused-r2.log` and XML. Covers permissions, strict non-echoing request validation, idempotent request lookup/retry, actual app lifespan, cancellation and recovery. One root test exceeded the lint line-length limit; that formatting-only error was corrected in the next snapshot. Two additional real missing/wrong-key API tests passed in the unified run below, not these 77 results. |
+| Unified backend | Root `source-r4`: **2298 passed, no skips**, 1023.21 s; strict Ruff and compile passed. Includes all six opt-in external-fetch TLS tests and the combined notification store, transport, API and worker. `evidence/backend-full-r4.log` SHA-256 `84a69f71a9ff176e688efba739c191c4a51501edcccdf431b853326f35b7d8bb`; XML SHA-256 `6dfae1fe69f67e3bfd199f7063d56fea7b3fec3a43fed95b380339a3dc8d39bf`. One Starlette/httpx deprecation warning is retained. |
+
+Store tests read real inventory records and verify all non-notification tables
+remain unchanged. Network tests include verified TLS/SNI, invalid certificates,
+proxy/CA/key-log environment isolation, strict bounded HTTP framing, false-success
+200, valid/invalid 429, redirection, disconnects and cancellation. They are
+controlled fixtures, not a canary proving Telegram acceptance.
+
+The root's first full-suite attempt (`source-r3`) stopped during collection:
+the backend-only archive omitted `scripts/vps/sync-and-test.py`, which a backend
+test imports. The error and XML are preserved in `evidence/backend-full-r3.*`;
+this is not a full-suite pass. The replacement `source-r4` is a complete 530-file
+repository snapshot, archive SHA-256
+`d0a6148466ee94a57bd42bdb24ba4945f1ca1d0eea431255543c87fe7bd935dc`.
+Its strict backend Ruff/compile and complete suite passed in a fresh
+loopback-only namespace.
+An assigned public-format address exists only inside that namespace, not on a
+new host listener. No product SSRF/TLS bypass is enabled.
+
+All 530 source-file hashes and the private Python dependency inventory remained
+unchanged through the full run. The later unified `source-r5` contains 531 files,
+archive SHA-256
+`9e0ea5c8ecd4c637fc0d7a900a3b5fa1e678588becaf32e12a793c7404676916`.
+Its backend application, tests and `pyproject.toml` are byte-identical to the
+passed R4 source; the two `evidence/backend-executable-r*.sha256` manifests agree.
+The R5 frontend type check and both production builds passed. Its complete
+Vitest run passed **890 tests in 72 files**, no failures or pending tests,
+995.86 s, in `frontend-gate-r5`. The original test process continued after an SSH
+transport disconnect; a read-only recovery check found the same PID, growing
+log, no host restart and no kernel OOM record. It was not rerun or counted as a
+test failure. Native `full-vitest.json` SHA-256 is
+`0f771f2a974e41f27b104454a72fe5aae3d0a6ed8d90a203b62b26f0f6104e28`;
+log SHA-256 `2b71513bc40ee2ee37d03763f604f6876105fb1ad065c51f848bc1df73663569`.
+All 531 source files, 24,024 shared dependency files and the 39 administrator / 3
+Probe assets stayed unchanged. Combined asset manifest SHA-256 is
+`39491685f0277eec9be2250e208817d4980d29f39ac91eafbcce1107ea8c3f61`.
+
+The production-bundle browser and working-tree Docker gates below have passed.
+Clean-commit CI and the exact-Git-revision Docker gate remain pending.
+Earlier Chinese/external gates further below are separate
+evidence and must not be relabeled as notification acceptance.
+
+#### Notification production-browser gate
+
+`scripts/vps/smoke-notifications-browser.py` passed in
+`/tmp/open-node-notifications-browser-r4.H23Kcoyq`, using an independent copy of
+the frozen R5 product and its built assets. The executed fixture SHA-256 is
+`7210494597bc55d0102aa8aa80a170ee3789236b422a66092dc1e620a3f1b09a`;
+strict Ruff and compile passed. This **browser R4** is not backend `source-r4`.
+
+All nine phases passed: default-off/no-key behavior; token input clearing at
+request start; save/preview making no sends; confirmed double-click creating one
+durable request; lost POST-response reconciliation through read-only GETs;
+clearing configuration cancelling only unsent work while retaining attempt
+snapshots; real subscriber login followed by administrator-API 401 and separate
+CSRF/Origin 403 checks; an actual 40-second worker lease recovering to unknown
+without automatic replay; risk/target confirmation, configuration CAS and old
+attempt rejection on manual retry; late acceptance updating only the old attempt;
+and a real over-quota expiry candidate using the preview formatter, scheduler and
+restart deduplication. The phase count groups related checks, not individual
+assertions. Logout and expired-session UI flows were not newly exercised here.
+
+The fixture uses the actual application, store and worker with a trusted local
+transport replacement in a fresh loopback-only network namespace. It records
+6 transport calls with 6 committed-claim checks, one deliberately failed receipt
+commit and one late receipt. Product clock, lease and timeout constants are not
+shortened. These are **not** real Telegram deliveries or acceptance evidence.
+
+Console errors and page errors were both zero. All 12 viewport PNGs were checked
+individually at 1440, 390 and 320 pixels: default settings, unknown-result warning,
+retry confirmation, and preview/history. Text and controls fit; wide tables keep
+their own horizontal scroll. Source/assets, both read-only Python environments,
+the earlier frozen R4 source and production fingerprints remained unchanged.
+The namespace had zero owned processes and zero listeners after cleanup.
+The read-only `durable-receipt-audit.json` confirms that all six attempt leases
+were 40.0 seconds, recovery occurred after 40.36 seconds, and the late accepted
+receipt did not change the newer unknown attempt or its current identity.
+
+Evidence hashes:
+
+- `evidence/report.json`: `0834a7096d9bac0a22141642d68394f70dc196a164b39ed1df43b6b405429ee9`.
+- `screenshots.sha256`: `17759b6f9392986b552a084d29e7fa1113e28df3d40a696a02b3377834166f6c`.
+- `screenshots.tar.gz`: `4a6d8b14dae70f96cad02b9192c27c96f2a80960f5845b26a8b5baf9ffb47e39`.
+- `visual-qa.json`: `3992c220d02ce0400baf04651fdce39226acec58cf413c30e807f00fd0283bf4`.
+- `final-evidence.sha256`: `27d0cbfa2d5642aea62a2db0b771b9a6abcd256dc1c31c5dc70e39a2bb48aa62`.
+
+The earlier browser attempts remain failed evidence: R1 selected Ant Design's
+hidden accessibility option instead of the visible dropdown; R2 checked the
+lost-response fixture before the POST completed; R3 used `/account/profile`
+instead of the real `/account/me` identity endpoint. Before R4, a further static
+review corrected the fixture's retry expectation to the actual HTTP 200 contract.
+Only the smoke script changed between those attempts; product source did not.
+
+#### Notification working-tree Docker gate
+
+The final `scripts/vps/smoke-notifications-docker.py` fixture SHA-256 is
+`4610687487d15a7c88209e3ec3cc92411a4893b0ccdb644845f4ab9a3d461a34`.
+It passed all 16 phases in
+`/tmp/open-node-notifications-docker-r5.dFPBVH4K/docker-r3` with image
+`open-node:notifications-working-tree-r5`, ID
+`sha256:2a0aa26bcce8bcddc034fa00bcbba9fc9beb6fb013336bca7bf2f8c63eaea796`.
+Its OCI revision is **`working-tree-caf016c-notifications-r5`**, not a Git SHA.
+
+It verified UID/GID 10001, read-only root, no capabilities, no-new-privileges,
+`--network none`, all 39 administrator assets (1,789,471 bytes), and the
+`/notifications` SPA index. Default-off/no-key, encrypted persistence/private
+permissions, request idempotency, original-session restart, independent cold
+backup/restore, missing/wrong-key refusal across restart, preservation of
+ciphertext while disabling, and restoration of the original key all passed.
+No real Telegram host was reachable and no delivery was marked accepted.
+
+Six explicit stops completed within 0.30 seconds each. They returned SIGTERM/143;
+the fixture requires matching start/finish PID logs from **that current start**,
+one completed application shutdown, no OOM/error, and completion within the
+30-second grace period. Uvicorn 0.52.4 in the image matches the
+[official version's signal re-raise behavior](https://github.com/Kludex/uvicorn/blob/0.52.4/uvicorn/server.py).
+Seventeen independent positive/negative checks cover this stop criterion.
+The initial R1 failure from incompatible Docker local-log options and R2 failure
+from an exit-zero-only fixture remain preserved; neither was relabeled a pass.
+
+The seven label-owned containers and three disposable volumes were removed;
+an independent second check found no leftovers. All 531 R5 source files, 39
+assets and 424 protected production/shared-candidate files remained unchanged.
+The production container was not restarted or upgraded. Evidence hashes:
+
+- `report.json`: `5f737c803554c5f94356efbcd31d785c53d758a3095602c1a50d7700c44c3598`.
+- `independent-postcheck.json`: `7dac7f0a97740ff96227a29c322b332e94204643762c2a0b7669809a3af929e8`.
+- `executed-source.tar`: `0baf9494cff019f64572c4017783243a7299f61cb05bc5252556e3edc4871447`.
+- `final-evidence.sha256`: `206c49cf1349355abfe3dc6eb9bed418659d62903bfbe205d85d5542fff4a11b`.
+
 ### External subscriptions
 
 This gate concerns the new administrator-managed, explicitly confirmed

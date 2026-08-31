@@ -11,6 +11,7 @@ const { routeState } = vi.hoisted(() => ({ routeState: { broken: false } }));
 vi.mock("../routes", () => ({ routes: [
   { path: "/", component: () => { if (routeState.broken) throw new Error("PRIVATE-TEST-FAILURE"); return <div>Inventory workspace</div>; } },
   { path: "/subscriptions", component: () => <div>Subscriptions workspace</div> },
+  { path: "/notifications", component: () => <div>Notifications workspace</div> },
   { path: "/account", component: () => <div>Separate subscriber portal</div> },
 ] }));
 vi.mock("../services/auth", async importOriginal => ({ ...await importOriginal<typeof import("../services/auth")>(), loadSession: vi.fn(), signOut: vi.fn() }));
@@ -38,6 +39,18 @@ describe("React application shell", () => {
     expect(screen.getByRole("status", { name: "正在加载会话" })).toBeTruthy();
     await act(async () => { authState.ready = true; pending.resolve(); });
     expect(screen.getByLabelText("用户名")).toBeTruthy();
+  });
+  it("keeps notification settings private and uses Chinese navigation and title", async () => {
+    const first = mount("/notifications"); await flush();
+    expect(screen.queryByText("Notifications workspace")).toBeNull();
+    expect(screen.getByRole("heading", { name: "管理员登录" })).toBeTruthy();
+    first.unmount();
+    authState.session = { configured: true, authenticated: true, username: "admin", csrf_token: "test-csrf" };
+    mount(); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "切换导航菜单" })); await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "通知设置" })); await flush();
+    expect(screen.getByText("Notifications workspace")).toBeTruthy();
+    expect(document.title).toBe("通知设置 - Open Node");
   });
   it("does not request an administrator session on the separate account route", async () => {
     authState.ready = false; authState.session = null; mount("/account"); await flush();

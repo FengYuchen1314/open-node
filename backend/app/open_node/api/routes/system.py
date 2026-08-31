@@ -46,6 +46,6 @@ def meta(request: Request) -> AppMeta:
         short_links_enabled=settings.short_links_enabled,
         stack={
             "backend": "fastapi",
-            "frontend": "vue3-vuetify",
+            "frontend": "react-antd",
         },
     )

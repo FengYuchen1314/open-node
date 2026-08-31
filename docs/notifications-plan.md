@@ -1,9 +1,10 @@
-# Notifications: next-phase first-slice design
+# Notifications: first-slice design and implementation boundaries
 
-Status: proposed, not implemented. This document records a source-reviewed next
-phase; it is not release evidence and does not change the frozen product.
+Status: implemented, not published. Unified regression, production-browser and
+working-tree Docker gates passed; exact-Git-revision Docker and clean-checkout CI
+remain pending. See the [operator guide](notifications.md) and [test record](testing.md).
 Administrator Telegram configuration, preview, test and package-expiry reminders
-would be one independent slice, not full notification or renewal parity.
+are one independent slice, not full notification or renewal parity.
 
 ## Pinned reference and separate workflows
 
@@ -37,7 +38,9 @@ Support one administrator bot/chat destination, disabled by default. Provide
 configuration GET/PUT, preview POST, test POST, delivery-status GET and explicit
 retry POST under a new administrator-only `/notifications` route group.
 
-Saving, reading settings, opening the page and previewing must never send.
+Saving, reading settings, opening the page and previewing must never send inline.
+Enabling reminders authorizes the independent scheduler; after local 09:00 it may
+scan and dispatch soon after a save. This is not a promise of no background sends.
 Preview uses the same formatter and eligibility rules as delivery; label sample
 data explicitly when no real candidate exists. A test sends fixed text only on
 an explicit click, even if scheduled reminders are disabled. Test/retry requests
@@ -63,7 +66,8 @@ There is no payment processing, automatic extension or license gate in this plan
   existing administrator session, CSRF and exact-Origin checks.
 - [services/inventory.py](../backend/app/open_node/services/inventory.py): read
   `ProductUserModel.current_plan_id`, `plan_expires_at`, activity/removal state
-  and `SubscriptionPlanModel`. Register new models before `create_schema()`.
+  and `SubscriptionPlanModel`. Notification models use separate metadata and
+  create their own five tables after inventory schema initialization.
   `assign_subscription_plan()` defaults to start plus cycle, not extension of
   an existing future expiry; notification code must not call it.
 - Eligible users are active, not being removed, and have a current plan with a
@@ -166,5 +170,7 @@ Docker gates must cover non-root key permissions, restart, missing/wrong keys
 and database-plus-key restoration. Record source hashes and actual outcomes.
 
 A real Telegram canary requires separately authorized credentials and a test
-chat. Fixtures do not prove real Telegram acceptance. None of these gates or
-Telegram deliveries has been performed for this proposed notification slice.
+chat. Fixtures do not prove real Telegram acceptance. Store, transport, API,
+unified regression, production-browser and working-tree Docker gates passed in
+isolated VPS directories. Exact-commit Docker and CI still precede publication.
+No real Telegram delivery has been performed for this slice.

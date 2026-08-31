@@ -19,7 +19,7 @@ def test_health_endpoint_is_available(tmp_path: Path) -> None:
     assert response.json()["status"] == "ok"
 
 
-def test_meta_declares_fastapi_vue_vuetify_stack(tmp_path: Path) -> None:
+def test_meta_declares_fastapi_react_ant_design_stack(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 
     response = client.get("/api/v1/meta")
@@ -27,6 +27,6 @@ def test_meta_declares_fastapi_vue_vuetify_stack(tmp_path: Path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["stack"]["backend"] == "fastapi"
-    assert payload["stack"]["frontend"] == "vue3-vuetify"
+    assert payload["stack"]["frontend"] == "react-antd"
     assert payload["license_required"] is False
     assert payload["short_links_enabled"] is False

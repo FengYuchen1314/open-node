@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -16,6 +17,7 @@ from open_node.api.routes.system import healthz
 from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
 from open_node.core.config import Settings, get_settings
 from open_node.domain.inventory import AgentCommandPayloadError
+from open_node.domain.notifications import NotificationError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.auth import AuthStore
@@ -23,6 +25,8 @@ from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
 from open_node.services.external_subscriptions import ExternalSubscriptionError
 from open_node.services.inventory import InventoryStore, ManagedNodeConflict
+from open_node.services.notification_worker import NotificationWorker
+from open_node.services.notifications import NotificationStore
 from open_node.services.probe_stream import PublicProbeStreamManager
 from open_node.services.secure_channel import AgentIdentity
 from open_node.services.server_traffic import ServerTrafficWorker
@@ -33,6 +37,7 @@ from open_node.services.subscription_templates import (
     TemplateForbidden,
     TemplateNotFound,
 )
+from open_node.services.telegram_transport import TelegramTransport
 from open_node.services.template_rendering import TemplateError
 from open_node.web import FrontendFiles
 
@@ -60,18 +65,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.inventory, active_settings.server_traffic_poll_seconds
             ).run()
         )
+        notification_task = asyncio.create_task(
+            NotificationWorker(
+                app.state.notifications,
+                app.state.notification_transport,
+                interval=active_settings.notifications_poll_seconds,
+            ).run()
+        )
         try:
             yield
         finally:
             task.cancel()
             access_task.cancel()
             traffic_task.cancel()
+            notification_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             with contextlib.suppress(asyncio.CancelledError):
                 await access_task
             with contextlib.suppress(asyncio.CancelledError):
                 await traffic_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await notification_task
 
     app = FastAPI(
         title=active_settings.app_name,
@@ -97,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     active_settings.api_prefix + "/auth/",
                     active_settings.api_prefix + "/agents/bootstrap/",
                     active_settings.api_prefix + "/external-subscriptions",
+                    active_settings.api_prefix + "/notifications",
                 )
             )
             or (
@@ -115,6 +131,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
+        if request.url.path.startswith(active_settings.api_prefix + "/notifications"):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "notification_invalid_request",
+                    "detail": "Invalid notification request.",
+                    "license_required": False,
+                },
+            )
         if secret_request(request):
             return JSONResponse(
                 status_code=422,
@@ -165,6 +190,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
 
+    @app.exception_handler(NotificationError)
+    async def invalid_notification(_request, exc):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"code": exc.code, "detail": str(exc), "license_required": False},
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=active_settings.cors_origins,
@@ -184,7 +217,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         short_links_enabled=active_settings.short_links_enabled,
         external_subscriptions_state_dir=active_settings.external_subscriptions_state_dir,
     )
+    notification_state_dir = active_settings.notifications_state_dir
+    database_file = app.state.inventory._engine.url.database
+    if (
+        notification_state_dir is None
+        and app.state.inventory._engine.dialect.name == "sqlite"
+        and database_file not in (None, "", ":memory:")
+        and not database_file.startswith("file:")
+    ):
+        # Default Docker backups cover the SQLite database and its independent
+        # notification key together. In-memory/URI databases never infer a path.
+        notification_state_dir = Path(database_file).absolute().parent / "notifications"
+    if notification_state_dir is not None:
+        private_roots = [active_settings.certificate_state_dir.absolute()]
+        if app.state.inventory.external_subscriptions_state_dir is not None:
+            private_roots.append(app.state.inventory.external_subscriptions_state_dir.absolute())
+        if any(
+            notification_state_dir.is_relative_to(root)
+            or root.is_relative_to(notification_state_dir)
+            for root in private_roots
+        ):
+            raise ValueError("Notification secrets require a separate, non-overlapping directory")
     app.state.inventory.create_schema()
+    app.state.notifications = NotificationStore(app.state.inventory, notification_state_dir)
+    app.state.notifications.create_schema()
+    app.state.notification_transport = TelegramTransport()
     app.state.external_subscriptions = app.state.inventory.external_subscriptions()
     app.state.agent_bootstrap = AgentBootstrapStore(app.state.inventory)
     app.state.subscriber_auth = SubscriberAuthStore(app.state.inventory, active_settings)

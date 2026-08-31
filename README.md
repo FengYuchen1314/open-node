@@ -48,6 +48,14 @@ also covers HTTPS cookies, local previews, session expiry, and API clients.
 enrollment, one-use recovery codes, mandatory enrollment and local recovery.
 Configure the persistent TOTP encryption key before enabling this optional feature.
 
+[Administrator Telegram notifications](docs/notifications.md) provide one bot/chat
+destination, saved-configuration previews, explicitly confirmed tests, durable
+package-expiry reminders and Chinese delivery history. Reminders default off;
+unknown send results require a risk-confirmed manual retry, not automatic replay.
+Back up the notification key directory together with SQLite. User bot binding,
+daily digests, other alert rules and renewal approval are not part of this slice;
+its current release and verification status is recorded in the linked guide.
+
 Subscribers use the separate `/account` portal. Administrators provision their
 login passwords directly or issue a high-entropy, single-use
 [registration invitation](docs/registration-invitations.md) bound to an existing

@@ -9,6 +9,8 @@ describe("router", () => {
     expect(paths).toContain("/config");
     expect(paths).toContain("/subscriptions");
     expect(paths).toContain("/templates");
+    expect(paths).toContain("/notifications");
+    expect(routes.find(route => route.path === "/notifications")?.meta?.subscriber).toBeUndefined();
     expect(routes.find(route => route.path === "/account")?.meta?.subscriber).toBe(true);
     expect(routes.find(route => route.path === "/subscriptions")?.meta?.subscriber).toBeUndefined();
   });

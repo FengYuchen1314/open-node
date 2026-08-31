@@ -11,6 +11,7 @@ from open_node.api.routes import (
     legacy_mmwx,
     license,
     node_management,
+    notifications,
     plan_management,
     private_routed_nodes,
     probe,
@@ -45,6 +46,7 @@ private_router.include_router(registration_invitations.router)
 private_router.include_router(plan_management.router)
 private_router.include_router(user_management.router)
 private_router.include_router(node_management.router)
+private_router.include_router(notifications.router)
 private_router.include_router(subscriber_auth.management_router)
 api_router.include_router(private_router)
 api_router.include_router(auth.router)

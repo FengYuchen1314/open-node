@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     session_idle_seconds: int = Field(default=1800, ge=60, le=86400)
     subscriber_totp_key: SecretStr | None = None
     external_subscriptions_state_dir: Path | None = None
+    notifications_state_dir: Path | None = None
+    notifications_poll_seconds: float = Field(default=1, ge=0.25, le=60)
     short_links_enabled: bool = False
     certificate_state_dir: Path = Path("./data/certificates")
     certificate_lego_binary: Path | None = None
@@ -106,6 +108,20 @@ class Settings(BaseSettings):
             not value.is_absolute() or value == Path(value.anchor) or ".." in value.parts
         ):
             raise ValueError("External subscription state requires an absolute non-root path")
+        return value
+
+    @field_validator("notifications_state_dir", mode="before")
+    @classmethod
+    def optional_notification_state(cls, value):
+        return None if value == "" else value
+
+    @field_validator("notifications_state_dir")
+    @classmethod
+    def notification_state_path(cls, value: Path | None) -> Path | None:
+        if value is not None and (
+            not value.is_absolute() or value == Path(value.anchor) or ".." in value.parts
+        ):
+            raise ValueError("Notification state requires an absolute non-root path")
         return value
 
     @field_validator("agent_identity_file")
