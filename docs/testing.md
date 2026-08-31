@@ -144,10 +144,9 @@ The first unified Chinese product snapshot is frozen at
 `source-zh-final-r2.tar` SHA-256 is
 `e105396bbd5e215fa26f05478c2b1d760d1d9d911707f1b8a60aafbe12f10ff2`.
 Subsequent browser-fixture selector/format corrections have separate manifests;
-they do not rewrite that archive. The later certificate-message correction and
-R4 source are recorded below. Publication and an exact-commit clean image remain
-pending. The English baseline above is earlier
-evidence, not relabeled as Chinese acceptance.
+they do not rewrite that archive. The later certificate-message correction,
+R4 source, exact-commit clean image and completed publication are recorded below.
+The English baseline above is earlier evidence, not relabeled as Chinese acceptance.
 
 | Unified working-source gate | Result and evidence |
 | --- | --- |
@@ -236,8 +235,13 @@ The final 41-asset manifest `frontend-assets-r4.sha256` hashes to
 `backend-verified-source-r4-match.log` proves the complete previously tested
 backend is identical. Agent and Worker code are unchanged.
 
-The following R4 gates have completed; the combined frontend full run,
-exact-commit CI/image and main-branch publication are still pending:
+The combined R4 frontend run passed **796 tests in 70 files**, 852.45 s, with
+zero failed or skipped tests. `frontend-full-r4.json` SHA-256 is
+`80fa75de132b3a20cf8053f9640ec8b9cc9fa46af9f1cb9e36ae7bd3146f8968`.
+Source and all 41 assets matched their manifests after the run. These 796 tests
+include the 34 added regressions; focused counts are not added a second time.
+
+The following R4 gates have also completed:
 
 - External subscriptions: `external-browser-r4/report.json` under the release
   directory, SHA-256
@@ -276,12 +280,13 @@ exact-commit CI/image and main-branch publication are still pending:
 - Operator UI: `operator-browser-r4.log` and `operator-browser-r4/` under the
   release directory; the entire R2 operator scope was rerun with 16 new
   screenshots, unchanged source/assets and exit 0.
-- Anonymous Probe Worker: `/tmp/open-node-zh-worker-r4.L4wUF4T5/report.json`,
+- Anonymous Probe Worker: `/tmp/open-node-zh-worker-r4.L4wUF4T5/evidence/report.json`,
   SHA-256 `56c4bc924389a54d4f6996ae7406db0edf8d1dea9959ee1ff7fdf391f02ef854`;
   same full local Miniflare HTTP/WS/polling/reconnect/security/range/theme/deep-link
   scope, exit 0. Source, fixtures, assets, dependencies and production remained
-  unchanged; nine screenshots have a separate visual review. This is still not
-  a Cloudflare account deployment.
+  unchanged; all nine screenshots passed visual review. `visual-qa.json` SHA-256
+  `b09bb90656940d6047e1ecf38d7fd33e5d5aff3f5603bffa0b691a6e0306dc7d`.
+  This is still not a Cloudflare account deployment.
 
 All 28 changed Python browser/native fixtures pass strict E/F/I/UP/B Ruff and
 byte compilation in R4; backend and Agent Ruff also pass. The changed-fixture
@@ -291,6 +296,36 @@ manifest SHA-256 is
 R3 was only an intermediate source archive; it was not built or accepted as a
 release. R2 browser evidence for unaffected workflows remains explicitly R2,
 not a claim those screenshots came from the R4 bundle.
+
+#### Exact published revision
+
+Feature commit `998839ba06429d47de2e12b5562b4a4c4cad6a62` was published on public
+`main` after its independent clean-checkout
+[CI run 33359846368](https://github.com/FengYuchen1314/open-node/actions/runs/33359846368)
+completed successfully on 2026-08-31. All four jobs passed: backend **1927 passed,
+6 opt-in skipped**, 703.33 s; Agent **605 passed**, 10.23 s; frontend **796 tests /
+70 files passed** plus main/Probe builds; Worker **5 passed** plus typecheck.
+The six real TLS cases passed separately in the isolated VPS gate above; they
+were not executed by this hosted-CI run. Later documentation-only commits do
+not change the tested feature revision.
+
+A fresh public clone at `/root/open-node-zh-commit-998839b.c3ycWOn7/source`
+was clean at that exact SHA. Every non-documentation tracked file matched the
+verified R4 snapshot; the manifest SHA-256 is
+`4052a9519ac6bf9971e7bb3d4138695877d35dfe8776a81d04a94d6e4365311a`.
+The source-built image
+`open-node:zh-external-commit-998839ba06429d47de2e12b5562b4a4c4cad6a62`
+has ID `sha256:77b0d0faed6aa4f3e2195eebb44be8c506c6a62bc624363c3ab4cb2f2eba8b04`
+and an OCI revision label equal to the full Git SHA, not a working-tree label.
+
+The image passed the same non-root/read-only, static route/404, three-viewport,
+restart/session/data, encrypted-source key and real HTTPS-fetch boundaries as
+the R2 Docker gate. All 38 packaged frontend files matched the final R4 assets
+byte for byte. The exact-clone source and standalone assets remained unchanged.
+`evidence-r1/report.json` SHA-256 is
+`5ce7fb209a29a7ba1e57dee8674b8fd6c1793841fab5c63386ad0f610d1bfd23`.
+The owned temporary container and volume were removed after identity checks;
+production's source, image, instance, start time and restart count did not change.
 
 ### React and standard Ant Design migration (2026-08-31)
 

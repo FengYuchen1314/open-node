@@ -12,17 +12,19 @@ Agent 安装已完成 VPS 验收，Agent 0.3.0a0 已公开发布；功能代码 
 托管 CI 夹具修正 `a677280` 已进入主线。用户要求的标准 Ant Design 前端重写
 已在 `50897f9` 进入主线：管理控制台、订阅门户和公共探针均已迁入 React，
 完整 CI、VPS 浏览器及精确提交的 Docker 验收通过。生产实例保持原镜像，本轮
-只发布源码，没有升级生产。当前工作源已接入外部订阅首期：管理员维护 HTTPS
+只发布源码，没有升级生产。外部订阅首期现已进入主线：管理员维护 HTTPS
 来源、手动预览确认、保留上游凭据并合入用户主订阅。英文候选的完整回归、
-真实浏览器、客户端及隔离 Docker 验收已完成，但尚未发布。用户随后明确要求
+真实浏览器、客户端及隔离 Docker 验收已完成。用户随后明确要求
 界面使用中文，管理后台、用户中心、公共探针及 Ant Design 内置文案现已完成
 中文化。首轮中文 R2 前端 762 项、后端 1927 项（另验 6 个真实 TLS 用例）、
 Agent 605 项、Worker 5 项通过；中文浏览器和隔离 Docker 多项验收也已通过。
 截图复核发现证书成功回执被误译成失败，现已在 R4 补齐固定消息并新增 34 项测试，
 187 项专项检查、类型检查和双产物构建通过，证书和全客户端实机验收也已通过。
 早先一次 gRPC 转发失败在新完整运行中未复现，原因仍未知，不称为已定位修复。
-R4 完整前端复跑及精确提交 CI、镜像、主线发布尚待完成。通知、设置、应用内
-备份和完整迁移仍未补齐。建议在新聊天中直接说明：
+R4 完整前端 796 项和精确 `998839b` 干净源码的 Docker 验收已通过。四项 GitHub CI
+全部通过后，外部订阅和中文界面已以 `998839b` 发布到 `main`；生产保持原镜像。
+通知、设置、应用内备份和完整迁移仍未补齐。
+建议在新聊天中直接说明：
 
 > 请先阅读 `docs/refactor-handoff.md`、`docs/mmwx-source-parity.md` 和 `docs/testing.md`，核对公开主线、候选分支、VPS 隔离测试 checkout 和生产镜像四者的实际 revision。继续参考用户提供的四个固定官方仓库，不要把受限 Preview 首发等同于完整 MMWX 替代。测试、构建、浏览器和真实流量验收都在 `185.99.135.224` 的隔离候选环境运行，不动生产服务和数据库。公开 HTTPS、Cloudflare 账户部署与异地加密备份需操作者的实际输入，不能用本地通过替代外部验证。
 
@@ -62,10 +64,11 @@ Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 M
 
 | 项目 | 当前状态 |
 | --- | --- |
-| GitHub `main` | 已包含 React/Ant Design 功能提交 `50897f928226c9fef2ab7d0f68de0c3aad46156a`，以及此前的面板 Agent 安装和托管 CI 夹具修正；后续只含文档的提交不改变该功能基线 |
-| 当前候选 | `codex/mmwx-parity-release-candidate`；精确 `50897f9` 的 GitHub run `33330624705` 四个 job 全部成功。后续文档提交与该功能测试分开记录 |
-| 外部订阅英文基线 | 在公开 `0ffc072` 上新增，尚未发布；冻结 VPS 源为 `/tmp/open-node-external-integration.YG95YRYU/source`。后端 1927 passed / 6 opt-in skipped（6 个真实 TLS 用例另行全部通过），Agent 605、前端 570/65 files、Worker 5，以及浏览器/客户端/隔离 Docker 均通过；该目录不再覆盖 |
-| 中文工作源 | 当前产品冻结于 `/tmp/open-node-zh-release.fp33Igbt/source-r4`，源码归档 SHA-256 `5c8d6008d20c692710e9e4718b935e87a3558c2172f400c5dbb6d9ccf6fdec04`。R2 全量前端 762/70 files、后端 1927 + 6 opt-in skips（230 项 fetcher 含 6 项真实 TLS 全过）、Agent 605、Worker 5 已过。R4 仅改证书消息字典及两个测试文件，新增 34 项，187 项专项、双构建、外部订阅、证书及全客户端实机通过；完整前端复跑与精确提交/CI/主线发布仍待完成。R2 和所有失败记录保留，详见 `testing.md` |
+| GitHub `main` | 已包含外部订阅/中文界面功能提交 `998839ba06429d47de2e12b5562b4a4c4cad6a62`，以及此前 React/Ant Design、面板 Agent 安装等功能；后续只含文档的提交不改变该功能基线 |
+| 当前候选 | `codex/mmwx-parity-release-candidate` 的 `998839b` 已经完成发布。GitHub run `33359846368` 四项均通过：后端 1927 passed / 6 opt-in skipped、Agent 605、前端 796/70 files、Worker 5；不能与之后尚未验证的通知工作源混同 |
+| 外部订阅英文基线 | 在公开 `0ffc072` 上新增，后续随中文版发布；冻结 VPS 源为 `/tmp/open-node-external-integration.YG95YRYU/source`。后端 1927 passed / 6 opt-in skipped（6 个真实 TLS 用例另行全部通过），Agent 605、前端 570/65 files、Worker 5，以及浏览器/客户端/隔离 Docker 均通过；该目录不再覆盖 |
+| 中文工作源 | 当前产品冻结于 `/tmp/open-node-zh-release.fp33Igbt/source-r4`，源码归档 SHA-256 `5c8d6008d20c692710e9e4718b935e87a3558c2172f400c5dbb6d9ccf6fdec04`。R4 全量前端 796/70 files、双构建及受影响实机流程通过；后端与已验 1927 + 6 opt-in skips（230 项 fetcher 含 6 项真实 TLS 全过）的源码相同，Agent 605、Worker 5 代码亦未变。客户端两次完整验收通过，初次 gRPC 失败原因仍未知。R2 和所有失败记录保留，详见 `testing.md` |
+| 中文精确提交镜像 | `/root/open-node-zh-commit-998839b.c3ycWOn7/source` 是干净 `998839b`；非文档源码与已验 R4 一致。精确 OCI label、38 项打包前端资产、中文浏览器、重启保留、外部密钥及 HTTPS 抓取通过。镜像 ID `sha256:77b0d0faed6aa4f3e2195eebb44be8c506c6a62bc624363c3ab4cb2f2eba8b04`；临时容器和卷已清理，不是生产镜像 |
 | VPS 隔离候选 | 共享 `/opt/open-node/mmwx-parity-candidate` 保留 clean `6ca84e2`；最终 React 完整回归在 `/tmp/open-node-react-release.xaSu8WDc/source`。GitHub 精确 `50897f9` 的干净构建及 Docker 复验在 `/root/open-node-react-commit-50897.0MDZIwd3/source`，两份前端产物逐字节一致；不混用生产数据库 |
 | VPS 生产源码 | `/opt/open-node`，`27ad431dd97670076d532efa461745ac9576ee2a`；源码、公开主线和运行镜像不是同一个 revision，不要混为一谈 |
 | 持久控制面 | Compose 服务 `open-node-open-node-1` healthy，绑定 `127.0.0.1:8000 -> 8080`；数据卷为 `open-node_data` |
