@@ -15,11 +15,24 @@ import type { ManagedNode } from "../../domain/subscriptions";
 const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider locale={zhCN}>{children}</ConfigProvider> });
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   const getStyle = window.getComputedStyle; vi.spyOn(window, "getComputedStyle").mockImplementation(element => getStyle(element));
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(async () => {
+  try {
+    cleanup();
+    // Ant Design form feedback can still have delayed state updates after unmount.
+    // Execute them while jsdom exists instead of discarding pending callbacks.
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    expect(vi.getTimerCount(), "UI timers must finish before jsdom teardown").toBe(0);
+  } finally {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
 async function flush() { await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); }); }
 
 describe("React subscription field editors", { timeout: 20_000 }, () => {
