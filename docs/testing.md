@@ -19,6 +19,104 @@ VPS.
 
 ## Remote Test Command
 
+### Backup v1 format — structure checks, not recovery
+
+The new [format and CLI contract](backup-format.md) follows the pinned-source
+[backup plan](backup-plan.md). It does not implement a consistent online snapshot,
+authenticated encryption, a downloadable Web backup, extraction or recovery.
+The existing installer-level stopped-volume backup is unchanged. All fixtures
+below contain synthetic bytes; a successful report deliberately leaves database,
+key, source-authentication, snapshot and restoration checks as `not_checked` and
+`restoration_ready: false`.
+
+| Focused gate | Actual result |
+| --- | --- |
+| Manifest | 358 passed, zero failures/errors/skips, strict Ruff and compile passed in `/tmp/open-node-backup-manifest-6799fe9.OTearUiK`. |
+| Root archive checks | 34 archive tests plus the 358 manifest tests passed together in `/tmp/open-node-backup-root-6799.W9sPvzsR/source-r3`; 392 passed, 1.52 s, strict Ruff/compile passed. |
+| Independent hostile ZIPs | 237 passed, zero failures/errors/skips, 0.80 s, strict Ruff/compile passed in `/tmp/open-node-backup-adversarial.uFEWVpUg/source-r2`. Includes real stdlib ZIPs and binary mutations, constructor-before-preflight observation with a positive control, short reads, ordinary embedded ZIP signatures and reordered central directories. |
+| Staging writer | 79 passed, zero failures/errors/skips, strict Ruff/compile passed in `/tmp/open-node-backup-writer-6799fe9.2KSxJine/source-r2`. Includes real streams, short writes/reads, exact membership, source growth around EOF, immutable declaration shapes, deterministic ZIP metadata and a real independent reader after finalization. |
+| Read-only CLI | 77 passed, zero failures/errors/skips, strict Ruff/compile passed in `/tmp/open-node-backup-cli.2LoZqVh4/source-r3`. Real module subprocesses cover human/JSON/help/error output, ASCII streams, ordinary-file restrictions, private anonymous staging, unchanged inputs and no application initialization. |
+
+These focused runs each retained the existing FastAPI/Starlette `httpx`
+deprecation warning; no warning filter was added. Initial import-group or
+line-length Ruff failures remain alongside the corrected sources. The root's
+first namespace preflight inspected shared sysfs and did not start tests; the
+corrected runner checks the actual netlink interfaces. An initial evidence
+verification used the wrong working directory for relative hash entries; its
+failed output is retained, and the corrected root check verified all 32 manifest,
+33 final hostile-ZIP and 34 original hostile-ZIP evidence entries. Original JUnit
+files were independently parsed to confirm every testcase and absence of failure,
+error or skipped elements.
+
+Reader code SHA-256 is
+`79ca4d00dc716f5bb75b47e27f10a382ef904069db69574b0cf849239b165a1d`;
+manifest code is
+`ef737a3d1e062e16eabb3a2e9a4246e41397226d76dc49b45b202c601488d1e1`;
+writer code is
+`69ba8b64c06dfbb1f99a6c73a3f3ddb97762536516ced5106c9c4fdecb4e92ab`.
+The root's R3 JUnit hash is
+`ff9979d21cc1455d6408e3dfbeb58a66267991ee85485274faf8f78c00662c8e`;
+the independent 237-case JUnit is
+`19dc12aceaef0b6517e86442c81a153693da5f6616b38c451f73f5353dc5657e`;
+the 79-case writer JUnit is
+`04c47a6ae80b5bcd6fa07f8632be82d3f24af8eee0e9b52900d9393269c1a675`.
+
+The root also exercised the real, unmodified resource limits on disk: exactly
+**1 GiB of payload across 4096 files**, including 4093 files of 65,537 bytes,
+two one-byte key placeholders and an 805,498,881-byte database placeholder.
+The initial I/O-check budget could reject this valid layout; the corrected
+524,288-check budget passed in **6.663 seconds**, peak RSS **35,792 KiB**, with
+the full archive digest independently reread and matched. No byte, file or time
+limit was patched for this gate. Evidence is
+`/tmp/open-node-backup-root-6799.W9sPvzsR/evidence-r3/large-boundary.json`.
+
+The same retained ordinary file supplied actual `pread` ranges to the writer,
+not generated read results. Writing the full 1 GiB and performing the independent
+archive validation took **12.152 seconds**, peak RSS **38,928 KiB**. The 4096
+source views made 24,575 bounded reads totaling exactly 1,073,741,824 bytes.
+The output's independently reread SHA-256 is
+`d8504e8916eab114c499a3e4ef924100916d1e64ff8c7b33e3c4ea8ef5f9dbc3`;
+source size, inode, modification and change timestamps stayed unchanged. Evidence
+is `evidence-writer-boundary-r1/writer-boundary.json` under the same root.
+
+The actual module CLI then validated that retained 1 GiB / 4096-file output,
+including its own private-copy stage, in **11.582 seconds**, peak RSS
+**29,892 KiB**, exit `0`. Its 13-field JSON matched the independently checked
+archive and manifest hashes; stderr was empty. Input metadata and SHA-256,
+all 558 unified source files and 6,344 dependency files stayed unchanged.
+The import observer recorded no application import attempts or loaded application
+modules, and no anonymous regular-file descriptor remained at normal exit.
+The root independently verified all 23 evidence hashes and read the native
+report, child resource record and external cleanup audit in
+`/tmp/open-node-backup-cli-max-r2.bf27ZWBl`; its `evidence.sha256` hash is
+`752cc3bbbff3c813bfce74ec90454977129c6b73596a259f35df8b32f057edab`.
+The first wrapper could not find `/usr/bin/time` and did not launch the CLI;
+that failure remains in `/tmp/open-node-backup-cli-max.sw02yMbE`. R2 measured
+the real child with POSIX `wait4`, without installing tools or changing budgets.
+
+These runs used private loopback-only namespaces and the existing backend venv
+read-only. Frozen source files and all 6,344 dependency files remained unchanged;
+the agents also checked the four dependency symlinks. Neither the production
+container nor the shared candidate checkout was upgraded. CLI, integrated full
+backend and exact-package release gates are recorded separately: module CLI is
+now verified, while full integration and the installed console entrypoint are
+still pending for this working tree.
+
+CLI code SHA-256 is
+`a1f520b79853e815211268e451118e009d56bdbfd7a42735473afa68f4586cca`,
+test code is
+`4809f859a48b6cfa55fcee120ea3a31989debd04bd5503dcd6dbfd660d5ca9dc`,
+and the native 77-case JUnit is
+`90e7e7f3fd29f61d12abb862207513234489e6d2f8e02dadbf370786908e73db`.
+The initial CLI static gate had two test line-length failures; R2 passed 57
+cases and failed three assertions about help text that argparse had wrapped.
+Those assertions now normalize display whitespace. A separate real edge case
+was fixed: an ASCII stderr could raise a second encoding exception while
+reporting a failure. The CLI now safely handles unwritable/unencodable error
+output and tests real ASCII subprocesses, without changing default Chinese
+messages or making JSON include sensitive declarations. All original evidence
+remains beside R3.
+
 ### Site text settings — published first slice
 
 This is the two-field branding slice in the [operator guide](system-settings.md)

@@ -22,3 +22,10 @@ encrypted bot configuration, offline preview, durable test delivery and
 package-expiry reminders. The first slice uses SQLite and a
 separate private notification key directory; it does not implement user binding,
 bot commands, payment or renewal approval.
+
+[Backup v1 format tools](../docs/backup-format.md) provide a bounded manifest
+parser, stored-ZIP validator, internal staging writer and the read-only
+`open-node-backup validate PATH [--json]` command. The CLI checks an anonymous
+private copy and never loads application settings, starts workers or restores
+files. It reports database, key, provenance, snapshot and restoration checks as
+not performed. This is not an online backup/download or recovery feature.

@@ -29,6 +29,7 @@ dependencies = [
 
 [project.scripts]
 open-node-admin = "open_node.admin:main"
+open-node-backup = "open_node.backup_cli:main"
 
 [project.optional-dependencies]
 dev = [

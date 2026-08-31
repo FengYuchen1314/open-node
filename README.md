@@ -63,6 +63,14 @@ versioned atomic saves and no license gate. Probe-only titles and security
 settings remain independent.
 This is the two-field first slice, not complete general-settings parity.
 
+[Backup v1 format tools](docs/backup-format.md) add strict manifest/ZIP checking,
+an internal staging writer and `open-node-backup validate PATH [--json]` with
+Chinese output. The command checks a private copy without loading application
+configuration or restoring data. Passing structure and hashes does not verify
+the database, keys, provenance or recoverability. Online snapshots, encryption,
+Web download and restore remain unfinished; the existing stopped-volume
+installer backup is unchanged.
+
 Subscribers use the separate `/account` portal. Administrators provision their
 login passwords directly or issue a high-entropy, single-use
 [registration invitation](docs/registration-invitations.md) bound to an existing
