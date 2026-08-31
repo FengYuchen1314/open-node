@@ -97,10 +97,109 @@ the real child with POSIX `wait4`, without installing tools or changing budgets.
 These runs used private loopback-only namespaces and the existing backend venv
 read-only. Frozen source files and all 6,344 dependency files remained unchanged;
 the agents also checked the four dependency symlinks. Neither the production
-container nor the shared candidate checkout was upgraded. CLI, integrated full
-backend and exact-package release gates are recorded separately: module CLI is
-now verified, while full integration and the installed console entrypoint are
-still pending for this working tree.
+container nor the shared candidate checkout was upgraded.
+
+The unified full-backend run used the 558-file R4 snapshot copied into
+`/tmp/open-node-backup-backend-full.GsvPgZu8/source-r1`. Strict Ruff and compile
+passed; the original full pytest execution passed **3285 tests**, zero
+failures/errors/skips, **924.67 seconds**, including all 785 new backup cases
+and the six opt-in real external-fetch TLS cases. The root independently parsed
+the native JUnit and rechecked every frozen file against the R4 manifest. JUnit
+SHA-256 is `9e7019a500cc11572c27b5a312f59028211867883aed32d3bcb05f4ba98a55cc`;
+the log is `74687a90d035ebf3e8a5f052c12fedb06dda49df71e61df71b8b5b852510a081`.
+
+The original full-tree postcheck exited `1`: the private test tree gained six
+certificate `.pyc` files, `data/open-node.db` and `data/certificates/worker.lock`.
+None of the 558 frozen files changed or disappeared. This is not reported as an
+all-zero runner result, and no generated artifact or original exit record was
+deleted. A separate read-only post-audit exited `0`: all original source and
+dependency content, four dependency symlinks and the original R4 reference
+matched; PID 2887753 and its namespace had no remaining holders. All eight
+additions are private root-owned mode `0600`. Their timestamps and source
+paths match existing certificate subprocess bytecode generation and default
+application/test state creation; no filesystem syscall trace was taken, so an
+exact first-writer PID is not claimed. `post-audit-notes.md` retains that
+attribution and its limits. The root verified all 71 evidence hashes and all
+13 final-chain entries; the manifests are respectively
+`c19d9d8abea9800f0c1eed651ea69cce9ea8bbdbca0515be462b763d7b4f29c8` and
+`83a4a0bddfaa3c1368fdb87ddee091abdf16189c3f8621bbab107281842cd231`.
+This post-audit does not turn the original whole-tree runner failure into a pass.
+The installed console and exact-Git package gates were still pending when
+the initial candidate commit `2a28103` was created; their later results follow.
+
+The working-tree image was then built with the normal Dockerfile as image
+`sha256:76eac71df12a1973ab56e89fa0ed7743cdee0ecdf5c55cf2d1bde50751c81c94`,
+with the explicit non-Git label `working-tree-6799fe9-backup-v1-r4`.
+`/tmp/open-node-backup-image-r4.S2FuV1DN/evidence/report.json` passed all three
+phases: installed source/package comparison, 18 actual CLI/guard cases and a
+separate fresh default application. All 110 installed Python files match the
+frozen source; the 106 pre-existing modules and 40 frontend files match the old
+exact `100d93f` image byte-for-byte. Only package `METADATA`, `RECORD` and
+`entry_points.txt` intentionally differ. The root read the native CLI and app
+results: guards have negative controls, invalid files fail with fixed errors,
+valid synthetic bytes leave database/key/recovery checks unverified, and CLI
+calls create no application state. The separate app passes health/meta/branding
+and HTML SPA routing, while non-HTML deep links still return `404`.
+
+These containers used UID/GID 10001, no network, a read-only root, dropped
+capabilities and private tmpfs. All three stopped normally with exit `0`, no
+OOM kill and no remaining owned containers or volumes. R1–R3 remain failed
+fixture runs: help wrapping, CPython's ASCII stderr backslash escaping, and a
+non-HTML request wrongly expecting the HTML-only SPA fallback. Corrections were
+limited to the external test helpers; product code was not changed or retagged.
+R1's two idle keepers required daemon termination with exit `137`; later helpers
+handle SIGTERM and require normal exits. The exact-Git build is separate.
+
+The clean detached 558-file checkout at
+`/tmp/open-node-backup-commit-2a281032.HIzydE1B/source` then produced image
+`sha256:642bc4a8ee1069aaa87aed00ff8291fde34c3e38a66acd03c5678ac641cb9d43`
+with the full `2a2810325e092b760481e427ea500245d01a3884` OCI revision.
+This is a fresh normal Dockerfile build, not a retag. Only two non-build-input
+documents differ from frozen R4; all Docker inputs and all installed Python,
+frontend and package metadata bytes match the working image. The same frozen
+helpers passed all 18 actual CLI/guard cases and the separate fresh app checks.
+All three containers stopped with exit `0`, no OOM, and no owned containers,
+volumes or processes remained. Source, fixtures, dependencies, production,
+the shared checkout and both older comparison images stayed unchanged.
+
+The root independently checked every entry in both final evidence manifests:
+184 entries at `open-node-backup-image-r4.S2FuV1DN/evidence/final-evidence.sha256`
+hash to `45baf9dbac7134bc2921026eefd5ec5c6675627643e980cb38527b3a5e9bff61`;
+224 entries at `open-node-backup-commit-2a281032.HIzydE1B/evidence/final-evidence.sha256`
+hash to `49e0ebfd34482616f275107931488f10b32f3dd76b9e030ba465b5f8469ddd20`.
+Both paths are under `/tmp`. The exact gate's native `report.json` hashes to
+`823daea25a1c0cd013a85e06ea009c02734509e65b28826e93e92dba5e7fa8c5`.
+An initial exact-wrapper Ruff line-length failure was corrected only in the
+external helper and remains in the evidence; it did not run product checks.
+
+Candidate commit `2a2810325e092b760481e427ea500245d01a3884` also passed all
+four hosted [CI jobs](https://github.com/FengYuchen1314/open-node/actions/runs/33377433229):
+Backend, Agent, Frontend and Probe Worker. This clean checkout check is separate
+from the VPS run with all six opt-in TLS cases enabled.
+After the independent exact-image audit, the same commit was fast-forwarded
+to `main`; both remote branch refs were verified. Production was not upgraded.
+
+The default Compose `/tmp` is only 64 MiB; the format maximum is not a default
+deployment capacity promise. An independent real capacity gate used the same
+immutable working image, its default entrypoint and UID 10001, and a synthetic
+73,401,117-byte ZIP with 70 MiB of payload. With a 64 MiB tmpfs, the installed
+CLI wrote 67,108,864 bytes and received actual kernel `ENOSPC`: exit `1`, empty
+stdout and only the fixed Chinese error. With a separate 128 MiB tmpfs, the
+same input passed, exit `0`, still `restoration_ready: false`. These were two
+real CLI executions, not injected errors. Host `strace` observed `O_TMPFILE`,
+the failing `write` and descriptor closure without changing container
+capabilities. Both cases restored all temporary space, created no application
+database/key state, and left input SHA-256 and complete stat unchanged.
+
+Evidence is `/tmp/open-node-backup-capacity.UPRseCPU`. The root independently
+checked the 179-entry `capacity-artifacts.sha256`
+(`328125554bd4bb945b214e2649d6d36fd3cef4e066d43ada044479af654b2803`)
+and 12-entry `final-chain.sha256`
+(`b9f8b1d7167029dd7524cceabe5242dd911c4c323798007351cf26c874cabcf7`),
+read both native observations and the independent audit, and checked the raw
+syscall evidence. Source, dependencies and the image stayed unchanged; owned
+containers and processes were removed. R1's observer-selector failure remains
+recorded and did not invoke the CLI. R2 only fixed that external selector.
 
 CLI code SHA-256 is
 `a1f520b79853e815211268e451118e009d56bdbfd7a42735473afa68f4586cca`,
