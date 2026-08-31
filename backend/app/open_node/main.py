@@ -41,6 +41,11 @@ from open_node.services.notification_worker import NotificationWorker
 from open_node.services.notifications import NotificationStore
 from open_node.services.probe_stream import PublicProbeStreamManager
 from open_node.services.renewals import RenewalStore
+from open_node.services.restore_state import (
+    RestoreIsolationMiddleware,
+    RestoreState,
+    RestoreStateError,
+)
 from open_node.services.secure_channel import AgentIdentity, decode_public_key
 from open_node.services.server_traffic import ServerTrafficWorker
 from open_node.services.subscriber_auth import SubscriberAuthStore
@@ -71,6 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) -> FastAPI:
+    restore_state = RestoreState(active_settings.database_url)
     identity = (
         AgentIdentity.load(active_settings.agent_identity_file)
         if active_settings.agent_identity_file
@@ -79,6 +85,11 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
 
     @asynccontextmanager
     async def lifespan(app):
+        if restore_state.blocked:
+            # Do not even construct workers: startup recovery can alter local
+            # webroots or create remote commands. A review does not lift this gate.
+            yield
+            return
         with backup_operation(backup_writes):
             worker = CertificateWorker(
                 app.state.certificates,
@@ -291,6 +302,14 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             headers=headers,
         )
 
+    @app.exception_handler(RestoreStateError)
+    async def invalid_restore(_request, _exc):
+        return JSONResponse(status_code=409, content={
+            "code": "restore_state_unavailable",
+            "detail": "恢复记录不匹配或不可用，请刷新状态；必要时停止服务检查数据目录。",
+            "license_required": False,
+        }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=active_settings.cors_origins,
@@ -301,6 +320,10 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.add_middleware(
         BackupHTTPMiddleware, barrier=backup_writes, api_prefix=active_settings.api_prefix
     )
+    app.add_middleware(
+        RestoreIsolationMiddleware, state=restore_state, api_prefix=active_settings.api_prefix
+    )
+    app.state.restore_state = restore_state
     app.state.settings = active_settings
     # This barrier belongs to the app, not a single lifespan context. Actual
     # worker references retain it after cancellation; idle instances use the

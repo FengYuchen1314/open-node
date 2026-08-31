@@ -51,7 +51,7 @@ describe("administrator backup workspace", () => {
     renderUi(<StrictMode><BackupsView /></StrictMode>); await flush();
     expect(button("刷新备份状态").disabled).toBe(false); expect(screen.getByRole("heading", { name: "备份与恢复" })).toBeTruthy();
     expect(screen.getByText(/这里只接收 age 公开接收者公钥/)).toBeTruthy();
-    expect(screen.getByText(/当前不提供上传或一键恢复/)).toBeTruthy();
+    expect(screen.getByText(/浏览器上传恢复、旧版 mmwx 备份和 PostgreSQL 迁移暂不支持/)).toBeTruthy();
     expect(screen.getByText(/加密包保留 15 分钟，最多保留两份/)).toBeTruthy();
     expect(document.querySelector('input[type="file"]')).toBeNull(); expect(createBackup).not.toHaveBeenCalled();
   });

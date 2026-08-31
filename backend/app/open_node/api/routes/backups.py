@@ -10,6 +10,7 @@ from starlette.responses import StreamingResponse
 from open_node.api.auth import SESSION_COOKIE
 from open_node.api.backup import BackupAPIRoute
 from open_node.domain.backup_jobs import BackupCreateRequest, BackupJobRead, BackupJobsRead
+from open_node.domain.restore import RestoreReviewRequest, RestoreStatus
 from open_node.services.backup_authorization import backup_session_hash
 from open_node.services.backup_jobs import BackupJobError
 from open_node.services.backup_runtime import run_in_backup_threadpool
@@ -65,7 +66,7 @@ def _invalid_constant(_value):
     raise ValueError()
 
 
-async def _payload(request: Request) -> BackupCreateRequest:
+async def _payload(request: Request, model=BackupCreateRequest):
     # The administrator dependency checks identity, Origin and CSRF first.
     if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != (
         "application/json"
@@ -77,7 +78,7 @@ async def _payload(request: Request) -> BackupCreateRequest:
             raise BackupJobError("backup_invalid_request", 413)
         content.extend(chunk)
     try:
-        return BackupCreateRequest.model_validate(json.loads(
+        return model.model_validate(json.loads(
             content.decode("utf-8"), object_pairs_hook=_unique_object,
             parse_constant=_invalid_constant,
         ))
@@ -88,13 +89,43 @@ async def _payload(request: Request) -> BackupCreateRequest:
 @router.get("", response_model=BackupJobsRead)
 def list_backups(request: Request):
     manager = request.app.state.backup_jobs
-    available = manager is not None and manager.available
+    recovery = request.app.state.restore_state.read()
+    available = not recovery.blocked and manager is not None and manager.available
     return BackupJobsRead(
         available=available,
         unavailable_code=None if available else "backup_worker_unavailable",
         jobs=manager.list_jobs(_owner(request)) if available else [],
         requires_two_factor=request.app.state.auth.security().totp_enabled,
+        recovery=recovery,
     )
+
+
+@router.get("/restore-review", response_model=RestoreStatus)
+def restore_status(request: Request):
+    return request.app.state.restore_state.read()
+
+
+def _review(request: Request, payload: RestoreReviewRequest):
+    from open_node.services.restore_state import RestoreStateError
+
+    with request.app.state.backup_submission_lock:
+        state = request.app.state.restore_state
+        current = state.read()
+        if not current.blocked or not current.record or current.record.id != payload.id:
+            raise RestoreStateError()
+        if current.restart_required:
+            return current  # Same restore: no second consumption of an MFA code.
+        request.app.state.backup_authorizer.issue(
+            request.cookies[SESSION_COOKIE], payload.password.get_secret_value(),
+            payload.code.get_secret_value(),
+        )
+        return state.review(payload.id)
+
+
+@router.post("/restore-review", response_model=RestoreStatus)
+async def review_restore(request: Request):
+    payload = await _payload(request, RestoreReviewRequest)
+    return await run_in_backup_threadpool(_review, request, payload)
 
 
 def _create(request: Request, payload: BackupCreateRequest):

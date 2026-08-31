@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validBackupId, validBackupRecipient, type BackupCreateRequest, type BackupJob } from "../domain/backups";
 import { authState } from "./auth";
-import { BackupRequestError, backupDownloadUrl, backupErrorMessage, createBackup, deleteBackup, getBackupJob, getBackups, newBackupRequestId } from "./backups";
+import { BackupRequestError, backupDownloadUrl, backupErrorMessage, createBackup, deleteBackup, getBackupJob, getBackups, newBackupRequestId, reviewRestore } from "./backups";
 
 const id = "01234567-89ab-4cde-8fab-0123456789ab";
 const recipient = `age1${"q".repeat(58)}`;
@@ -14,6 +14,18 @@ beforeEach(() => { authState.session = { configured: true, authenticated: true, 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe("administrator backup requests", () => {
+  it("parses restore metadata and accepts only the matching reviewed receipt", async () => {
+    const recovery = { blocked: true, restart_required: true, record: { version: 1, id, status: "reviewed", created_at: job.created_at,
+      archive_sha256: "a".repeat(64), invalidated_sessions: 2, cancelled_agent_commands: 3,
+      cancelled_certificate_jobs: 4, quarantined_files: 0, reviewed_at: job.created_at } };
+    expect((await getBackups(vi.fn<typeof fetch>().mockResolvedValue(response({ ...listing, recovery })))).recovery).toEqual(recovery);
+    const proof = { id, password: "PRIVATE-password", code: "123456", confirm_original_stopped: true as const,
+      confirm_configuration: true as const, confirm_trusted_backup: true as const };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(recovery));
+    expect(await reviewRestore(proof, fetcher)).toEqual(recovery);
+    expect(fetcher).toHaveBeenCalledWith("/api/v1/backups/restore-review", expect.objectContaining({ method: "POST", body: JSON.stringify(proof) }));
+    await expect(reviewRestore(proof, vi.fn<typeof fetch>().mockResolvedValue(response({ ...recovery, restart_required: false })))).rejects.toBeInstanceOf(BackupRequestError);
+  });
   it("uses existing cookie/CSRF authentication, exact creation fields and a matching 202 receipt", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(job, 202)); vi.stubGlobal("fetch", fetcher);
     expect(await createBackup(payload)).toEqual(job);

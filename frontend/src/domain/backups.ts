@@ -28,6 +28,33 @@ export interface BackupsOverview {
   ttl_seconds: 900;
   requires_two_factor: boolean;
   restoration_supported: false;
+  offline_restoration_supported?: true;
+  recovery?: RestoreStatus;
+}
+
+export interface RestoreStatus {
+  blocked: boolean;
+  restart_required: boolean;
+  record: {
+    version: 1;
+    id: string;
+    status: "review_required" | "reviewed";
+    created_at: string;
+    archive_sha256: string;
+    invalidated_sessions: number;
+    cancelled_agent_commands: number;
+    cancelled_certificate_jobs: number;
+    quarantined_files: number;
+    reviewed_at: string | null;
+  } | null;
+}
+export interface RestoreReviewRequest {
+  id: string;
+  password: string;
+  code: string;
+  confirm_original_stopped: true;
+  confirm_configuration: true;
+  confirm_trusted_backup: true;
 }
 
 export interface BackupCreateRequest {

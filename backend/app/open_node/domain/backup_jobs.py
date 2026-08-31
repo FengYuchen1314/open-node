@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from open_node.domain.restore import RestoreStatus
+
 
 class BackupCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
@@ -44,4 +46,7 @@ class BackupJobsRead(BaseModel):
     max_completed: Literal[2] = 2
     ttl_seconds: Literal[900] = 900
     requires_two_factor: bool
+    # This flag describes Web upload, not the separately available offline CLI.
     restoration_supported: Literal[False] = False
+    offline_restoration_supported: Literal[True] = True
+    recovery: RestoreStatus = Field(default_factory=RestoreStatus)

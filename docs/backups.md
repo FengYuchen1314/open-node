@@ -1,8 +1,8 @@
-# 网页加密备份
+# 备份与恢复
 
 管理员可在“备份与恢复”页面创建本控制面的加密备份、查看进度、下载或删除临时文件。
-这不是远端 Agent 的整机备份，也不是在线恢复入口。恢复功能尚未交付，界面不会将
-“生成成功”显示为“恢复就绪”。
+支持把 v1 备份离线恢复到新目录，再登录网页复核并重启。它不是远端 Agent 的整机备份，
+也不提供浏览器上传或在线覆盖恢复。“生成成功”仍不代表某份备份已经做过恢复演练。
 
 ## 创建和下载
 
@@ -50,6 +50,99 @@ open-node-backup validate backup.zip.age --identity backup-identity.txt --json
 该命令验证完整解密认证和包结构，不执行恢复，也不能证明备份发送者身份。
 新网页包不是安装器的停服整卷 tar 包，不能直接代入后者的解包命令。
 现有停服整卷备份的用法仍见[部署说明](deployment.md)。
+
+## 离线恢复到新目录
+
+参考官方[管理员恢复及首次初始化恢复处理器](https://github.com/tajiaoyezi/miaomiaowuX/blob/c12ce653bc07fe30426b7dfcb85076974b7be0e0/internal/handler/backup.go#L342)。
+本项目采用新目录导入和首次启动复核，不直接覆盖在线数据库。此入口只接受本项目 v1 包，
+不接受原版 mmwx ZIP、安装器 tar 或 PostgreSQL dump；后两种数据库之间的迁移尚未实现。
+包需具备完整的已知覆盖范围和兼容的应用表结构；仅通过通用 v1 格式校验的手工包不一定可恢复。
+
+先停止原实例，并保留原数据目录/卷、镜像和配置用于回退。备份必须来自可信来源：age
+认证能发现密文损坏，但不能证明发送者身份，也不能保证数据符合您的业务预期。
+
+在**包含本轮恢复代码**且配有固定官方 age 的 Linux 环境运行：
+
+```sh
+open-node-backup restore backup.zip.age \
+  --identity backup-identity.txt \
+  --totp-key-file original-totp.key \
+  --output /srv/private-restore/new-data \
+  --confirm-stopped --confirm-trusted-source --json
+```
+
+`/srv/private-restore` 须事先存在、属于运行命令的用户且权限为 `0700`；`new-data` 必须不存在。
+age 私钥和 TOTP 密钥文件需属于同一用户，权限为 `0400` 或 `0600`，不可为符号链接或硬链接。
+TOTP 文件只存原 `OPEN_NODE_SUBSCRIBER_TOTP_KEY` 的值，不是六位验证码、恢复码或新生成的密钥。
+备份中没有 TOTP 数据时可以省略该参数；有已启用或待绑定的 TOTP 时，缺失/错误密钥会拒绝导入。
+如已有未加密的 v1 ZIP，可省略 `--identity`，但须特别注意明文文件保管。
+
+导入会检查归档结构、文件摘要、SQLite 完整性/外键及已知加密依赖。成功后新目录包含：
+
+- 数据库、证书/外部订阅/通知密钥，及已配置的 Agent 控制面身份。
+- `restore.env`：默认容器路径和提供的 TOTP 密钥，权限 `0600`，不要提交到 Git 或贴到日志。
+- `.open-node-restore.json`：首次启动复核记录，不要删除或手工修改来跳过复核。
+- `.restore-quarantine/`：旧证书任务和 HTTP-01 webroot 文件，只留作人工核对，不会自动执行清理。
+
+不会覆盖已有目录。发布失败时只清理本次随机暂存目录；若发布后的磁盘同步或终端输出失败，
+可能已经存在完整新目录，请先检查恢复记录，不能把非零退出码当作“完全没导入”。
+上限仍受 v1 格式（合计 1 GiB）和检查时间限制；临时空间与新数据一起应预留至少三倍包大小，
+另留数据库日志余量。CLI 使用 `/tmp`，不会自动扩大原容器的 64 MiB tmpfs。
+
+## Docker 使用方式
+
+使用您已经从对应源码构建的镜像标记，不要使用尚不含恢复代码的旧生产镜像。
+镜像运行用户是 `10001:10001`。可以事先准备三个属于该用户的 `0700` 目录：
+`/srv/open-node-restore/input`、`output`、`tmp`。把备份和所需密钥放入 input，密钥设为 `0600`；
+其中 tmp 使用磁盘空间，不使用小容量内存盘。确认原实例停止后执行：
+
+```sh
+export OPEN_NODE_RESTORE_IMAGE=open-node:local # 替换为实际构建的标记
+docker run --rm --network none --read-only --user 10001:10001 \
+  --cap-drop ALL --security-opt no-new-privileges:true \
+  --mount type=bind,src=/srv/open-node-restore/input,dst=/input,readonly \
+  --mount type=bind,src=/srv/open-node-restore/output,dst=/output \
+  --mount type=bind,src=/srv/open-node-restore/tmp,dst=/tmp \
+  --entrypoint open-node-backup "$OPEN_NODE_RESTORE_IMAGE" \
+  restore /input/backup.zip.age --identity /input/backup-identity.txt \
+  --totp-key-file /input/original-totp.key --output /output/new-data \
+  --confirm-stopped --confirm-trusted-source
+```
+
+从项目根目录使用单独的[恢复实例 Compose 模板](../deploy/compose.restore.example.yaml)：
+
+```sh
+export OPEN_NODE_RESTORE_DATA_DIR=/srv/open-node-restore/output/new-data
+docker compose -f deploy/compose.restore.example.yaml up -d
+```
+
+模板不会构建/拉取镜像，也不会自动创建源目录，仅监听回环地址。仍须接好原来的 HTTPS
+反向代理、可信代理、公开地址等部署配置；如需临时 HTTP 登录，请按部署文档配置 Cookie，
+不要把明文管理接口直接暴露到公网。单 Web 进程是支持的运行方式。
+
+## 首次启动复核与回退
+
+打开 `/backups`（隔离时首页也跳转到此处），用备份中的管理员账户登录。
+旧管理员/用户会话和登录挑战已清除，未完成的 TOTP 绑定已取消，原 Agent 安装票据已撤销。
+未完成的 Agent 命令与证书任务已终止，执行中的变更集转为待复核；原有执行历史保留。
+通知发送中的结果记为未知，未发队列取消。证书自动续签/部署和通知开关均关闭，需另行开启。
+
+此时只放行管理员认证、备份状态/复核和所需页面资源；Agent、用户订阅和所有自动任务都暂停。
+核对原实例已停止、部署配置/密钥、用户套餐与节点权限、远端状态和来源后，重新输入当前管理员密码
+及启用的两步验证码/恢复码保存复核。页面回执丢失可刷新状态，不会自动重复提交。
+
+保存复核**不会**启用当前进程，须显式重启：
+
+```sh
+docker compose -f deploy/compose.restore.example.yaml restart open-node
+```
+
+重启后按恢复的数据重新协调订阅权限、配额和节点状态，可能生成新的 Agent 命令，包括继续处理
+未完成的用户/节点移除流程；这不是对旧远端状态的证明。需要核对远端 Agent 的控制面身份、地址、
+已执行但未回报的命令以及残留 DNS/HTTP-01 挑战资源。关闭的证书/通知自动功能仍需管理员分别开启。
+
+若发现问题，先停止新实例，再用原镜像和原目录/卷启动原实例，不能两套同时控制同一批 Agent。
+启用新实例后发生的数据库写入和远端操作不会随着切回原数据库自动回滚。原目录与隔离文件不会被此流程删除。
 
 官方依据、快照范围和未覆盖的恢复语义见[备份设计](backup-plan.md)及
 [一致快照说明](backup-runtime.md)。本功能免费，不需要许可证。

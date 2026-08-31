@@ -6,6 +6,7 @@ import { authState, type OperatorSession } from "../../services/auth";
 import { BackupRequestError, backupCodeMessage, backupDownloadUrl, backupErrorMessage, createBackup, deleteBackup, getBackupJob, getBackups, newBackupRequestId } from "../../services/backups";
 import { useAsyncScope } from "../hooks/useAsyncScope";
 import { useAdministratorSession } from "../hooks/useSession";
+import RestoreReviewPanel from "./RestoreReviewPanel";
 
 const labels: Record<BackupStatus, string> = {
   queued: "等待执行", running: "正在创建", ready: "可下载", failed: "创建失败", expired: "已过期", cancelled: "已取消",
@@ -138,11 +139,12 @@ function BackupWorkspace({ operator }: { operator: OperatorSession }) {
 
   return <section className="page-shell" aria-label="备份与恢复">
     <div><Typography.Title level={2}>备份与恢复</Typography.Title>
-      <Typography.Paragraph type="secondary">创建本控制面的 age 加密备份，并查看后台任务状态。当前不提供网页恢复。</Typography.Paragraph></div>
+      <Typography.Paragraph type="secondary">创建 age 加密备份、查看任务状态，或完成离线导入后的首次恢复复核。</Typography.Paragraph></div>
+    {overview?.recovery?.blocked && <RestoreReviewPanel key={overview.recovery.record?.id} initial={overview.recovery} requiresTwoFactor={overview.requires_two_factor} operator={operator} />}
     <Alert type="warning" showIcon title="备份包含密钥和登录会话，请妥善保管。"
       description="这里只接收 age 公开接收者公钥。恢复私钥由您自行保管，请勿上传；丢失对应私钥将无法解密。" />
     {notice && <Alert type={notice.type} showIcon title={notice.text} role="alert" />}
-    {overview && !overview.available && <Alert type="warning" showIcon title={backupCodeMessage(overview.unavailable_code)} />}
+    {overview && !overview.available && !overview.recovery?.blocked && <Alert type="warning" showIcon title={backupCodeMessage(overview.unavailable_code)} />}
     <Card title="创建加密备份">
       <Form layout="vertical" className="form-narrow" onFinish={() => {
         if (canCreate) { setPassword(""); setCode(""); setConfirmed(false); setCreateOpen(true); }
@@ -192,8 +194,8 @@ function BackupWorkspace({ operator }: { operator: OperatorSession }) {
       <Typography.Paragraph type="secondary" style={{ marginTop: 16, marginBottom: 0 }}>任务状态每 5 秒通过只读请求刷新。下载仍需服务器验证当前会话；“可下载”不代表已经完成恢复验证。</Typography.Paragraph>
     </Card>
     <Card title="恢复说明">
-      <Typography.Paragraph>当前不提供上传或一键恢复。本页生成的是 age 加密 v1 控制面备份，不是安装器的停服整卷归档。</Typography.Paragraph>
-      <Typography.Paragraph style={{ marginBottom: 0 }}>恢复应先停止服务，在独立空目录或空卷中核对备份格式、数据库、密钥与部署配置，再由管理员确认后续操作。不要覆盖在线实例；完整恢复流程尚未实现，远端 Agent 的文件与信任关系不在本页备份范围内。</Typography.Paragraph>
+      <Typography.Paragraph>支持使用 open-node-backup restore 将本页的 age 加密 v1 备份离线导入新目录，然后在此完成管理员复核并显式重启。命令要求确认原实例已停止、备份来源可信；不会覆盖已有目录。私钥只在服务器命令行使用，不上传到本页。</Typography.Paragraph>
+      <Typography.Paragraph style={{ marginBottom: 0 }}>浏览器上传恢复、旧版 mmwx 备份和 PostgreSQL 迁移暂不支持。本格式不同于安装器的停服整卷归档，远端 Agent 的文件与信任关系不在备份范围内。完整操作见项目 docs/backups.md。</Typography.Paragraph>
     </Card>
     <Modal title="确认创建加密备份" open={createOpen} onCancel={closeCreate} destroyOnHidden maskClosable={false} closable={busy !== "create"} keyboard={busy !== "create"}
       footer={<Space wrap><Button aria-label="取消创建备份" disabled={Boolean(busy)} onClick={closeCreate}>取消</Button>

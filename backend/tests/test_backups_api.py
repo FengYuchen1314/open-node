@@ -57,6 +57,8 @@ def test_backup_index_is_private_and_describes_actual_scope(client):
     assert response.json() == {
         "available": True, "unavailable_code": None, "jobs": [], "max_completed": 2,
         "ttl_seconds": 900, "requires_two_factor": False, "restoration_supported": False,
+        "offline_restoration_supported": True,
+        "recovery": {"blocked": False, "restart_required": False, "record": None},
     }
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"

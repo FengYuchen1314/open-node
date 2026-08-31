@@ -19,6 +19,7 @@ frontend/.vite/
 .env
 .env.*
 !.env.example
+restore.env
 .dev.vars
 probe-worker/.dev.vars
 

@@ -2,6 +2,7 @@ import {
   backupErrorCodes, backupStatuses, validBackupId, validBackupRecipient,
   type BackupCreateRequest, type BackupDisplayCode, type BackupErrorCode,
   type BackupJob, type BackupsOverview, type BackupStatus,
+  type RestoreReviewRequest, type RestoreStatus,
 } from "../domain/backups";
 import { authenticatedFetch } from "./auth";
 
@@ -82,7 +83,36 @@ function overview(value: unknown): BackupsOverview {
   const jobs = row.jobs.map(value => job(value));
   if (new Set(jobs.map(item => item.id)).size !== jobs.length) return invalid();
   return { available: row.available, unavailable_code: code(row.unavailable_code), jobs,
-    max_completed: 2, ttl_seconds: 900, requires_two_factor: row.requires_two_factor, restoration_supported: false };
+    max_completed: 2, ttl_seconds: 900, requires_two_factor: row.requires_two_factor, restoration_supported: false,
+    ...(row.offline_restoration_supported === true ? { offline_restoration_supported: true as const } : {}),
+    ...(row.recovery === undefined ? {} : { recovery: restoreStatus(row.recovery) }) };
+}
+function restoreStatus(value: unknown): RestoreStatus {
+  const row = record(value);
+  if (typeof row.blocked !== "boolean" || typeof row.restart_required !== "boolean") return invalid();
+  if (row.record === null) {
+    if (row.blocked || row.restart_required) return invalid();
+    return { blocked: false, restart_required: false, record: null };
+  }
+  const detail = record(row.record);
+  if (detail.version !== 1 || !validBackupId(detail.id)
+    || !["review_required", "reviewed"].includes(detail.status as string)
+    || typeof detail.archive_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(detail.archive_sha256)) return invalid();
+  for (const key of ["invalidated_sessions", "cancelled_agent_commands", "cancelled_certificate_jobs", "quarantined_files"]) {
+    if (typeof detail[key] !== "number" || !Number.isSafeInteger(detail[key]) || detail[key] < 0) return invalid();
+  }
+  const result: RestoreStatus = { blocked: row.blocked, restart_required: row.restart_required, record: {
+    version: 1, id: detail.id, status: detail.status as "review_required" | "reviewed",
+    created_at: instant(detail.created_at), archive_sha256: detail.archive_sha256,
+    invalidated_sessions: detail.invalidated_sessions as number,
+    cancelled_agent_commands: detail.cancelled_agent_commands as number,
+    cancelled_certificate_jobs: detail.cancelled_certificate_jobs as number,
+    quarantined_files: detail.quarantined_files as number,
+    reviewed_at: detail.reviewed_at === null ? null : instant(detail.reviewed_at),
+  } };
+  if (result.restart_required !== (result.blocked && detail.status === "reviewed")
+    || (detail.status === "review_required" && !result.blocked)) return invalid();
+  return result;
 }
 async function json(response: Response): Promise<unknown> {
   if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get("Content-Type") ?? "")) return invalid();
@@ -118,6 +148,18 @@ async function request<T>(path: string, init: RequestInit, status: number, parse
 }
 
 export const getBackups = (fetcher = authenticatedFetch): Promise<BackupsOverview> => request(base, {}, 200, overview, fetcher);
+export const getRestoreStatus = (fetcher = authenticatedFetch): Promise<RestoreStatus> => request(`${base}/restore-review`, {}, 200, restoreStatus, fetcher);
+export function reviewRestore(payload: RestoreReviewRequest, fetcher = authenticatedFetch): Promise<RestoreStatus> {
+  if (!validBackupId(payload.id) || !payload.password || payload.password.length > 1024 || payload.code.length > 64
+    || payload.confirm_original_stopped !== true || payload.confirm_configuration !== true || payload.confirm_trusted_backup !== true) return invalidInput();
+  const body = { id: payload.id, password: payload.password, code: payload.code,
+    confirm_original_stopped: true, confirm_configuration: true, confirm_trusted_backup: true };
+  return request(`${base}/restore-review`, { method: "POST", body: JSON.stringify(body) }, 200, value => {
+    const result = restoreStatus(value);
+    if (result.record?.id !== payload.id || !result.restart_required) return invalid();
+    return result;
+  }, fetcher);
+}
 export function getBackupJob(id: string, fetcher = authenticatedFetch): Promise<BackupJob> {
   if (!validBackupId(id)) return invalidInput();
   return request(`${base}/${id}`, {}, 200, value => job(value, id), fetcher);

@@ -225,7 +225,9 @@ def test_every_project_router_protects_sync_endpoints_before_dependency_construc
                 assert inspect.signature(route.endpoint) == inspect.signature(
                     original, eval_str=True
                 )
-    assert len(routers) == 34
+    # Preserve the discovery baseline without rejecting newly added routers;
+    # every discovered endpoint above must still have its write barrier wrapper.
+    assert len(routers) >= 38
     assert count > 100
     assert issubclass(CertificateRoute, BackupAPIRoute)
     for dependency in (require_administrator, require_subscriber, actor):

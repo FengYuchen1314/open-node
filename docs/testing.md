@@ -1,5 +1,44 @@
 # Testing
 
+## Offline restore and first-boot review — 2026-09-01
+
+Only synthetic data in private VPS mount/PID/network namespaces was used:
+`/tmp/open-node-restore.HnltFLbA/evidence`, `evidence-r2`, `evidence-r3`.
+Production, shared candidate and prior evidence were not changed.
+
+- R1: 161 adjacent backend checks passed, 6 CLI expectations failed, and all
+  12 new restore cases stopped at a fixture's incorrect command-creation status
+  (expected 202, actual 201). CLI help regained explicit validate-only wording;
+  invalid restore arguments retain the existing fixed safe argument error.
+- R2: all 12 restore cases and affected CLI selections passed: **23 passed,
+  66 deselected**. This includes actual official-age encryption/decryption,
+  missing/wrong TOTP refusal, new-directory publication, existing-target and
+  late-publication collision refusal, untouched source DB, discarded sessions,
+  certificate state/quarantine, fresh administrator proof, blocked HTTP/WS,
+  no worker construction before review and explicit restart activation.
+- R3: **7 passed, 113 deselected** covering the updated roundtrip with revoked
+  bootstrap tickets, view/trigger/generated-column refusal, strict persistent
+  marker parsing, Compose's real configuration parser, and the router regression.
+  One overlong assertion was wrapped afterward; no behavioral change.
+- Frontend R1: **20 passed** across backup/restore views and the service parser;
+  R3: **13 passed** in the affected restore view and service files, adding two
+  cases (22 distinct tests overall). Password/code clearing, confirmation gates,
+  lost-receipt GET reconciliation, matching response IDs and late-session
+  isolation are covered. App/node type checks and the main build passed in R1;
+  final app type check passed in R3. No repeat browser or Docker image gate.
+
+The prior full hosted CI [33412367798](https://github.com/FengYuchen1314/open-node/actions/runs/33412367798)
+completed on `562413e`: Agent, Probe Worker and Frontend passed. Backend reported
+**4841 passed, 104 skipped, 1 failed** in 999.57s. Its only failure was the stale
+34-router count after adding four routers. The test now retains a minimum
+38-router discovery baseline and still checks every discovered route's wrapper
+and signature; that exact test passed in R3. The old run remains failed, not
+retroactively green. Official-age and other opt-in tests were actually exercised
+in their VPS gates; CI's skipped tests are not counted as passes.
+
+This implements the documented offline v1 restore workflow, not browser upload,
+initial-setup restore, legacy MMWX backup conversion or PostgreSQL migration.
+
 ## Online users/IP and Agent 0.3.0a1
 
 Focused VPS evidence: `/tmp/open-node-online.JUz2LGwv/evidence` and `evidence-r2`.

@@ -1,4 +1,4 @@
-"""Check or encrypt explicitly selected local packages without loading the application."""
+"""Check, encrypt or restore selected local packages without loading the application."""
 
 import argparse
 import hashlib
@@ -64,14 +64,17 @@ def _parser() -> argparse.ArgumentParser:
         prog="open-node-backup",
         usage=(
             "%(prog)s validate PATH [--identity KEYFILE] [--json]\n"
-            "      %(prog)s encrypt PATH --recipient AGEKEY --output FILE [--json]"
+            "      %(prog)s encrypt PATH --recipient AGEKEY --output FILE [--json]\n"
+            "      %(prog)s restore PATH --output NEWDIR [--identity KEYFILE] "
+            "[--totp-key-file FILE] --confirm-stopped --confirm-trusted-source [--json]"
         ),
         add_help=False,
         allow_abbrev=False,
         formatter_class=_HelpFormatter,
         description=(
-            "检查 v1 备份包结构和内容摘要，或加密已有 v1 包；"
-            "不解压、不恢复、不创建应用快照，也不加载应用配置。"
+            "检查、加密 v1 备份包，或离线恢复到新私有目录；不加载应用配置。"
+            "validate 只读检查，不解压、不恢复。"
+            "恢复前须停止原实例，保留原目录；恢复后登录 /backups 复核并重启。"
         ),
         epilog=(
             "输入仅限明确指定的本地普通文件，不接受标准输入或 URL。会先只读复制到匿名私有"
@@ -86,13 +89,13 @@ def _parser() -> argparse.ArgumentParser:
     parser._positionals.title = "位置参数"
     parser._optionals.title = "选项"
     parser.add_argument(
-        "action", choices=("validate", "encrypt"), metavar="{validate,encrypt}",
-        help="validate 只读检查；encrypt 加密已有包，不创建应用快照",
+        "action", choices=("validate", "encrypt", "restore"), metavar="{validate,encrypt,restore}",
+        help="validate 只读检查；encrypt 加密；restore 离线恢复到新目录",
     )
     parser.add_argument("path", metavar="PATH", help="要只读检查的本地文件路径")
     parser.add_argument(
         "--identity", metavar="KEYFILE", action=_UniqueValue,
-        help="仅用于 validate：当前用户私有的原生 age 私钥文件，不接受口令或插件",
+        help="用于 validate/restore：当前用户私有的原生 age 私钥文件",
     )
     parser.add_argument(
         "--recipient", metavar="AGEKEY", action=_UniqueValue,
@@ -100,8 +103,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output", metavar="FILE", action=_UniqueValue,
-        help="仅用于 encrypt：创建私有密文文件，已有路径一律拒绝",
+        help="encrypt 的新密文文件，或 restore 的新目录；已有路径一律拒绝",
     )
+    parser.add_argument("--totp-key-file", action=_UniqueValue, metavar="FILE",
+                        help="仅用于 restore：原实例的 TOTP Fernet 密钥文件，0400/0600")
+    parser.add_argument("--confirm-stopped", action="store_true", help="确认原实例已停止")
+    parser.add_argument("--confirm-trusted-source", action="store_true",
+                        help="确认备份来自可信来源")
     parser.add_argument("--json", action="store_true", help="只输出安全 JSON 汇总，不包含清单声明")
     parser.add_argument("-h", "--help", action="help", help="显示此帮助后退出")
     return parser
@@ -431,6 +439,26 @@ def _validate_encrypted_path(path: str, identity_path: str):
             return staged.report
 
 
+def _restore_path(args):
+    from open_node.services.backup_encryption import (
+        MAX_ENCRYPTED_ARCHIVE_BYTES,
+        decrypted_backup_archive,
+    )
+    from open_node.services.backup_restore import restore_backup_archive
+
+    key = _identity_bytes(args.totp_key_file).strip() if args.totp_key_file else None
+    if args.identity:
+        identity = _identity_bytes(args.identity)
+        with _held_input(args.path, 1, MAX_ENCRYPTED_ARCHIVE_BYTES) as (source, initial):
+            with decrypted_backup_archive(source, identity) as staged:
+                _unchanged(source, initial)
+                return restore_backup_archive(staged.stream, args.output, totp_key=key)
+    with _held_input(args.path, 22, MAX_ARCHIVE_BYTES) as (source, initial):
+        with tempfile.TemporaryFile(mode="w+b", dir="/tmp") as staged:
+            _copy_source(source.fileno(), initial, staged, time.monotonic() + COPY_SECONDS)
+            return restore_backup_archive(staged, args.output, totp_key=key)
+
+
 def _summary(report: BackupArchiveReport) -> dict[str, object]:
     # Never serialize report.manifest: its paths and source claims are untrusted input.
     return {name: getattr(report, name) for name in _REPORT_FIELDS}
@@ -477,7 +505,28 @@ def main(argv: list[str] | None = None) -> int:
     error = ERROR_MESSAGE
     try:
         args = _parser().parse_args(argv)
-        if args.action == "encrypt":
+        if args.action != "restore" and (
+            args.totp_key_file is not None or args.confirm_stopped or args.confirm_trusted_source
+        ):
+            raise _CLIError()
+        if args.action == "restore":
+            if not args.output or args.recipient or not (
+                args.confirm_stopped and args.confirm_trusted_source
+            ):
+                raise _CLIError()
+            from open_node.services.backup_restore import RESTORE_ERROR
+
+            error = RESTORE_ERROR
+            restored = _restore_path(args)
+            summary = {"restored": True, "review_required": True,
+                       "record": restored.model_dump(mode="json")}
+            human = (
+                "已恢复到指定的新私有目录，原实例未被修改。\n"
+                "旧会话已失效，未完成的 Agent 命令已终止；证书自动操作与通知已暂停。\n"
+                "请按恢复指南接入新数据目录与 restore.env，在 /backups 完成管理员复核，"
+                "再显式重启；远端状态仍需核对。\n"
+            )
+        elif args.action == "encrypt":
             error = ENCRYPT_ERROR_MESSAGE
             if not args.recipient or not args.output or args.identity is not None:
                 raise _CLIError()
