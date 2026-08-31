@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_inventory_store
 from open_node.domain.registration_invitations import (
     RegistrationInvitationCreate,
@@ -17,7 +18,11 @@ from open_node.services.registration_invitations import (
     RegistrationInvitationUnavailable,
 )
 
-router = APIRouter(prefix="/registration-invitations", tags=["registration invitations"])
+router = APIRouter(
+    route_class=BackupAPIRoute,
+    prefix="/registration-invitations",
+    tags=["registration invitations"],
+)
 
 
 @router.get("", response_model=RegistrationInvitationsResponse)

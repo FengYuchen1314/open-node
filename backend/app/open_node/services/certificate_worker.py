@@ -14,6 +14,8 @@ from time import time
 
 from sqlalchemy import select
 
+from open_node.services.backup_coordination import BackupWriteBarrier
+from open_node.services.backup_runtime import backup_operation, current_backup_child_fds
 from open_node.services.certificate_acme import ADMIN_ERRORS, fingerprint
 from open_node.services.certificate_http import WebrootChallenges, harden_work
 from open_node.services.certificate_remote import RemoteHTTP01
@@ -31,13 +33,21 @@ log = logging.getLogger(__name__)
 
 
 class CertificateWorker:
-    def __init__(self, store, connections):
-        self.store, self.connections = store, connections
-        self.settings = store.settings
-        self.webroots = WebrootChallenges(store.vault)
-        self.remote = RemoteHTTP01(store, connections)
+    def __init__(self, store, connections, *, backup_writes: BackupWriteBarrier | None = None):
+        self.backup_writes = (
+            backup_writes if backup_writes is not None else BackupWriteBarrier(None)
+        )
+        with backup_operation(self.backup_writes):
+            self.store, self.connections = store, connections
+            self.settings = store.settings
+            self.webroots = WebrootChallenges(store.vault)
+            self.remote = RemoteHTTP01(store, connections, backup_writes=self.backup_writes)
 
     def recover(self):
+        with backup_operation(self.backup_writes):
+            return self._recover()
+
+    def _recover(self):
         self.webroots.recover()
         self.remote.request_cleanup()
         with self.store.write() as db:
@@ -61,6 +71,10 @@ class CertificateWorker:
                     row.next_attempt = time() + 3600
 
     def schedule(self):
+        with backup_operation(self.backup_writes):
+            return self._schedule()
+
+    def _schedule(self):
         with self.store.session() as db:
             due = [
                 row.id
@@ -79,6 +93,10 @@ class CertificateWorker:
                 self.store.queue(identifier, "renew")
 
     async def deploy_pending(self):
+        with backup_operation(self.backup_writes):
+            return await self._deploy_pending()
+
+    async def _deploy_pending(self):
         with self.store.session() as db:
             candidates = list(
                 db.scalars(select(CertificateTarget).where(CertificateTarget.auto_deploy.is_(True)))
@@ -105,13 +123,21 @@ class CertificateWorker:
         while True:
             try:
                 # Inherited by lego, so a surviving child prevents a second worker after a crash.
-                with self.store.vault.lock("worker.lock", blocking=False) as lock_fd:
+                with contextlib.ExitStack() as locks:
+                    # Opening worker.lock may create private state. Protect that
+                    # short operation, not the worker lock's idle lifetime.
+                    with backup_operation(self.backup_writes):
+                        lock_fd = locks.enter_context(
+                            self.store.vault.lock("worker.lock", blocking=False)
+                        )
                     self.recover()
                     while True:
-                        await self.deploy_pending()
-                        await self.remote.drain()
-                        self.schedule()
-                        if await self.run_one(lock_fd):
+                        with backup_operation(self.backup_writes):
+                            await self.deploy_pending()
+                            await self.remote.drain()
+                            self.schedule()
+                            worked = await self.run_one(lock_fd)
+                        if worked:
                             continue
                         await asyncio.sleep(self.settings.certificate_poll_seconds)
             except asyncio.CancelledError:
@@ -121,6 +147,10 @@ class CertificateWorker:
                 await asyncio.sleep(self.settings.certificate_poll_seconds)
 
     async def run_one(self, lock_fd):
+        with backup_operation(self.backup_writes):
+            return await self._run_one(lock_fd)
+
+    async def _run_one(self, lock_fd):
         with self.store.write() as db:
             job = db.scalar(
                 select(CertificateJob)
@@ -223,6 +253,10 @@ class CertificateWorker:
         return True
 
     async def administer(self, row, job, lock_fd):
+        with backup_operation(self.backup_writes):
+            return await self._administer(row, job, lock_fd)
+
+    async def _administer(self, row, job, lock_fd):
         root = self.store.vault.root
         work = private_path(root, root / row.id)
         directory = job.parameters.get("directory_url", row.directory_url)
@@ -304,6 +338,10 @@ class CertificateWorker:
             private_path(root, request_path).unlink(missing_ok=True)
 
     async def obtain(self, row, provider, job, lock_fd):
+        with backup_operation(self.backup_writes):
+            return await self._obtain(row, provider, job, lock_fd)
+
+    async def _obtain(self, row, provider, job, lock_fd):
         if job.kind == "renew" and not job.force and not self.store.due(row):
             return None
         root = self.store.vault.root
@@ -396,6 +434,10 @@ class CertificateWorker:
         return None if current and data["serial"] == current["serial"] else data
 
     async def execute(self, args, environment, work, lock_fd):
+        with backup_operation(self.backup_writes):
+            return await self._execute(args, environment, work, lock_fd)
+
+    async def _execute(self, args, environment, work, lock_fd):
         # uvloop rejects Popen's umask option; exec preserves the lock FD and process group.
         mask = "0o022" if "--http.webroot" in args else "0o077"
         process = await asyncio.create_subprocess_exec(
@@ -410,7 +452,7 @@ class CertificateWorker:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
-            pass_fds=(lock_fd,),
+            pass_fds=tuple(dict.fromkeys((lock_fd, *current_backup_child_fds()))),
         )
         output = bytearray()
         try:
@@ -430,25 +472,35 @@ class CertificateWorker:
         finally:
 
             async def cleanup():
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGTERM)
-                if process.returncode is None:
-                    try:
-                        await asyncio.wait_for(process.wait(), 5)
-                    except TimeoutError:
-                        with contextlib.suppress(ProcessLookupError):
-                            os.killpg(process.pid, signal.SIGKILL)
-                        await process.wait()
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)
-                path = private_path(self.store.vault.root, work / "last-job.log")
-                fd = os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-                with os.fdopen(fd, "wb") as stream:
-                    stream.write(output[:262144])
+                # A copied ContextVar alone is not a retained lease. Keep a
+                # reference for this task through child reaping and log writes.
+                with backup_operation(self.backup_writes):
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGTERM)
+                    if process.returncode is None:
+                        try:
+                            await asyncio.wait_for(process.wait(), 5)
+                        except TimeoutError:
+                            with contextlib.suppress(ProcessLookupError):
+                                os.killpg(process.pid, signal.SIGKILL)
+                            await process.wait()
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    path = private_path(self.store.vault.root, work / "last-job.log")
+                    fd = os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+                    with os.fdopen(fd, "wb") as stream:
+                        stream.write(output[:262144])
 
             task = asyncio.create_task(cleanup())
             try:
                 await asyncio.shield(task)
             except asyncio.CancelledError:
-                await task
+                # Repeated cancellation must not interrupt cleanup or release
+                # the operation while its child/tasks can still write.
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                task.result()
                 raise

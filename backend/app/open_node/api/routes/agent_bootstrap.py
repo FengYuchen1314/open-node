@@ -2,10 +2,10 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from open_node.api.auth import check_request_origin
+from open_node.api.backup import BackupAPIRoute
 from open_node.domain.agent_bootstrap import AgentBootstrapTransport
 from open_node.services.agent_bootstrap import (
     AgentBootstrapRedemptionError,
@@ -17,10 +17,13 @@ from open_node.services.agent_bootstrap_release import (
     installer_bytes,
     release_manifest,
 )
+from open_node.services.backup_runtime import run_in_backup_threadpool
 from open_node.services.inventory import ServerNotFoundError
 
-router = APIRouter(prefix="/servers", tags=["agent bootstrap"])
-public_router = APIRouter(prefix="/agents/bootstrap", tags=["agent bootstrap"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/servers", tags=["agent bootstrap"])
+public_router = APIRouter(
+    route_class=BackupAPIRoute, prefix="/agents/bootstrap", tags=["agent bootstrap"]
+)
 
 
 class BootstrapIssueRequest(BaseModel):
@@ -148,7 +151,7 @@ def bootstrap_installer() -> Response:
 async def redeem_bootstrap(request: Request) -> dict:
     check_request_origin(request)
     peer = request.client.host if request.client else "unknown"
-    allowed = await run_in_threadpool(
+    allowed = await run_in_backup_threadpool(
         request.app.state.auth.allow_login_attempt, "agent-bootstrap:" + peer
     )
     if not allowed:
@@ -169,7 +172,7 @@ async def redeem_bootstrap(request: Request) -> dict:
         )
     except (ValueError, RecursionError):
         raise HTTPException(401, "Invalid or expired installation ticket") from None
-    configuration = await run_in_threadpool(
+    configuration = await run_in_backup_threadpool(
         invoke, request.app.state.agent_bootstrap.redeem, payload.ticket, payload.claim_nonce
     )
     result = configuration.model_dump(mode="json", exclude={"agent_token"})

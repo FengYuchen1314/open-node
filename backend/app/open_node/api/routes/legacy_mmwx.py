@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.domain.legacy_mmwx import (
     LegacyMMWXImportPreview,
     LegacyMMWXImportRequest,
@@ -8,7 +9,7 @@ from open_node.domain.legacy_mmwx import (
 )
 from open_node.services.legacy_mmwx import LegacyMMWXMigration, LegacyMMWXMigrationError
 
-router = APIRouter(prefix="/migrations/mmwx", tags=["MMWX migration"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/migrations/mmwx", tags=["MMWX migration"])
 
 
 def migration(request):

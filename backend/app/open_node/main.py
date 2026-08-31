@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from open_node.api.backup import BackupHTTPMiddleware
 from open_node.api.router import api_router
 from open_node.api.routes.agents import agent_websocket
 from open_node.api.routes.public import router as public_router
@@ -23,6 +24,8 @@ from open_node.domain.notifications import NotificationError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.auth import AuthStore
+from open_node.services.backup_coordination import BackupWriteBarrier
+from open_node.services.backup_runtime import backup_operation, configured_backup_barrier
 from open_node.services.branding import BrandingStore
 from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
@@ -49,6 +52,18 @@ log = logging.getLogger(__name__)
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings = settings or get_settings()
+    backup_writes = configured_backup_barrier(active_settings.database_url)
+    try:
+        # Constructors and migrations can write before lifespan starts. They
+        # participate in the same cross-process lock as HTTP and the admin CLI.
+        with backup_operation(backup_writes):
+            return _create_app(active_settings, backup_writes)
+    except BaseException:
+        backup_writes.close()
+        raise
+
+
+def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) -> FastAPI:
     identity = (
         AgentIdentity.load(active_settings.agent_identity_file)
         if active_settings.agent_identity_file
@@ -57,26 +72,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app):
-        worker = CertificateWorker(app.state.certificates, app.state.agent_connections)
-        task = asyncio.create_task(worker.run())
-        access = SubscriptionAccessWorker(
-            app.state.inventory,
-            app.state.agent_connections,
-            active_settings.subscription_access_poll_seconds,
-        )
-        access_task = asyncio.create_task(access.run())
-        traffic_task = asyncio.create_task(
-            ServerTrafficWorker(
-                app.state.inventory, active_settings.server_traffic_poll_seconds
-            ).run()
-        )
-        notification_task = asyncio.create_task(
-            NotificationWorker(
+        with backup_operation(backup_writes):
+            worker = CertificateWorker(
+                app.state.certificates,
+                app.state.agent_connections,
+                backup_writes=backup_writes,
+            )
+            access = SubscriptionAccessWorker(
+                app.state.inventory,
+                app.state.agent_connections,
+                active_settings.subscription_access_poll_seconds,
+                backup_writes=backup_writes,
+            )
+            traffic = ServerTrafficWorker(
+                app.state.inventory,
+                active_settings.server_traffic_poll_seconds,
+                backup_writes=backup_writes,
+            )
+            notification = NotificationWorker(
                 app.state.notifications,
                 app.state.notification_transport,
                 interval=active_settings.notifications_poll_seconds,
-            ).run()
-        )
+                backup_writes=backup_writes,
+            )
+        # Each actual cycle establishes its own lease. Idle workers must not
+        # inherit an initialization operation or prevent a snapshot forever.
+        task = asyncio.create_task(worker.run())
+        access_task = asyncio.create_task(access.run())
+        traffic_task = asyncio.create_task(traffic.run())
+        notification_task = asyncio.create_task(notification.run())
         try:
             yield
         finally:
@@ -229,7 +253,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(
+        BackupHTTPMiddleware, barrier=backup_writes, api_prefix=active_settings.api_prefix
+    )
     app.state.settings = active_settings
+    # This barrier belongs to the app, not a single lifespan context. Actual
+    # worker references retain it after cancellation; idle instances use the
+    # barrier's finalizer instead of closing live or reusable app resources.
+    app.state.backup_writes = backup_writes
     app.state.agent_identity = identity
     app.state.auth = AuthStore(
         active_settings.database_url,

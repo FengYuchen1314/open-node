@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from open_node.api.auth import require_administrator
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.routes.subscriber_auth import require_subscriber
 from open_node.domain.subscription_templates import (
     TemplateFormat,
@@ -18,12 +19,16 @@ from open_node.domain.subscription_templates import (
     TemplateWrite,
 )
 from open_node.domain.subscriptions import SubscriptionClientFormat
+from open_node.services.backup_runtime import protected_sync
 from open_node.services.inventory import InventoryStore, SubscriptionUnavailableError
 from open_node.services.template_rendering import DEFAULT_CLASH, DEFAULT_SURGE, render
 
-router = APIRouter(prefix="/subscription-templates", tags=["subscription templates"])
+router = APIRouter(
+    route_class=BackupAPIRoute, prefix="/subscription-templates", tags=["subscription templates"]
+)
 
 
+@protected_sync
 def actor(request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
     if request.url.path.startswith(request.app.state.settings.api_prefix + "/account/"):

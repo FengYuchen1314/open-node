@@ -19,6 +19,54 @@ VPS.
 
 ## Remote Test Command
 
+### 一致快照与创建器：开发候选
+
+实现范围及容量限制见[一致快照说明](backup-runtime.md)。这些结果尚不表示网页创建、
+下载或恢复完成，也不表示已经发布或升级生产。
+
+写入协调冻结 572 个文件，VPS 完整后端 **4412 项全部通过，零跳过**，另有 75 项
+bootstrap 专项。Ruff、编译、收集、专项、全量、namespace、runner 全部为 0。
+官方 age 自有 19 项、独立 49 项、真实 TLS 6 项都启用并通过；原 CLI 和加密 CLI
+分别为 77 项。根目录 `/tmp/open-node-writer-full-backend-r3.nJm3ryxu`，
+82 项 `final-evidence.sha256` 为
+`e812293d2aa7641d80291a59c84b243abda2e25a309491c16567415448c9db58`；
+原始 JUnit `evidence/pytest.xml` 为
+`c9b2ee5e85805ff66f69035e9befd174003b934de0c5b6aec06968cbbde9b0a4`。
+root 已逐项核验清单、最终链和原始 JUnit。
+
+前轮全量 `/tmp/open-node-writer-full-backend.w0W6eH1P` 为 4411 通过、1 失败：
+旧 bootstrap 测试直接调用 endpoint，绕过 HTTP 中间件，未建立工作上下文。
+只给直接调用补上实际租约，原两次数据库操作及“不阻塞事件循环”的断言未削弱。
+R2 的 runner=1、SSH 断连及 81 项证据完整保留；后核通过不改写原失败。
+
+新增十个服务/测试文件后，582 文件 R2 的 **410 项联动测试全部通过、零跳过**：
+SQLite 83、状态文件 58、依赖检查 216、整体快照 19、创建器 34。
+全 app/tests Ruff、编译和隔离运行全部为 0。实际调用官方 age，并以独立官方进程
+解密核对生成包；测试确认在交出密文前所有明文连接/文件已关闭、写入已恢复，
+以及复制密文 FD 后清理失败也不交出结果。这是内部服务联动，不是 Web 验收。
+目录为 `/tmp/open-node-backup-integration-root.UiQGUE78/creation-evidence-r2`。
+源输入为 `full-source-r3.tar` 加 `creation-overlay-r2.tar`，后者 SHA-256 为
+`e83712f9b8876d85fe4238d6f32d11dc55c25d650e5692d1a322c799be46751e`，
+十文件清单为 `f664528a13d1fcd11d5ede5bd9571f2e2aa7b1af9f94f37de09dfdec31e71fa9`。
+
+原联动 R1 为 402 通过、3 失败，另有三项测试 lint 问题，原记录没有覆盖。
+两项测试把 22 字节 age 标头只读了 21 字节，另一项提供互相矛盾的 Git/镜像 revision；
+修订均在测试中，产品代码未变。R2 另增五项负控/清理用例。
+原始 R1 JUnit 为 `2abce246013910cb4952121f8371afc7d1a266db6bf0af2653d8773d55f6bb12`。
+
+单独的 SQLite 借用连接门位于 `/tmp/open-node-backup-sqlite.aBQ7bQxy/gate-r5`，
+83 项全部通过；98 项最终清单为
+`a08d7032954203cc9be0cf6107028428bd498d3b20eeed0d2b974cc366c4c329`。
+依赖门 `/tmp/open-node-backup-dependencies-r4.ZUrs1Z5Z` 的 216 项全部通过，
+817 项清单为 `39324d0f9e08b405cd83eee53d5138a8f2f83c7effcccfdc8f549c1e082c47f9`。
+其先前 lint/测试失败以及匿名 `/proc/fd` 重新开 SQLite 的真实失败均保留，
+最终采用的是先打开完成目标的只读连接再 unlink。允许的是 SQLite 自身的空 temp
+schema，不是额外 ATTACH 的数据库。
+
+所有执行只在 VPS 的私有 mount/net/PID 环境进行，源码和 6344 个依赖文件只读，
+四个依赖链接不变；运行目录、数据库、证书和缓存独立。生产及共享候选前后身份一致。
+包含新增服务的完整后端回归正在独立目录进行，精确 Git 镜像和发布 CI 尚待完成。
+
 ### 备份加密：专项、完整回归与精确提交发布
 
 此切片在已发布的 `2a28103` 格式层之上新增官方 age 加密和带私钥的只读验证，

@@ -3,6 +3,7 @@ from secrets import compare_digest
 from fastapi import HTTPException, Request, Response
 
 from open_node.services.auth import SessionIdentity
+from open_node.services.backup_runtime import protected_sync
 
 SESSION_COOKIE = "open_node_session"
 
@@ -14,6 +15,7 @@ def check_request_origin(request: Request) -> None:
         raise HTTPException(403, "Request origin is not allowed")
 
 
+@protected_sync
 def require_administrator(request: Request, response: Response) -> SessionIdentity:
     response.headers["Cache-Control"] = "no-store"
     settings = request.app.state.settings

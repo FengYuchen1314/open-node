@@ -7,6 +7,8 @@ from pydantic import ValidationError
 from open_node.core.config import get_settings
 from open_node.domain.auth import AdministratorCredentials
 from open_node.services.auth import AuthStore
+from open_node.services.backup_coordination import BackupCoordinationError
+from open_node.services.backup_runtime import backup_operation, configured_backup_barrier
 
 
 def main() -> None:
@@ -24,13 +26,20 @@ def main() -> None:
         parser.exit(1, "Use a 1-64 character username and a 12-1024 character password\n")
     try:
         settings = get_settings()
-        AuthStore(
-            settings.database_url, settings.subscriber_totp_key, settings.app_name
-        ).set_administrator(
-            credentials.username,
-            credentials.password.get_secret_value(),
-            reset=args.action == "reset-password",
-        )
+        backup_writes = configured_backup_barrier(settings.database_url)
+        try:
+            with backup_operation(backup_writes):
+                AuthStore(
+                    settings.database_url, settings.subscriber_totp_key, settings.app_name
+                ).set_administrator(
+                    credentials.username,
+                    credentials.password.get_secret_value(),
+                    reset=args.action == "reset-password",
+                )
+        finally:
+            backup_writes.close()
+    except BackupCoordinationError:
+        parser.exit(1, "备份停写协调暂不可用，请稍后重试。\n")
     except ValueError as exc:
         parser.exit(1, f"{exc}\n")
     if args.action == "reset-password":

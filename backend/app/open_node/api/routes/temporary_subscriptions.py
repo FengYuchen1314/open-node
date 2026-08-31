@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_inventory_store
 from open_node.api.routes.subscriptions import rendered_subscription_response
 from open_node.domain.subscriptions import SubscriptionClientFormat
@@ -22,8 +23,8 @@ from open_node.services.temporary_subscriptions import (
     TemporarySubscriptionNotFoundError,
 )
 
-router = APIRouter(tags=["temporary subscriptions"])
-public_router = APIRouter(tags=["temporary subscriptions"])
+router = APIRouter(route_class=BackupAPIRoute, tags=["temporary subscriptions"])
+public_router = APIRouter(route_class=BackupAPIRoute, tags=["temporary subscriptions"])
 
 
 @router.get("/temporary-subscriptions", response_model=TemporarySubscriptionsResponse)

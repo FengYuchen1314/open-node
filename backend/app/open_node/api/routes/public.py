@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from open_node.api.auth import require_administrator
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_inventory_store
 from open_node.domain.probe import (
     ProbePayload,
@@ -18,7 +19,7 @@ from open_node.domain.probe import (
 from open_node.services.inventory import InventoryStore, ProbeNotFoundError
 from open_node.services.probe_stream import PublicProbeStreamManager
 
-router = APIRouter(prefix="/public", tags=["public"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/public", tags=["public"])
 
 
 @router.get(

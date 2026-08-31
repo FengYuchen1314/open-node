@@ -1,9 +1,9 @@
-import asyncio
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.server_management import (
     ServerRemovalPreview,
@@ -13,6 +13,7 @@ from open_node.domain.server_management import (
     ServerSettingsUpdate,
 )
 from open_node.services.agent_ws import AgentConnectionManager
+from open_node.services.backup_runtime import run_in_backup_thread
 from open_node.services.inventory import (
     DuplicateServerNameError,
     InventoryStore,
@@ -20,7 +21,7 @@ from open_node.services.inventory import (
 )
 from open_node.services.server_management import ServerManagementConflict
 
-router = APIRouter(prefix="/servers", tags=["servers"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/servers", tags=["servers"])
 Store = Annotated[InventoryStore, Depends(get_inventory_store)]
 
 
@@ -55,6 +56,6 @@ async def remove_server(
     store: Store,
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ):
-    result = await asyncio.to_thread(call, store._server_management().remove, server_id, payload)
+    result = await run_in_backup_thread(call, store._server_management().remove, server_id, payload)
     await connections.disconnect(server_id)
     return result

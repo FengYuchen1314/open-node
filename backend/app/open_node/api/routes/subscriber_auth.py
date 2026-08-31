@@ -1,4 +1,3 @@
-import asyncio
 from secrets import compare_digest
 from typing import Annotated
 from uuid import UUID
@@ -6,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from open_node.api.auth import check_request_origin
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.routes.subscriptions import _subscription_token_response
 from open_node.domain.registration_invitations import RegistrationClaim, RegistrationClaimResponse
 from open_node.domain.subscriber_auth import (
@@ -30,6 +30,7 @@ from open_node.domain.subscriptions import (
     SubscriptionIpPolicyRead,
     SubscriptionIpPolicyUpdate,
 )
+from open_node.services.backup_runtime import protected_sync, run_in_backup_thread
 from open_node.services.inventory import ProductUserConflict, ProductUserNotFoundError
 from open_node.services.registration_invitations import (
     RegistrationInvitationConflict,
@@ -44,8 +45,10 @@ from open_node.services.subscriber_auth import (
 from open_node.services.subscription_access import SubscriptionAccessConflict
 
 COOKIE = "open_node_subscriber"
-router = APIRouter(prefix="/account", tags=["subscriber account"])
-management_router = APIRouter(prefix="/subscriber-accounts", tags=["subscriber administration"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/account", tags=["subscriber account"])
+management_router = APIRouter(
+    route_class=BackupAPIRoute, prefix="/subscriber-accounts", tags=["subscriber administration"]
+)
 
 
 def invoke(call, *args, login=False, **kwargs):
@@ -62,6 +65,7 @@ def invoke(call, *args, login=False, **kwargs):
         raise HTTPException(409, str(exc)) from exc
 
 
+@protected_sync
 def require_subscriber(request: Request):
     identity = request.app.state.subscriber_auth.authenticate(request.cookies.get(COOKIE))
     if identity is None:
@@ -132,7 +136,7 @@ async def register(payload: RegistrationClaim, request: Request):
     login_request(request)
     limit(request, payload.username)
     try:
-        result = await asyncio.to_thread(
+        result = await run_in_backup_thread(
             request.app.state.inventory._registration_invitations().claim, payload
         )
     except RegistrationInvitationUnavailable as exc:

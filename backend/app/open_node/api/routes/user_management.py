@@ -1,9 +1,9 @@
-import asyncio
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.user_management import (
     UserManagementRead,
@@ -13,6 +13,7 @@ from open_node.domain.user_management import (
     UserUpdate,
 )
 from open_node.services.agent_ws import AgentConnectionManager
+from open_node.services.backup_runtime import run_in_backup_thread
 from open_node.services.inventory import (
     InventoryStore,
     ManagedNodeConflict,
@@ -23,7 +24,7 @@ from open_node.services.inventory import (
 from open_node.services.subscription_access import SubscriptionAccessConflict
 from open_node.services.user_management import UserRemovalNotFoundError
 
-router = APIRouter(tags=["subscriptions"])
+router = APIRouter(route_class=BackupAPIRoute, tags=["subscriptions"])
 Store = Annotated[InventoryStore, Depends(get_inventory_store)]
 Connections = Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)]
 
@@ -38,7 +39,7 @@ def call(operation, *args):
 
 
 async def apply(operation, store, connections, *args):
-    result = await asyncio.to_thread(call, operation, *args)
+    result = await run_in_backup_thread(call, operation, *args)
     for command in result.commands:
         await connections.dispatch_command(store, command)
     return result

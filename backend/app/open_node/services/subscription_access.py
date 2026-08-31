@@ -12,6 +12,8 @@ from sqlalchemy import select
 
 from open_node.domain.inventory import AgentCommandCreate
 from open_node.domain.subscriptions import SubscriptionDueTrafficResetRequest
+from open_node.services.backup_coordination import BackupBusyError, BackupWriteBarrier
+from open_node.services.backup_runtime import backup_operation, run_in_backup_thread
 from open_node.services.inventory import (
     AgentModel,
     CommandModel,
@@ -647,25 +649,34 @@ class SubscriptionAccessCoordinator:
 
 
 class SubscriptionAccessWorker:
-    def __init__(self, store, connections, interval=10):
+    def __init__(
+        self, store, connections, interval=10, *, backup_writes: BackupWriteBarrier | None = None
+    ):
         self.store, self.connections, self.interval = store, connections, interval
+        self.backup_writes = (
+            backup_writes if backup_writes is not None else BackupWriteBarrier(None)
+        )
 
     async def tick(self):
-        await asyncio.to_thread(
-            self.store.reset_due_subscription_traffic, SubscriptionDueTrafficResetRequest()
-        )
-        commands = await asyncio.to_thread(self.store._subscription_access().run_once)
-        for command in commands:
-            await self.connections.dispatch_command(self.store, command)
+        with backup_operation(self.backup_writes):
+            await run_in_backup_thread(
+                self.store.reset_due_subscription_traffic, SubscriptionDueTrafficResetRequest()
+            )
+            commands = await run_in_backup_thread(self.store._subscription_access().run_once)
+            for command in commands:
+                await self.connections.dispatch_command(self.store, command)
 
     async def run(self):
         backfilled = False
         while True:
             try:
                 if not backfilled:
-                    await asyncio.to_thread(self.store._subscription_access().backfill)
+                    with backup_operation(self.backup_writes):
+                        await run_in_backup_thread(self.store._subscription_access().backfill)
                     backfilled = True
                 await self.tick()
+            except BackupBusyError:
+                pass
             except Exception:
                 log.exception("Subscription access reconciliation failed")
             await asyncio.sleep(self.interval)

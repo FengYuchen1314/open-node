@@ -4,17 +4,20 @@ import json
 
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
-from starlette.concurrency import run_in_threadpool
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.domain.branding import (
     BrandingError,
     BrandingPublicRead,
     BrandingSettingsRead,
     BrandingSettingsUpdate,
 )
+from open_node.services.backup_runtime import run_in_backup_threadpool
 
-router = APIRouter(prefix="/system-settings/branding", tags=["system-settings"])
-public_router = APIRouter(prefix="/branding", tags=["branding"])
+router = APIRouter(
+    route_class=BackupAPIRoute, prefix="/system-settings/branding", tags=["system-settings"]
+)
+public_router = APIRouter(route_class=BackupAPIRoute, prefix="/branding", tags=["branding"])
 MAX_REQUEST_BYTES = 4096
 
 
@@ -69,4 +72,4 @@ def settings(request: Request):
 @router.put("", response_model=BrandingSettingsRead)
 async def update_settings(request: Request):
     payload = await _payload(request)
-    return await run_in_threadpool(request.app.state.branding.update_settings, payload)
+    return await run_in_backup_threadpool(request.app.state.branding.update_settings, payload)

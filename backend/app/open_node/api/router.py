@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from open_node.api.auth import require_administrator
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.routes import (
     agent_bootstrap,
     agents,
@@ -29,8 +30,10 @@ from open_node.api.routes import (
     user_management,
 )
 
-api_router = APIRouter()
-private_router = APIRouter(dependencies=[Depends(require_administrator)])
+api_router = APIRouter(route_class=BackupAPIRoute)
+private_router = APIRouter(
+    route_class=BackupAPIRoute, dependencies=[Depends(require_administrator)]
+)
 private_router.include_router(servers.router)
 private_router.include_router(agent_bootstrap.router)
 private_router.include_router(branding.router)

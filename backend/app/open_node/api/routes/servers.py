@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.inventory import (
     AgentBatchApplyOperationRequest,
@@ -101,7 +102,7 @@ from open_node.services.inventory import (
     XrayRuntimeTunnelNotFoundError,
 )
 
-router = APIRouter(prefix="/servers", tags=["servers"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/servers", tags=["servers"])
 
 
 @router.get("", response_model=list[ServerRead])

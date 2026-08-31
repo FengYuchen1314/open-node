@@ -5,8 +5,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
-from starlette.concurrency import run_in_threadpool
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.domain.external_subscriptions import (
     ExternalConfirmationRead,
     ExternalNodeUpdate,
@@ -20,8 +20,11 @@ from open_node.domain.external_subscriptions import (
     ExternalSourcesResponse,
     ExternalSourceUpdate,
 )
+from open_node.services.backup_runtime import run_in_backup_threadpool
 
-router = APIRouter(prefix="/external-subscriptions", tags=["external subscriptions"])
+router = APIRouter(
+    route_class=BackupAPIRoute, prefix="/external-subscriptions", tags=["external subscriptions"]
+)
 MAX_REQUEST_BYTES = 65536
 
 
@@ -71,7 +74,7 @@ def list_sources(request: Request):
 @router.post("", response_model=ExternalSourceRead, status_code=201)
 async def create_source(request: Request):
     payload = await _payload(request, ExternalSourceCreate)
-    return await run_in_threadpool(request.app.state.external_subscriptions.create, payload)
+    return await run_in_backup_threadpool(request.app.state.external_subscriptions.create, payload)
 
 
 @router.get("/{source_id}", response_model=ExternalSourceDetail)
@@ -82,7 +85,7 @@ def source_detail(source_id: UUID, request: Request):
 @router.put("/{source_id}", response_model=ExternalSourceRead)
 async def update_source(source_id: UUID, request: Request):
     payload = await _payload(request, ExternalSourceUpdate)
-    return await run_in_threadpool(
+    return await run_in_backup_threadpool(
         request.app.state.external_subscriptions.update, source_id, payload
     )
 
@@ -90,14 +93,16 @@ async def update_source(source_id: UUID, request: Request):
 @router.post("/{source_id}/delete")
 async def delete_source(source_id: UUID, request: Request):
     payload = await _payload(request, ExternalSourceDelete)
-    await run_in_threadpool(request.app.state.external_subscriptions.delete, source_id, payload)
+    await run_in_backup_threadpool(
+        request.app.state.external_subscriptions.delete, source_id, payload
+    )
     return {"deleted": True, "license_required": False}
 
 
 @router.put("/{source_id}/nodes/{node_id}", response_model=ExternalSourceDetail)
 async def update_node(source_id: UUID, node_id: UUID, request: Request):
     payload = await _payload(request, ExternalNodeUpdate)
-    return await run_in_threadpool(
+    return await run_in_backup_threadpool(
         request.app.state.external_subscriptions.update_node, source_id, node_id, payload
     )
 
@@ -105,7 +110,7 @@ async def update_node(source_id: UUID, node_id: UUID, request: Request):
 @router.post("/{source_id}/previews", response_model=ExternalPreviewRead)
 async def fetch_preview(source_id: UUID, request: Request):
     payload = await _payload(request, ExternalRevisionRequest)
-    return await run_in_threadpool(
+    return await run_in_backup_threadpool(
         request.app.state.external_subscriptions.prepare_preview,
         source_id,
         payload.expected_revision,
@@ -120,7 +125,7 @@ def preview_detail(source_id: UUID, preview_id: UUID, request: Request):
 @router.post("/{source_id}/previews/{preview_id}/confirm", response_model=ExternalConfirmationRead)
 async def confirm_preview(source_id: UUID, preview_id: UUID, request: Request):
     payload = await _payload(request, ExternalPreviewConfirm)
-    return await run_in_threadpool(
+    return await run_in_backup_threadpool(
         request.app.state.external_subscriptions.confirm, source_id, preview_id, payload
     )
 

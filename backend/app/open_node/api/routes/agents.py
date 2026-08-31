@@ -14,9 +14,9 @@ from fastapi import (
     status,
 )
 from pydantic import ValidationError
-from starlette.concurrency import run_in_threadpool
 
 from open_node.api.auth import require_administrator
+from open_node.api.backup import BackupAPIRoute, agent_backup_operation
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.inventory import (
     AgentCommandLeaseRequest,
@@ -34,6 +34,8 @@ from open_node.domain.inventory import (
     AgentTelemetryResponse,
 )
 from open_node.services.agent_ws import AgentConnectionManager
+from open_node.services.backup_coordination import BackupCoordinationError
+from open_node.services.backup_runtime import run_in_backup_threadpool
 from open_node.services.inventory import (
     CommandNotFoundError,
     CommandNotReadyError,
@@ -43,7 +45,7 @@ from open_node.services.inventory import (
 )
 from open_node.services.secure_channel import AgentSocket, ChannelError
 
-router = APIRouter(prefix="/agents", tags=["agents"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/agents", tags=["agents"])
 
 
 @router.get("/identity", dependencies=[Depends(require_administrator)])
@@ -78,7 +80,7 @@ async def register_agent(
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentRegistrationResponse:
     try:
-        agent, server = await run_in_threadpool(store.register_agent, payload)
+        agent, server = await run_in_backup_threadpool(store.register_agent, payload)
     except InvalidAgentTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     await connections.dispatch_pending_commands(store, server.id)
@@ -142,7 +144,7 @@ async def complete_agent_command(
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentCommandResultResponse:
     try:
-        command = await run_in_threadpool(store.complete_command, command_id, payload)
+        command = await run_in_backup_threadpool(store.complete_command, command_id, payload)
     except InvalidAgentTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     except CommandNotFoundError as exc:
@@ -161,7 +163,9 @@ async def complete_agent_command_by_request(
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentCommandResultResponse:
     try:
-        command = await run_in_threadpool(store.complete_command_by_request_id, request_id, payload)
+        command = await run_in_backup_threadpool(
+            store.complete_command_by_request_id, request_id, payload
+        )
     except InvalidAgentTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     except CommandNotFoundError as exc:
@@ -177,6 +181,7 @@ async def agent_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     store: InventoryStore = websocket.app.state.inventory
     connections: AgentConnectionManager = websocket.app.state.agent_connections
+    barrier = getattr(websocket.app.state, "backup_writes", None)
     channel = AgentSocket(websocket)
     server_id: UUID | None = None
     token = ""
@@ -194,38 +199,45 @@ async def agent_websocket(websocket: WebSocket) -> None:
             return
 
         token = str(auth_payload.get("token") or "")
-        try:
-            if auth_payload.get("probe") is True:
-                server = store.authenticate_agent(token)
-                await _send_auth_result(channel, True, "authenticated", server.id)
-                await channel.close(code=1000)
-                return
-            agent, server = store.register_agent(
-                _registration_from_ws_payload(
-                    auth_payload,
-                    legacy_transport=websocket.url.path == "/api/remote/ws",
+        async with agent_backup_operation(barrier):
+            try:
+                if auth_payload.get("probe") is True:
+                    server = store.authenticate_agent(token)
+                    await _send_auth_result(channel, True, "authenticated", server.id)
+                    await channel.close(code=1000)
+                    return
+                agent, server = store.register_agent(
+                    _registration_from_ws_payload(
+                        auth_payload,
+                        legacy_transport=websocket.url.path == "/api/remote/ws",
+                    )
                 )
-            )
-        except (InvalidAgentTokenError, ValidationError) as exc:
-            await _send_auth_result(channel, False, str(exc))
-            await channel.close(code=1008)
-            return
+            except (InvalidAgentTokenError, ValidationError) as exc:
+                await _send_auth_result(channel, False, str(exc))
+                await channel.close(code=1008)
+                return
 
-        server_id = server.id
-        await _send_auth_result(channel, True, "authenticated", server.id)
-        connections.register(server.id, channel, agent.capabilities)
-        await connections.dispatch_pending_commands(store, server.id)
+            server_id = server.id
+            await _send_auth_result(channel, True, "authenticated", server.id)
+            connections.register(server.id, channel, agent.capabilities)
+            await connections.dispatch_pending_commands(store, server.id)
 
         while True:
             message = await channel.receive_json()
-            store.authenticate_agent(token)
-            await _handle_agent_ws_message(channel, store, token, message)
-            if isinstance(message, dict) and message.get("type") == "rpc_reply":
-                await connections.dispatch_ready_commands(store)
-            else:
-                await connections.dispatch_pending_commands(store, server.id)
+            async with agent_backup_operation(barrier):
+                store.authenticate_agent(token)
+                await _handle_agent_ws_message(channel, store, token, message)
+                if isinstance(message, dict) and message.get("type") == "rpc_reply":
+                    await connections.dispatch_ready_commands(store)
+                else:
+                    await connections.dispatch_pending_commands(store, server.id)
     except WebSocketDisconnect:
         pass
+    except BackupCoordinationError:
+        try:
+            await channel.close(code=1013)
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            pass
     except (ChannelError, TimeoutError, UnicodeError, InvalidAgentTokenError, ServerNotFoundError):
         await channel.close(code=1008)
     finally:
@@ -266,9 +278,7 @@ def _registration_from_ws_payload(
         hostname=str(payload.get("hostname") or "websocket-agent"),
         agent_version=agent_version,
         connection_mode=payload.get("connection_mode") or "websocket",
-        listen_port=(
-            23889 if payload.get("listen_port") is None else payload.get("listen_port")
-        ),
+        listen_port=(23889 if payload.get("listen_port") is None else payload.get("listen_port")),
         public_ipv4=payload.get("public_ipv4"),
         public_ipv6=payload.get("public_ipv6"),
         xray_mode=payload.get("xray_mode") or "external",

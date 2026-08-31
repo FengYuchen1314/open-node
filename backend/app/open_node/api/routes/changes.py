@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.changes import (
     AgentChangeSetAcceptRequest,
@@ -21,7 +22,7 @@ from open_node.services.inventory import (
     ServerNotFoundError,
 )
 
-router = APIRouter(prefix="/change-sets", tags=["change-sets"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/change-sets", tags=["change-sets"])
 
 
 @router.get("", response_model=AgentChangeSetsResponse)

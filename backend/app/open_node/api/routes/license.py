@@ -3,7 +3,9 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/license", tags=["license"])
+from open_node.api.backup import BackupAPIRoute
+
+router = APIRouter(route_class=BackupAPIRoute, prefix="/license", tags=["license"])
 
 
 class LicenseStatus(BaseModel):

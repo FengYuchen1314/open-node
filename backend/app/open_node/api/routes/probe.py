@@ -3,8 +3,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import ValidationError
-from starlette.concurrency import run_in_threadpool
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.probe import (
     ProbeAccessTokenCreateResponse,
@@ -17,13 +17,14 @@ from open_node.domain.probe import (
     ProbeTaskUpdate,
 )
 from open_node.services.agent_ws import AgentConnectionManager
+from open_node.services.backup_runtime import run_in_backup_threadpool
 from open_node.services.inventory import (
     InventoryStore,
     ProbeTaskNotFoundError,
     ServerNotFoundError,
 )
 
-router = APIRouter(prefix="/probe", tags=["probe"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/probe", tags=["probe"])
 
 
 @router.post("/access-token", response_model=ProbeAccessTokenCreateResponse)
@@ -85,7 +86,7 @@ async def dispatch_due_probe_tasks(
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> ProbeTaskDispatchResponse:
-    checked_at, queued = await run_in_threadpool(store.dispatch_due_probe_tasks, limit)
+    checked_at, queued = await run_in_backup_threadpool(store.dispatch_due_probe_tasks, limit)
     dispatched = []
     for task, command in queued:
         dispatched_command = await connections.dispatch_command(store, command)

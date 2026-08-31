@@ -14,6 +14,8 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from open_node.domain.inventory import AgentCommandCreate
+from open_node.services.backup_coordination import BackupWriteBarrier
+from open_node.services.backup_runtime import backup_operation, current_backup_child_fds
 from open_node.services.certificate_remote_acme import ERRORS
 from open_node.services.certificate_vault import material, private_path
 from open_node.services.certificates import CertificateError, CertificateHTTPLease
@@ -34,10 +36,18 @@ def confirmed(command, lease_id):
 
 
 class RemoteHTTP01:
-    def __init__(self, store, connections):
-        self.store, self.connections = store, connections
+    def __init__(self, store, connections, *, backup_writes: BackupWriteBarrier | None = None):
+        self.backup_writes = (
+            backup_writes if backup_writes is not None else BackupWriteBarrier(None)
+        )
+        with backup_operation(self.backup_writes):
+            self.store, self.connections = store, connections
 
     def request_cleanup(self, job_id=None):
+        with backup_operation(self.backup_writes):
+            return self._request_cleanup(job_id)
+
+    def _request_cleanup(self, job_id):
         with self.store.write() as db:
             query = select(CertificateHTTPLease).where(CertificateHTTPLease.released_at.is_(None))
             if job_id:
@@ -46,6 +56,10 @@ class RemoteHTTP01:
                 lease.cleanup_requested = True
 
     async def drain(self):
+        with backup_operation(self.backup_writes):
+            return await self._drain()
+
+    async def _drain(self):
         with self.store.session() as db:
             identifiers = list(
                 db.scalars(
@@ -96,6 +110,10 @@ class RemoteHTTP01:
                     await self.connections.dispatch_command(self.store.inventory, outgoing)
 
     async def present(self, row, job, items):
+        with backup_operation(self.backup_writes):
+            return await self._present(row, job, items)
+
+    async def _present(self, row, job, items):
         if (
             not isinstance(items, list)
             or not 1 <= len(items) <= 20
@@ -173,6 +191,10 @@ class RemoteHTTP01:
                 await asyncio.sleep(0.25)
 
     async def obtain(self, row, job, lock_fd):
+        with backup_operation(self.backup_writes):
+            return await self._obtain(row, job, lock_fd)
+
+    async def _obtain(self, row, job, lock_fd):
         if job.kind == "renew" and not job.force and not self.store.due(row):
             return None
         vault, settings = self.store.vault, self.store.settings
@@ -225,6 +247,10 @@ class RemoteHTTP01:
             await self.drain()
 
     async def execute(self, request_path, row, job, lock_fd):
+        with backup_operation(self.backup_writes):
+            return await self._execute(request_path, row, job, lock_fd)
+
+    async def _execute(self, request_path, row, job, lock_fd):
         work = request_path.parent
         environment = {
             "PATH": os.defpath,
@@ -250,7 +276,7 @@ class RemoteHTTP01:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
-            pass_fds=(lock_fd,),
+            pass_fds=tuple(dict.fromkeys((lock_fd, *current_backup_child_fds()))),
             limit=16384,
         )
         output = bytearray()
@@ -287,22 +313,28 @@ class RemoteHTTP01:
         finally:
 
             async def stop():
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    await asyncio.wait_for(process.wait(), 5)
-                except TimeoutError:
+                with backup_operation(self.backup_writes):
                     with contextlib.suppress(ProcessLookupError):
-                        os.killpg(process.pid, signal.SIGKILL)
-                    await process.wait()
-                for task in tasks:
-                    task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-                self.store.vault.write(work / "last-job.log", bytes(output[:262144]))
+                        os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        await asyncio.wait_for(process.wait(), 5)
+                    except TimeoutError:
+                        with contextlib.suppress(ProcessLookupError):
+                            os.killpg(process.pid, signal.SIGKILL)
+                        await process.wait()
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    self.store.vault.write(work / "last-job.log", bytes(output[:262144]))
 
             task = asyncio.create_task(stop())
             try:
                 await asyncio.shield(task)
             except asyncio.CancelledError:
-                await task
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                task.result()
                 raise

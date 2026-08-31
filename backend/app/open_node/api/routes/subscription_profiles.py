@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_inventory_store
 from open_node.api.routes.subscriptions import (
     enforce_subscription_ip,
@@ -24,8 +25,8 @@ from open_node.services.subscription_profiles import (
     SubscriptionProfileNotFoundError,
 )
 
-router = APIRouter(tags=["subscription profiles"])
-legacy_router = APIRouter(tags=["MMWX compatibility"])
+router = APIRouter(route_class=BackupAPIRoute, tags=["subscription profiles"])
+legacy_router = APIRouter(route_class=BackupAPIRoute, tags=["MMWX compatibility"])
 
 
 @router.get("/subscription-profiles", response_model=SubscriptionProfilesResponse)

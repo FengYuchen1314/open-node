@@ -5,6 +5,8 @@ import logging
 import time
 from datetime import UTC, datetime
 
+from open_node.services.backup_coordination import BackupBusyError, BackupWriteBarrier
+from open_node.services.backup_runtime import backup_operation, run_in_backup_thread
 from open_node.services.telegram_transport import SEND_TIMEOUT_SECONDS, TelegramOutcome
 
 log = logging.getLogger(__name__)
@@ -14,17 +16,34 @@ SHUTDOWN_RECEIPT_SECONDS = 3
 
 
 class NotificationWorker:
-    def __init__(self, store, transport, *, interval=1, clock=None, monotonic=None):
+    def __init__(
+        self,
+        store,
+        transport,
+        *,
+        interval=1,
+        clock=None,
+        monotonic=None,
+        backup_writes: BackupWriteBarrier | None = None,
+    ):
         self.store = store
         self.transport = transport
         self.interval = interval
         self.clock = clock or (lambda: datetime.now(UTC))
         self.monotonic = monotonic or time.monotonic
         self._next_scan = float("-inf")
+        self.backup_writes = (
+            backup_writes if backup_writes is not None else BackupWriteBarrier(None)
+        )
 
     async def _finish(self, claim, outcome):
         try:
-            return await asyncio.to_thread(self.store.finish, claim, outcome, now=self.clock())
+            # A shielded shutdown receipt may outlive tick's awaiting task.
+            # Both this task and its actual worker retain their own reference.
+            with backup_operation(self.backup_writes):
+                return await run_in_backup_thread(
+                    self.store.finish, claim, outcome, now=self.clock()
+                )
         except Exception:
             # A failed receipt commit leaves durable `sending` for conservative
             # deadline recovery. Never log a claim, HTTP exception or SQL values.
@@ -46,13 +65,17 @@ class NotificationWorker:
             log.warning("Notification shutdown receipt is pending durable recovery")
 
     async def tick(self):
-        await asyncio.to_thread(self.store.recover, now=self.clock())
+        with backup_operation(self.backup_writes):
+            return await self._tick()
+
+    async def _tick(self):
+        await run_in_backup_thread(self.store.recover, now=self.clock())
         current = self.monotonic()
         if current >= self._next_scan:
-            await asyncio.to_thread(self.store.scan, now=self.clock())
+            await run_in_backup_thread(self.store.scan, now=self.clock())
             self._next_scan = self.monotonic() + SCAN_SECONDS
 
-        claim = await asyncio.to_thread(
+        claim = await run_in_backup_thread(
             self.store.claim, now=self.clock(), lease_seconds=LEASE_SECONDS
         )
         if claim is None:
@@ -90,6 +113,9 @@ class NotificationWorker:
         while True:
             try:
                 await self.tick()
+            except BackupBusyError:
+                failure_delay = self.interval
+                delay = self.interval
             except Exception:
                 current = self.monotonic()
                 if current >= next_failure_log:

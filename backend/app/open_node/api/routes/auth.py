@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from open_node.api.auth import SESSION_COOKIE, check_request_origin, require_administrator
+from open_node.api.backup import BackupAPIRoute
 from open_node.domain.auth import (
     AdministratorCode,
     AdministratorPolicyUpdate,
@@ -25,7 +26,7 @@ from open_node.services.auth import (
     SessionIdentity,
 )
 
-router = APIRouter(prefix="/auth", tags=["authentication"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/auth", tags=["authentication"])
 
 
 def rate_limit(request: Request) -> None:

@@ -5,9 +5,10 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from open_node import __version__
+from open_node.api.backup import BackupAPIRoute
 from open_node.core.config import get_settings
 
-router = APIRouter(tags=["system"])
+router = APIRouter(route_class=BackupAPIRoute, tags=["system"])
 
 
 class HealthResponse(BaseModel):

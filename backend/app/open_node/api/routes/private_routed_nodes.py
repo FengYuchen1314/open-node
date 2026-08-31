@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.api.routes.subscriber_auth import Identity, require_subscriber
 from open_node.domain.private_routed_nodes import (
@@ -24,8 +25,11 @@ from open_node.services.private_routed_nodes import (
     PrivateRoutedNodeNotFoundError,
 )
 
-router = APIRouter(prefix="/private-routed-nodes", tags=["private routed nodes"])
+router = APIRouter(
+    route_class=BackupAPIRoute, prefix="/private-routed-nodes", tags=["private routed nodes"]
+)
 account_router = APIRouter(
+    route_class=BackupAPIRoute,
     prefix="/account/private-routed-nodes",
     tags=["subscriber private routed nodes"],
     dependencies=[Depends(require_subscriber)],
@@ -106,9 +110,7 @@ async def create_account_private_routed_node(
     return await _dispatch(store, connections, result)
 
 
-@account_router.delete(
-    "/{identifier}", response_model=PrivateRoutedNodeMutationResponse
-)
+@account_router.delete("/{identifier}", response_model=PrivateRoutedNodeMutationResponse)
 async def delete_account_private_routed_node(
     identifier: UUID,
     identity: Identity,

@@ -6,8 +6,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
 from pydantic import ValidationError
-from starlette.concurrency import run_in_threadpool
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.domain.notifications import (
     NotificationDeliveriesResponse,
     NotificationDeliveryDetail,
@@ -20,8 +20,9 @@ from open_node.domain.notifications import (
     NotificationSettingsUpdate,
     NotificationTestRequest,
 )
+from open_node.services.backup_runtime import run_in_backup_threadpool
 
-router = APIRouter(prefix="/notifications", tags=["notifications"])
+router = APIRouter(route_class=BackupAPIRoute, prefix="/notifications", tags=["notifications"])
 MAX_REQUEST_BYTES = 8192
 
 
@@ -72,13 +73,13 @@ def settings(request: Request):
 @router.put("/settings", response_model=NotificationSettingsRead)
 async def update_settings(request: Request):
     payload = await _payload(request, NotificationSettingsUpdate)
-    return await run_in_threadpool(request.app.state.notifications.update_settings, payload)
+    return await run_in_backup_threadpool(request.app.state.notifications.update_settings, payload)
 
 
 @router.post("/preview", response_model=NotificationPreviewRead)
 async def preview(request: Request):
     payload = await _payload(request, NotificationRevisionRequest)
-    return await run_in_threadpool(
+    return await run_in_backup_threadpool(
         request.app.state.notifications.preview, payload.expected_revision
     )
 
@@ -86,7 +87,7 @@ async def preview(request: Request):
 @router.post("/test", response_model=NotificationDeliveryDetail, status_code=202)
 async def enqueue_test(request: Request):
     payload = await _payload(request, NotificationTestRequest)
-    return await run_in_threadpool(request.app.state.notifications.enqueue_test, payload)
+    return await run_in_backup_threadpool(request.app.state.notifications.enqueue_test, payload)
 
 
 @router.get("/deliveries", response_model=NotificationDeliveriesResponse)
@@ -108,4 +109,6 @@ def request_delivery(request_id: UUID, request: Request):
 @router.post("/deliveries/{delivery_id}/retry", response_model=NotificationDeliveryDetail)
 async def retry(delivery_id: UUID, request: Request):
     payload = await _payload(request, NotificationRetryRequest)
-    return await run_in_threadpool(request.app.state.notifications.retry, delivery_id, payload)
+    return await run_in_backup_threadpool(
+        request.app.state.notifications.retry, delivery_id, payload
+    )

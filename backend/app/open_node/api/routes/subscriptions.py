@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.subscription_links import SubscriptionShortCodeUpdate
 from open_node.domain.subscriptions import (
@@ -55,8 +56,8 @@ from open_node.services.inventory import (
 )
 from open_node.services.subscription_access import SubscriptionAccessConflict
 
-router = APIRouter(tags=["subscriptions"])
-public_router = APIRouter(tags=["subscriptions"])
+router = APIRouter(route_class=BackupAPIRoute, tags=["subscriptions"])
+public_router = APIRouter(route_class=BackupAPIRoute, tags=["subscriptions"])
 
 
 def enforce_subscription_ip(store, username, request):
@@ -66,9 +67,7 @@ def enforce_subscription_ip(store, username, request):
 
 
 @router.get("/user-subscription-ip-policy", response_model=SubscriptionIpPolicyRead)
-@router.get(
-    "/users/{username}/subscription-ip-policy", response_model=SubscriptionIpPolicyRead
-)
+@router.get("/users/{username}/subscription-ip-policy", response_model=SubscriptionIpPolicyRead)
 def get_subscription_ip_policy(
     username: str,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
@@ -80,9 +79,7 @@ def get_subscription_ip_policy(
 
 
 @router.put("/user-subscription-ip-policy", response_model=SubscriptionIpPolicyRead)
-@router.put(
-    "/users/{username}/subscription-ip-policy", response_model=SubscriptionIpPolicyRead
-)
+@router.put("/users/{username}/subscription-ip-policy", response_model=SubscriptionIpPolicyRead)
 def update_subscription_ip_policy(
     username: str,
     payload: SubscriptionIpPolicyUpdate,

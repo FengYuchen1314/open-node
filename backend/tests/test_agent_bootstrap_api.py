@@ -21,6 +21,7 @@ from open_node.main import create_app
 from open_node.resources import agent_installer
 from open_node.services import agent_bootstrap_release as releases
 from open_node.services.agent_bootstrap import AgentBootstrapTicketModel, normalize_control_url
+from open_node.services.backup_runtime import backup_operation
 from open_node.services.inventory import ServerModel
 from pydantic import SecretStr, ValidationError
 from sqlalchemy import delete, update
@@ -537,7 +538,10 @@ def test_redeem_database_lock_waits_do_not_block_the_async_request_loop(api, mon
             "headers": [(b"content-type", b"application/json")],
             "client": ("testclient", 12345), "server": ("testserver", 443), "app": api.app,
         }
-        result = await redeem_bootstrap(Request(scope, receive=receive))
+        # Direct endpoint invocation bypasses the ASGI middleware that normally
+        # establishes this operation; keep the real offloaded database calls.
+        with backup_operation(api.app.state.backup_writes):
+            result = await redeem_bootstrap(Request(scope, receive=receive))
         assert result["configuration"]["agent_token"] == api.server.agent_token
         assert len(database_threads) == 2
         assert all(identifier != loop_thread for identifier in database_threads)

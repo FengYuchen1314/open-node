@@ -7,6 +7,8 @@ from sqlalchemy import select
 
 from open_node.domain.inventory import ServerTrafficRead
 from open_node.domain.probe import ProbeDailyTraffic
+from open_node.services.backup_coordination import BackupBusyError, BackupWriteBarrier
+from open_node.services.backup_runtime import backup_operation, run_in_backup_thread
 from open_node.services.inventory import (
     ServerModel,
     ServerNotFoundError,
@@ -247,16 +249,23 @@ class ServerTrafficCoordinator:
 
 
 class ServerTrafficWorker:
-    def __init__(self, store, interval=60):
+    def __init__(self, store, interval=60, *, backup_writes: BackupWriteBarrier | None = None):
         self.store, self.interval = store, interval
+        self.backup_writes = (
+            backup_writes if backup_writes is not None else BackupWriteBarrier(None)
+        )
 
     async def tick(self):
-        return await asyncio.to_thread(self.store._server_traffic().reset_due)
+        with backup_operation(self.backup_writes):
+            return await run_in_backup_thread(self.store._server_traffic().reset_due)
 
     async def run(self):
         while True:
             try:
                 await self.tick()
+            except BackupBusyError:
+                # Admission was refused before this cycle started any writes.
+                pass
             except Exception:
                 log.exception("Server traffic cycle reset failed")
             await asyncio.sleep(self.interval)

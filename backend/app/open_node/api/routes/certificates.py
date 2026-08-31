@@ -4,8 +4,8 @@ from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.domain.certificates import (
     CertificateAccountUpdate,
     CertificateCreate,
@@ -19,7 +19,7 @@ from open_node.domain.certificates import (
 from open_node.services.certificates import CertificateError
 
 
-class CertificateRoute(APIRoute):
+class CertificateRoute(BackupAPIRoute):
     def get_route_handler(self):
         original = super().get_route_handler()
 

@@ -1,9 +1,9 @@
-import asyncio
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
 from open_node.domain.plan_management import (
     PlanManagementRead,
@@ -12,6 +12,7 @@ from open_node.domain.plan_management import (
     PlanUpdate,
 )
 from open_node.services.agent_ws import AgentConnectionManager
+from open_node.services.backup_runtime import run_in_backup_thread
 from open_node.services.inventory import (
     DuplicateSubscriptionPlanNameError,
     InventoryStore,
@@ -22,7 +23,7 @@ from open_node.services.inventory import (
 from open_node.services.plan_management import PlanManagementConflict
 from open_node.services.subscription_access import SubscriptionAccessConflict
 
-router = APIRouter(tags=["subscriptions"])
+router = APIRouter(route_class=BackupAPIRoute, tags=["subscriptions"])
 Store = Annotated[InventoryStore, Depends(get_inventory_store)]
 Connections = Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)]
 
@@ -45,7 +46,7 @@ def call(operation, *args):
 
 
 async def apply(operation, store, connections, *args):
-    result = await asyncio.to_thread(call, operation, *args)
+    result = await run_in_backup_thread(call, operation, *args)
     for command in result.commands:
         await connections.dispatch_command(store, command)
     return result
