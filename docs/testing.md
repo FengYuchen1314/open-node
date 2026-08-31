@@ -19,7 +19,7 @@ VPS.
 
 ## Remote Test Command
 
-### 备份加密：候选切片的专项验证
+### 备份加密：专项、完整回归与精确提交发布
 
 此切片在已发布的 `2a28103` 格式层之上新增官方 age 加密和带私钥的只读验证，
 不创建应用快照，也不提供网页备份或恢复。完整工作树 R1 冻结为 564 个文件：
@@ -28,7 +28,7 @@ VPS.
 逐文件清单为
 `9501bbd6b7b43faf977ce140f198ff156ef1ff39713632b1504a8b981e6e30db`。
 它来自 `9602217` 加候选修改，不能冒充一个精确 Git 提交。本节记录已经完成的
-专项、完整后端、真实大包与工作树镜像；后续精确 Git 提交验收尚在进行。
+专项、完整后端、真实大包与工作树镜像；后续精确 Git 验收也已完成，见本节末尾。
 
 | 专项 | 实际结果与边界 |
 | --- | --- |
@@ -113,7 +113,7 @@ root 读取了原始 27 项 CLI/守卫记录与另外 2 项容量记录。正常
 原 R1 只因 helper 把 entrypoint 配置误认作绝对路径而失败，尚未调用 CLI；实际
 配置是 `open-node-entrypoint`。仅修 helper 后运行 R2，产品和镜像没有修改或 retag。
 此前 helper 静态行宽失败也原样保留。后续精确 Git 镜像须另行构建，不能用这个
-工作树 revision 代替。
+工作树 revision 代替；独立精确提交验收记录在下文。
 
 完整后端在 `/tmp/open-node-encryption-full-backend.ZgoSHNdy` 使用同一份 564 文件
 冻结源，只运行一次完整 pytest：**4048 项通过，零失败、错误和跳过，967.14 秒**。
@@ -162,6 +162,39 @@ root 还逐项复核了 4254 项最终工件和 27 项封存链；清单分别�
 最终封存为 `918cb00aab5d2d263b9f54144ee95dd5d7fa5a642baa182bde2b26a956407825`。
 初次准备目录 `/tmp/open-node-encryption-max.1dKQIpLZ` 因缺少 GNU time、helper
 误要求清单路径带 `./` 而停止，均未运行产品；失败记录保留。
+
+精确 Git 提交 `a29345b7e58417d1089c349f6f9cca878830817e` 已在
+`/tmp/open-node-backup-encryption-commit-a29345b.E5BnhrHc` 使用干净 GitHub checkout
+正常重建，未将工作树镜像 retag 充数。564 文件归档 SHA-256 为
+`d10b780cdfb1c2bd7a2240d64c20c21e899f92c67ea4f0227e92b12dbce4c265`，
+逐文件清单为
+`cadcd7f0f019a1beb552b4066ac2fd0d507a7d2d7f8c797fdf431f7d88f4eb87`。
+相对已验 R1 只有四份不参与 Docker 构建的文档变化；111 个安装后 Python 文件、
+全部 wheel 元数据及 40 个前端文件与工作树镜像逐字节一致。
+
+新镜像为
+`sha256:40868d23f5961f8731b59c8a41c210485d32469cc89086884a09af371b666d66`，
+OCI revision 是完整 `a29345b` SHA。原有三个验收 helper 保持原字节，新 driver
+仅调整源码身份、revision 与输入清单断言；27 项实际 CLI/守卫、两项 128 MiB
+容量检查及独立新应用全部通过。所有原生调用均读取实际退出状态，不把完成
+解密但内部 ZIP 无效、临时空间不足或拒绝覆盖写成成功。UID/GID 10001、只读根、
+无网络、零 capability 及默认 entrypoint 保持不变；没有修改 Compose 限额。
+
+root 独立读取完整报告、29 项原始 CLI/容量记录、应用检查和后核，并逐项验证
+379 项最终证据。`evidence/final-evidence.sha256` 的 SHA-256 为
+`8e2244a40f810502a7253c3e76a45544306c117e3079d0bfe3f7a9b75727ba74`，
+报告为 `a447fbe22358e5d7089c8eee9be5ac936df099cd59393099f946d0636a0d85f4`，
+后核为 `7ac3531684bbcd43f693d42a73fbd7f3c8396604ca1d9653e77cec83041a6f25`。
+五个自有容器全部正常退出，无 OOM，无剩余自有容器、卷或 PID；生产、共享候选、
+依赖、旧镜像及旧证据均不变。driver 首轮四个 E501 格式失败也保留，修正后
+Ruff/编译通过；原三份 helper 及产品代码没有因此修改。
+
+此精确提交的候选 [CI 33384255225](https://github.com/FengYuchen1314/open-node/actions/runs/33384255225)
+四项全部通过后，root 已非强制快进公开 `main` 到 `a29345b`，未升级生产。
+随后主线 [CI 33385668793](https://github.com/FengYuchen1314/open-node/actions/runs/33385668793)
+的 Backend、Agent、Frontend、Probe Worker 四项也全部通过；它与候选 CI 是独立运行。
+这次发布只增加已完成包的命令行加密与只读验证，不提供在线快照、网页创建/下载
+或受控恢复；不能据此将应用内备份或全部 MMWX 功能标为完成。
 
 ### Backup v1 format — structure checks, not recovery
 
