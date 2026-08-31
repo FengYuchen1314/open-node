@@ -110,6 +110,14 @@ def _quiesce(connection: sqlite3.Connection) -> dict[str, int]:
                 sessions += connection.execute(f"DELETE FROM {table}").rowcount
             for table in ("operator_challenges", "subscriber_challenges"):
                 connection.execute(f"DELETE FROM {table}")
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='initial_setup_tickets'"
+            ).fetchone():
+                connection.execute(
+                    "UPDATE initial_setup_tickets SET token_hash=NULL, expires_at=0, "
+                    "completed_at=?",
+                    (now.timestamp(),),
+                )
             connection.execute(
                 "UPDATE agent_bootstrap_tickets SET revoked_at=? WHERE revoked_at IS NULL",
                 (now.timestamp(),),

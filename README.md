@@ -45,9 +45,11 @@ keys, commands and user-provided content retain their original values.
 ## Administrator Access
 
 Management APIs require a local administrator session. There is no default
-password or activation key. Create the account with `open-node-admin create`
-using the same database configuration as the backend, then sign in through
-the React interface. [Administrator setup and recovery](docs/administrator-access.md)
+password or activation key. Fresh installations support
+[Chinese browser initialization](docs/initial-setup.md): the installer prints a
+30-minute one-use credential, then the browser creates the administrator and
+site titles. `open-node-admin create` remains available for terminal setup.
+[Administrator setup and recovery](docs/administrator-access.md)
 also covers HTTPS cookies, local previews, session expiry, and API clients.
 [Administrator MFA](docs/administrator-security.md) adds encrypted authenticator
 enrollment, one-use recovery codes, mandatory enrollment and local recovery.
@@ -86,8 +88,9 @@ existing output, and never publishes decrypted plaintext. The control plane now
 also provides [consistent snapshots](docs/backup-runtime.md) and an
 [administrator Web backup page](docs/backups.md): fresh password/MFA proof,
 background creation, bounded retention and encrypted download to an age public
-recipient. Controlled application restore remains unfinished; the existing
-stopped-volume installer backup is unchanged. See the guides for private-key
+recipient. Native v1 offline restore and isolated first-boot review are available;
+browser upload restore remains unfinished. The existing stopped-volume installer
+backup is unchanged. See the guides for private-key
 and temporary-space requirements; a successful envelope check is not sender
 authentication.
 
@@ -159,9 +162,10 @@ The public command downloads the script completely before running it:
 ```
 
 The secure default binds the panel to `127.0.0.1:8080`; use an SSH tunnel for
-the first login. Interactive account creation reads from the controlling
-`/dev/tty`; unattended installs use a root-owned private password file. The
-same script accepts `update`, `status`, `uninstall`, and `create-admin`.
+browser initialization. By default the installer prints a one-use setup
+credential; `setup` renews it if needed. Explicit terminal creation still reads
+from `/dev/tty`; unattended provisioning can use a root-owned private password
+file. The same script accepts `update`, `status`, `uninstall`, `setup`, and `create-admin`.
 Updates create a stopped-volume recovery bundle before starting a candidate;
 an unhealthy candidate can leave recovery explicitly required rather than
 restart an older image against possibly migrated data. Uninstall preserves the

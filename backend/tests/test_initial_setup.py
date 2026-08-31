@@ -1,0 +1,262 @@
+"""First-run HTTP/local issuance, atomic setup, expiry and race boundaries."""
+
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
+import pytest
+from fastapi.testclient import TestClient
+from open_node.core.config import Settings
+from open_node.domain.initial_setup import InitialSetupError, InitialSetupRequest
+from open_node.main import create_app
+from open_node.services.auth import Administrator, InitialSetupTicket, password_hash
+from open_node.services.backup_restore import _quiesce
+from open_node.services.branding import BrandingSettingsModel
+from open_node.services.initial_setup import InitialSetupStore
+from sqlalchemy import delete, event
+from sqlalchemy.exc import SQLAlchemyError
+
+HEADERS = {"X-Open-Node-Client": "browser"}
+PASSWORD = "  first-administrator-secret  "
+
+
+@pytest.fixture
+def setup_app(tmp_path):
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path / 'setup.db'}",
+                              certificate_state_dir=tmp_path / "certificates", _env_file=None))
+    yield app
+    for engine in (app.state.auth.engine, app.state.inventory._engine,
+                   app.state.certificates.engine):
+        engine.dispose()
+    app.state.backup_writes.close()
+
+
+def payload(token, **changes):
+    return dict(
+        setup_token=token, username="first-admin", password=PASSWORD,
+        site_title="  中文站点 🧭  ", brand_title="我的面板", confirm_new_install=True,
+    ) | changes
+
+
+def test_issue_complete_login_and_no_remote_reissue(setup_app):
+    app = setup_app
+    store = InitialSetupStore(app.state.auth)
+    client = TestClient(app)
+    initial = client.get("/api/v1/setup")
+    assert initial.json() == dict(configured=False, available=False, expires_at=None,
+                                 token_required=True)
+    assert initial.headers["cache-control"] == "no-store"
+    token, expires = store.issue()
+    assert len(token) == 43
+    ready = client.get("/api/v1/setup")
+    assert ready.json()["available"] is True
+    assert token not in ready.text and PASSWORD not in ready.text
+    with app.state.auth.session() as db:
+        ticket = db.get(InitialSetupTicket, 1)
+        assert ticket.token_hash != token
+        assert ticket.expires_at == pytest.approx(expires.timestamp(), abs=0.000001, rel=0)
+    response = client.post("/api/v1/setup", json=payload(token), headers=HEADERS)
+    assert response.status_code == 201
+    assert response.json() == dict(configured=True, login_required=True)
+    assert "set-cookie" not in response.headers
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert client.get("/api/v1/servers").status_code == 401
+    assert client.get("/api/v1/branding").json()["site_title"] == "中文站点 🧭"
+    assert app.state.branding.get_settings().revision == 1
+    assert client.post("/api/v1/setup", json=payload(token), headers=HEADERS).status_code == 409
+    with pytest.raises(InitialSetupError, match="already completed"):
+        store.issue()
+    assert client.post("/api/v1/setup/issue", headers=HEADERS).status_code == 404
+    login = client.post("/api/v1/auth/login", headers=HEADERS,
+                        json={"username": "first-admin", "password": PASSWORD})
+    assert login.status_code == 200 and login.json()["authenticated"]
+    with app.state.auth.session() as db:
+        ticket = db.get(InitialSetupTicket, 1)
+        assert ticket.token_hash is None and ticket.completed_at is not None
+
+
+def test_expiry_reissue_and_no_hash_for_invalid_token(setup_app, monkeypatch):
+    now = [1000]
+    store = InitialSetupStore(setup_app.state.auth, clock=lambda: now[0])
+    old, _ = store.issue()
+    token, _ = store.issue()
+    calls = []
+    monkeypatch.setattr(password_hash, "hash", lambda value: calls.append(value))
+    for credential in (old, "x" * 43):
+        with pytest.raises(InitialSetupError) as failure:
+            store.complete(InitialSetupRequest(**payload(credential)))
+        assert failure.value.code == "setup_ticket_invalid"
+    now[0] += 1800
+    assert not store.status().available
+    with pytest.raises(InitialSetupError):
+        store.complete(InitialSetupRequest(**payload(token)))
+    assert not calls and not setup_app.state.auth.configured()
+
+
+@pytest.mark.parametrize("changes", [
+    {"confirm_new_install": False}, {"confirm_new_install": 1}, {"confirm_new_install": "true"},
+    {"setup_token": "a" * 42}, {"setup_token": "中" * 43}, {"password": "too-short"},
+    {"password": "a" * 1025}, {"username": "bad space"}, {"username": 12},
+    {"site_title": "\u202eunsafe"}, {"brand_title": "x" * 41}, {"PRIVATE-EXTRA": "PRIVATE"},
+])
+def test_strict_safe_payload(setup_app, changes):
+    token, _ = InitialSetupStore(setup_app.state.auth).issue()
+    response = TestClient(setup_app).post("/api/v1/setup", json=payload(token, **changes),
+                                         headers=HEADERS)
+    assert response.status_code == 422
+    assert response.json()["code"] == "setup_invalid_request"
+    assert token not in response.text and "PRIVATE" not in response.text
+    assert not setup_app.state.auth.configured()
+
+
+@pytest.mark.parametrize("body,status", [
+    ('{"password":"PRIVATE","password":"PRIVATE"}', 422),
+    ('{"password":NaN}', 422), ('[1,2]', 422), ("[" * 1500, 422),
+    ("PRIVATE" * 3000, 413),
+])
+def test_bounded_unique_json(setup_app, body, status):
+    response = TestClient(setup_app).post("/api/v1/setup", content=body,
+                                         headers=HEADERS | {"Content-Type": "application/json"})
+    assert response.status_code == status
+    assert "PRIVATE" not in response.text
+
+
+def test_origin_header_media_and_durable_limit(setup_app):
+    client = TestClient(setup_app)
+    token, _ = InitialSetupStore(setup_app.state.auth).issue()
+    assert client.post("/api/v1/setup", json=payload(token)).status_code == 403
+    assert client.post("/api/v1/setup", json=payload(token), headers=HEADERS | {
+        "Origin": "https://not-this-panel.test",
+    }).status_code == 403
+    assert client.post("/api/v1/setup", content="PRIVATE", headers=HEADERS).status_code == 415
+    for _ in range(9):
+        assert client.post("/api/v1/setup", json=payload("a" * 43),
+                           headers=HEADERS).status_code == 403
+    response = TestClient(setup_app).post("/api/v1/setup", json=payload(token), headers=HEADERS)
+    assert response.status_code == 429 and response.headers["retry-after"] == "60"
+    assert not setup_app.state.auth.configured()
+
+
+@pytest.mark.parametrize("race", ["double", "reissue", "expiry", "cli"])
+def test_commit_rechecks_authority_after_hash(setup_app, monkeypatch, race):
+    app = setup_app
+    now = [1000]
+    store = InitialSetupStore(app.state.auth, clock=lambda: now[0])
+    token, _ = store.issue()
+    original_hash = password_hash.hash
+    barrier = Barrier(2)
+
+    def pause(value):
+        hashed = original_hash(value)
+        if race == "double":
+            barrier.wait(timeout=10)
+        elif race == "reissue":
+            store.issue()
+        elif race == "expiry":
+            now[0] += 1800
+        elif race == "cli":
+            monkeypatch.setattr(password_hash, "hash", original_hash)
+            app.state.auth.set_administrator("cli-admin", PASSWORD)
+        return hashed
+
+    monkeypatch.setattr(password_hash, "hash", pause)
+
+    def finish(username):
+        try:
+            store.complete(InitialSetupRequest(**payload(token, username=username)))
+            return "completed"
+        except InitialSetupError as exc:
+            return exc.code
+
+    if race == "double":
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = list(executor.map(finish, ["first", "second"]))
+        assert sorted(outcomes) == ["completed", "setup_already_completed"]
+        assert app.state.branding.get_settings().revision == 1
+    else:
+        assert finish("browser") == (
+            "setup_already_completed" if race == "cli" else "setup_ticket_invalid"
+        )
+        assert app.state.branding.get_settings().revision == 0
+
+
+def test_commit_failure_rolls_back_all_changes(setup_app):
+    app = setup_app
+    store = InitialSetupStore(app.state.auth)
+    token, _ = store.issue()
+
+    def fail(_connection):
+        raise SQLAlchemyError("PRIVATE-COMMIT-FAILURE")
+
+    event.listen(app.state.auth.engine, "commit", fail)
+    try:
+        with pytest.raises(InitialSetupError) as failure:
+            store.complete(InitialSetupRequest(**payload(token)))
+        assert "PRIVATE" not in str(failure.value)
+    finally:
+        event.remove(app.state.auth.engine, "commit", fail)
+    assert not app.state.auth.configured()
+    assert app.state.branding.get_settings().revision == 0
+    assert store.status().available
+    store.complete(InitialSetupRequest(**payload(token)))
+    assert app.state.auth.configured()
+
+
+def test_missing_branding_is_not_partial_success(setup_app):
+    app = setup_app
+    store = InitialSetupStore(app.state.auth)
+    token, _ = store.issue()
+    with app.state.auth.session.begin() as db:
+        db.execute(delete(BrandingSettingsModel))
+    with pytest.raises(InitialSetupError):
+        store.complete(InitialSetupRequest(**payload(token)))
+    assert store.status().available and not app.state.auth.configured()
+
+
+def test_local_creation_deletion_and_restore_do_not_reopen_setup(setup_app):
+    app = setup_app
+    store = InitialSetupStore(app.state.auth)
+    store.issue()
+    app.state.auth.set_administrator("local-admin", PASSWORD)
+    with app.state.auth.session.begin() as db:
+        db.execute(delete(Administrator))
+    assert store.status().configured and not store.status().available
+    with pytest.raises(InitialSetupError):
+        store.issue()
+    # Restores also consume optional preexisting setup tickets, even malformed
+    # historical entries. This uses the real application schema, no remote jobs.
+    with app.state.auth.session.begin() as db:
+        row = db.get(InitialSetupTicket, 1)
+        row.token_hash = "b" * 64
+        row.expires_at = 9999999999
+    with sqlite3.connect(app.state.auth.engine.url.database) as db:
+        _quiesce(db)
+        assert db.execute("SELECT token_hash,expires_at FROM initial_setup_tickets").fetchone() == (
+            None, 0,
+        )
+        db.execute("DROP TABLE initial_setup_tickets")
+        _quiesce(db)  # Older archives did not have the optional table.
+
+
+def test_cli_issue_does_not_read_password_and_rejects_existing_admin(setup_app):
+    app = setup_app
+    environment = os.environ | {"OPEN_NODE_DATABASE_URL": str(app.state.auth.engine.url)}
+
+    def run(*args):
+        return subprocess.run([sys.executable, "-m", "open_node.admin", *args],
+                              env=environment, input="", text=True, capture_output=True, timeout=15)
+
+    first = run("prepare-setup", "--json")
+    assert first.returncode == 0, first.stderr
+    issued = json.loads(first.stdout)
+    assert len(issued["setup_token"]) == 43
+    assert "Password:" not in first.stderr
+    app.state.auth.set_administrator("local-admin", PASSWORD)
+    result = run("prepare-setup", "--json")
+    assert result.returncode == 1 and result.stdout == ""
+    assert issued["setup_token"] not in result.stderr
+    assert "已初始化" in result.stderr

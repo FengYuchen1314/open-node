@@ -1,5 +1,47 @@
 # Testing
 
+## Browser first-run setup — 2026-09-01
+
+VPS evidence: `/tmp/open-node-setup.p3gIS3vS/evidence`, `evidence-r2`, and
+`evidence-installer-final`. Source and dependencies were mounted read-only in
+private mount/PID/network namespaces; `/opt/open-node` was masked. Only
+synthetic administrators, tokens, database files and password files were used.
+No production/container/shared-candidate upgrade or destructive installer smoke
+was performed.
+
+- R1 backend: **98 passed, 1 failed** in 75.12s across initial setup, extracted
+  installer functions, authentication, application backup coordination and
+  native restore. The failure was a timestamp fixture comparing floating-point
+  seconds with a microsecond-rounded datetime using exact equality. It now
+  uses a one-microsecond absolute tolerance, not an epoch-relative tolerance.
+  Initial Ruff also found six long lines, subsequently wrapped.
+- R2 backend: **33 passed** in 18.36s for the initial-setup and installer suites.
+  This includes real local CLI issuance, HTTP initialization/login, no auto-login,
+  safe public status, strict/duplicate/oversize JSON, origin/header/limit guards,
+  expiry/reissue, no hash for invalid authority, simultaneous completion, CLI
+  creation racing the browser, post-hash rechecks, real SQLite commit rollback,
+  branding atomicity, deleted-admin refusal and optional-table restore cleanup.
+  Full application-source Ruff and the changed test files passed.
+- R1 frontend: **31 passed, 2 failed**. The failures were an ambiguous alert
+  selector and a StrictMode fixture nested below a non-strict root, which React
+  does not replay as a strict root. R2 corrects those fixtures and adds application
+  initialization routing/title coverage: **47 passed in four files**, 28.44s.
+  App and Node TypeScript checks and the main production build passed. Controls
+  cover consent, password confirmation, clearing secrets before awaiting a
+  response, duplicate submit, lost-result GET-only reconciliation, failed status
+  reads, safe error text, strict-root replay, unmount and normal login/MFA paths.
+- Final installer review added explicit failure propagation for CLI calls made
+  inside Bash conditional function contexts. **6 extracted-function/syntax tests
+  passed**, with Ruff, in `evidence-installer-final`. These never deploy Docker
+  or access real installation state. Historical installer deployment tests remain
+  the baseline; this is not a new anonymous-download/container/browser end-to-end
+  deployment claim.
+
+The preceding exact-`2367439` scheduled-refresh CI
+[33422768101](https://github.com/FengYuchen1314/open-node/actions/runs/33422768101)
+has completed with Backend, Frontend, Agent and Probe Worker all successful.
+It does not substitute for the new setup feature's CI.
+
 ## Scheduled external refresh — 2026-09-01
 
 VPS evidence: `/tmp/open-node-refresh.e6s5c4WF/evidence`. Tests run against

@@ -21,6 +21,7 @@ from open_node.api.routes.system import healthz
 from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
 from open_node.core.config import Settings, get_settings
 from open_node.domain.branding import BRANDING_ERROR_MESSAGES, BrandingError
+from open_node.domain.initial_setup import SETUP_MESSAGES, InitialSetupError
 from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.domain.notifications import NotificationError
 from open_node.domain.renewals import RENEWAL_MESSAGES, RenewalError
@@ -171,6 +172,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 (
                     active_settings.api_prefix + "/migrations/mmwx/",
                     active_settings.api_prefix + "/auth/",
+                    active_settings.api_prefix + "/setup",
                     active_settings.api_prefix + "/backups",
                     active_settings.api_prefix + "/agents/bootstrap/",
                     active_settings.api_prefix + "/external-subscriptions",
@@ -234,6 +236,12 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 },
             )
         return await request_validation_exception_handler(request, exc)
+
+    @app.exception_handler(InitialSetupError)
+    async def initial_setup_error(_request, exc):
+        return JSONResponse(status_code=exc.status_code, content={
+            "code": exc.code, "detail": SETUP_MESSAGES[exc.code],
+        }, headers={"Retry-After": "60"} if exc.status_code == 429 else None)
 
     @app.exception_handler(RenewalError)
     async def renewal_error(_request, exc):

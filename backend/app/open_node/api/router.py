@@ -11,6 +11,7 @@ from open_node.api.routes import (
     certificates,
     changes,
     external_subscriptions,
+    initial_setup,
     legacy_mmwx,
     license,
     node_management,
@@ -59,6 +60,7 @@ private_router.include_router(notifications.router)
 private_router.include_router(subscriber_auth.management_router)
 api_router.include_router(private_router)
 api_router.include_router(auth.router)
+api_router.include_router(initial_setup.router)
 api_router.include_router(subscriber_auth.router)
 api_router.include_router(external_subscriptions.account_router)
 api_router.include_router(renewals.account_router)

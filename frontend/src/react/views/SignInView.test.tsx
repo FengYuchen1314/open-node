@@ -6,11 +6,13 @@ import { getPublicBranding } from "../../services/branding";
 import { BrandingProvider } from "../hooks/useBranding";
 import { deferred, flush, installDom, renderUi } from "../test-utils";
 import SignInView from "./SignInView";
+import { getInitialSetupStatus } from "../../services/initial-setup";
 
 vi.mock("../../services/auth", async importOriginal => ({ ...await importOriginal<typeof import("../../services/auth")>(), signIn: vi.fn(), verifySignIn: vi.fn(), acceptOperatorSession: vi.fn(), loadSession: vi.fn() }));
 vi.mock("../../services/branding", async original => ({ ...await original<typeof import("../../services/branding")>(), getPublicBranding: vi.fn() }));
 const { qrDataUrl } = vi.hoisted(() => ({ qrDataUrl: vi.fn<(text: string, options?: object) => Promise<string>>() }));
 vi.mock("qrcode", () => ({ default: { toDataURL: qrDataUrl } }));
+vi.mock("../../services/initial-setup", async original => ({ ...await original<typeof import("../../services/initial-setup")>(), getInitialSetupStatus: vi.fn() }));
 const anonymous = { configured: true, authenticated: false, username: null, csrf_token: null };
 const challenge: OperatorLogin = { ...anonymous, requires_2fa: true, challenge: "memory-only-challenge", enrollment_required: false, enrollment: null, recovery_codes: [] };
 const authenticated: OperatorLogin = { ...challenge, authenticated: true, username: "admin", csrf_token: "private-csrf", requires_2fa: false, challenge: null };
@@ -20,6 +22,7 @@ beforeEach(() => {
   vi.mocked(signIn).mockResolvedValue(challenge);
   vi.mocked(verifySignIn).mockResolvedValue(authenticated);
   qrDataUrl.mockResolvedValue("data:image/png;base64,cXI=");
+  vi.mocked(getInitialSetupStatus).mockResolvedValue({ configured: false, available: false, expires_at: null, token_required: true });
 });
 afterEach(async () => {
   cleanup();

@@ -62,6 +62,8 @@ def test_every_management_route_requires_an_operator(tmp_path: Path):
     client = TestClient(app)
     checked = 0
     public_http = {
+        ("get", "/api/v1/setup"),
+        ("post", "/api/v1/setup"),
         ("get", "/api/v1/auth/session"),
         ("post", "/api/v1/auth/login"),
         ("post", "/api/v1/auth/login/verify"),

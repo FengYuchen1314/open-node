@@ -257,8 +257,8 @@ load_manifest_defaults() {
 
 validate_inputs() {
   case "$ACTION" in
-    install|update|status|uninstall|create-admin) ;;
-    *) die "usage: install.sh [install|update|status|uninstall|create-admin]" ;;
+    install|update|status|uninstall|create-admin|setup) ;;
+    *) die "usage: install.sh [install|update|status|uninstall|create-admin|setup]" ;;
   esac
   command -v realpath >/dev/null 2>&1 || die "GNU realpath is required"
   validate_plain_value "OPEN_NODE_REPOSITORY" "$REPOSITORY"
@@ -281,8 +281,10 @@ validate_inputs() {
     || die "OPEN_NODE_AUTO_INSTALL_DEPENDENCIES must be 0 or 1"
   [[ "$BUILD_PULL" == "0" || "$BUILD_PULL" == "1" ]] \
     || die "OPEN_NODE_BUILD_PULL must be 0 or 1"
-  [[ "$CREATE_ADMIN" == "0" || "$CREATE_ADMIN" == "1" || "$CREATE_ADMIN" == "auto" ]] \
-    || die "OPEN_NODE_CREATE_ADMIN must be 0, 1, or auto"
+  [[ "$CREATE_ADMIN" == "0" || "$CREATE_ADMIN" == "1" || "$CREATE_ADMIN" == "auto" || "$CREATE_ADMIN" == "web" ]] \
+    || die "OPEN_NODE_CREATE_ADMIN must be 0, 1, auto, or web"
+  [[ "$CREATE_ADMIN" != "web" || -z "$ADMIN_PASSWORD_FILE" ]] \
+    || die "OPEN_NODE_CREATE_ADMIN=web cannot be combined with a password file"
 }
 
 install_dependencies() {
@@ -1589,7 +1591,18 @@ backup_stopped_volume() {
     TXN_TEMP_BACKUP="" TXN_ROLLBACK_IMAGE=""
 }
 
+prepare_browser_setup() {
+  compose_with "$INSTALL_DIR" "$ENV_FILE" exec -T open-node open-node-admin prepare-setup \
+    || die "初始化凭证签发失败。服务数据已保留，请检查后重新运行 setup。"
+  log "请通过 SSH 隧道或可信 HTTPS 打开面板，填写终端凭证完成初始化。"
+  log "凭证过期后，可重新运行此安装脚本的 setup 命令；不会重置已有管理员。"
+}
+
 create_administrator() {
+  if [[ "$CREATE_ADMIN" == "web" || ( "$CREATE_ADMIN" == "auto" && -z "$ADMIN_PASSWORD_FILE" ) ]]; then
+    prepare_browser_setup
+    return
+  fi
   local password="" confirmation="" password_mode password_owner
   if [[ -n "$ADMIN_PASSWORD_FILE" ]]; then
     validate_absolute_path "OPEN_NODE_ADMIN_PASSWORD_FILE" "$ADMIN_PASSWORD_FILE"
@@ -1619,7 +1632,8 @@ create_administrator() {
   [[ ${#password} -ge 12 && ${#password} -le 1024 ]] \
     || die "administrator password must contain 12-1024 characters"
   printf '%s\n' "$password" | compose_with "$INSTALL_DIR" "$ENV_FILE" exec -T open-node \
-    open-node-admin create --username "$ADMIN_USERNAME" --password-stdin
+    open-node-admin create --username "$ADMIN_USERNAME" --password-stdin \
+    || die "administrator creation failed; existing service data was preserved"
   unset password confirmation
 }
 
@@ -1644,7 +1658,7 @@ log_success() {
     warn "the panel is exposed over plain HTTP by explicit operator opt-in"
   fi
   [[ "$CREATE_ADMIN" != "0" ]] \
-    || log "create an administrator by running this installer with create-admin"
+    || log "使用此安装脚本的 setup 命令在浏览器初始化，或用 create-admin 在终端创建管理员。"
 }
 
 install_fresh() {
@@ -1953,7 +1967,7 @@ uninstall_preserving_data() {
   log "data volume, source, configuration, installer state, and backups were preserved"
 }
 
-create_admin_action() {
+verify_administrator_action() {
   require_no_recovery
   require_manifest
   require_environment_file
@@ -1962,6 +1976,10 @@ create_admin_action() {
   verify_volume
   wait_for_health "$INSTALL_DIR" "$ENV_FILE" "$(read_manifest_value DEPLOYED_IMAGE_ID)" \
     || die "deployment must be healthy before creating an administrator"
+}
+
+create_admin_action() {
+  verify_administrator_action
   CREATE_ADMIN=1
   create_administrator
 }
@@ -1996,6 +2014,7 @@ main() {
     status) show_status ;;
     uninstall) uninstall_preserving_data ;;
     create-admin) create_admin_action ;;
+    setup) verify_administrator_action; prepare_browser_setup ;;
   esac
 }
 

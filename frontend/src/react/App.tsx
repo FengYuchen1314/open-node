@@ -58,10 +58,10 @@ function ApplicationLayout() {
   }, [subscriber, auth.ready]);
   useEffect(() => { setDrawer(false); }, [location.pathname, mobile]);
   useEffect(() => {
-    const title = subscriber ? "用户中心" : !auth.session?.authenticated ? "管理员登录" : navigation.find(item => item.key === location.pathname)?.label ?? "管理后台";
+    const title = subscriber ? "用户中心" : auth.session?.configured === false ? "首次初始化" : !auth.session?.authenticated ? "管理员登录" : navigation.find(item => item.key === location.pathname)?.label ?? "管理后台";
     document.documentElement.lang = "zh-CN";
     document.title = `${title} - ${branding.site_title}`;
-  }, [auth.session?.authenticated, branding.site_title, location.pathname, subscriber]);
+  }, [auth.session?.authenticated, auth.session?.configured, branding.site_title, location.pathname, subscriber]);
   async function logout() {
     if (logoutBusy) return;
     setLogoutBusy(true); setLogoutError("");

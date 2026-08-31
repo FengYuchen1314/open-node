@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authState, loadSession } from "../services/auth";
 import { defaultBranding } from "../domain/branding";
 import { getPublicBranding } from "../services/branding";
+import { getInitialSetupStatus } from "../services/initial-setup";
 import { deferred, flush, installDom } from "./test-utils";
 import App from "./App";
 
@@ -21,16 +22,27 @@ vi.mock("../routes", () => ({ routes: [
 ] }));
 vi.mock("../services/auth", async importOriginal => ({ ...await importOriginal<typeof import("../services/auth")>(), loadSession: vi.fn(), signOut: vi.fn() }));
 vi.mock("../services/branding", async original => ({ ...await original<typeof import("../services/branding")>(), getPublicBranding: vi.fn() }));
+vi.mock("../services/initial-setup", async original => ({ ...await original<typeof import("../services/initial-setup")>(), getInitialSetupStatus: vi.fn() }));
 beforeEach(() => {
   vi.resetAllMocks(); installDom(); routeState.broken = false;
   authState.ready = true; authState.error = "";
   authState.session = { configured: true, authenticated: false, username: null, csrf_token: null };
   vi.mocked(getPublicBranding).mockResolvedValue({ ...defaultBranding });
+  vi.mocked(getInitialSetupStatus).mockResolvedValue({ configured: false, available: false, expires_at: null, token_required: true });
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Unexpected network request in application test"); }));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function mount(path = "/") { return render(<StrictMode><MemoryRouter initialEntries={[path]}><App /></MemoryRouter></StrictMode>); }
 describe("React application shell", () => {
+  it("routes unconfigured administrators to Chinese first-run setup", async () => {
+    authState.session = { configured: false, authenticated: false, username: null, csrf_token: null };
+    mount("/system-settings"); await flush();
+    expect(screen.getByRole("heading", { name: "首次初始化" })).toBeTruthy();
+    expect(document.title).toBe("首次初始化 - Open Node");
+    expect(screen.getByText("open-node-admin prepare-setup")).toBeTruthy();
+    expect(screen.queryByText("System settings workspace")).toBeNull();
+    expect(screen.queryByLabelText("密码")).toBeNull();
+  });
   it("never mounts a management workspace before administrator authentication", async () => {
     mount(); await flush();
     expect(screen.getByRole("heading", { name: "管理员登录" })).toBeTruthy();

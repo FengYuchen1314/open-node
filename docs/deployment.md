@@ -64,10 +64,10 @@ The installer performs these bounded actions:
    transaction-unique `source-<revision>-<transaction>` image, starts it without
    rebuilding, and verifies that the container uses the recorded image ID, has
    the requested published binding, and passes `/healthz`; and
-5. when a usable controlling terminal is present, prompts through `/dev/tty`
-   for the initial administrator without putting the password in command-line
-   arguments or environment variables. Otherwise automatic account creation is
-   skipped unless unattended creation was explicitly required.
+5. by default, prints a 30-minute one-use credential for
+   [browser initialization](initial-setup.md). An explicit private password file
+   retains terminal provisioning. `OPEN_NODE_CREATE_ADMIN=1` retains the
+   interactive `/dev/tty` password flow; `0` skips administrator initialization.
 
 The default listener is `127.0.0.1:8080` and the initial loopback/SSH-tunnel
 cookie setting is HTTP-compatible. From your workstation, open a tunnel and
@@ -118,11 +118,12 @@ file without using `/dev/tty`. The installer reads the secret but deliberately
 does not delete an operator-owned file; the caller's trap owns that cleanup.
 
 Common lifecycle commands can use the same completely downloaded, reviewed
-script. The explicit `create-admin` action is also available after installation:
+script. `setup` renews a browser credential before initialization; `create-admin`
+creates the administrator through the terminal. Neither overwrites an account:
 
 ```bash
 (
-  action=status # Change to update, uninstall, or create-admin as required.
+  action=status # Change to update, uninstall, setup, or create-admin as required.
   installer="$(mktemp)" || exit 1
   trap 'rm -f -- "$installer"' EXIT
   trap 'exit 1' HUP INT TERM
@@ -450,7 +451,7 @@ Failure handling depends on how far the transaction progressed:
   candidate, remove temporary worktrees/files, and record the interrupted phase
   and available backup in `installer.recovery`.
 
-While that marker exists, `install`, `update`, and `create-admin` fail closed;
+While that marker exists, `install`, `update`, `setup`, and `create-admin` fail closed;
 `status` displays it. Restore the named bundle into a fresh, uniquely named
 Compose project and verify the old image and data together using the procedure
 above. Only after recovery has been completed and recorded state reconciled

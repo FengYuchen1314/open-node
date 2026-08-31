@@ -72,6 +72,15 @@ class AdministratorBackupEpoch(AuthBase):
     value: Mapped[str] = mapped_column(String(64))
 
 
+class InitialSetupTicket(AuthBase):
+    __tablename__ = "initial_setup_tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str | None] = mapped_column(String(64))
+    expires_at: Mapped[float] = mapped_column(Float, default=0)
+    completed_at: Mapped[float | None] = mapped_column(Float)
+
+
 class OperatorSession(AuthBase):
     __tablename__ = "operator_sessions"
 
@@ -186,7 +195,7 @@ class AuthStore:
 
     def set_administrator(self, username: str, password: str, *, reset: bool = False) -> None:
         hashed = password_hash.hash(password)
-        with self.session.begin() as db:
+        with self._coordinated_session() as db:
             administrator = db.get(Administrator, 1)
             if administrator:
                 if not reset:
@@ -203,6 +212,12 @@ class AuthStore:
             else:
                 db.add(Administrator(id=1, username=username, password_hash=hashed))
             self._advance_backup_epoch(db)
+            ticket = db.get(InitialSetupTicket, 1)
+            if ticket is not None:
+                ticket.token_hash = None
+                ticket.expires_at = 0
+                ticket.completed_at = time()
+            db.commit()
 
     def allow_login_attempt(self, peer: str, *, max_attempts: int = 10) -> bool:
         key = sha256(peer.encode()).hexdigest()
