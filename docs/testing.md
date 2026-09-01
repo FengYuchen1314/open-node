@@ -1,5 +1,45 @@
 # Testing
 
+## Logo, login background and standard themes — 2026-09-01
+
+VPS evidence is preserved at `/tmp/open-node-appearance.UE4IW9bS/evidence` and
+`/tmp/open-node-appearance-r2.WhxKJy/evidence`. Source, Pillow and Node/Python
+dependencies were mounted read-only in private mount/PID/network namespaces;
+the namespace had no external route and `/opt/open-node` was masked. Only
+synthetic databases, administrators and images were used. Production and the
+shared candidate were not changed.
+
+- R1 backend selected the new appearance, branding and authentication suites:
+  **210 passed, 2 failed**. Both failures were test expectations: a cross-slot
+  immutable asset URL correctly returns the fixed missing-asset code, and a
+  corruption fixture called the inventory session function as if it were an
+  object. The assertions were corrected without weakening product behavior.
+  Initial Ruff found four test-only import/line-format issues.
+- R1 frontend selected seven appearance and adjacent application/view files:
+  **82 passed, 2 failed**. JSDOM exposes `referrerpolicy` through the attribute,
+  and the duplicate-upload test tried to query a button after its file selection
+  had deliberately been cleared. The final fixture reuses the already captured
+  element and still proves the upload service is called once. App and Node
+  TypeScript checks and the main production build passed in R1.
+- R2 passed complete application-source Ruff, **27 appearance backend tests** in
+  23.66s, **42 frontend tests in three affected files** in 31.36s, and the App
+  TypeScript check. It also aligns browser validation with the backend's standard
+  HTTPS port and ASCII hostname rules. No historical full suite, real browser or
+  Docker image audit was repeated.
+- Final R3 catches decoder `EOFError` as a fixed invalid-image response and makes
+  the Ant Design menu explicitly follow the selected dark/light theme. Complete
+  application-source Ruff, **28 appearance backend tests**, **15 App tests** and
+  the App TypeScript check passed. R3 copied the preserved R2 source and replaced
+  only the three recorded affected files; evidence is at
+  `/tmp/open-node-appearance-r3.6xRQRm/evidence`.
+
+The preceding `54e2360` hosted CI
+[33425368130](https://github.com/FengYuchen1314/open-node/actions/runs/33425368130)
+has successful Frontend, Agent and Probe Worker jobs. Backend reported no test
+failure but was cancelled exactly at its former 60-minute job limit; this release
+raises that limit to 90 minutes instead of deleting tests. It is not recorded as
+an all-green run.
+
 ## Browser first-run setup — 2026-09-01
 
 VPS evidence: `/tmp/open-node-setup.p3gIS3vS/evidence`, `evidence-r2`, and

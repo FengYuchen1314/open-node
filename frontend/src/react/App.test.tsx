@@ -7,6 +7,7 @@ import { authState, loadSession } from "../services/auth";
 import { defaultBranding } from "../domain/branding";
 import { getPublicBranding } from "../services/branding";
 import { getInitialSetupStatus } from "../services/initial-setup";
+import { getPublicAppearance } from "../services/appearance";
 import { deferred, flush, installDom } from "./test-utils";
 import App from "./App";
 
@@ -23,17 +24,34 @@ vi.mock("../routes", () => ({ routes: [
 vi.mock("../services/auth", async importOriginal => ({ ...await importOriginal<typeof import("../services/auth")>(), loadSession: vi.fn(), signOut: vi.fn() }));
 vi.mock("../services/branding", async original => ({ ...await original<typeof import("../services/branding")>(), getPublicBranding: vi.fn() }));
 vi.mock("../services/initial-setup", async original => ({ ...await original<typeof import("../services/initial-setup")>(), getInitialSetupStatus: vi.fn() }));
+vi.mock("../services/appearance", async original => ({ ...await original<typeof import("../services/appearance")>(), getPublicAppearance: vi.fn() }));
 beforeEach(() => {
   vi.resetAllMocks(); installDom(); routeState.broken = false;
   authState.ready = true; authState.error = "";
   authState.session = { configured: true, authenticated: false, username: null, csrf_token: null };
   vi.mocked(getPublicBranding).mockResolvedValue({ ...defaultBranding });
   vi.mocked(getInitialSetupStatus).mockResolvedValue({ configured: false, available: false, expires_at: null, token_required: true });
+  vi.mocked(getPublicAppearance).mockResolvedValue({ default_theme: "light", logo_url: "", wallpaper_url: "", license_required: false });
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Unexpected network request in application test"); }));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function mount(path = "/") { return render(<StrictMode><MemoryRouter initialEntries={[path]}><App /></MemoryRouter></StrictMode>); }
 describe("React application shell", () => {
+  it("applies the public Logo, login background and site default theme", async () => {
+    vi.mocked(getPublicAppearance).mockResolvedValue({
+      default_theme: "dark", logo_url: "https://cdn.example.test/logo.png",
+      wallpaper_url: "https://cdn.example.test/background.webp", license_required: false,
+    });
+    mount(); await flush();
+    const logo = screen.getByAltText("站点 Logo") as HTMLImageElement;
+    expect(logo.src).toBe("https://cdn.example.test/logo.png");
+    const wallpaper = document.querySelector(".auth-wallpaper") as HTMLImageElement;
+    expect(wallpaper.src).toBe("https://cdn.example.test/background.webp");
+    expect(logo.crossOrigin).toBe("anonymous");
+    expect(wallpaper.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(document.documentElement.dataset.openNodeTheme).toBe("dark");
+    expect(screen.getByLabelText("页面主题")).toBeTruthy();
+  });
   it("routes unconfigured administrators to Chinese first-run setup", async () => {
     authState.session = { configured: false, authenticated: false, username: null, csrf_token: null };
     mount("/system-settings"); await flush();

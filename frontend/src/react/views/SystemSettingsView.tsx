@@ -7,6 +7,7 @@ import { BrandingRequestError, brandingErrorMessage, getBrandingSettings, update
 import { useAsyncScope } from "../hooks/useAsyncScope";
 import { useBranding } from "../hooks/useBranding";
 import { useAdministratorSession } from "../hooks/useSession";
+import AppearancePanel from "../components/AppearancePanel";
 
 export default function SystemSettingsView() {
   const auth = useAdministratorSession();
@@ -103,5 +104,6 @@ function BrandingEditor({ operator }: { operator: OperatorSession }) {
         <Typography.Text type="secondary">恢复默认只回填草稿，仍需保存。重新读取会丢弃未保存的草稿。</Typography.Text>
       </Space>
     </Card>
+    <AppearancePanel operator={operator} />
   </section>;
 }

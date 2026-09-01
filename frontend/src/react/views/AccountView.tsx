@@ -18,6 +18,7 @@ import { useAsyncScope } from "../hooks/useAsyncScope";
 import { useBranding } from "../hooks/useBranding";
 import { useSubscriberSession } from "../hooks/useSession";
 import { zhMessage } from "../../i18n/zh-CN";
+import { LoginWallpaper, SiteLogo, ThemeSelector } from "../components/AppearanceChrome";
 
 const formats: { label: string; value: SubscriptionClientFormat }[] = [
   { label: "Clash / Mihomo", value: "clash" }, { label: "sing-box", value: "sing-box" }, { label: "Surge", value: "surge" },
@@ -99,8 +100,8 @@ function SubscriberSignIn({ invitation, onClearInvitation }: { invitation: strin
   function restart() { scope.invalidate(); setChallenge(""); setCode(""); setPassword(""); setError(""); }
   function cancelRegistration() { onClearInvitation(); setPassword(""); setConfirmPassword(""); setEmail(""); setDisplayName(""); setError(""); }
 
-  return <section className="auth-page"><Card className="auth-card"><Space orientation="vertical" size="large" style={{ width: "100%" }}>
-    <div><Typography.Title level={2} className="branding-block-text">{branding.brand_title}</Typography.Title><Typography.Title level={4}>{registering ? "创建用户账户" : challenge ? "双重验证" : "用户登录"}</Typography.Title></div>
+  return <section className="auth-page"><LoginWallpaper /><Card className="auth-card"><Space orientation="vertical" size="large" style={{ width: "100%" }}>
+    <Flex justify="space-between" align="start" gap="middle"><div><SiteLogo /><Typography.Title level={2} className="branding-block-text">{branding.brand_title}</Typography.Title><Typography.Title level={4}>{registering ? "创建用户账户" : challenge ? "双重验证" : "用户登录"}</Typography.Title></div><ThemeSelector /></Flex>
     {auth.error ? <Alert type="error" showIcon title={zhMessage(auth.error, "暂时无法连接服务器。")} action={<Button icon={<ReloadOutlined aria-hidden />} aria-label="重新连接账户" onClick={() => void loadSubscriberSession()} />} /> : <Form layout="vertical" onFinish={() => void (registering ? register() : submit())}>
       {error && <Alert className="form-alert" type="error" showIcon title={error} />}
       {(!challenge || registering) && <Form.Item label="用户名" htmlFor="subscriber-username" required><Input id="subscriber-username" value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" autoFocus required maxLength={80} disabled={busy} /></Form.Item>}
@@ -201,7 +202,7 @@ function SubscriberWorkspace({ username }: { username: string }) {
     ]} /></Card></section>}
   </Space> : null;
   return <Layout className="account-layout">
-    <Layout.Header className="application-header"><Typography.Title level={4} className="branding-header-text account-header-brand" title={branding.brand_title} style={{ margin: 0 }}>{branding.brand_title}</Typography.Title><Space className="application-header-actions"><Typography.Text className="account-header-username" title={username}>{username}</Typography.Text><Button icon={<LogoutOutlined aria-hidden />} aria-label="退出登录" loading={logoutBusy} onClick={() => void logout()} /></Space></Layout.Header>
+    <Layout.Header className="application-header"><div className="application-header-brand"><SiteLogo compact /><Typography.Title level={4} className="branding-header-text account-header-brand" title={branding.brand_title} style={{ margin: 0 }}>{branding.brand_title}</Typography.Title></div><Space className="application-header-actions"><ThemeSelector /><Typography.Text className="account-header-username" title={username}>{username}</Typography.Text><Button icon={<LogoutOutlined aria-hidden />} aria-label="退出登录" loading={logoutBusy} onClick={() => void logout()} /></Space></Layout.Header>
     <Layout.Content className="account-content"><Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       <Flex gap="middle" justify="space-between" align="center"><Typography.Title level={2}>{profile?.display_name || username}</Typography.Title><Button icon={<ReloadOutlined aria-hidden />} aria-label="刷新账户" loading={loading} onClick={() => void load()} /></Flex>
       {error && <Alert type="error" showIcon title={error} />}

@@ -12,6 +12,7 @@ import { useBranding } from "../hooks/useBranding";
 import { useAdministratorSession } from "../hooks/useSession";
 import { zhMessage } from "../../i18n/zh-CN";
 import InitialSetupPanel from "../components/InitialSetupPanel";
+import { LoginWallpaper, SiteLogo, ThemeSelector } from "../components/AppearanceChrome";
 
 export default function SignInView() {
   const auth = useAdministratorSession();
@@ -81,9 +82,9 @@ export default function SignInView() {
     acceptOperatorSession(session);
   }
 
-  return <section className="auth-page"><Card className="auth-card">
+  return <section className="auth-page"><LoginWallpaper /><Card className="auth-card">
     <Space orientation="vertical" size="large" style={{ width: "100%" }}>
-      <div><Typography.Title level={2} className="branding-block-text">{branding.brand_title}</Typography.Title><Typography.Title level={4}>{auth.session?.configured === false ? "首次初始化" : "管理员登录"}</Typography.Title></div>
+      <Flex justify="space-between" align="start" gap="middle"><div><SiteLogo /><Typography.Title level={2} className="branding-block-text">{branding.brand_title}</Typography.Title><Typography.Title level={4}>{auth.session?.configured === false ? "首次初始化" : "管理员登录"}</Typography.Title></div><ThemeSelector /></Flex>
       {auth.error ? <Alert type="error" showIcon title={zhMessage(auth.error, "暂时无法连接服务器。")} action={<Button aria-label="重新连接" icon={<ReloadOutlined aria-hidden />} onClick={() => void loadSession()} />} />
         : auth.session?.configured === false ? <InitialSetupPanel />
         : recoveryCodes.length ? <Space orientation="vertical" size="middle" style={{ width: "100%" }}>

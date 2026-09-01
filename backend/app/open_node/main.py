@@ -20,6 +20,8 @@ from open_node.api.routes.subscription_profiles import legacy_router
 from open_node.api.routes.system import healthz
 from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
 from open_node.core.config import Settings, get_settings
+from open_node.domain.appearance import MESSAGES as APPEARANCE_MESSAGES
+from open_node.domain.appearance import AppearanceError
 from open_node.domain.branding import BRANDING_ERROR_MESSAGES, BrandingError
 from open_node.domain.initial_setup import SETUP_MESSAGES, InitialSetupError
 from open_node.domain.inventory import AgentCommandPayloadError
@@ -27,6 +29,7 @@ from open_node.domain.notifications import NotificationError
 from open_node.domain.renewals import RENEWAL_MESSAGES, RenewalError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
+from open_node.services.appearance import AppearanceStore
 from open_node.services.auth import AuthStore
 from open_node.services.backup_authorization import BackupAuthorizationError, BackupAuthorizer
 from open_node.services.backup_coordination import BackupWriteBarrier
@@ -179,6 +182,8 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                     active_settings.api_prefix + "/notifications",
                     active_settings.api_prefix + "/renewals",
                     active_settings.api_prefix + "/system-settings/branding",
+                    active_settings.api_prefix + "/system-settings/appearance",
+                    active_settings.api_prefix + "/appearance",
                     active_settings.api_prefix + "/branding",
                 )
             )
@@ -236,6 +241,12 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 },
             )
         return await request_validation_exception_handler(request, exc)
+
+    @app.exception_handler(AppearanceError)
+    async def appearance_error(_request, exc):
+        return JSONResponse(status_code=exc.status_code, content={
+            "code": exc.code, "detail": APPEARANCE_MESSAGES[exc.code], "license_required": False,
+        })
 
     @app.exception_handler(InitialSetupError)
     async def initial_setup_error(_request, exc):
@@ -403,6 +414,11 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         # Site labels must not make authentication or other services unavailable.
         # Reads still fail safely; the UI uses its built-in text fallback.
         log.warning("Branding settings could not be initialized")
+    app.state.appearance = AppearanceStore(app.state.inventory)
+    try:
+        app.state.appearance.create_schema()
+    except AppearanceError:
+        log.warning("Appearance settings could not be initialized")
     app.state.notifications = NotificationStore(app.state.inventory, notification_state_dir)
     app.state.notifications.create_schema()
     app.state.notification_transport = TelegramTransport()

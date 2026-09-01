@@ -21,8 +21,9 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-24.04
-    # The expanded integration suite reached 75% at the old 30-minute cutoff.
-    timeout-minutes: 60
+    # The expanded integration suite exceeded the previous 60-minute cutoff
+    # without reporting a test failure on the hosted runner.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:

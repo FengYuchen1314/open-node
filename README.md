@@ -70,11 +70,11 @@ check the reference and explicitly approve or reject it, and repeated approvals
 cannot extend the same request twice. No Telegram setup or payment-provider
 integration is required. Existing traffic usage and reset rules are preserved.
 
-[Site text settings](docs/system-settings.md) add administrator-controlled browser
-and page titles, published in `f0ed515`. Names are public plain text, with
-versioned atomic saves and no license gate. Probe-only titles and security
-settings remain independent.
-This is the two-field first slice, not complete general-settings parity.
+[Site text settings](docs/system-settings.md) provide administrator-controlled
+browser and page titles. [Appearance settings](docs/appearance.md) add a public
+Logo, login background and standard Ant Design light/dark/system themes with
+bounded uploads. Both use versioned atomic saves, persist in SQLite and have no
+license gate. Probe-only titles and security settings remain independent.
 
 [Backup v1 format tools](docs/backup-format.md) add strict manifest/ZIP checking,
 an internal staging writer and `open-node-backup validate PATH [--json]` with

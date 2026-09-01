@@ -5,6 +5,7 @@ from open_node.api.backup import BackupAPIRoute
 from open_node.api.routes import (
     agent_bootstrap,
     agents,
+    appearance,
     auth,
     backups,
     branding,
@@ -41,6 +42,7 @@ private_router.include_router(servers.router)
 private_router.include_router(backups.router)
 private_router.include_router(agent_bootstrap.router)
 private_router.include_router(branding.router)
+private_router.include_router(appearance.router)
 private_router.include_router(server_management.router)
 private_router.include_router(certificates.router)
 private_router.include_router(changes.router)
@@ -69,6 +71,7 @@ api_router.include_router(subscription_templates.router)
 api_router.include_router(subscription_templates.router, prefix="/account")
 api_router.include_router(system.router)
 api_router.include_router(branding.public_router)
+api_router.include_router(appearance.public_router)
 api_router.include_router(license.router)
 api_router.include_router(agents.router)
 api_router.include_router(agent_bootstrap.public_router)

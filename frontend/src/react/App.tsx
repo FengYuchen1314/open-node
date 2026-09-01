@@ -1,4 +1,4 @@
-import { App as AntApp, Alert, Button, ConfigProvider, Drawer, Grid, Layout, Menu, Result, Space, Spin, Tag, Typography } from "antd";
+import { App as AntApp, Alert, Button, ConfigProvider, Drawer, Grid, Layout, Menu, Result, Space, Spin, Tag, Typography, theme as antTheme } from "antd";
 import { ApartmentOutlined, BellOutlined, CloudDownloadOutlined, ControlOutlined, DashboardOutlined, FileProtectOutlined, FileTextOutlined, HistoryOutlined, LineChartOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined, SettingOutlined } from "@ant-design/icons";
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import zhCN from "antd/locale/zh_CN";
@@ -9,6 +9,8 @@ import { useAdministratorSession } from "./hooks/useSession";
 import { BrandingProvider, useBranding } from "./hooks/useBranding";
 import SignInView from "./views/SignInView";
 import { zhMessage } from "../i18n/zh-CN";
+import { AppearanceProvider, useAppearance } from "./hooks/useAppearance";
+import { SiteLogo, ThemeSelector } from "./components/AppearanceChrome";
 
 const navigation = [
   { key: "/", label: "概览", icon: <DashboardOutlined aria-hidden /> },
@@ -43,6 +45,7 @@ function WorkspaceRoutes() {
 function ApplicationLayout() {
   const auth = useAdministratorSession();
   const { branding } = useBranding();
+  const { dark } = useAppearance();
   const location = useLocation();
   const navigate = useNavigate();
   const screens = Grid.useBreakpoint();
@@ -72,16 +75,21 @@ function ApplicationLayout() {
   if (subscriber) return <WorkspaceRoutes />;
   if (!auth.ready) return <div className="auth-page" role="status" aria-label="正在加载会话"><Spin size="large" /></div>;
   if (!auth.session?.authenticated) return <SignInView />;
-  const menu = <Menu mode="inline" selectedKeys={[location.pathname]} items={navigation} onClick={({ key }) => { navigate(key); setDrawer(false); }} />;
+  const menu = <Menu mode="inline" theme={dark ? "dark" : "light"} selectedKeys={[location.pathname]} items={navigation} onClick={({ key }) => { navigate(key); setDrawer(false); }} />;
   return <Layout className="application-layout">
-    {!mobile && <Layout.Sider theme="light" width={248} collapsible collapsed={collapsed} onCollapse={setCollapsed}><div className="application-brand"><Typography.Title level={4} className="branding-block-text" style={{ margin: 0 }}>{collapsed ? "ON" : branding.brand_title}</Typography.Title>{!collapsed && <Typography.Text type="secondary">管理后台</Typography.Text>}</div>{menu}</Layout.Sider>}
+    {!mobile && <Layout.Sider theme={dark ? "dark" : "light"} width={248} collapsible collapsed={collapsed} onCollapse={setCollapsed}><div className="application-brand"><SiteLogo compact={collapsed} />{!collapsed && <Typography.Title level={4} className="branding-block-text" style={{ margin: 0 }}>{branding.brand_title}</Typography.Title>}{!collapsed && <Typography.Text type="secondary">管理后台</Typography.Text>}</div>{menu}</Layout.Sider>}
     <Drawer title={<span className="branding-header-text" title={branding.brand_title}>{branding.brand_title}</span>} placement="left" size={280} open={mobile && drawer} onClose={() => setDrawer(false)} styles={{ body: { padding: 0 } }}>{menu}</Drawer>
     <Layout>
-      <Layout.Header className="application-header"><div className="application-header-brand">{mobile && <Button icon={<MenuOutlined aria-hidden />} aria-label="切换导航菜单" onClick={() => setDrawer(true)} />}<Typography.Title level={4} className="branding-header-text" title={branding.brand_title} style={{ margin: 0 }}>{branding.brand_title}</Typography.Title></div><Space className="application-header-actions"><Tag color="success" aria-label="免费版">免费版</Tag><Button icon={<LogoutOutlined aria-hidden />} aria-label="退出登录" loading={logoutBusy} onClick={() => void logout()} /></Space></Layout.Header>
+      <Layout.Header className="application-header"><div className="application-header-brand">{mobile && <Button icon={<MenuOutlined aria-hidden />} aria-label="切换导航菜单" onClick={() => setDrawer(true)} />}<SiteLogo compact /><Typography.Title level={4} className="branding-header-text" title={branding.brand_title} style={{ margin: 0 }}>{branding.brand_title}</Typography.Title></div><Space className="application-header-actions"><ThemeSelector /><Tag color="success" aria-label="免费版">免费版</Tag><Button icon={<LogoutOutlined aria-hidden />} aria-label="退出登录" loading={logoutBusy} onClick={() => void logout()} /></Space></Layout.Header>
       <Layout.Content className="application-content">{logoutError && <Alert className="form-alert" type="error" showIcon title={logoutError} role="alert" />}<WorkspaceRoutes /></Layout.Content>
     </Layout>
   </Layout>;
 }
+function ThemedApplication() {
+  const { dark } = useAppearance();
+  useEffect(() => { document.documentElement.dataset.openNodeTheme = dark ? "dark" : "light"; }, [dark]);
+  return <ConfigProvider locale={zhCN} theme={{ algorithm: dark ? antTheme.darkAlgorithm : antTheme.defaultAlgorithm }}><AntApp><BrandingProvider><ApplicationLayout /></BrandingProvider></AntApp></ConfigProvider>;
+}
 export default function App() {
-  return <ConfigProvider locale={zhCN}><AntApp><BrandingProvider><ApplicationLayout /></BrandingProvider></AntApp></ConfigProvider>;
+  return <AppearanceProvider><ThemedApplication /></AppearanceProvider>;
 }
