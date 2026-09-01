@@ -1,5 +1,23 @@
 # Testing
 
+## 安全事件、订阅暴力探测与 IP 封禁 — 2026-09-01
+
+实现依据为固定官方 `logs_tables.go`、`security_logs.go`、`brute_force.go`、
+`security_settings.go` 和登录处理器。候选源码为 `9eba59d`，Linux 隔离目录为
+`/tmp/open-node-security.0aaexw/repo`，没有修改生产 `/opt/open-node`、生产数据库或容器。
+
+- 新增后端安全文件 **6 项通过**：默认/修订号设置、严格载荷、IPv4/IPv6 手工封禁和解封、
+  追加式历史、非法 IP 固定错误、公开订阅连续失败自动封禁、实际 Token 不落日志、管理员
+  登录失败事件、管理员隔离及禁止缓存。
+- 认证、订阅、短链及应用/HTTP 备份协调六个邻近文件共 **241 项通过**。测试使用从精确
+  `9eba59d` 构建的 Python 3.11 backend 阶段镜像；临时容器没有连接或修改生产实例。
+- 前端安全服务与管理面板 **6 项通过**，系统设置、登录、订阅和应用壳邻近回归
+  **69 项通过**；类型检查和生产构建通过。手工封禁/解封与不确定保存只重新读取，
+  不自动重复写入。
+- 变更文件 Ruff、`git diff --check` 通过。Windows 后端因既有 Linux `fcntl` 依赖不能
+  收集，最终后端结果来自隔离 Linux。Turnstile、通用速率设置、多管理员 RBAC 与封禁通知
+  不在本批验证结论内。
+
 ## 首次初始化管理员资料 — 2026-09-01
 
 实现依据为固定官方 `internal/handler/setup.go` 与 `profile.go`。Linux 隔离目录继续使用

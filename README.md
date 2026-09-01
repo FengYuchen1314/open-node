@@ -57,6 +57,13 @@ also covers HTTPS cookies, local previews, session expiry, and API clients.
 enrollment, one-use recovery codes, mandatory enrollment and local recovery.
 Configure the persistent TOTP encryption key before enabling this optional feature.
 
+[Security events and IP bans](docs/security-management.md) add an administrator-only
+Chinese console for login failures, subscription-token probes, automatic/manual bans,
+unbans and revision-bound brute-force thresholds. Public subscription failures use
+fixed route templates and never persist the submitted token. Bans are application-layer
+controls rather than firewall rules; Turnstile, editable general request-rate settings
+and multi-administrator RBAC remain separate work.
+
 [Administrator Telegram notifications](docs/notifications.md), published in
 `bf8eaa8`, provide one bot/chat
 destination, saved-configuration previews, explicitly confirmed tests, durable
