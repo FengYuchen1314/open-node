@@ -483,6 +483,25 @@ class ExternalSubscriptions:
                 session, identifier, writable=True, owner_username=owner_username
             )
             self._expected(source, payload.expected_revision)
+            from open_node.services.subscription_customizations import ProxyProviderModel
+
+            provider_ids = list(
+                session.scalars(
+                    select(ProxyProviderModel.id).where(
+                        ProxyProviderModel.external_source_id == source.id
+                    )
+                )
+            )
+            customizations = self.store.subscription_customizations()
+            for provider_id in provider_ids:
+                customizations._remove_profile_reference(
+                    session, "selected_proxy_provider_ids", provider_id
+                )
+            session.execute(
+                delete(ProxyProviderModel).where(
+                    ProxyProviderModel.external_source_id == source.id
+                )
+            )
             session.delete(source)
 
     def update_node(self, source_id, node_id, payload: ExternalNodeUpdate, *, owner_username=None):
@@ -800,10 +819,20 @@ class ExternalSubscriptions:
         return dict(imported_count=imported, updated_count=updated, missing_count=missing)
 
     def subscription_candidates(self, session, username):
+        return self._subscription_candidates(session, username)
+
+    def source_candidates(self, session, username, source_id):
+        """Return one confirmed owner-scoped snapshot without fetching its upstream URL."""
+        return self._subscription_candidates(session, username, source_id=str(source_id))
+
+    def _subscription_candidates(self, session, username, *, source_id=None):
+        query = select(ExternalSourceModel).where(
+            ExternalSourceModel.owner_username == username
+        )
+        if source_id is not None:
+            query = query.where(ExternalSourceModel.id == source_id)
         sources = session.scalars(
-            select(ExternalSourceModel)
-            .where(ExternalSourceModel.owner_username == username)
-            .order_by(ExternalSourceModel.created_at, ExternalSourceModel.id)
+            query.order_by(ExternalSourceModel.created_at, ExternalSourceModel.id)
         ).all()
         if not sources:
             return [], [], []

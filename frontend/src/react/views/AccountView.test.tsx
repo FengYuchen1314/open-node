@@ -26,6 +26,7 @@ vi.mock("../components/PrivateRoutedNodesPanel", () => ({ default: () => <div>�
 vi.mock("../components/SubscriberSecurityPanel", () => ({ default: () => <div>账户安全工作区</div> }));
 vi.mock("../components/TemplatesWorkspace", () => ({ default: () => <div>订阅模板工作区</div> }));
 vi.mock("../components/SubscriptionShortCodeDialog", () => ({ default: () => null }));
+vi.mock("./SubscriptionCustomizationsView", () => ({ default: () => <div>用户规则与代理集合工作区</div> }));
 
 const anonymous: SubscriberSession = { authenticated: false, username: null, csrf_token: null, requires_2fa: false, challenge: null };
 const session: SubscriberSession = { ...anonymous, authenticated: true, username: "alice", csrf_token: "test-session-csrf" };
@@ -151,7 +152,7 @@ describe("Chinese subscriber portal", () => {
     expect(screen.getByText("English Plan Name")).toBeTruthy();
     expect(screen.getByRole("region", { name: "当前套餐" })).toBeTruthy();
     expect(screen.getByText("下次流量重置")).toBeTruthy();
-    for (const name of ["订阅", "路由", "模板", "安全设置"]) expect(screen.getByRole("tab", { name })).toBeTruthy();
+    for (const name of ["订阅", "路由", "模板", "规则与代理集合", "安全设置"]) expect(screen.getByRole("tab", { name })).toBeTruthy();
     const url = new URL(input("订阅地址").value);
     expect(url.pathname).toBe("/sub/fixture-token"); expect(url.searchParams.get("format")).toBe("clash");
     fireEvent.click(screen.getByRole("radio", { name: "短链接" })); await flush();
@@ -194,6 +195,7 @@ describe("Chinese subscriber portal", () => {
     expect(screen.getByRole("tab", { name: "安全设置" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "路由" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "模板" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "规则与代理集合" })).toBeNull();
     expect(screen.queryByRole("link", { name: /外部订阅/ })).toBeNull();
     expect(screen.getByRole("link", { name: "申请续费" })).toBeTruthy();
   });

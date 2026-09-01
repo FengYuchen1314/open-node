@@ -23,6 +23,7 @@ from open_node.services.inventory import (
     SubscriptionUnavailableError,
 )
 from open_node.services.subscription_access import revision
+from open_node.services.subscription_customizations import CustomRuleModel, ProxyProviderModel
 from open_node.services.subscription_templates import TemplateRecord
 
 LEGACY_FORMATS = {
@@ -83,6 +84,10 @@ class SubscriptionProfiles:
             "node_ids": profile.node_ids or [],
             "clash_template_id": profile.clash_template_id,
             "surge_template_id": profile.surge_template_id,
+            "custom_rules_enabled": profile.custom_rules_enabled,
+            "selected_custom_rule_ids": profile.selected_custom_rule_ids or [],
+            "proxy_providers_enabled": profile.proxy_providers_enabled,
+            "selected_proxy_provider_ids": profile.selected_proxy_provider_ids or [],
             "enabled": profile.enabled,
             "assigned_usernames": assigned_usernames,
             "updated_at": self.store._aware_datetime(profile.updated_at).isoformat(),
@@ -97,6 +102,10 @@ class SubscriptionProfiles:
             node_ids=profile.node_ids or [],
             clash_template_id=profile.clash_template_id,
             surge_template_id=profile.surge_template_id,
+            custom_rules_enabled=profile.custom_rules_enabled,
+            selected_custom_rule_ids=profile.selected_custom_rule_ids or [],
+            proxy_providers_enabled=profile.proxy_providers_enabled,
+            selected_proxy_provider_ids=profile.selected_proxy_provider_ids or [],
             enabled=profile.enabled,
             sort_order=profile.sort_order,
             source_type=profile.source_type,
@@ -169,6 +178,22 @@ class SubscriptionProfiles:
                         f"Selected {expected_format} template is missing or incompatible"
                     )
                 setattr(profile, field, str(template_id) if template_id else None)
+            custom_rule_ids = list(
+                dict.fromkeys(str(value) for value in payload.selected_custom_rule_ids)
+            )
+            provider_ids = list(
+                dict.fromkeys(str(value) for value in payload.selected_proxy_provider_ids)
+            )
+            self._owned_customizations(
+                session, CustomRuleModel, custom_rule_ids, profile.owner_username, "custom rule"
+            )
+            self._owned_customizations(
+                session, ProxyProviderModel, provider_ids, profile.owner_username, "proxy provider"
+            )
+            profile.custom_rules_enabled = payload.custom_rules_enabled
+            profile.selected_custom_rule_ids = custom_rule_ids
+            profile.proxy_providers_enabled = payload.proxy_providers_enabled
+            profile.selected_proxy_provider_ids = provider_ids
             profile.name = payload.name.strip()
             if not profile.name:
                 raise SubscriptionProfileConflict("Subscription profile name is required")
@@ -195,6 +220,18 @@ class SubscriptionProfiles:
             result = self.read(session, profile)
             session.commit()
             return result
+
+    @staticmethod
+    def _owned_customizations(session, model, identifiers, owner_username, label):
+        if not identifiers:
+            return
+        rows = session.scalars(select(model).where(model.id.in_(identifiers))).all()
+        if len(rows) != len(identifiers) or any(
+            row.owner_username != owner_username for row in rows
+        ):
+            raise SubscriptionProfileConflict(
+                f"Selected {label} is missing or belongs to another subscriber"
+            )
 
     def subscriber_profiles(self, username, url_for):
         with self.store._session() as session:
@@ -239,64 +276,112 @@ class SubscriptionProfiles:
         code: str,
         client_format: SubscriptionClientFormat,
         node_id: UUID | None = None,
+        public_base_url: str | None = None,
     ) -> RenderedSubscription:
         code = code.strip()
         if not code:
             raise SubscriptionTokenNotFoundError("subscription not found")
         with self.store._session() as session:
-            profile = session.scalar(
-                select(SubscriptionProfileModel).where(
-                    or_(
-                        SubscriptionProfileModel.legacy_custom_short_code == code,
-                        SubscriptionProfileModel.legacy_file_short_code == code,
-                    )
+            username, profile = self._resolve_code(session, code)
+            return self._render(
+                session,
+                username,
+                client_format,
+                node_id,
+                profile,
+                public_base_url=public_base_url,
+                subscription_code=code,
+            )
+
+    def _resolve_code(self, session, code):
+        profile = session.scalar(
+            select(SubscriptionProfileModel).where(
+                or_(
+                    SubscriptionProfileModel.legacy_custom_short_code == code,
+                    SubscriptionProfileModel.legacy_file_short_code == code,
                 )
             )
-            if profile is not None:
-                return self._render(
-                    session, profile.owner_username, client_format, node_id, profile
-                )
+        )
+        if profile is not None:
+            return profile.owner_username, profile
 
-            user_codes = {}
-            for token in session.scalars(select(ProductUserSubscriptionTokenModel)).all():
-                if token.custom_short_code:
-                    user_codes[token.custom_short_code] = token.username
-                if token.short_code:
-                    user_codes[token.short_code] = token.username
-            profiles = session.scalars(select(SubscriptionProfileModel)).all()
-            profile_codes = {
-                value: profile
-                for profile in profiles
-                for value in (
-                    profile.legacy_file_short_code,
-                    profile.legacy_custom_short_code,
-                )
-                if value
-            }
-            plan_codes = set(session.scalars(select(LegacySubscriptionPlanCodeModel.code)))
-            for position in range(len(code) - 1, 0, -1):
-                username = user_codes.get(code[position:])
-                if username is None:
-                    continue
-                left = code[:position]
-                if left in profile_codes:
-                    return self._render(
-                        session, username, client_format, node_id, profile_codes[left]
-                    )
-                if left in plan_codes:
-                    return self._render(session, username, client_format, node_id, None)
+        user_codes = {}
+        for token in session.scalars(select(ProductUserSubscriptionTokenModel)).all():
+            if token.custom_short_code:
+                user_codes[token.custom_short_code] = token.username
+            if token.short_code:
+                user_codes[token.short_code] = token.username
+        profiles = session.scalars(select(SubscriptionProfileModel)).all()
+        profile_codes = {
+            value: profile
+            for profile in profiles
+            for value in (
+                profile.legacy_file_short_code,
+                profile.legacy_custom_short_code,
+            )
+            if value
+        }
+        plan_codes = set(session.scalars(select(LegacySubscriptionPlanCodeModel.code)))
+        for position in range(len(code) - 1, 0, -1):
+            username = user_codes.get(code[position:])
+            if username is None:
+                continue
+            left = code[:position]
+            if left in profile_codes:
+                return username, profile_codes[left]
+            if left in plan_codes:
+                return username, None
         raise SubscriptionTokenNotFoundError("subscription not found")
 
-    def _render(self, session, username, client_format, node_id, profile):
+    def provider(self, code, identifier):
+        code = code.strip()
+        if not code:
+            raise SubscriptionTokenNotFoundError("subscription not found")
+        from open_node.services.subscription_customizations import ProxyProviderModel
+
+        with self.store._session() as session:
+            username, profile = self._resolve_code(session, code)
+            if profile is None:
+                raise SubscriptionTokenNotFoundError("proxy provider not found")
+            self._available_profile(profile)
+            provider = session.get(ProxyProviderModel, str(identifier))
+            selected = set(profile.selected_proxy_provider_ids or [])
+            if (
+                not profile.proxy_providers_enabled
+                or provider is None
+                or not provider.enabled
+                or provider.owner_username != profile.owner_username
+                or selected and provider.id not in selected
+            ):
+                raise SubscriptionTokenNotFoundError("proxy provider not found")
+            content, count = self.store.subscription_customizations().provider_payload(
+                session, provider
+            )
+            return username, provider.name, content, count
+
+    def _available_profile(self, profile):
+        if not profile.enabled:
+            raise SubscriptionUnavailableError("subscription profile requires configuration")
+        if profile.expires_at and datetime.now(UTC) > self.store._aware_datetime(
+            profile.expires_at
+        ):
+            raise SubscriptionUnavailableError("subscription profile has expired")
+
+    def _render(
+        self,
+        session,
+        username,
+        client_format,
+        node_id,
+        profile,
+        *,
+        public_base_url=None,
+        subscription_code=None,
+    ):
         user = session.get(ProductUserModel, username)
         plan = self.store._available_subscription_plan(session, user)
         if profile is not None:
-            if not profile.enabled:
-                raise SubscriptionUnavailableError("subscription profile requires configuration")
-            if profile.expires_at and datetime.now(UTC) > self.store._aware_datetime(
-                profile.expires_at
-            ):
-                raise SubscriptionUnavailableError("subscription profile has expired")
+            self._available_profile(profile)
         return self.store._render_user_subscription(
             session,
             user,
@@ -309,6 +394,15 @@ class SubscriptionProfiles:
             ),
             title=profile.name if profile else plan.name,
             extra_warnings=profile.migration_warnings if profile else None,
+            customization_owner=profile.owner_username if profile else None,
+            custom_rules_enabled=bool(profile and profile.custom_rules_enabled),
+            selected_custom_rule_ids=(profile.selected_custom_rule_ids or []) if profile else [],
+            proxy_providers_enabled=bool(profile and profile.proxy_providers_enabled),
+            selected_proxy_provider_ids=(
+                (profile.selected_proxy_provider_ids or []) if profile else []
+            ),
+            public_base_url=public_base_url,
+            subscription_code=subscription_code,
         )
 
     @staticmethod

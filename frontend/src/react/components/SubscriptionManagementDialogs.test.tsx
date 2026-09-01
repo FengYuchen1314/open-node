@@ -15,6 +15,7 @@ import { getNodeManagement, removeNode, retryNodeRemoval, saveNode } from "../..
 import { getSubscriptionAccess, setProductUserActive } from "../../services/subscriptions";
 import { listSubscriptionTemplates } from "../../services/subscription-templates";
 import { updateSubscriptionProfile } from "../../services/subscription-profiles";
+import { listCustomRules, listProxyProviders } from "../../services/subscription-customizations";
 import { updatePrivateRoutePolicy } from "../../services/private-routed-nodes";
 import type { ManagedNode, ProductUser, SubscriptionAccessResponse, SubscriptionPlan } from "../../domain/subscriptions";
 import type { SubscriptionProfile } from "../../domain/subscription-profiles";
@@ -27,6 +28,7 @@ vi.mock("../../services/node-management", async importOriginal => ({ ...await im
 vi.mock("../../services/subscriptions", () => ({ getSubscriptionAccess: vi.fn(), syncSubscriptionAccess: vi.fn(), setProductUserActive: vi.fn() }));
 vi.mock("../../services/subscription-templates", () => ({ listSubscriptionTemplates: vi.fn() }));
 vi.mock("../../services/subscription-profiles", () => ({ updateSubscriptionProfile: vi.fn() }));
+vi.mock("../../services/subscription-customizations", () => ({ listCustomRules: vi.fn(), listProxyProviders: vi.fn() }));
 vi.mock("../../services/private-routed-nodes", () => ({ updatePrivateRoutePolicy: vi.fn() }));
 const plan: SubscriptionPlan = { id: "p", name: "Basic", description: "", traffic_limit_gb: 30, traffic_limit_bytes: 30 * 1024 ** 3, cycle_days: 30, is_reset: true, reset_day: 1, node_ids: ["a"], node_multipliers: { a: 1.5 }, node_name_overrides: { a: "Fast" }, node_name_override_enabled: true, auto_speed_rules: [], node_speed_limits: { a: 10 }, node_device_limits: { a: 2 }, speed_limit_mbps: 5, device_limit: 1, traffic_mode: "oneway", created_at: "", updated_at: "" };
 const node: ManagedNode = { id: "a", name: "Alpha", server_id: "edge", protocol: "vless", node_type: "physical", tags: [], enabled: true, config: { port: 443 }, client_template: { id: "client-{username}" }, created_at: "", updated_at: "" };
@@ -41,6 +43,8 @@ beforeEach(() => {
   const getStyle = window.getComputedStyle; vi.spyOn(window, "getComputedStyle").mockImplementation(element => getStyle(element));
   vi.mocked(getPlanManagement).mockResolvedValue({ plan, revision: "plan-r1", users: [{ username: "alice", display_name: "Alice", is_active: true, managed: true }], warnings: [] });
   vi.mocked(listSubscriptionTemplates).mockResolvedValue({ templates: [], settings: { enabled: true, clash_template_id: null, surge_template_id: null, revision: "" }, can_manage: true, license_required: false });
+  vi.mocked(listCustomRules).mockResolvedValue({ rules: [], license_required: false });
+  vi.mocked(listProxyProviders).mockResolvedValue({ providers: [], license_required: false });
   vi.mocked(getSubscriptionAccess).mockResolvedValue(access); vi.mocked(getUserManagement).mockResolvedValue(userDetail); vi.mocked(getNodeManagement).mockResolvedValue(nodeDetail);
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -130,7 +134,7 @@ describe("React subscription management dialogs", { timeout: 20_000 }, () => {
     vi.mocked(updateSubscriptionProfile).mockResolvedValue(profile);
     render(<SubscriptionProfileDialog open profile={profile} nodes={[node]} users={[user]} templates={[]} onOpenChange={vi.fn()} />);
     fireEvent.click(screen.getByRole("switch", { name: "已启用" })); fireEvent.click(screen.getByRole("button", { name: "保存" })); await flush();
-    expect(updateSubscriptionProfile).toHaveBeenCalledWith("profile", { name: "Travel", description: "Subset", node_ids: ["a"], assigned_usernames: ["alice"], clash_template_id: "clash1", surge_template_id: null, enabled: true, expected_revision: "profile-r1" });
+    expect(updateSubscriptionProfile).toHaveBeenCalledWith("profile", { name: "Travel", description: "Subset", node_ids: ["a"], assigned_usernames: ["alice"], clash_template_id: "clash1", surge_template_id: null, custom_rules_enabled: false, selected_custom_rule_ids: [], proxy_providers_enabled: false, selected_proxy_provider_ids: [], enabled: true, expected_revision: "profile-r1" });
     expect(screen.getByText("规则需要设置")).toBeTruthy();
   });
   it("validates private-route policy bounds before updating", async () => {

@@ -24,6 +24,10 @@ export interface SubscriptionProfile {
   node_ids: string[];
   clash_template_id: string | null;
   surge_template_id: string | null;
+  custom_rules_enabled: boolean;
+  selected_custom_rule_ids: string[];
+  proxy_providers_enabled: boolean;
+  selected_proxy_provider_ids: string[];
   enabled: boolean;
   sort_order: number;
   source_type: string;
@@ -49,6 +53,10 @@ export interface SubscriptionProfileUpdate {
   node_ids: string[];
   clash_template_id: string | null;
   surge_template_id: string | null;
+  custom_rules_enabled: boolean;
+  selected_custom_rule_ids: string[];
+  proxy_providers_enabled: boolean;
+  selected_proxy_provider_ids: string[];
   assigned_usernames: string[];
   enabled: boolean;
   expected_revision: string;

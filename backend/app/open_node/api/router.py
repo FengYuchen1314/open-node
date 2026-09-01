@@ -31,6 +31,7 @@ from open_node.api.routes import (
     servers,
     subscriber_auth,
     subscriber_permissions,
+    subscription_customizations,
     subscription_profiles,
     subscription_templates,
     subscriptions,
@@ -61,6 +62,7 @@ private_router.include_router(legacy_mmwx.router)
 private_router.include_router(probe.router)
 private_router.include_router(subscriptions.router)
 private_router.include_router(subscription_profiles.router)
+private_router.include_router(subscription_customizations.router)
 private_router.include_router(temporary_subscriptions.router)
 private_router.include_router(private_routed_nodes.router)
 private_router.include_router(registration_invitations.router)
@@ -79,6 +81,7 @@ api_router.include_router(subscriber_permissions.account_router)
 api_router.include_router(server_sharing.public_router)
 api_router.include_router(announcements.account_router)
 api_router.include_router(external_subscriptions.account_router)
+api_router.include_router(subscription_customizations.account_router)
 api_router.include_router(renewals.account_router)
 api_router.include_router(private_routed_nodes.account_router)
 api_router.include_router(subscription_templates.router)
@@ -91,3 +94,4 @@ api_router.include_router(agents.router)
 api_router.include_router(agent_bootstrap.public_router)
 api_router.include_router(public.router)
 api_router.include_router(subscriptions.public_router)
+api_router.include_router(subscription_profiles.public_router)

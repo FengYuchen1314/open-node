@@ -1,7 +1,7 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_inventory_store
@@ -21,6 +21,7 @@ from open_node.services.inventory import (
     SubscriptionUnavailableError,
 )
 from open_node.services.subscription_clients import select_client_format
+from open_node.services.subscription_customizations import SubscriptionCustomizationError
 from open_node.services.subscription_profiles import (
     SubscriptionProfileConflict,
     SubscriptionProfileNotFoundError,
@@ -28,6 +29,7 @@ from open_node.services.subscription_profiles import (
 
 router = APIRouter(route_class=BackupAPIRoute, tags=["subscription profiles"])
 legacy_router = APIRouter(route_class=BackupAPIRoute, tags=["MMWX compatibility"])
+public_router = APIRouter(route_class=BackupAPIRoute, tags=["subscription profiles"])
 
 
 @router.get("/subscription-profiles", response_model=SubscriptionProfilesResponse)
@@ -67,8 +69,42 @@ def render_legacy_mmwx_subscription(
     selected_format = select_client_format(client_format, request.headers.get("user-agent", ""))
     selected_format = profiles.legacy_format(t, selected_format)
     try:
-        rendered = profiles.resolve(code, selected_format, node_id)
+        rendered = profiles.resolve(
+            code,
+            selected_format,
+            node_id,
+            public_base_url=(
+                str(request.base_url).rstrip("/") + request.app.state.settings.api_prefix
+            ),
+        )
     except (SubscriptionTokenNotFoundError, SubscriptionUnavailableError) as exc:
         raise HTTPException(404, str(exc)) from exc
     enforce_subscription_ip(request.app.state.inventory, rendered.username, request)
     return rendered_subscription_response(rendered)
+
+
+@public_router.get(
+    "/proxy-provider/{code}/{provider_id}",
+    name="render_subscription_proxy_provider",
+)
+def render_proxy_provider(code: str, provider_id: str, request: Request):
+    try:
+        username, name, content, count = (
+            request.app.state.inventory._subscription_profiles().provider(code, provider_id)
+        )
+    except (SubscriptionTokenNotFoundError, SubscriptionUnavailableError) as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except SubscriptionCustomizationError as exc:
+        raise HTTPException(404, "proxy provider unavailable") from exc
+    enforce_subscription_ip(request.app.state.inventory, username, request)
+    return Response(
+        content,
+        media_type="text/yaml; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Open-Node-Included-Nodes": str(count),
+            "Content-Disposition": InventoryStore.subscription_content_disposition(
+                f"{name}.yaml"
+            ),
+        },
+    )

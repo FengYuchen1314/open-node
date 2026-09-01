@@ -141,6 +141,7 @@ def test_roles_cookies_and_operator_routes_are_isolated(tmp_path, role):
             or "agents" in path
             or "public" in path
             or "subscribe/" in path
+            or path.startswith("/api/v1/proxy-provider/")
             or path == "/x/{code}"
             or path == "/t/{code}"
             or path == "/api/v1/setup"

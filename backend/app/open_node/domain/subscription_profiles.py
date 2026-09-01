@@ -15,6 +15,10 @@ class SubscriptionProfileRead(BaseModel):
     node_ids: list[UUID] = Field(default_factory=list)
     clash_template_id: UUID | None = None
     surge_template_id: UUID | None = None
+    custom_rules_enabled: bool = False
+    selected_custom_rule_ids: list[UUID] = Field(default_factory=list)
+    proxy_providers_enabled: bool = False
+    selected_proxy_provider_ids: list[UUID] = Field(default_factory=list)
     enabled: bool
     sort_order: int = 0
     source_type: str = "managed"
@@ -40,6 +44,10 @@ class SubscriptionProfileUpdate(BaseModel):
     node_ids: list[UUID] = Field(default_factory=list, max_length=10000)
     clash_template_id: UUID | None = None
     surge_template_id: UUID | None = None
+    custom_rules_enabled: bool = False
+    selected_custom_rule_ids: list[UUID] = Field(default_factory=list, max_length=1000)
+    proxy_providers_enabled: bool = False
+    selected_proxy_provider_ids: list[UUID] = Field(default_factory=list, max_length=1000)
     assigned_usernames: list[str] = Field(default_factory=list, max_length=10000)
     enabled: bool
     expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")

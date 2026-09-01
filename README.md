@@ -146,6 +146,13 @@ automatic provider selection, manual synchronization, status and retry, and has 
 Chinese Ant Design workspace. It does not delete records when disabled or configure
 DNS/firewalls for the public panel; real provider accounts remain an operator check.
 
+[Custom rules and Proxy Providers](docs/subscription-customizations.md) add the pinned
+MMWX DNS/rules/rule-providers replace/prepend/append workflow, owner-scoped administrator
+and subscriber CRUD, named-profile selection and snapshot-backed Mihomo Providers. Public
+Provider URLs reuse subscription short-code and IP-policy checks and never disclose or fetch
+the upstream URL during a client download. The official JavaScript hook engine, server-side
+Provider processing, GeoIP filtering and custom upstream headers remain separate work.
+
 ## Deployment
 
 The root Dockerfile and [Compose deployment](docs/deployment.md) build a

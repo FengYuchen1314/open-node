@@ -14,6 +14,7 @@ import PrivateRoutedNodesPanel from "../components/PrivateRoutedNodesPanel";
 import SubscriberSecurityPanel from "../components/SubscriberSecurityPanel";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog";
 import TemplatesWorkspace from "../components/TemplatesWorkspace";
+import SubscriptionCustomizationsView from "./SubscriptionCustomizationsView";
 import { useAsyncScope } from "../hooks/useAsyncScope";
 import { useBranding } from "../hooks/useBranding";
 import { useSubscriberSession } from "../hooks/useSession";
@@ -176,7 +177,8 @@ function SubscriberWorkspace({ username }: { username: string }) {
   useEffect(() => { setCopied(false); }, [url]);
   useEffect(() => {
     if ((tab === "routes" && !permissions?.pages.includes("private_routes"))
-      || (tab === "templates" && !permissions?.pages.includes("templates"))) setTab("subscription");
+      || (tab === "templates" && !permissions?.pages.includes("templates"))
+      || (tab === "customizations" && !permissions?.pages.some(page => page === "templates" || page === "external_subscriptions"))) setTab("subscription");
   }, [permissions, tab]);
   async function logout() {
     if (logoutBusy) return;
@@ -241,6 +243,15 @@ function SubscriberWorkspace({ username }: { username: string }) {
         { key: "subscription", label: "订阅", children: subscriptionContent },
         ...(permissions?.pages.includes("private_routes") ? [{ key: "routes", label: "路由", children: <PrivateRoutedNodesPanel /> }] : []),
         ...(permissions?.pages.includes("templates") ? [{ key: "templates", label: "模板", children: <TemplatesWorkspace subscriber /> }] : []),
+        ...(permissions?.pages.some(page => page === "templates" || page === "external_subscriptions") ? [{
+          key: "customizations",
+          label: "规则与代理集合",
+          children: <SubscriptionCustomizationsView
+            subscriberUsername={username}
+            allowRules={permissions.pages.includes("templates")}
+            allowProviders={permissions.pages.includes("external_subscriptions")}
+          />,
+        }] : []),
         { key: "security", label: "安全设置", children: <SubscriberSecurityPanel onChanged={() => void load()} /> },
       ]} />
     </Space></Layout.Content>

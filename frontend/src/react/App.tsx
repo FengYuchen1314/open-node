@@ -1,5 +1,5 @@
 import { App as AntApp, Alert, Button, ConfigProvider, Drawer, Grid, Layout, Menu, Result, Space, Spin, Tag, Typography, theme as antTheme } from "antd";
-import { ApartmentOutlined, BellOutlined, CloudDownloadOutlined, CloudSyncOutlined, ControlOutlined, DashboardOutlined, FileProtectOutlined, FileTextOutlined, HistoryOutlined, LineChartOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
+import { ApartmentOutlined, BellOutlined, CloudDownloadOutlined, CloudSyncOutlined, ControlOutlined, DashboardOutlined, FileProtectOutlined, FileTextOutlined, FilterOutlined, HistoryOutlined, LineChartOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import zhCN from "antd/locale/zh_CN";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -16,6 +16,7 @@ const navigation = [
   { key: "/", label: "概览", icon: <DashboardOutlined aria-hidden /> },
   { key: "/subscriptions", label: "订阅管理", icon: <ApartmentOutlined aria-hidden /> },
   { key: "/templates", label: "订阅模板", icon: <FileTextOutlined aria-hidden /> },
+  { key: "/subscription-customizations", label: "规则与代理集合", icon: <FilterOutlined aria-hidden /> },
   { key: "/changes", label: "变更集", icon: <HistoryOutlined aria-hidden /> },
   { key: "/config", label: "配置管理", icon: <SettingOutlined aria-hidden /> },
   { key: "/server-sharing", label: "服务器共享", icon: <ShareAltOutlined aria-hidden /> },

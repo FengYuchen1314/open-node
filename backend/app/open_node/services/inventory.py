@@ -1368,6 +1368,10 @@ class SubscriptionProfileModel(Base):
     surge_template_id: Mapped[str | None] = mapped_column(
         ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
     )
+    custom_rules_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    selected_custom_rule_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    proxy_providers_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    selected_proxy_provider_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     source_type: Mapped[str] = mapped_column(String(24), default="managed")
@@ -1643,11 +1647,13 @@ class InventoryStore:
         from open_node.services.renewals import RenewalRequestModel
         from open_node.services.server_sharing import FederatedServerModel, ServerShareModel
         from open_node.services.subscriber_auth import SubscriberAccount
+        from open_node.services.subscription_customizations import CustomRuleModel
         from open_node.services.subscription_templates import TemplateRecord
 
         SubscriberAccount.metadata.create_all(self._engine)
         TemplateRecord.metadata.create_all(self._engine)
         ExternalSourceModel.metadata.create_all(self._engine)
+        CustomRuleModel.metadata.create_all(self._engine)
         RenewalRequestModel.metadata.create_all(self._engine)
         ServerShareModel.metadata.create_all(self._engine)
         FederatedServerModel.metadata.create_all(self._engine)
@@ -1699,6 +1705,17 @@ class InventoryStore:
                     "surge_template_id": (
                         "VARCHAR(36) REFERENCES subscription_templates(id) ON DELETE SET NULL"
                     ),
+                },
+            )
+        if "subscription_profiles" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector,
+                "subscription_profiles",
+                {
+                    "custom_rules_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+                    "selected_custom_rule_ids": "JSON NOT NULL DEFAULT '[]'",
+                    "proxy_providers_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+                    "selected_proxy_provider_ids": "JSON NOT NULL DEFAULT '[]'",
                 },
             )
         if "product_user_subscription_tokens" in table_names:
@@ -4137,13 +4154,54 @@ class InventoryStore:
         extra_warnings: list[str] | None = None,
         include_userinfo: bool = True,
         include_external: bool = False,
+        customization_owner: str | None = None,
+        custom_rules_enabled: bool = False,
+        selected_custom_rule_ids: list[str] | None = None,
+        proxy_providers_enabled: bool = False,
+        selected_proxy_provider_ids: list[str] | None = None,
+        public_base_url: str | None = None,
+        subscription_code: str | None = None,
     ) -> RenderedSubscription:
+        selected = template_override or self.subscription_templates().resolve(
+            session, user, plan, "clash" if client_format.value == "stash" else client_format.value
+        )
+        template_content = selected.content if selected else None
+        clash_customization = client_format in {
+            SubscriptionClientFormat.CLASH,
+            SubscriptionClientFormat.STASH,
+        }
+        customization_warnings = []
+        if (custom_rules_enabled or proxy_providers_enabled) and not clash_customization:
+            customization_warnings.append(
+                "Subscription custom rules and proxy providers only apply to "
+                "Clash-compatible output"
+            )
+        if clash_customization and (custom_rules_enabled or proxy_providers_enabled):
+            from open_node.services.template_rendering import DEFAULT_CLASH
+
+            template_content = template_content or DEFAULT_CLASH
+        if clash_customization and proxy_providers_enabled:
+            if not customization_owner or not public_base_url or not subscription_code:
+                raise SubscriptionUnavailableError(
+                    "Proxy providers require a named subscription profile URL"
+                )
+            try:
+                template_content = self.subscription_customizations().prepare_clash_template(
+                    session,
+                    template_content,
+                    customization_owner,
+                    selected_proxy_provider_ids or [],
+                    public_base_url,
+                    subscription_code,
+                )
+            except ValueError as exc:
+                raise SubscriptionUnavailableError(str(exc)) from exc
         proxies, report = self._prepare_subscription_format(
             session,
             user,
             plan,
             client_format,
-            template_override.content if template_override else None,
+            template_content,
             selected_node_ids,
             include_external=include_external,
         )
@@ -4158,12 +4216,23 @@ class InventoryStore:
             raise SubscriptionUnavailableError(
                 "subscription has no compatible nodes for this format and selection"
             )
-        selected = template_override or self.subscription_templates().resolve(
-            session, user, plan, "clash" if client_format.value == "stash" else client_format.value
-        )
         content, media_type, extension = self._render_subscription_content(
-            proxies, client_format, selected.content if selected else None
+            proxies, client_format, template_content
         )
+        if clash_customization and custom_rules_enabled:
+            if not customization_owner:
+                raise SubscriptionUnavailableError(
+                    "Custom rules require a named subscription profile owner"
+                )
+            try:
+                content = self.subscription_customizations().apply_rules(
+                    session,
+                    content,
+                    customization_owner,
+                    selected_custom_rule_ids or [],
+                )
+            except ValueError as exc:
+                raise SubscriptionUnavailableError(str(exc)) from exc
         rendered_title = title or plan.name or user.username
         return RenderedSubscription(
             username=user.username,
@@ -4176,7 +4245,11 @@ class InventoryStore:
                 if include_userinfo
                 else None
             ),
-            warnings=list(dict.fromkeys([*report.warnings, *(extra_warnings or [])])),
+            warnings=list(dict.fromkeys([
+                *report.warnings,
+                *(extra_warnings or []),
+                *customization_warnings,
+            ])),
             included_nodes=len(proxies),
             excluded_nodes=sum(not node.available for node in report.nodes),
         )
@@ -7695,6 +7768,11 @@ class InventoryStore:
         from open_node.services.external_subscriptions import ExternalSubscriptions
 
         return ExternalSubscriptions(self)
+
+    def subscription_customizations(self):
+        from open_node.services.subscription_customizations import SubscriptionCustomizations
+
+        return SubscriptionCustomizations(self)
 
     @contextmanager
     def _coordinated_session(self):
