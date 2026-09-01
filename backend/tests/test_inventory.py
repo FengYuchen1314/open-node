@@ -101,6 +101,7 @@ def scan_result_payload() -> dict[str, object]:
         "xray_running": True,
         "nginx": {
             "running": True, "installed": True, "available": True, "mode": "managed",
+            "version": "nginx version: nginx/1.29.1",
             "tunnel_deploy": 0,
             "config_path": "/opt/open-node-agent/config/nginx/nginx.conf",
             "certificate_dir": "/opt/open-node-agent/config/certificates",

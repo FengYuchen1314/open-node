@@ -1,4 +1,13 @@
-import type { AgentCommandStatus, ServerStatus, XrayMode } from "./inventory";
+import type { AgentCommandStatus, AgentNginxScan, ProbeSysMetrics, ServerStatus, XrayMode } from "./inventory";
+
+export interface FederationProbeSys extends ProbeSysMetrics {
+  upload_speed: number;
+  download_speed: number;
+  cumulative_up: number;
+  cumulative_down: number;
+  has_network: boolean;
+  at: number;
+}
 
 export interface ServerShare {
   id: string;
@@ -37,6 +46,8 @@ export interface FederationServerInfo {
   current_download_speed: number;
   xray_running: boolean | null;
   xray_version: string | null;
+  nginx: AgentNginxScan | null;
+  probe_sys: FederationProbeSys | null;
   last_heartbeat: string | null;
   allow_manage_xray: boolean;
   license_required: false;

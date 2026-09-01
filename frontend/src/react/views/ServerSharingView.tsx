@@ -208,6 +208,7 @@ export default function ServerSharingView() {
           { key: "owner", label: "拥有方", children: item.owner_url }, { key: "prefix", label: "入站前缀", children: item.prefix || "无" },
           { key: "address", label: "地址", children: item.info.domain || item.info.ip_address || "未提供" }, { key: "heartbeat", label: "拥有方心跳", children: date(item.info.last_heartbeat) },
           { key: "xray", label: "Xray", children: item.info.xray_running == null ? "未知" : item.info.xray_running ? `运行中 ${item.info.xray_version ?? ""}` : "已停止" },
+          { key: "nginx", label: "Nginx", children: !item.info.nginx ? "未知" : item.info.nginx.running ? `运行中 ${item.info.nginx.version ?? ""}` : item.info.nginx.installed ? "已停止" : "未安装" },
           { key: "sync", label: "同步时间", children: date(item.last_synced_at) },
         ]} /> }} columns={[
           { title: "服务器", key: "name", render: (_, item) => <Space orientation="vertical" size={0}><Typography.Text strong>{item.name}</Typography.Text><Typography.Text type="secondary">{item.owner_url}</Typography.Text></Space> },

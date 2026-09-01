@@ -92,6 +92,17 @@ describe("React Dashboard workflows", () => {
     fireEvent.click(getButton("删除 Edge")); expect(screen.getByTestId("management-dialog-target").textContent).toBe("edge:remove");
     expect(queueAgentOperation).not.toHaveBeenCalled();
   }, 30000);
+  it("shows the Agent-reported Nginx version without inventing one", async () => {
+    vi.mocked(listServers).mockResolvedValue([edge]);
+    vi.mocked(getLatestScanResult).mockResolvedValue({ server_id: "edge", scan: {
+      server_id: "edge", xray_running: true, xray_version: "Xray 26.8.31", xray_capabilities: {}, api_port: 46736,
+      inbounds: [], device_kicks: {}, config_modified: false, config_added_sections: [], reported_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z",
+      nginx: { running: true, installed: true, available: true, version: "nginx version: nginx/1.29.1", tunnel_deploy: 1,
+        mode: "managed", config_path: "/etc/nginx/nginx.conf", certificate_dir: "/etc/nginx/certs", html_path: "/var/www/html" },
+    }, license_required: false });
+    await mount();
+    expect(screen.getByText("nginx version: nginx/1.29.1")).toBeTruthy();
+  }, 30000);
   it("shows shared servers in the ordinary inventory without exposing local Agent controls", async () => {
     vi.mocked(listServers).mockResolvedValue([edge, shared]); await mount();
     expect(screen.getByText("分享")).toBeTruthy(); expect(screen.getByText("拥有方在线")).toBeTruthy();

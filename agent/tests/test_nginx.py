@@ -58,6 +58,17 @@ async def agent(config):
     await instance.close()
 
 
+async def test_status_reports_the_owned_nginx_version(agent, monkeypatch):
+    command = AsyncMock(return_value=(0, "nginx version: nginx/1.29.1\n"))
+    monkeypatch.setattr("open_node_agent.nginx.run_command", command)
+    status = await agent.operations.nginx.status()
+    assert status["version"] == "nginx version: nginx/1.29.1"
+    command.assert_awaited_once_with("/operator/nginx", "-v", timeout=5)
+
+    command.side_effect = TimeoutError
+    assert (await agent.operations.nginx.status())["version"] is None
+
+
 def test_certificate_validity_and_name_matching():
     cert, key = certificate()
     assert validate_pair("LOCALHOST.", cert, key)["domain"] == "localhost"

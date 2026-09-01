@@ -297,6 +297,18 @@ export interface ServerTelemetryResponse {
   license_required: false;
 }
 
+export interface AgentNginxScan {
+  tunnel_deploy?: number;
+  running: boolean;
+  installed: boolean;
+  available: boolean;
+  version: string | null;
+  mode: "managed";
+  config_path: string;
+  certificate_dir: string;
+  html_path: string;
+}
+
 export interface AgentScanResult {
   http01?: {
     version: 1;
@@ -304,16 +316,7 @@ export interface AgentScanResult {
     webroots: string[];
     cleanup_error: string | null;
   } | null;
-  nginx?: {
-    tunnel_deploy?: number;
-    running: boolean;
-    installed: boolean;
-    available: boolean;
-    mode: "managed";
-    config_path: string;
-    certificate_dir: string;
-    html_path: string;
-  } | null;
+  nginx?: AgentNginxScan | null;
   server_id: string;
   xray_running: boolean;
   xray_version?: string | null;

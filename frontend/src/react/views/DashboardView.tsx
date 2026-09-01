@@ -365,6 +365,9 @@ export default function DashboardView(_props: DashboardViewProps) {
       <span>{scan ? scan.xray_running ? "运行中" : "已停止" : "暂无扫描"}</span><Typography.Text type="secondary">{scan
         ? [scan.xray_version, `${scan.inbounds.length} 个入站`, scan.api_port ? `API ${scan.api_port}` : ""].filter(Boolean).join(" · ")
           || (scan.message ? zhMessage(scan.message).slice(0, 80) : "") : ""}</Typography.Text></Space>; } },
+    { title: "Nginx", key: "nginx", width: 190, render: (_, server) => { const nginx = scans[server.id]?.nginx; return <Space orientation="vertical" size={0}>
+      <span>{nginx ? nginx.running ? "运行中" : nginx.installed ? "已停止" : nginx.available ? "未安装" : "不可用" : "暂无扫描"}</span>
+      <Typography.Text type="secondary">{nginx?.version ?? ""}</Typography.Text></Space>; } },
     { title: "模式", dataIndex: "connection_mode", width: 110, render: value => connectionOptions.find(option => option.value === value)?.label ?? value }, { title: "端口", dataIndex: "listen_port", width: 80 },
     { title: "上传", key: "up", width: 110, render: (_, server) => speed(server.current_upload_speed) },
     { title: "下载", key: "down", width: 110, render: (_, server) => speed(server.current_download_speed) },
@@ -389,7 +392,7 @@ export default function DashboardView(_props: DashboardViewProps) {
       <Col xs={24} sm={8}><Card><Statistic title="速率" value={`${speed(servers.reduce((sum, server) => sum + server.current_upload_speed, 0))} ↑ / ${speed(servers.reduce((sum, server) => sum + server.current_download_speed, 0))} ↓`} styles={{ content: { fontSize: 18 } }} />
         <Typography.Text type="secondary">{Object.values(telemetry).filter(Boolean).length} 份遥测报告</Typography.Text></Card></Col></Row>
     <Card title="服务器" styles={{ body: { padding: 0 } }}><Table rowKey="id" columns={columns} dataSource={servers}
-      loading={loading} pagination={false} scroll={{ x: 1480 }} locale={{ emptyText: <Empty description="暂无服务器。" /> }} /></Card>
+      loading={loading} pagination={false} scroll={{ x: 1670 }} locale={{ emptyText: <Empty description="暂无服务器。" /> }} /></Card>
     {servers.length > 0 && <ServerTrafficPanel servers={servers} />}
     <Row gutter={[24, 24]}>
       <Col xs={24} xl={9}><Space orientation="vertical" size="large" style={{ width: "100%" }}>

@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import signal
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
@@ -259,6 +260,24 @@ class NginxRuntime:
 
     async def running(self):
         return self.process is not None and self.process.returncode is None
+
+    async def version(self):
+        if self.config.nginx_binary is None:
+            return None
+        try:
+            code, output = await run_command(
+                str(self.config.nginx_binary), "-v", timeout=5
+            )
+        except (OSError, RuntimeFailure, TimeoutError):
+            return None
+        if code:
+            return None
+        match = re.search(
+            r"nginx version:\s*nginx/[0-9][0-9A-Za-z.+_-]{0,79}",
+            output,
+            re.IGNORECASE,
+        )
+        return match.group(0) if match is not None else None
 
     def workers(self):
         if not self.process or self.process.returncode is not None:
@@ -594,6 +613,7 @@ class NginxRuntime:
             "running": await self.running(),
             "installed": self.main.exists(),
             "available": self.config.nginx_binary is not None,
+            "version": await self.version(),
             "tunnel_deploy": int(self.config.runtime_mode == "managed"),
             "mode": "managed",
             "config_path": str(self.main),

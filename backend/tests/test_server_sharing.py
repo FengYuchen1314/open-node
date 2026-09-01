@@ -338,6 +338,7 @@ class FakeFederationTransport:
             xray_running=True, xray_version="25.8.3",
             nginx={
                 "running": True, "installed": True, "available": True,
+                "version": "nginx version: nginx/1.29.1",
                 "tunnel_deploy": 1, "mode": "managed",
                 "config_path": "/etc/nginx/nginx.conf",
                 "certificate_dir": "/etc/nginx/certs", "html_path": "/var/www/html",
@@ -437,6 +438,7 @@ def test_imported_server_encrypts_token_prefixes_tags_and_uses_revision(tmp_path
     assert scan["xray_running"] is True
     assert scan["xray_version"] == "25.8.3"
     assert scan["nginx"]["running"] is True
+    assert scan["nginx"]["version"] == "nginx version: nginx/1.29.1"
     telemetry = client.get(
         f"/api/v1/servers/{imported_id}/telemetry/latest"
     ).raise_for_status().json()["latest"]

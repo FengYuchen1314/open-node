@@ -548,6 +548,7 @@ class AgentNginxScan(BaseModel):
     running: bool = False
     installed: bool = False
     available: bool = False
+    version: str | None = Field(default=None, max_length=120)
     tunnel_deploy: int = Field(default=0, ge=0, le=1)
     mode: Literal["managed"] = "managed"
     config_path: str = Field(max_length=512)

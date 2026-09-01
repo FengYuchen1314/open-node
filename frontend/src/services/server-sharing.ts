@@ -3,6 +3,7 @@ import type {
   FederatedServersResponse,
   FederationCommand,
   FederationCommandCreate,
+  FederationProbeSys,
   FederationServerInfo,
   ServerShare,
   ServerShareCreated,
@@ -55,6 +56,10 @@ function text(value: unknown, maximum: number, empty = true) {
 function integer(value: unknown) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : invalid();
 }
+function number(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : invalid();
+}
+function bool(value: unknown) { return typeof value === "boolean" ? value : invalid(); }
 function instant(value: unknown) {
   return typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value))
     ? value : invalid();
@@ -63,8 +68,27 @@ function nullableText(value: unknown, maximum: number) { return value === null ?
 function nullableInstant(value: unknown) { return value === null ? null : instant(value); }
 function license(value: unknown) { if (value !== false) invalid(); return false as const; }
 
+function nginx(value: unknown): FederationServerInfo["nginx"] {
+  if (value === null) return null;
+  const row = exact(value, ["running", "installed", "available", "version", "tunnel_deploy", "mode", "config_path", "certificate_dir", "html_path"]);
+  if (typeof row.running !== "boolean" || typeof row.installed !== "boolean" || typeof row.available !== "boolean"
+    || row.mode !== "managed" || ![0, 1].includes(Number(row.tunnel_deploy))) invalid();
+  return { running: row.running, installed: row.installed, available: row.available,
+    version: nullableText(row.version, 120), tunnel_deploy: integer(row.tunnel_deploy), mode: "managed",
+    config_path: text(row.config_path, 512), certificate_dir: text(row.certificate_dir, 512), html_path: text(row.html_path, 512) };
+}
+function probeSys(value: unknown): FederationProbeSys | null {
+  if (value === null) return null;
+  const row = exact(value, ["cpu_pct", "loadavg", "mem_used", "mem_total", "disk_used", "disk_total", "uptime", "cpu_model", "cpu_cores", "cpu_threads", "os", "kernel", "arch", "upload_speed", "download_speed", "cumulative_up", "cumulative_down", "has_cpu", "has_mem", "has_disk", "has_network", "at"]);
+  return { cpu_pct: number(row.cpu_pct), loadavg: text(row.loadavg, 120), mem_used: integer(row.mem_used), mem_total: integer(row.mem_total),
+    disk_used: integer(row.disk_used), disk_total: integer(row.disk_total), uptime: integer(row.uptime), cpu_model: text(row.cpu_model, 255),
+    cpu_cores: integer(row.cpu_cores), cpu_threads: integer(row.cpu_threads), os: text(row.os, 255), kernel: text(row.kernel, 255), arch: text(row.arch, 120),
+    upload_speed: integer(row.upload_speed), download_speed: integer(row.download_speed), cumulative_up: integer(row.cumulative_up), cumulative_down: integer(row.cumulative_down),
+    has_cpu: bool(row.has_cpu), has_mem: bool(row.has_mem), has_disk: bool(row.has_disk), has_network: bool(row.has_network), at: integer(row.at) };
+}
+
 function info(value: unknown): FederationServerInfo {
-  const row = exact(value, ["name", "status", "ip_address", "ip_address_v6", "domain", "domain_v6", "ipv6_enabled", "xray_mode", "traffic_limit", "traffic_reset_day", "traffic_used", "current_upload_speed", "current_download_speed", "xray_running", "xray_version", "last_heartbeat", "allow_manage_xray", "license_required"]);
+  const row = exact(value, ["name", "status", "ip_address", "ip_address_v6", "domain", "domain_v6", "ipv6_enabled", "xray_mode", "traffic_limit", "traffic_reset_day", "traffic_used", "current_upload_speed", "current_download_speed", "xray_running", "xray_version", "nginx", "probe_sys", "last_heartbeat", "allow_manage_xray", "license_required"]);
   if (!["pending", "connected", "offline"].includes(String(row.status))
     || !["external", "embedded"].includes(String(row.xray_mode))
     || typeof row.ipv6_enabled !== "boolean"
@@ -78,6 +102,7 @@ function info(value: unknown): FederationServerInfo {
     traffic_limit: integer(row.traffic_limit), traffic_reset_day: integer(row.traffic_reset_day), traffic_used: integer(row.traffic_used),
     current_upload_speed: integer(row.current_upload_speed), current_download_speed: integer(row.current_download_speed),
     xray_running: row.xray_running as boolean | null, xray_version: nullableText(row.xray_version, 120),
+    nginx: nginx(row.nginx), probe_sys: probeSys(row.probe_sys),
     last_heartbeat: nullableInstant(row.last_heartbeat), allow_manage_xray: row.allow_manage_xray, license_required: license(row.license_required),
   };
 }
