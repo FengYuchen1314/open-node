@@ -56,3 +56,33 @@ export type ProxyProviderWrite = Omit<
 
 export interface CustomRulesResponse { rules: CustomRule[]; license_required: false }
 export interface ProxyProvidersResponse { providers: ProxyProvider[]; license_required: false }
+
+export type OverrideScriptHook = "post_fetch" | "pre_save_nodes";
+
+export interface OverrideScript {
+  id: string;
+  owner_username: string;
+  name: string;
+  hook: OverrideScriptHook;
+  content: string;
+  enabled: boolean;
+  sort_order: number;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OverrideScriptWrite {
+  owner_username: string;
+  name: string;
+  hook: OverrideScriptHook;
+  content: string;
+  enabled: boolean;
+  sort_order: number;
+}
+
+export interface OverrideScriptsResponse {
+  scripts: OverrideScript[];
+  runtime: "quickjs-subprocess";
+  license_required: false;
+}

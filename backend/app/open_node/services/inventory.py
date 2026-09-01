@@ -1372,6 +1372,8 @@ class SubscriptionProfileModel(Base):
     selected_custom_rule_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     proxy_providers_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     selected_proxy_provider_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    override_scripts_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    selected_override_script_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     source_type: Mapped[str] = mapped_column(String(24), default="managed")
@@ -1648,12 +1650,14 @@ class InventoryStore:
         from open_node.services.server_sharing import FederatedServerModel, ServerShareModel
         from open_node.services.subscriber_auth import SubscriberAccount
         from open_node.services.subscription_customizations import CustomRuleModel
+        from open_node.services.subscription_scripts import OverrideScriptModel
         from open_node.services.subscription_templates import TemplateRecord
 
         SubscriberAccount.metadata.create_all(self._engine)
         TemplateRecord.metadata.create_all(self._engine)
         ExternalSourceModel.metadata.create_all(self._engine)
         CustomRuleModel.metadata.create_all(self._engine)
+        OverrideScriptModel.metadata.create_all(self._engine)
         RenewalRequestModel.metadata.create_all(self._engine)
         ServerShareModel.metadata.create_all(self._engine)
         FederatedServerModel.metadata.create_all(self._engine)
@@ -1716,6 +1720,8 @@ class InventoryStore:
                     "selected_custom_rule_ids": "JSON NOT NULL DEFAULT '[]'",
                     "proxy_providers_enabled": "BOOLEAN NOT NULL DEFAULT 0",
                     "selected_proxy_provider_ids": "JSON NOT NULL DEFAULT '[]'",
+                    "override_scripts_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+                    "selected_override_script_ids": "JSON NOT NULL DEFAULT '[]'",
                 },
             )
         if "product_user_subscription_tokens" in table_names:
@@ -4159,6 +4165,8 @@ class InventoryStore:
         selected_custom_rule_ids: list[str] | None = None,
         proxy_providers_enabled: bool = False,
         selected_proxy_provider_ids: list[str] | None = None,
+        override_scripts_enabled: bool = False,
+        selected_override_script_ids: list[str] | None = None,
         public_base_url: str | None = None,
         subscription_code: str | None = None,
     ) -> RenderedSubscription:
@@ -4216,6 +4224,23 @@ class InventoryStore:
             raise SubscriptionUnavailableError(
                 "subscription has no compatible nodes for this format and selection"
             )
+        script_warnings = []
+        if override_scripts_enabled:
+            if not customization_owner:
+                raise SubscriptionUnavailableError(
+                    "Override scripts require a named subscription profile owner"
+                )
+            proxies, warnings, _pre_applied = self.subscription_scripts().apply(
+                session,
+                customization_owner,
+                selected_override_script_ids or [],
+                "pre_save_nodes",
+                proxies,
+                validator=lambda value: self._validated_script_proxies(
+                    value, client_format
+                ),
+            )
+            script_warnings.extend(warnings)
         content, media_type, extension = self._render_subscription_content(
             proxies, client_format, template_content
         )
@@ -4233,6 +4258,70 @@ class InventoryStore:
                 )
             except ValueError as exc:
                 raise SubscriptionUnavailableError(str(exc)) from exc
+        if override_scripts_enabled:
+            if clash_customization:
+                try:
+                    config = yaml.safe_load(content)
+                except yaml.YAMLError:
+                    config = None
+                if not isinstance(config, dict):
+                    raise SubscriptionUnavailableError(
+                        "Override scripts require a Clash-compatible mapping"
+                    )
+                def validate_clash_script(value):
+                    value["proxies"] = self._validated_script_proxies(
+                        value.get("proxies", []), client_format
+                    )
+                    candidate = yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
+                    from open_node.services.template_rendering import parse_template
+
+                    parse_template(candidate, "clash")
+                    return value
+
+                config, warnings, _post_applied = self.subscription_scripts().apply(
+                    session,
+                    customization_owner,
+                    selected_override_script_ids or [],
+                    "post_fetch",
+                    config,
+                    validator=validate_clash_script,
+                )
+                script_warnings.extend(warnings)
+                content = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
+                proxies = config.get("proxies", [])
+            else:
+                initial_config = {
+                    "proxies": deepcopy(proxies),
+                    "proxy-groups": [],
+                    "rules": [],
+                }
+
+                def validate_portable_script(value):
+                    value["proxies"] = self._validated_script_proxies(
+                        value.get("proxies", []), client_format
+                    )
+                    return value
+
+                config, warnings, post_applied = self.subscription_scripts().apply(
+                    session,
+                    customization_owner,
+                    selected_override_script_ids or [],
+                    "post_fetch",
+                    initial_config,
+                    validator=validate_portable_script,
+                )
+                script_warnings.extend(warnings)
+                proxies = config.get("proxies", [])
+                content, media_type, extension = self._render_subscription_content(
+                    proxies, client_format, template_content
+                )
+                if post_applied and any(
+                    config.get(key) != initial_config[key]
+                    for key in ("proxy-groups", "rules")
+                ):
+                    script_warnings.append(
+                        "Override script rule changes are not preserved by this client format"
+                    )
         rendered_title = title or plan.name or user.username
         return RenderedSubscription(
             username=user.username,
@@ -4249,10 +4338,40 @@ class InventoryStore:
                 *report.warnings,
                 *(extra_warnings or []),
                 *customization_warnings,
+                *script_warnings,
             ])),
             included_nodes=len(proxies),
             excluded_nodes=sum(not node.available for node in report.nodes),
         )
+
+    @staticmethod
+    def _validated_script_proxies(proxies, client_format):
+        if not isinstance(proxies, list) or len(proxies) > 10_000:
+            raise SubscriptionUnavailableError(
+                "Override script must return a bounded proxy array"
+            )
+        result, names = [], set()
+        for proxy in proxies:
+            if not isinstance(proxy, dict):
+                raise SubscriptionUnavailableError(
+                    "Override script proxy entries must be objects"
+                )
+            name = proxy.get("name")
+            if not isinstance(name, str) or not name.strip() or name in names:
+                raise SubscriptionUnavailableError(
+                    "Override script proxy names must be non-empty and unique"
+                )
+            reason = subscription_clients.unsupported_reason(proxy, client_format.value)
+            if reason:
+                raise SubscriptionUnavailableError(
+                    "Override script produced a proxy incompatible with this client format"
+                )
+            copied = deepcopy(proxy)
+            copied["name"] = name
+            copied["port"] = int(copied["port"])
+            names.add(name)
+            result.append(copied)
+        return result
 
     def subscription_format_preview(
         self, username: str, client_format: SubscriptionClientFormat
@@ -7773,6 +7892,11 @@ class InventoryStore:
         from open_node.services.subscription_customizations import SubscriptionCustomizations
 
         return SubscriptionCustomizations(self)
+
+    def subscription_scripts(self):
+        from open_node.services.subscription_scripts import SubscriptionScripts
+
+        return SubscriptionScripts(self)
 
     @contextmanager
     def _coordinated_session(self):

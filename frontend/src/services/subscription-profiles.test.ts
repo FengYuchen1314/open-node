@@ -25,6 +25,8 @@ describe("subscription profile management", () => {
       selected_custom_rule_ids: [],
       proxy_providers_enabled: false,
       selected_proxy_provider_ids: [],
+      override_scripts_enabled: false,
+      selected_override_script_ids: [],
       assigned_usernames: ["alice"],
       enabled: true,
       expected_revision: profile.revision,

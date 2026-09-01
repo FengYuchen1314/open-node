@@ -245,11 +245,12 @@ function SubscriberWorkspace({ username }: { username: string }) {
         ...(permissions?.pages.includes("templates") ? [{ key: "templates", label: "模板", children: <TemplatesWorkspace subscriber /> }] : []),
         ...(permissions?.pages.some(page => page === "templates" || page === "external_subscriptions") ? [{
           key: "customizations",
-          label: "规则与代理集合",
+          label: "订阅自定义",
           children: <SubscriptionCustomizationsView
             subscriberUsername={username}
             allowRules={permissions.pages.includes("templates")}
             allowProviders={permissions.pages.includes("external_subscriptions")}
+            allowScripts={permissions.pages.includes("templates")}
           />,
         }] : []),
         { key: "security", label: "安全设置", children: <SubscriberSecurityPanel onChanged={() => void load()} /> },

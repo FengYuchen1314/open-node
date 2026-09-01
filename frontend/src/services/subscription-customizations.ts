@@ -5,6 +5,9 @@ import type {
   ProxyProvider,
   ProxyProvidersResponse,
   ProxyProviderWrite,
+  OverrideScript,
+  OverrideScriptsResponse,
+  OverrideScriptWrite,
 } from "../domain/subscription-customizations";
 import { authenticatedFetch } from "./auth";
 import { requestError } from "./request-error";
@@ -12,6 +15,7 @@ import { accountRequest, subscriberState } from "./subscriber-auth";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const adminBase = `${apiBaseUrl}/api/v1/subscription-customizations`;
+const scriptsBase = `${apiBaseUrl}/api/v1/subscription-scripts`;
 
 async function failure(response: Response) {
   const body = await response.json().catch(() => null);
@@ -101,6 +105,37 @@ export function deleteProxyProvider(value: ProxyProvider, fetcher = authenticate
   );
 }
 
+export function listOverrideScripts(fetcher = authenticatedFetch) {
+  return request<OverrideScriptsResponse>(scriptsBase, {}, fetcher);
+}
+
+export function createOverrideScript(value: OverrideScriptWrite, fetcher = authenticatedFetch) {
+  return request<OverrideScript>(
+    scriptsBase, { method: "POST", body: JSON.stringify(value) }, fetcher,
+  );
+}
+
+export function updateOverrideScript(
+  value: OverrideScript,
+  changes: OverrideScriptWrite,
+  fetcher = authenticatedFetch,
+) {
+  const { owner_username: _owner, ...payload } = changes;
+  return request<OverrideScript>(
+    `${scriptsBase}/${encodeURIComponent(value.id)}`,
+    { method: "PUT", body: JSON.stringify({ ...payload, expected_revision: value.revision }) },
+    fetcher,
+  );
+}
+
+export function deleteOverrideScript(value: OverrideScript, fetcher = authenticatedFetch) {
+  return request<void>(
+    `${scriptsBase}/${encodeURIComponent(value.id)}/delete`,
+    { method: "POST", body: JSON.stringify({ expected_revision: value.revision }) },
+    fetcher,
+  );
+}
+
 /** Subscriber-cookie client. Ownership is derived by the server, never trusted from a form. */
 export function accountSubscriptionCustomizations(username: string, fetcher = fetch) {
   const sessionToken = subscriberState.session?.csrf_token;
@@ -110,7 +145,7 @@ export function accountSubscriptionCustomizations(username: string, fetcher = fe
   const ensureCurrent = () => {
     if (!current()) throw requestError(undefined, "用户会话已经变化，请返回用户中心重新读取。");
   };
-  const owned = <T extends CustomRule | ProxyProvider>(value: T) => {
+  const owned = <T extends CustomRule | ProxyProvider | OverrideScript>(value: T) => {
     ensureCurrent();
     if (value.owner_username !== username) {
       throw requestError(undefined, "服务器返回了不属于当前用户的订阅资源。");
@@ -182,6 +217,40 @@ export function accountSubscriptionCustomizations(username: string, fetcher = fe
       owned(value);
       return accountRequest<void>(
         `subscription-customizations/providers/${encodeURIComponent(value.id)}/delete`,
+        { method: "POST", body: JSON.stringify({ expected_revision: value.revision }) },
+        fetcher,
+      );
+    },
+    listOverrideScripts: async () => {
+      ensureCurrent();
+      const result = await accountRequest<OverrideScriptsResponse>(
+        "subscription-scripts", {}, fetcher,
+      );
+      result.scripts.forEach(owned);
+      return result;
+    },
+    createOverrideScript: async (value: OverrideScriptWrite) => {
+      ensureCurrent();
+      const { owner_username: _owner, ...payload } = value;
+      return owned(await accountRequest<OverrideScript>(
+        "subscription-scripts",
+        { method: "POST", body: JSON.stringify(payload) },
+        fetcher,
+      ));
+    },
+    updateOverrideScript: async (value: OverrideScript, changes: OverrideScriptWrite) => {
+      owned(value);
+      const { owner_username: _owner, ...payload } = changes;
+      return owned(await accountRequest<OverrideScript>(
+        `subscription-scripts/${encodeURIComponent(value.id)}`,
+        { method: "PUT", body: JSON.stringify({ ...payload, expected_revision: value.revision }) },
+        fetcher,
+      ));
+    },
+    deleteOverrideScript: async (value: OverrideScript) => {
+      owned(value);
+      return accountRequest<void>(
+        `subscription-scripts/${encodeURIComponent(value.id)}/delete`,
         { method: "POST", body: JSON.stringify({ expected_revision: value.revision }) },
         fetcher,
       );

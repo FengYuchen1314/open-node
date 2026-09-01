@@ -5,23 +5,24 @@ import type { ManagedNode, ProductUser } from "../../domain/subscriptions";
 import type { SubscriptionProfile } from "../../domain/subscription-profiles";
 import type { SubscriptionTemplate } from "../../domain/subscription-templates";
 import { updateSubscriptionProfile } from "../../services/subscription-profiles";
-import type { CustomRule, ProxyProvider } from "../../domain/subscription-customizations";
-import { listCustomRules, listProxyProviders } from "../../services/subscription-customizations";
+import type { CustomRule, OverrideScript, ProxyProvider } from "../../domain/subscription-customizations";
+import { listCustomRules, listOverrideScripts, listProxyProviders } from "../../services/subscription-customizations";
 
 export interface SubscriptionProfileDialogProps { open: boolean; profile: SubscriptionProfile | null; nodes: ManagedNode[]; users: ProductUser[]; templates: SubscriptionTemplate[]; onOpenChange: (open: boolean) => void; onSaved?: (profile: SubscriptionProfile) => void }
 export default function SubscriptionProfileDialog(props: SubscriptionProfileDialogProps) { return props.open && props.profile ? <ProfileContent key={`${props.profile.id}:${props.profile.revision}`} {...props} profile={props.profile} /> : null; }
 function ProfileContent({ profile, nodes, users, templates, onOpenChange, onSaved }: SubscriptionProfileDialogProps & { profile: SubscriptionProfile }) {
-  const [form, setForm] = useState(() => ({ name: profile.name, description: profile.description, node_ids: [...profile.node_ids], assigned_usernames: [...profile.assigned_usernames], clash_template_id: profile.clash_template_id, surge_template_id: profile.surge_template_id, custom_rules_enabled: profile.custom_rules_enabled ?? false, selected_custom_rule_ids: [...(profile.selected_custom_rule_ids ?? [])], proxy_providers_enabled: profile.proxy_providers_enabled ?? false, selected_proxy_provider_ids: [...(profile.selected_proxy_provider_ids ?? [])], enabled: profile.enabled }));
-  const [rules, setRules] = useState<CustomRule[]>([]), [providers, setProviders] = useState<ProxyProvider[]>([]);
+  const [form, setForm] = useState(() => ({ name: profile.name, description: profile.description, node_ids: [...profile.node_ids], assigned_usernames: [...profile.assigned_usernames], clash_template_id: profile.clash_template_id, surge_template_id: profile.surge_template_id, custom_rules_enabled: profile.custom_rules_enabled ?? false, selected_custom_rule_ids: [...(profile.selected_custom_rule_ids ?? [])], proxy_providers_enabled: profile.proxy_providers_enabled ?? false, selected_proxy_provider_ids: [...(profile.selected_proxy_provider_ids ?? [])], override_scripts_enabled: profile.override_scripts_enabled ?? false, selected_override_script_ids: [...(profile.selected_override_script_ids ?? [])], enabled: profile.enabled }));
+  const [rules, setRules] = useState<CustomRule[]>([]), [providers, setProviders] = useState<ProxyProvider[]>([]), [scripts, setScripts] = useState<OverrideScript[]>([]);
   const [resourcesBusy, setResourcesBusy] = useState(true);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const version = useRef(0); useEffect(() => () => { ++version.current; }, []);
   useEffect(() => {
     const run = ++version.current; setResourcesBusy(true);
-    Promise.all([listCustomRules(), listProxyProviders()]).then(([ruleList, providerList]) => {
+    Promise.all([listCustomRules(), listProxyProviders(), listOverrideScripts()]).then(([ruleList, providerList, scriptList]) => {
       if (run !== version.current) return;
       setRules(ruleList.rules.filter(item => item.owner_username === profile.owner_username));
       setProviders(providerList.providers.filter(item => item.owner_username === profile.owner_username));
+      setScripts(scriptList.scripts.filter(item => item.owner_username === profile.owner_username));
     }).catch(failure => { if (run === version.current) setError(failure instanceof Error ? failure.message : "读取订阅规则失败"); })
       .finally(() => { if (run === version.current) setResourcesBusy(false); });
   }, [profile.owner_username]);
@@ -46,6 +47,7 @@ function ProfileContent({ profile, nodes, users, templates, onOpenChange, onSave
         {(["clash", "surge"] as const).map(format => <Form.Item key={format} label={`${format === "clash" ? "Clash" : "Surge"} 模板`}><Select aria-label={`${format === "clash" ? "Clash" : "Surge"} 模板`} allowClear value={form[`${format}_template_id`] ?? undefined} onChange={value => patch({ [`${format}_template_id`]: value ?? null })} options={templates.filter(template => template.format === format).map(template => ({ label: template.name, value: template.id }))} /></Form.Item>)}
         <Form.Item label="自定义规则" extra="仅应用于 Clash / Stash。开启后留空表示应用该所有者的全部已启用规则。"><Flex vertical gap="small"><Switch aria-label="启用订阅自定义规则" checked={form.custom_rules_enabled} onChange={custom_rules_enabled => patch({ custom_rules_enabled })} />{form.custom_rules_enabled && (resourcesBusy ? <Spin size="small" /> : <Select aria-label="订阅自定义规则" mode="multiple" allowClear placeholder="留空：全部已启用规则" value={form.selected_custom_rule_ids} onChange={selected_custom_rule_ids => patch({ selected_custom_rule_ids })} options={rules.map(item => ({ label: `${item.name} · ${item.enabled ? "已启用" : "已停用"}`, value: item.id, disabled: !item.enabled }))} />)}</Flex></Form.Item>
         <Form.Item label="Proxy Provider" extra="仅应用于 Clash / Stash；公开 URL 使用当前订阅短码鉴权，不包含上游订阅地址。"><Flex vertical gap="small"><Switch aria-label="启用订阅代理集合" checked={form.proxy_providers_enabled} onChange={proxy_providers_enabled => patch({ proxy_providers_enabled })} />{form.proxy_providers_enabled && (resourcesBusy ? <Spin size="small" /> : <Select aria-label="订阅代理集合" mode="multiple" allowClear placeholder="留空：全部已启用代理集合" value={form.selected_proxy_provider_ids} onChange={selected_proxy_provider_ids => patch({ selected_proxy_provider_ids })} options={providers.map(item => ({ label: `${item.name} · ${item.enabled ? "已启用" : "已停用"}`, value: item.id, disabled: !item.enabled }))} />)}</Flex></Form.Item>
+        <Form.Item label="覆写脚本" extra="按排序值依次运行 post_fetch / pre_save_nodes；开启后留空表示应用该所有者的全部已启用脚本。单个脚本失败会跳过并产生警告。"><Flex vertical gap="small"><Switch aria-label="启用订阅覆写脚本" checked={form.override_scripts_enabled} onChange={override_scripts_enabled => patch({ override_scripts_enabled })} />{form.override_scripts_enabled && (resourcesBusy ? <Spin size="small" /> : <Select aria-label="订阅覆写脚本" mode="multiple" allowClear placeholder="留空：全部已启用脚本" value={form.selected_override_script_ids} onChange={selected_override_script_ids => patch({ selected_override_script_ids })} options={scripts.map(item => ({ label: `${item.name} · ${item.hook} · ${item.enabled ? "已启用" : "已停用"}`, value: item.id, disabled: !item.enabled }))} />)}</Flex></Form.Item>
       </Form>
     </Flex>
   </Modal>;

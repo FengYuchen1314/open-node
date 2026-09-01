@@ -24,6 +24,7 @@ from open_node.services.inventory import (
 )
 from open_node.services.subscription_access import revision
 from open_node.services.subscription_customizations import CustomRuleModel, ProxyProviderModel
+from open_node.services.subscription_scripts import OverrideScriptModel
 from open_node.services.subscription_templates import TemplateRecord
 
 LEGACY_FORMATS = {
@@ -88,6 +89,8 @@ class SubscriptionProfiles:
             "selected_custom_rule_ids": profile.selected_custom_rule_ids or [],
             "proxy_providers_enabled": profile.proxy_providers_enabled,
             "selected_proxy_provider_ids": profile.selected_proxy_provider_ids or [],
+            "override_scripts_enabled": profile.override_scripts_enabled,
+            "selected_override_script_ids": profile.selected_override_script_ids or [],
             "enabled": profile.enabled,
             "assigned_usernames": assigned_usernames,
             "updated_at": self.store._aware_datetime(profile.updated_at).isoformat(),
@@ -106,6 +109,8 @@ class SubscriptionProfiles:
             selected_custom_rule_ids=profile.selected_custom_rule_ids or [],
             proxy_providers_enabled=profile.proxy_providers_enabled,
             selected_proxy_provider_ids=profile.selected_proxy_provider_ids or [],
+            override_scripts_enabled=profile.override_scripts_enabled,
+            selected_override_script_ids=profile.selected_override_script_ids or [],
             enabled=profile.enabled,
             sort_order=profile.sort_order,
             source_type=profile.source_type,
@@ -184,16 +189,24 @@ class SubscriptionProfiles:
             provider_ids = list(
                 dict.fromkeys(str(value) for value in payload.selected_proxy_provider_ids)
             )
+            script_ids = list(
+                dict.fromkeys(str(value) for value in payload.selected_override_script_ids)
+            )
             self._owned_customizations(
                 session, CustomRuleModel, custom_rule_ids, profile.owner_username, "custom rule"
             )
             self._owned_customizations(
                 session, ProxyProviderModel, provider_ids, profile.owner_username, "proxy provider"
             )
+            self._owned_customizations(
+                session, OverrideScriptModel, script_ids, profile.owner_username, "override script"
+            )
             profile.custom_rules_enabled = payload.custom_rules_enabled
             profile.selected_custom_rule_ids = custom_rule_ids
             profile.proxy_providers_enabled = payload.proxy_providers_enabled
             profile.selected_proxy_provider_ids = provider_ids
+            profile.override_scripts_enabled = payload.override_scripts_enabled
+            profile.selected_override_script_ids = script_ids
             profile.name = payload.name.strip()
             if not profile.name:
                 raise SubscriptionProfileConflict("Subscription profile name is required")
@@ -400,6 +413,10 @@ class SubscriptionProfiles:
             proxy_providers_enabled=bool(profile and profile.proxy_providers_enabled),
             selected_proxy_provider_ids=(
                 (profile.selected_proxy_provider_ids or []) if profile else []
+            ),
+            override_scripts_enabled=bool(profile and profile.override_scripts_enabled),
+            selected_override_script_ids=(
+                (profile.selected_override_script_ids or []) if profile else []
             ),
             public_base_url=public_base_url,
             subscription_code=subscription_code,

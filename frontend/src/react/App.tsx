@@ -16,7 +16,7 @@ const navigation = [
   { key: "/", label: "概览", icon: <DashboardOutlined aria-hidden /> },
   { key: "/subscriptions", label: "订阅管理", icon: <ApartmentOutlined aria-hidden /> },
   { key: "/templates", label: "订阅模板", icon: <FileTextOutlined aria-hidden /> },
-  { key: "/subscription-customizations", label: "规则与代理集合", icon: <FilterOutlined aria-hidden /> },
+  { key: "/subscription-customizations", label: "订阅自定义", icon: <FilterOutlined aria-hidden /> },
   { key: "/changes", label: "变更集", icon: <HistoryOutlined aria-hidden /> },
   { key: "/config", label: "配置管理", icon: <SettingOutlined aria-hidden /> },
   { key: "/server-sharing", label: "服务器共享", icon: <ShareAltOutlined aria-hidden /> },

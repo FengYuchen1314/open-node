@@ -28,6 +28,8 @@ export interface SubscriptionProfile {
   selected_custom_rule_ids: string[];
   proxy_providers_enabled: boolean;
   selected_proxy_provider_ids: string[];
+  override_scripts_enabled: boolean;
+  selected_override_script_ids: string[];
   enabled: boolean;
   sort_order: number;
   source_type: string;
@@ -57,6 +59,8 @@ export interface SubscriptionProfileUpdate {
   selected_custom_rule_ids: string[];
   proxy_providers_enabled: boolean;
   selected_proxy_provider_ids: string[];
+  override_scripts_enabled: boolean;
+  selected_override_script_ids: string[];
   assigned_usernames: string[];
   enabled: boolean;
   expected_revision: string;
