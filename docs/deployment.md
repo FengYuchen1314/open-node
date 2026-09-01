@@ -10,9 +10,9 @@ that every MMWX migration gate is complete. See [migration-map.md](migration-map
 
 - A Linux Docker host with Docker Compose v2, Git, and outbound access to
   Docker Hub, npm, PyPI, GitHub, and the selected ACME/DNS services.
-- For public access: a hostname, an existing host HTTPS reverse proxy, and a
-  certificate trusted by clients. Bootstrap the panel certificate outside the
-  panel; do not depend on an unauthenticated panel to provision its own TLS.
+- For managed public access: a hostname whose A/AAAA records already point to
+  this host, free inbound TCP ports 80/443, and outbound access to public ACME.
+  Hosts with an existing edge proxy should keep using the manual mode below.
 - Backups on a private filesystem outside the application's volume.
 
 The shipped setup uses one backend process, one host-local SQLite database,
@@ -68,6 +68,12 @@ The installer performs these bounded actions:
    [browser initialization](initial-setup.md). An explicit private password file
    retains terminal provisioning. `OPEN_NODE_CREATE_ADMIN=1` retains the
    interactive `/dev/tty` password flow; `0` skips administrator initialization.
+
+When `OPEN_NODE_PUBLIC_HOSTNAME` is supplied, the installer also pins the official
+Caddy image by digest, keeps the application on loopback, configures secure cookies,
+proxy trust and the Agent public URL, starts a hardened host-network HTTPS gateway,
+and waits for a trusted SNI health check before printing success. The complete
+operator flow is in [公网一键部署](public-deployment.md).
 
 The default listener is `127.0.0.1:8080` and the initial loopback/SSH-tunnel
 cookie setting is HTTP-compatible. From your workstation, open a tunnel and
@@ -152,24 +158,26 @@ sudo env OPEN_NODE_CONFIG_DIR=/srv/open-node-config bash /path/to/reviewed/insta
 
 Useful unattended overrides include `OPEN_NODE_REF`,
 `OPEN_NODE_HTTP_PORT`, `OPEN_NODE_INSTALL_DIR`, `OPEN_NODE_CONFIG_DIR`,
-`OPEN_NODE_BACKUP_DIR`, and `OPEN_NODE_PROJECT_NAME`. A public plain-HTTP bind
+`OPEN_NODE_BACKUP_DIR`, `OPEN_NODE_PROJECT_NAME`, and
+`OPEN_NODE_PUBLIC_HOSTNAME`. A public plain-HTTP bind
 requires both `OPEN_NODE_BIND_ADDRESS=0.0.0.0` and the explicit
 `OPEN_NODE_ALLOW_PUBLIC_HTTP=1` opt-in; it is not the recommended production
-topology. Before putting the loopback listener behind HTTPS, set
+topology. For a custom proxy, set
 `OPEN_NODE_SESSION_COOKIE_SECURE=true` and configure the exact trusted proxy as
 described below.
 
 This installer deliberately targets a new or already installer-managed,
 single-host Docker/SQLite deployment. It does not adopt an existing manual
-Compose installation, merge data, configure a reverse proxy or public DNS/TLS,
+Compose installation, merge data, manage public DNS or take over an existing proxy,
 restore a backup, prune retained images/backups, install or migrate remote
 Agents, or claim support for the upstream MMWX native binary, PostgreSQL,
 embedded Nginx, Windows, rootless Docker, multi-host or multi-worker operation.
 
 ### Enable panel-issued Agent commands
 
-After configuring a trusted HTTPS reverse proxy, supply the canonical control-
-plane URL to the reviewed root installer. For an existing **installer-managed**
+Managed public installation sets this value automatically to its HTTPS hostname.
+With a custom trusted HTTPS reverse proxy, supply the canonical control-plane
+URL to the reviewed root installer. For an existing **installer-managed**
 deployment:
 
 ```bash
@@ -201,7 +209,8 @@ sudo env OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL= \
 Do not hand-edit the installer's environment or manifest. Manual Compose
 deployments may set the same key in their own private environment and recreate
 the reviewed service; the root installer still refuses to adopt them. The
-setting neither creates HTTPS infrastructure nor installs Agents automatically.
+setting alone neither creates HTTPS infrastructure nor installs Agents automatically.
+Only `OPEN_NODE_PUBLIC_HOSTNAME` enables the managed Caddy workflow.
 See [panel-issued Agent installation](agent-bootstrap.md) for its new-host
 scope, secret handling and recovery rules.
 
@@ -237,6 +246,17 @@ root-only disposable-host requirement:
 sudo python3 scripts/vps/smoke-installer-bootstrap-setting.py \
   --safety-negative-controls --guarded-update \
   --output /tmp/open-node-installer-bootstrap-reviewed-revision
+```
+
+The public-gateway policy smoke creates a UUID-named Caddy container with
+`docker create` but never starts it. It checks the installer's exact image,
+command, capability, host-network, read-only, tmpfs, mount, label and volume
+policy, including safe removal after a hostname change, then removes only the
+verified fixture resources:
+
+```bash
+sudo python3 scripts/vps/smoke-installer-public-gateway.py \
+  --repository "$PWD" --output /tmp/open-node-public-gateway-policy
 ```
 
 ## Manual Install

@@ -132,10 +132,12 @@ No development server is needed. The hardened `cb1eb0c` baseline now runs on
 the VPS as the persistent Compose deployment, managed by an enabled and active
 systemd unit. It binds only to `127.0.0.1:8000` and is accessed as an
 SSH-tunneled Preview. Backup, restart, Compose down/up, and isolated restore
-have been verified against the deployed state. This is not yet a public HTTPS
-deployment: the production hostname, DNS, trusted certificate, and public
-reverse-proxy configuration still require operator input. Remaining migration
-boundaries still apply; this is not yet full MMWX parity.
+have been verified against the deployed state. That persistent production
+instance has not been upgraded and remains an SSH-tunneled Preview. The published
+installer now has a separate [managed public deployment](docs/public-deployment.md)
+mode: the operator supplies a prepared DNS hostname and open ports 80/443, while
+the installer provisions pinned Caddy, trusted HTTPS and the reverse proxy.
+Remaining product boundaries still apply; this is not yet full MMWX parity.
 
 The root installer is published on `main`. On 2026-08-30, the anonymous Raw
 GitHub URL below was downloaded on the Debian 12 VPS and passed isolated fresh
@@ -161,6 +163,14 @@ The public command downloads the script completely before running it:
 )
 ```
 
+For a fresh public deployment whose DNS already points to the host, pass the
+hostname to the same command as
+`sudo env OPEN_NODE_PUBLIC_HOSTNAME=panel.example.com bash "$installer"`.
+The application remains on loopback; the installer pins and hardens the official
+Caddy image, obtains and verifies trusted HTTPS, and configures the same public
+URL for new Agent commands. See the linked public-deployment guide before running
+it because ports 80/443 and correct A/AAAA records are prerequisites.
+
 The secure default binds the panel to `127.0.0.1:8080`; use an SSH tunnel for
 browser initialization. By default the installer prints a one-use setup
 credential; `setup` renews it if needed. Explicit terminal creation still reads
@@ -174,8 +184,9 @@ named data volume, source, configuration, installer state, images, and backups.
 The convenience URL above follows mutable `main`: it neither pins the bootstrap
 script nor cryptographically binds it to the subsequently cloned ref. Review
 and pin both inputs (for example, a commit-specific raw script URL and a reviewed
-release ref) when that supply-chain property matters. Public HTTPS still
-requires an operator-owned hostname, certificate, and edge proxy. See
+release ref) when that supply-chain property matters. Managed public HTTPS still
+requires operator-owned DNS and reachable ports; an existing custom edge remains
+a manual deployment. See
 [control-plane deployment](docs/deployment.md) for the exact commands, manifest
 rules, non-interactive secret cleanup, update/recovery semantics, maintainer VPS
 smoke prerequisites, and installer support boundary.
@@ -210,8 +221,9 @@ observe the Agent connecting. It uses a ten-minute single-host ticket, checks
 the installer and versioned release hashes, and installs a dedicated non-root
 Agent with official Xray. Real WebSocket and HTTP installations, traffic and
 replay/reinstallation refusal have passed on the VPS. Configure the canonical
-HTTPS control-plane URL first; this does not provision DNS/TLS, migrate an
-existing host, install fork-only protocols or add public proxy inbounds.
+HTTPS control-plane URL first. The managed public mode can provision Caddy/TLS
+after DNS is ready; it does not manage DNS, migrate an existing host, install
+fork-only protocols or add public proxy inbounds.
 The root control-plane installer and the panel's remote-host command are
 separate entry points. Neither makes the whole project feature-complete.
 

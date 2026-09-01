@@ -8,6 +8,26 @@
 导入/接管或 Telegram Bot/Mini App，也不把它们列为交付阻塞。保留此前已实现的代码，
 不因范围调整删除用户数据或已有功能。下文旧批次中的 Bot、完整迁移等优先级已失效。
 
+本轮已实现新部署公网入口：根安装器接受 `OPEN_NODE_PUBLIC_HOSTNAME`，要求应用保持
+回环监听，自动设置安全 Cookie、可信代理和 Agent 公网地址，并运行固定摘要的官方
+Caddy 2.11.4。网关自动申请/续期可信证书、HTTP 跳转、WebSocket 反代、压缩和 HSTS；
+安装器连续检查真实域名 SNI 与 `/healthz` 后才成功。支持同提交启用、换域名、关闭、
+状态核验和保留数据卸载。DNS A/AAAA、主机/云防火墙和空闲 80/443 仍由操作者准备，
+也不接管已有边缘代理。用法见 [public-deployment.md](public-deployment.md)。
+
+VPS `/tmp/open-node-public-gateway.S1vVKz/evidence` 中 Ruff 与 34 项专项测试通过；
+官方镜像 Caddyfile 校验通过。Docker 策略烟测创建但不启动 UUID 容器，实测固定
+镜像/命令、host 网络、能力、只读根、tmpfs、挂载、日志和标签，并覆盖换域名后的
+安全删除，所有夹具资源已清理。没有操作者正式域名，因此未申请真实公网证书，
+生产 `/opt/open-node` 没有升级。下一步转向 Web 公告、恢复/更新入口、权限与共享、
+DDNS 和规则生态。
+
+外观提交 `8dd3d07` 的 CI 中 Frontend、Agent、Probe Worker 成功；Backend 完成全套后为
+4,932 通过、116 跳过、2 失败。两项来自同一个旧的订阅角色隔离枚举，误把新增的匿名
+初始化/外观读取路径当成管理员接口；专用测试已覆盖它们的无秘密公开响应，并单独验证
+写接口仍需管理员。夹具现已排除这些已记录公开路径。新提交的完整 CI 未结束前不宣称
+hosted CI 全绿。
+
 本轮新增站点外观：管理员可在中文系统设置页保存 Logo、登录背景和标准 Ant Design
 浅色/深色/跟随系统主题；访客可选择站点默认或保留自己的浏览器主题偏好。支持公开
 HTTPS 地址及 PNG/JPEG/WebP/GIF/ICO/SVG 上传，Logo 2 MiB、背景 10 MiB，图片按内容
@@ -22,15 +42,15 @@ VPS R1 后端 210 通过、2 个测试预期失败；前端 82 通过、2 个测
 通过，证据在 `/tmp/open-node-appearance-r3.6xRQRm/evidence`。没有重复旧功能全套、
 浏览器或 Docker 验收，生产和共享候选未升级。上一版 `54e2360` 的 Frontend、Agent、Probe Worker CI
 成功，Backend 在没有测试失败记录时恰好达到 60 分钟上限被取消；本轮将上限改为
-90 分钟，不删除测试。下一步直接做新部署公网域名、HTTPS 和反向代理配置。
+90 分钟，不删除测试。公网域名、HTTPS 和反向代理配置已在上文完成。
 
 本轮补齐浏览器首次初始化：默认安装生成 30 分钟一次性凭证，中文页面创建管理员
 和站点文字，完成后正常登录。`install.sh setup` 可在初始化前重新签发，旧凭证失效；
 终端 `create-admin`、私有密码文件和本地密码恢复保留。数据库只存凭证摘要，
 管理员/品牌/永久标记/凭证消费原子提交；重复请求、终端创建竞态、已删除管理员和
 恢复备份均不能重新开放匿名初始化。API 没有签发凭证入口。
-用法与边界见 [initial-setup.md](initial-setup.md)。本批未加入域名/HTTPS 自动配置、
-头像/个人资料、PostgreSQL 初始化和首次启动上传恢复，不是全部初始化行为对等。
+用法与边界见 [initial-setup.md](initial-setup.md)。域名/HTTPS 已由后续公网安装器补齐；
+头像/个人资料、PostgreSQL 初始化和首次启动上传恢复仍未加入，不是全部初始化行为对等。
 
 验证在 VPS `/tmp/open-node-setup.p3gIS3vS`：R1 后端 98 通过、1 个时间精度断言失败；
 R2 修正用例及格式后，初始化/安装器 33 项、前端 47 项通过，Ruff、App/Node 类型检查

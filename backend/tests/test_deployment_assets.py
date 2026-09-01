@@ -52,6 +52,42 @@ def test_compose_defaults_to_loopback_but_allows_an_explicit_installer_bind():
     ).read_text()
 
 
+def test_managed_public_gateway_is_pinned_and_keeps_the_app_on_loopback():
+    installer = (ROOT / "install.sh").read_text()
+    caddyfile = (ROOT / "deploy/Caddyfile").read_text()
+    environment = (ROOT / "deploy/.env.example").read_text()
+
+    assert (
+        'PUBLIC_GATEWAY_IMAGE="caddy:2.11.4-alpine@sha256:'
+        '5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648"'
+        in installer
+    )
+    assert "OPEN_NODE_PUBLIC_HOSTNAME=" in environment
+    assert "admin off" in caddyfile
+    assert "{$OPEN_NODE_PUBLIC_HOSTNAME}" in caddyfile
+    assert "reverse_proxy 127.0.0.1:{$OPEN_NODE_UPSTREAM_PORT}" in caddyfile
+    assert "header_up X-Forwarded-For" not in caddyfile
+    assert "header_up X-Real-IP {remote_host}" in caddyfile
+    assert "health_uri /healthz" in caddyfile
+    assert "tls internal" not in caddyfile
+    assert "--network host" in installer
+    assert "--read-only --init" in installer
+    assert "--cap-drop ALL --cap-add NET_BIND_SERVICE" in installer
+    assert '--resolve "$hostname:443:127.0.0.1"' in installer
+
+
+def test_public_gateway_docker_policy_smoke_never_starts_its_fixture():
+    smoke = ROOT / "scripts/vps/smoke-installer-public-gateway.py"
+    source = smoke.read_text()
+
+    compile(source, str(smoke), "exec")
+    assert '        "create",\n        "--name",' in source
+    assert '"docker", "run"' not in source
+    assert "public_gateway_container_is_safe 0" in source
+    assert "public_gateway_volume_is_safe" in source
+    assert "Refusing to remove" in source
+
+
 def test_github_installer_has_safe_lifecycle_defaults_and_valid_bash():
     installer = ROOT / "install.sh"
     source = installer.read_text()

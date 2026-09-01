@@ -8,7 +8,8 @@
 ## 安装与打开页面
 
 默认 GitHub 安装脚本会在服务通过健康检查后显示初始化凭证，有效期 30 分钟。
-通过 SSH 隧道打开面板，或使用已经配置好的可信 HTTPS 地址。默认端口的隧道示例：
+通过 SSH 隧道打开面板，或使用[公网一键部署](public-deployment.md)已经验证的
+可信 HTTPS 地址。默认端口的隧道示例：
 
 ```bash
 ssh -L 8080:127.0.0.1:8080 root@SERVER_IP
@@ -74,5 +75,6 @@ docker compose exec -T open-node open-node-admin prepare-setup
 [本地恢复命令](administrator-access.md)，不要删除数据库。
 
 本功能面向新建单机 SQLite 部署。暂不包括首次启动上传备份、PostgreSQL 配置、
-个人资料/头像、自动配置域名、DNS 或主控 HTTPS。现有备份恢复仍按
+个人资料/头像或 DNS 账户配置。主控 HTTPS 可由根安装器在域名解析就绪后接入；
+现有备份恢复仍按
 [离线恢复及首次启动复核](backups.md)执行，恢复会使初始化凭证失效。

@@ -12,6 +12,7 @@ readonly RUNTIME_DATABASE_URL="sqlite:////var/lib/open-node/open-node.db"
 readonly RUNTIME_CONTAINER_PORT="8080"
 readonly RUNTIME_UID_GID="10001:10001"
 readonly HEALTH_STABLE_OBSERVATIONS="3"
+readonly PUBLIC_GATEWAY_IMAGE="caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648"
 
 ACTION="${1:-install}"
 REPOSITORY="${OPEN_NODE_REPOSITORY:-$DEFAULT_REPOSITORY}"
@@ -25,6 +26,8 @@ ENV_FILE="$CONFIG_DIR/open-node.env"
 MANIFEST_FILE="$CONFIG_DIR/installer.manifest"
 RECOVERY_FILE="$CONFIG_DIR/installer.recovery"
 DATA_VOLUME="${PROJECT_NAME}_data"
+PUBLIC_GATEWAY_CONTAINER="${PROJECT_NAME}-public-gateway"
+PUBLIC_GATEWAY_VOLUME="${PROJECT_NAME}_caddy_data"
 AUTO_INSTALL="${OPEN_NODE_AUTO_INSTALL_DEPENDENCIES:-1}"
 BUILD_PULL="${OPEN_NODE_BUILD_PULL:-1}"
 CREATE_ADMIN="${OPEN_NODE_CREATE_ADMIN:-auto}"
@@ -73,6 +76,28 @@ validate_plain_value() {
   [[ -n "$value" ]] || die "$label must not be empty"
   [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || die "$label contains a newline"
   [[ "$value" != -* ]] || die "$label must not start with '-'"
+}
+
+validate_public_hostname() {
+  local value="$1" label last
+  local -a labels=()
+  [[ -z "$value" ]] && return 0
+  [[ "${#value}" -le 253 && "$value" == "${value,,}" && "$value" == *.*
+    && "$value" != .* && "$value" != *. && "$value" != *..*
+    && "$value" =~ ^[a-z0-9.-]+$ ]] || return 1
+  local IFS='.'
+  read -r -a labels <<< "$value"
+  [[ "${#labels[@]}" -ge 2 ]] || return 1
+  for label in "${labels[@]}"; do
+    [[ "$label" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || return 1
+  done
+  last="${labels[${#labels[@]}-1]}"
+  [[ "$last" =~ [a-z] ]] || return 1
+  case "$value" in
+    localhost|*.localhost|*.local|*.internal|*.invalid|*.test|*.example|*.arpa|*.onion)
+      return 1
+      ;;
+  esac
 }
 
 validate_absolute_path() {
@@ -253,6 +278,8 @@ load_manifest_defaults() {
   adopt_manifest_value PROJECT_NAME OPEN_NODE_PROJECT_NAME PROJECT_NAME
   adopt_manifest_value IMAGE_REPOSITORY OPEN_NODE_IMAGE_REPOSITORY IMAGE_REPOSITORY
   DATA_VOLUME="${PROJECT_NAME}_data"
+  PUBLIC_GATEWAY_CONTAINER="${PROJECT_NAME}-public-gateway"
+  PUBLIC_GATEWAY_VOLUME="${PROJECT_NAME}_caddy_data"
 }
 
 validate_inputs() {
@@ -285,6 +312,10 @@ validate_inputs() {
     || die "OPEN_NODE_CREATE_ADMIN must be 0, 1, auto, or web"
   [[ "$CREATE_ADMIN" != "web" || -z "$ADMIN_PASSWORD_FILE" ]] \
     || die "OPEN_NODE_CREATE_ADMIN=web cannot be combined with a password file"
+  if [[ -v OPEN_NODE_PUBLIC_HOSTNAME ]]; then
+    validate_public_hostname "$OPEN_NODE_PUBLIC_HOSTNAME" \
+      || die "OPEN_NODE_PUBLIC_HOSTNAME must be empty or a lowercase public DNS hostname"
+  fi
 }
 
 install_dependencies() {
@@ -346,6 +377,7 @@ compose_with() {
     -u OPEN_NODE_SESSION_COOKIE_SECURE \
     -u OPEN_NODE_SHORT_LINKS_ENABLED \
     -u OPEN_NODE_TRUSTED_PROXIES \
+    -u OPEN_NODE_PUBLIC_HOSTNAME \
     -u OPEN_NODE_AGENT_IDENTITY_FILE \
     -u OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL \
     -u OPEN_NODE_SUBSCRIBER_TOTP_KEY \
@@ -406,6 +438,12 @@ requested_bootstrap_change() {
   [[ -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL ]] || return 1
   [[ "$OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL" != \
     "$(read_key "$ENV_FILE" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)" ]]
+}
+
+requested_public_gateway_change() {
+  [[ -v OPEN_NODE_PUBLIC_HOSTNAME ]] || return 1
+  [[ "$OPEN_NODE_PUBLIC_HOSTNAME" != \
+    "$(read_key "$ENV_FILE" OPEN_NODE_PUBLIC_HOSTNAME || true)" ]]
 }
 
 require_environment_file() {
@@ -825,6 +863,10 @@ require_fresh_project() {
   [[ -z "$containers" ]] || die "Compose project already has containers: $PROJECT_NAME"
   ! docker volume inspect "$DATA_VOLUME" >/dev/null 2>&1 \
     || die "data volume already exists without an installer manifest: $DATA_VOLUME"
+  ! docker inspect "$PUBLIC_GATEWAY_CONTAINER" >/dev/null 2>&1 \
+    || die "public gateway container already exists without an installer manifest"
+  ! docker volume inspect "$PUBLIC_GATEWAY_VOLUME" >/dev/null 2>&1 \
+    || die "public gateway data volume already exists without an installer manifest"
   ! docker network inspect "${PROJECT_NAME}_default" >/dev/null 2>&1 \
     || die "Compose network already exists without an installer manifest: ${PROJECT_NAME}_default"
 }
@@ -832,6 +874,7 @@ require_fresh_project() {
 create_candidate_environment() {
   local source_dir="$1" destination="$2" base_file="${3:-}" created=0
   local port bind_address secure_cookie bootstrap_value rendered_compose existing_bind=""
+  local public_hostname previous_public public_url trusted_proxies
   if [[ -n "$base_file" ]]; then
     validate_safe_file "active environment file" "$base_file" 1
     install -m 0600 -- "$base_file" "$destination"
@@ -861,9 +904,46 @@ create_candidate_environment() {
   esac
   [[ "$secure_cookie" == "true" || "$secure_cookie" == "false" ]] \
     || die "OPEN_NODE_SESSION_COOKIE_SECURE must be true or false"
+  trusted_proxies="$(read_key "$destination" OPEN_NODE_TRUSTED_PROXIES || true)"
+  if [[ -v OPEN_NODE_TRUSTED_PROXIES ]]; then
+    trusted_proxies="$OPEN_NODE_TRUSTED_PROXIES"
+  fi
   bootstrap_value="$(read_key "$destination" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
   if [[ -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL ]]; then
     bootstrap_value="$OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL"
+  fi
+  previous_public="$(read_key "$destination" OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  public_hostname="$previous_public"
+  if [[ -v OPEN_NODE_PUBLIC_HOSTNAME ]]; then
+    public_hostname="$OPEN_NODE_PUBLIC_HOSTNAME"
+  fi
+  validate_public_hostname "$public_hostname" \
+    || die "OPEN_NODE_PUBLIC_HOSTNAME must be empty or a lowercase public DNS hostname"
+  if [[ -n "$public_hostname" ]]; then
+    validate_safe_file "candidate public gateway Caddyfile" "$source_dir/deploy/Caddyfile" 0
+    [[ "$bind_address" == "127.0.0.1" ]] \
+      || die "public HTTPS requires the application listener to remain on 127.0.0.1"
+    [[ ! -v OPEN_NODE_SESSION_COOKIE_SECURE || "$OPEN_NODE_SESSION_COOKIE_SECURE" == "true" ]] \
+      || die "public HTTPS requires OPEN_NODE_SESSION_COOKIE_SECURE=true"
+    [[ ! -v OPEN_NODE_TRUSTED_PROXIES || "$OPEN_NODE_TRUSTED_PROXIES" == "*" ]] \
+      || die "the managed public gateway requires OPEN_NODE_TRUSTED_PROXIES=*"
+    public_url="https://$public_hostname"
+    [[ ! -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL \
+      || "$OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL" == "$public_url" ]] \
+      || die "the Agent bootstrap URL must equal the managed public HTTPS URL"
+    secure_cookie=true
+    trusted_proxies="*"
+    bootstrap_value="$public_url"
+  elif [[ -v OPEN_NODE_PUBLIC_HOSTNAME && -n "$previous_public" ]]; then
+    public_url="https://$previous_public"
+    if [[ ! -v OPEN_NODE_SESSION_COOKIE_SECURE ]]; then secure_cookie=false; fi
+    if [[ ! -v OPEN_NODE_TRUSTED_PROXIES && "$trusted_proxies" == "*" ]]; then
+      trusted_proxies=""
+    fi
+    if [[ ! -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL \
+      && "$bootstrap_value" == "$public_url" ]]; then
+      bootstrap_value=""
+    fi
   fi
   validate_agent_bootstrap_value "$bootstrap_value" \
     || die "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL must be empty or a safe canonical HTTPS URL"
@@ -871,6 +951,8 @@ create_candidate_environment() {
   set_file_value "$destination" OPEN_NODE_BIND_ADDRESS "$bind_address"
   set_file_value "$destination" OPEN_NODE_HTTP_PORT "$port"
   set_file_value "$destination" OPEN_NODE_SESSION_COOKIE_SECURE "$secure_cookie"
+  set_file_value "$destination" OPEN_NODE_TRUSTED_PROXIES "$trusted_proxies"
+  set_file_value "$destination" OPEN_NODE_PUBLIC_HOSTNAME "$public_hostname"
   set_file_value "$destination" OPEN_NODE_SHORT_LINKS_ENABLED \
     "$(read_key "$destination" OPEN_NODE_SHORT_LINKS_ENABLED || printf 'false')"
   set_file_value "$destination" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL "$bootstrap_value"
@@ -1131,6 +1213,211 @@ wait_for_health() {
   return 1
 }
 
+public_gateway_volume_is_safe() {
+  local details
+  details="$(docker volume inspect "$PUBLIC_GATEWAY_VOLUME" 2>/dev/null)" || return 1
+  printf '%s\n' "$details" | jq -e \
+    --arg name "$PUBLIC_GATEWAY_VOLUME" --arg project "$PROJECT_NAME" '
+    length == 1
+    and .[0].Name == $name
+    and .[0].Driver == "local"
+    and .[0].Scope == "local"
+    and (((.[0].Options // {}) | length) == 0)
+    and .[0].Labels["com.open-node.installer.project"] == $project
+    and .[0].Labels["com.open-node.installer.purpose"] == "public-gateway-data"
+  ' >/dev/null
+}
+
+ensure_public_gateway_volume() {
+  if docker volume inspect "$PUBLIC_GATEWAY_VOLUME" >/dev/null 2>&1; then
+    public_gateway_volume_is_safe \
+      || die "public gateway data volume exists outside installer policy"
+    return
+  fi
+  docker volume create --driver local \
+    --label "com.open-node.installer.project=$PROJECT_NAME" \
+    --label "com.open-node.installer.purpose=public-gateway-data" \
+    "$PUBLIC_GATEWAY_VOLUME" >/dev/null \
+    || die "could not create the public gateway data volume"
+  public_gateway_volume_is_safe \
+    || die "created public gateway data volume is outside installer policy"
+}
+
+public_gateway_container_is_safe() {
+  local require_running="${1:-0}" require_current="${2:-1}"
+  local expected_image_id details hostname upstream config
+  hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  upstream="$(read_env_value OPEN_NODE_HTTP_PORT || true)"
+  config="$(realpath -m -- "$INSTALL_DIR/deploy/Caddyfile")"
+  expected_image_id="$(docker image inspect --format '{{.Id}}' "$PUBLIC_GATEWAY_IMAGE" 2>/dev/null)" \
+    || return 1
+  details="$(docker inspect "$PUBLIC_GATEWAY_CONTAINER" 2>/dev/null)" || return 1
+  printf '%s\n' "$details" | jq -e \
+    --arg name "/$PUBLIC_GATEWAY_CONTAINER" \
+    --arg project "$PROJECT_NAME" \
+    --arg image "$PUBLIC_GATEWAY_IMAGE" \
+    --arg image_id "$expected_image_id" \
+    --arg hostname "$hostname" \
+    --arg upstream "$upstream" \
+    --arg volume "$PUBLIC_GATEWAY_VOLUME" \
+    --arg config "$config" \
+    --argjson require_running "$require_running" \
+    --argjson require_current "$require_current" '
+    length == 1
+    and (.[0] as $container
+      | $container.Name == $name
+      and $container.Image == $image_id
+      and $container.Config.Image == $image
+      and ($container.Config.Entrypoint == null or $container.Config.Entrypoint == [])
+      and $container.Config.Cmd == [
+        "caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"
+      ]
+      and ($container.Config.User // "") == ""
+      and $container.Config.WorkingDir == "/srv"
+      and $container.Config.Labels["com.open-node.installer.project"] == $project
+      and $container.Config.Labels["com.open-node.installer.purpose"] == "public-gateway"
+      and ([ $container.Config.Env[]?
+        | select(startswith("OPEN_NODE_PUBLIC_HOSTNAME=")
+          or startswith("OPEN_NODE_UPSTREAM_PORT=")) ] | sort) as $managed_env
+      | ($managed_env | length) == 2
+      and any($managed_env[]; startswith("OPEN_NODE_PUBLIC_HOSTNAME="))
+      and any($managed_env[]; startswith("OPEN_NODE_UPSTREAM_PORT="))
+      and ($require_current == 0 or $managed_env == ([
+        "OPEN_NODE_PUBLIC_HOSTNAME=" + $hostname,
+        "OPEN_NODE_UPSTREAM_PORT=" + $upstream
+      ] | sort))
+      and $container.HostConfig.Privileged == false
+      and $container.HostConfig.ReadonlyRootfs == true
+      and $container.HostConfig.CapDrop == ["ALL"]
+      and ($container.HostConfig.CapAdd == ["CAP_NET_BIND_SERVICE"]
+        or $container.HostConfig.CapAdd == ["NET_BIND_SERVICE"])
+      and ($container.HostConfig.SecurityOpt == ["no-new-privileges:true"]
+        or $container.HostConfig.SecurityOpt == ["no-new-privileges"])
+      and $container.HostConfig.NetworkMode == "host"
+      and $container.HostConfig.PublishAllPorts == false
+      and (($container.HostConfig.PortBindings // {}) | length) == 0
+      and $container.HostConfig.AutoRemove == false
+      and $container.HostConfig.Init == true
+      and $container.HostConfig.RestartPolicy.Name == "unless-stopped"
+      and $container.HostConfig.RestartPolicy.MaximumRetryCount == 0
+      and $container.HostConfig.LogConfig.Type == "local"
+      and $container.HostConfig.LogConfig.Config == {"max-file": "5", "max-size": "10m"}
+      and (($container.HostConfig.Tmpfs | keys) == ["/config", "/tmp"])
+      and ($container.HostConfig.Tmpfs["/config"] == "rw,nosuid,noexec,size=16m,mode=0700"
+        or $container.HostConfig.Tmpfs["/config"] == "rw,nosuid,noexec,size=16777216,mode=0700")
+      and ($container.HostConfig.Tmpfs["/tmp"] == "rw,nosuid,noexec,size=16m,mode=1777"
+        or $container.HostConfig.Tmpfs["/tmp"] == "rw,nosuid,noexec,size=16777216,mode=1777")
+      and ($container.Mounts | length) == 2
+      and any($container.Mounts[];
+        .Type == "volume" and .Name == $volume and .Destination == "/data" and .RW == true)
+      and any($container.Mounts[];
+        .Type == "bind" and .Source == $config
+        and .Destination == "/etc/caddy/Caddyfile" and .RW == false)
+      and ($require_running == 0 or $container.State.Running == true)
+    )
+  ' >/dev/null
+}
+
+remove_public_gateway_container() {
+  docker inspect "$PUBLIC_GATEWAY_CONTAINER" >/dev/null 2>&1 || return 0
+  public_gateway_container_is_safe 0 0 \
+    || die "refusing to remove a public gateway container outside installer policy"
+  docker rm -f -- "$PUBLIC_GATEWAY_CONTAINER" >/dev/null \
+    || die "could not remove the managed public gateway container"
+}
+
+ensure_public_gateway_image() {
+  if ! docker image inspect "$PUBLIC_GATEWAY_IMAGE" >/dev/null 2>&1; then
+    log "pulling pinned public HTTPS gateway image"
+    docker pull "$PUBLIC_GATEWAY_IMAGE" >/dev/null \
+      || die "could not pull the pinned public HTTPS gateway image"
+  fi
+  docker image inspect "$PUBLIC_GATEWAY_IMAGE" >/dev/null 2>&1 \
+    || die "pinned public HTTPS gateway image is unavailable"
+}
+
+wait_for_public_gateway() {
+  local hostname="$1" attempt stable=0
+  for attempt in $(seq 1 180); do
+    if public_gateway_container_is_safe 1 \
+      && curl --noproxy '*' --fail --silent --show-error --max-time 5 \
+        --resolve "$hostname:443:127.0.0.1" "https://$hostname/healthz" >/dev/null 2>&1; then
+      ((stable += 1))
+      if [[ "$stable" -ge "$HEALTH_STABLE_OBSERVATIONS" ]]; then return 0; fi
+    else
+      stable=0
+    fi
+    sleep 1
+  done
+  docker logs --tail 100 "$PUBLIC_GATEWAY_CONTAINER" >&2 || true
+  return 1
+}
+
+reconcile_public_gateway() {
+  local hostname upstream config
+  hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  if [[ -z "$hostname" ]]; then
+    remove_public_gateway_container
+    return
+  fi
+  validate_public_hostname "$hostname" \
+    || die "saved public hostname is invalid"
+  [[ "$(read_env_value OPEN_NODE_BIND_ADDRESS || true)" == "127.0.0.1" \
+    && "$(read_env_value OPEN_NODE_SESSION_COOKIE_SECURE || true)" == "true" \
+    && "$(read_env_value OPEN_NODE_TRUSTED_PROXIES || true)" == "*" \
+    && "$(read_env_value OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)" == "https://$hostname" ]] \
+    || die "saved public gateway environment is inconsistent"
+  upstream="$(read_env_value OPEN_NODE_HTTP_PORT || true)"
+  [[ "$upstream" =~ ^[0-9]+$ && "$upstream" -ge 1 && "$upstream" -le 65535 ]] \
+    || die "saved public gateway upstream port is invalid"
+  config="$INSTALL_DIR/deploy/Caddyfile"
+  validate_safe_file "public gateway Caddyfile" "$config" 0
+  ensure_public_gateway_image
+  ensure_public_gateway_volume
+  remove_public_gateway_container
+  log "starting managed HTTPS gateway for $hostname"
+  if ! docker run --detach --name "$PUBLIC_GATEWAY_CONTAINER" \
+    --network host --restart unless-stopped --read-only --init \
+    --cap-drop ALL --cap-add NET_BIND_SERVICE \
+    --security-opt no-new-privileges:true --stop-timeout 30 \
+    --log-driver local --log-opt max-size=10m --log-opt max-file=5 \
+    --label "com.open-node.installer.project=$PROJECT_NAME" \
+    --label "com.open-node.installer.purpose=public-gateway" \
+    --env "OPEN_NODE_PUBLIC_HOSTNAME=$hostname" \
+    --env "OPEN_NODE_UPSTREAM_PORT=$upstream" \
+    --mount "type=volume,src=$PUBLIC_GATEWAY_VOLUME,dst=/data" \
+    --mount "type=bind,src=$config,dst=/etc/caddy/Caddyfile,readonly" \
+    --tmpfs /config:rw,nosuid,noexec,size=16m,mode=0700 \
+    --tmpfs /tmp:rw,nosuid,noexec,size=16m,mode=1777 \
+    "$PUBLIC_GATEWAY_IMAGE" >/dev/null; then
+    if docker inspect "$PUBLIC_GATEWAY_CONTAINER" >/dev/null 2>&1 \
+      && public_gateway_container_is_safe 0; then
+      docker rm -f -- "$PUBLIC_GATEWAY_CONTAINER" >/dev/null || true
+    fi
+    die "public HTTPS gateway could not start; check whether ports 80 and 443 are free"
+  fi
+  if ! wait_for_public_gateway "$hostname"; then
+    remove_public_gateway_container
+    die "public HTTPS did not become trusted; verify DNS and inbound ports 80/443, rerun install, then run setup"
+  fi
+}
+
+verify_public_gateway_status() {
+  local hostname
+  hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  if [[ -z "$hostname" ]]; then
+    ! docker inspect "$PUBLIC_GATEWAY_CONTAINER" >/dev/null 2>&1 \
+      || die "a public gateway container exists while the feature is disabled"
+    return
+  fi
+  public_gateway_volume_is_safe && public_gateway_container_is_safe 1 \
+    || die "public HTTPS gateway is missing or outside installer policy"
+  curl --noproxy '*' --fail --silent --show-error --max-time 5 \
+    --resolve "$hostname:443:127.0.0.1" "https://$hostname/healthz" >/dev/null \
+    || die "public HTTPS health check failed"
+  log "public HTTPS: https://$hostname"
+}
+
 safe_delete_candidate() {
   local candidate="$1" parent
   [[ -n "$candidate" && -d "$candidate" && ! -L "$candidate" ]] || return 0
@@ -1383,7 +1670,8 @@ prepare_update_candidate() {
   CANDIDATE_REVISION="$(git -C "$INSTALL_DIR" rev-parse FETCH_HEAD)"
   git -C "$INSTALL_DIR" merge-base --is-ancestor "$old_revision" "$CANDIDATE_REVISION" \
     || die "candidate ref is not a fast-forward descendant of the deployed revision"
-  if [[ "$CANDIDATE_REVISION" == "$old_revision" ]] && ! requested_bootstrap_change; then
+  if [[ "$CANDIDATE_REVISION" == "$old_revision" ]] \
+    && ! requested_bootstrap_change && ! requested_public_gateway_change; then
     CANDIDATE_UNCHANGED=1
     return
   fi
@@ -1651,8 +1939,13 @@ container_state() {
 }
 
 log_success() {
+  local public_hostname
   log "deployment is healthy"
   log "local URL: http://127.0.0.1:$(read_env_value OPEN_NODE_HTTP_PORT)"
+  public_hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  if [[ -n "$public_hostname" ]]; then
+    log "public URL: https://$public_hostname"
+  fi
   log "configuration: $ENV_FILE"
   if [[ "$(read_env_value OPEN_NODE_BIND_ADDRESS)" == "0.0.0.0" ]]; then
     warn "the panel is exposed over plain HTTP by explicit operator opt-in"
@@ -1747,6 +2040,7 @@ install_fresh() {
     || die "deployment failed its post-commit stability check"
   clear_recovery_marker
   TXN_PHASE="idle"
+  reconcile_public_gateway
   [[ "$CREATE_ADMIN" == "0" ]] || create_administrator
   log_success
 }
@@ -1764,6 +2058,7 @@ reinstall_existing() {
   if [[ "$state" == "running" ]]; then
     wait_for_health "$INSTALL_DIR" "$ENV_FILE" "$image_id" \
       || die "deployment is unhealthy"
+    reconcile_public_gateway
     log_success
     return
   fi
@@ -1791,6 +2086,7 @@ reinstall_existing() {
   TXN_CANDIDATE_ACTIVATED=0
   clear_recovery_marker
   TXN_PHASE="idle"
+  reconcile_public_gateway
   log_success
 }
 
@@ -1921,6 +2217,7 @@ update_existing() {
     || warn "committed candidate worktree requires manual cleanup"
   CANDIDATE_SOURCE=""
   TXN_PHASE="idle"
+  reconcile_public_gateway
   log_success
   log "pre-update backup: $BACKUP_PATH"
 }
@@ -1953,6 +2250,7 @@ show_status() {
       log "deployment container is absent; managed data is preserved"
       ;;
   esac
+  verify_public_gateway_status
 }
 
 uninstall_preserving_data() {
@@ -1960,11 +2258,12 @@ uninstall_preserving_data() {
   require_environment_file
   verify_checkout "$(read_manifest_value DEPLOYED_REVISION)"
   verify_active_identity
+  remove_public_gateway_container
   compose_with "$INSTALL_DIR" "$ENV_FILE" down --remove-orphans
   project_runtime_is_absent || die "uninstall could not verify complete runtime removal"
   verify_volume
   log "containers and project network were removed"
-  log "data volume, source, configuration, installer state, and backups were preserved"
+  log "application and public-gateway data volumes, source, configuration, installer state, and backups were preserved"
 }
 
 verify_administrator_action() {

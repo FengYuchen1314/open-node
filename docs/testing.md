@@ -1,5 +1,24 @@
 # Testing
 
+## 公网域名、HTTPS 与反向代理安装器 — 2026-09-01
+
+VPS 专项证据保存在 `/tmp/open-node-public-gateway.S1vVKz/evidence`。测试只使用
+临时源码、测试环境文件、UUID 容器名和 UUID 数据卷；没有升级 `/opt/open-node`，
+没有启动策略烟测容器，也没有占用主机 80/443。
+
+- Ruff 通过；部署资产和安装器公网配置共 **34 项测试通过**。覆盖域名白名单、
+  新装启用、保留、关闭、冲突安全设置、同提交配置变更和 Bash 语法。
+- 固定摘要的官方 Caddy 2.11.4 镜像以正式能力、只读文件系统和 tmpfs 参数执行
+  `caddy validate`，配置有效且无 Caddyfile 警告。
+- Docker 策略烟测用 `docker create` 生成但不启动网关，实测镜像 ID、命令、
+  `CAP_NET_BIND_SERVICE` 归一化、host 网络、只读根、no-new-privileges、日志、
+  tmpfs、两个精确挂载和标签。当前域名匹配及换域名后的安全删除策略均通过，
+  夹具容器和卷已验证标签后清理。
+
+本轮没有可支配的正式域名，因此没有申请真实公网证书，也没有把测试网关暴露到
+互联网。最终 A/AAAA、主机防火墙、外部 80/443 和公共 CA 签发仍须在实际部署域名上
+验收；离线配置与 Docker 策略通过不等同于生产域名已经上线。
+
 ## Logo, login background and standard themes — 2026-09-01
 
 VPS evidence is preserved at `/tmp/open-node-appearance.UE4IW9bS/evidence` and
@@ -32,6 +51,17 @@ shared candidate were not changed.
   the App TypeScript check passed. R3 copied the preserved R2 source and replaced
   only the three recorded affected files; evidence is at
   `/tmp/open-node-appearance-r3.6xRQRm/evidence`.
+
+The exact appearance commit `8dd3d07` hosted CI
+[33474536253](https://github.com/FengYuchen1314/open-node/actions/runs/33474536253)
+completed with successful Frontend, Agent and Probe Worker jobs. Backend reached
+the end of the full suite with **4,932 passed, 116 skipped and 2 failed**. Both
+failures came from one older subscriber-route isolation test still expecting the
+new anonymous setup/appearance routes to require administrator login; dedicated
+tests already cover their bounded, secret-free public responses and keep the
+write routes private. The route enumeration fixture now excludes those documented
+public paths. A later exact
+commit CI must pass before this is called an all-green hosted run.
 
 The preceding `54e2360` hosted CI
 [33425368130](https://github.com/FengYuchen1314/open-node/actions/runs/33425368130)

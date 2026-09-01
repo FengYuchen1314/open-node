@@ -1,0 +1,18 @@
+{
+	admin off
+}
+
+{$OPEN_NODE_PUBLIC_HOSTNAME} {
+	encode zstd gzip
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+	}
+
+	reverse_proxy 127.0.0.1:{$OPEN_NODE_UPSTREAM_PORT} {
+		header_up X-Real-IP {remote_host}
+		health_uri /healthz
+		health_interval 30s
+	}
+}

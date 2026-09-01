@@ -143,6 +143,8 @@ def test_roles_cookies_and_operator_routes_are_isolated(tmp_path, role):
             or "subscribe/" in path
             or path == "/x/{code}"
             or path == "/t/{code}"
+            or path == "/api/v1/setup"
+            or path.startswith("/api/v1/appearance")
             or path.endswith(("healthz", "meta", "license/status"))
             or "/auth/" in path
         ):
