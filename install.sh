@@ -16,6 +16,10 @@ readonly RUNTIME_CONTAINER_PORT="62031"
 readonly DEFAULT_PUBLIC_HTTPS_PORT="58090"
 readonly RUNTIME_UID_GID="10001:10001"
 readonly HEALTH_STABLE_OBSERVATIONS="3"
+readonly WAIT_HEARTBEAT_SECONDS="5"
+readonly DATABASE_READY_TIMEOUT_SECONDS="90"
+readonly APPLICATION_HEALTH_TIMEOUT_SECONDS="90"
+readonly PUBLIC_GATEWAY_TIMEOUT_SECONDS="180"
 readonly PUBLIC_GATEWAY_IMAGE="caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648"
 readonly UPDATE_HELPER_BIN="/usr/local/libexec/open-node-application-update"
 readonly UPDATE_HELPER_CONFIG_ROOT="/etc/open-node-update"
@@ -526,8 +530,8 @@ load_manifest_defaults() {
 
 validate_inputs() {
   case "$ACTION" in
-    install|update|status|uninstall|create-admin|setup) ;;
-    *) die "usage: install.sh [install|update|status|uninstall|create-admin|setup]" ;;
+    install|update|status|uninstall|purge|create-admin|setup) ;;
+    *) die "usage: install.sh [install|update|status|uninstall|purge|create-admin|setup]" ;;
   esac
   command -v realpath >/dev/null 2>&1 || die "GNU realpath is required"
   validate_plain_value "OPEN_NODE_REPOSITORY" "$REPOSITORY"
@@ -1484,7 +1488,11 @@ create_candidate_environment() {
   validate_public_ip_input "$public_ip_input" \
     || die "OPEN_NODE_PUBLIC_IP must be auto, off, or a plain public IPv4/IPv6 address"
   case "$public_ip_input" in
-    auto) public_ip="$(detect_public_ipv4)" ;;
+    auto)
+      log "PROGRESS phase=public-ip status=detecting"
+      public_ip="$(detect_public_ipv4)"
+      log "PROGRESS phase=public-ip status=ready address=$public_ip"
+      ;;
     off|'') public_ip="" ;;
     *)
       public_ip="$(normalize_public_ip "$public_ip_input")" \
@@ -1912,45 +1920,85 @@ build_candidate_image() {
 }
 
 ensure_database_ready() {
-  local source_dir="$1" environment_file="$2" backend attempt
+  local source_dir="$1" environment_file="$2" backend
+  local started deadline next_heartbeat now elapsed
   backend="$(read_key "$environment_file" OPEN_NODE_DATABASE_BACKEND || true)"
   [[ "$backend" == "sqlite" ]] && return 0
   [[ "$backend" == "postgresql" ]] || return 1
   log "starting pinned PostgreSQL"
   compose_with "$source_dir" "$environment_file" up -d --no-build --pull always postgres \
     || return 1
-  for attempt in $(seq 1 90); do
+  started="$SECONDS"
+  deadline=$((started + DATABASE_READY_TIMEOUT_SECONDS))
+  next_heartbeat=$((started + WAIT_HEARTBEAT_SECONDS))
+  log "PROGRESS phase=postgres-health status=waiting elapsed=0s"
+  while (( SECONDS < deadline )); do
     if postgres_volume_is_safe \
       && network_is_safe \
       && postgres_container_is_safe "$source_dir" "$environment_file" 1; then
+      elapsed=$((SECONDS - started))
+      log "PROGRESS phase=postgres-health status=ready elapsed=${elapsed}s"
       return 0
     fi
+    now="$SECONDS"
+    if (( now >= next_heartbeat )); then
+      elapsed=$((now - started))
+      log "PROGRESS phase=postgres-health status=waiting elapsed=${elapsed}s"
+      while (( next_heartbeat <= now )); do
+        next_heartbeat=$((next_heartbeat + WAIT_HEARTBEAT_SECONDS))
+      done
+    fi
+    (( SECONDS < deadline )) || break
     sleep 1
   done
+  elapsed=$((SECONDS - started))
+  log "PROGRESS phase=postgres-health status=timeout elapsed=${elapsed}s"
   compose_with "$source_dir" "$environment_file" logs --tail 100 postgres >&2 || true
   return 1
 }
 
 wait_for_health() {
   local source_dir="$1" environment_file="$2" expected_image_id="$3"
-  local port bind_address attempt stable=0
+  local port bind_address stable=0
+  local started deadline next_heartbeat now elapsed remaining probe_timeout
   port="$(read_key "$environment_file" OPEN_NODE_HTTP_PORT)"
   bind_address="$(read_key "$environment_file" OPEN_NODE_BIND_ADDRESS)"
   [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || return 1
   [[ "$bind_address" == "127.0.0.1" || "$bind_address" == "0.0.0.0" ]] || return 1
-  for attempt in $(seq 1 90); do
+  started="$SECONDS"
+  deadline=$((started + APPLICATION_HEALTH_TIMEOUT_SECONDS))
+  next_heartbeat=$((started + WAIT_HEARTBEAT_SECONDS))
+  log "PROGRESS phase=application-health status=waiting elapsed=0s stable=0/$HEALTH_STABLE_OBSERVATIONS"
+  while (( SECONDS < deadline )); do
+    remaining=$((deadline - SECONDS))
+    probe_timeout=3
+    if (( remaining < probe_timeout )); then probe_timeout="$remaining"; fi
     if runtime_container_is_safe "$source_dir" "$environment_file" "$expected_image_id" 1 \
-      && curl --noproxy '*' --fail --silent --show-error --max-time 3 \
+      && curl --noproxy '*' --fail --silent --show-error --max-time "$probe_timeout" \
         "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then
       ((stable += 1))
-      if [[ "$stable" -ge "$HEALTH_STABLE_OBSERVATIONS" ]]; then
+      if [[ "$stable" -ge "$HEALTH_STABLE_OBSERVATIONS" ]] \
+        && (( SECONDS < deadline )); then
+        elapsed=$((SECONDS - started))
+        log "PROGRESS phase=application-health status=ready elapsed=${elapsed}s stable=$stable/$HEALTH_STABLE_OBSERVATIONS"
         return 0
       fi
     else
       stable=0
     fi
+    now="$SECONDS"
+    if (( now >= next_heartbeat )); then
+      elapsed=$((now - started))
+      log "PROGRESS phase=application-health status=waiting elapsed=${elapsed}s stable=$stable/$HEALTH_STABLE_OBSERVATIONS"
+      while (( next_heartbeat <= now )); do
+        next_heartbeat=$((next_heartbeat + WAIT_HEARTBEAT_SECONDS))
+      done
+    fi
+    (( SECONDS < deadline )) || break
     sleep 1
   done
+  elapsed=$((SECONDS - started))
+  log "PROGRESS phase=application-health status=timeout elapsed=${elapsed}s stable=$stable/$HEALTH_STABLE_OBSERVATIONS"
   compose_with "$source_dir" "$environment_file" ps >&2 || true
   compose_with "$source_dir" "$environment_file" logs --tail 100 open-node >&2 || true
   return 1
@@ -2101,7 +2149,7 @@ remove_public_gateway_container() {
 ensure_public_gateway_image() {
   if ! docker image inspect "$PUBLIC_GATEWAY_IMAGE" >/dev/null 2>&1; then
     log "pulling pinned public HTTPS gateway image"
-    docker pull "$PUBLIC_GATEWAY_IMAGE" >/dev/null \
+    docker pull "$PUBLIC_GATEWAY_IMAGE" \
       || die "could not pull the pinned public HTTPS gateway image"
   fi
   docker image inspect "$PUBLIC_GATEWAY_IMAGE" >/dev/null 2>&1 \
@@ -2109,17 +2157,38 @@ ensure_public_gateway_image() {
 }
 
 wait_for_public_gateway() {
-  local attempt stable=0
-  for attempt in $(seq 1 180); do
+  local stable=0
+  local started deadline next_heartbeat now elapsed
+  started="$SECONDS"
+  deadline=$((started + PUBLIC_GATEWAY_TIMEOUT_SECONDS))
+  next_heartbeat=$((started + WAIT_HEARTBEAT_SECONDS))
+  log "PROGRESS phase=public-https status=waiting elapsed=0s stable=0/$HEALTH_STABLE_OBSERVATIONS"
+  while (( SECONDS < deadline )); do
     if public_gateway_container_is_safe 1 \
-      && public_gateway_endpoints_are_healthy; then
+      && public_gateway_endpoints_are_healthy "$deadline"; then
       ((stable += 1))
-      if [[ "$stable" -ge "$HEALTH_STABLE_OBSERVATIONS" ]]; then return 0; fi
+      if [[ "$stable" -ge "$HEALTH_STABLE_OBSERVATIONS" ]] \
+        && (( SECONDS < deadline )); then
+        elapsed=$((SECONDS - started))
+        log "PROGRESS phase=public-https status=ready elapsed=${elapsed}s stable=$stable/$HEALTH_STABLE_OBSERVATIONS"
+        return 0
+      fi
     else
       stable=0
     fi
+    now="$SECONDS"
+    if (( now >= next_heartbeat )); then
+      elapsed=$((now - started))
+      log "PROGRESS phase=public-https status=waiting elapsed=${elapsed}s stable=$stable/$HEALTH_STABLE_OBSERVATIONS"
+      while (( next_heartbeat <= now )); do
+        next_heartbeat=$((next_heartbeat + WAIT_HEARTBEAT_SECONDS))
+      done
+    fi
+    (( SECONDS < deadline )) || break
     sleep 1
   done
+  elapsed=$((SECONDS - started))
+  log "PROGRESS phase=public-https status=timeout elapsed=${elapsed}s stable=$stable/$HEALTH_STABLE_OBSERVATIONS"
   docker logs --tail 100 "$PUBLIC_GATEWAY_CONTAINER" >&2 || true
   return 1
 }
@@ -2160,20 +2229,33 @@ preflight_fresh_ports() {
 }
 
 public_gateway_endpoints_are_healthy() {
-  local hostname public_ip public_port authority public_url
+  local deadline="${1:-0}"
+  local hostname public_ip public_port authority public_url remaining probe_timeout
   hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
   public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
   public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
   [[ -n "$hostname" || -n "$public_ip" ]] || return 1
   if [[ -n "$hostname" ]]; then
-    curl --noproxy '*' --fail --silent --show-error --max-time 5 \
+    probe_timeout=5
+    if (( deadline > 0 )); then
+      remaining=$((deadline - SECONDS))
+      (( remaining > 0 )) || return 1
+      if (( remaining < probe_timeout )); then probe_timeout="$remaining"; fi
+    fi
+    curl --noproxy '*' --fail --silent --show-error --max-time "$probe_timeout" \
       --resolve "$hostname:443:127.0.0.1" "https://$hostname/healthz" >/dev/null 2>&1 \
       || return 1
   fi
   if [[ -n "$public_ip" ]]; then
     authority="$(public_ip_authority "$public_ip")"
     public_url="$(public_ip_url "$public_ip" "$public_port")"
-    curl --noproxy '*' --fail --silent --show-error --max-time 5 \
+    probe_timeout=5
+    if (( deadline > 0 )); then
+      remaining=$((deadline - SECONDS))
+      (( remaining > 0 )) || return 1
+      if (( remaining < probe_timeout )); then probe_timeout="$remaining"; fi
+    fi
+    curl --noproxy '*' --fail --silent --show-error --max-time "$probe_timeout" \
       --connect-to "$authority:$public_port:127.0.0.1:$public_port" \
       "$public_url/healthz" >/dev/null 2>&1 \
       || return 1
@@ -2928,7 +3010,10 @@ log_success() {
   public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
   public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
   [[ -z "$public_hostname" ]] || log "public URL (canonical): https://$public_hostname"
-  [[ -z "$public_ip" ]] || log "public URL (IP): $(public_ip_url "$public_ip" "$public_port")"
+  if [[ -n "$public_ip" ]]; then
+    log "public URL (IP): $(public_ip_url "$public_ip" "$public_port")"
+    log "public HTTPS proxy: TCP $public_port -> http://127.0.0.1:$(read_env_value OPEN_NODE_HTTP_PORT)"
+  fi
   log "configuration: $ENV_FILE"
   if [[ "$(read_env_value OPEN_NODE_BIND_ADDRESS)" == "0.0.0.0" ]]; then
     warn "the panel is exposed over plain HTTP by explicit operator opt-in"
@@ -3260,6 +3345,88 @@ uninstall_preserving_data() {
   log "application and public-gateway data volumes, source, configuration, installer state, and backups were preserved"
 }
 
+remove_managed_tree() {
+  local label="$1" directory="$2" policy="${3:-private}"
+  [[ ! -e "$directory" && ! -L "$directory" ]] && return 0
+  if [[ "$policy" == "update-state" ]]; then
+    application_update_directory_is_safe \
+      || die "$label is outside installer policy: $directory"
+  else
+    validate_safe_directory "$label" "$directory" "$([[ "$policy" == "private" ]] && printf 1 || printf 0)"
+  fi
+  log "removing $label: $directory"
+  find "$directory" -xdev -depth -delete \
+    || die "could not completely remove $label: $directory"
+  [[ ! -e "$directory" && ! -L "$directory" ]] \
+    || die "$label still exists after removal: $directory"
+}
+
+purge_installation() {
+  local database_backend
+  [[ "${OPEN_NODE_PURGE_CONFIRMED:-}" == "YES" ]] \
+    || die "purge requires confirmation through the interactive uninstall.sh entrypoint"
+  require_no_recovery
+  require_manifest
+  require_environment_file
+  verify_checkout "$(read_manifest_value DEPLOYED_REVISION)"
+  verify_active_identity 1
+  [[ "$(stat -c '%h' -- "$MANIFEST_FILE")" == "1" \
+    && "$(stat -c '%h' -- "$ENV_FILE")" == "1" ]] \
+    || die "refusing purge because installer identity files have extra hard links"
+  validate_safe_directory "install directory" "$INSTALL_DIR" 0
+  validate_safe_directory "configuration directory" "$CONFIG_DIR" 1
+  if [[ -e "$BACKUP_DIR" || -L "$BACKUP_DIR" ]]; then
+    validate_safe_directory "backup directory" "$BACKUP_DIR" 1
+  fi
+  if [[ -e "$UPDATE_STATE_DIR" || -L "$UPDATE_STATE_DIR" ]]; then
+    application_update_directory_is_safe \
+      || die "application update state directory is outside installer policy"
+  fi
+  if docker volume inspect "$PUBLIC_GATEWAY_VOLUME" >/dev/null 2>&1; then
+    public_gateway_volume_is_safe \
+      || die "public gateway data volume is outside installer policy"
+  fi
+  if docker inspect "$PUBLIC_GATEWAY_CONTAINER" >/dev/null 2>&1; then
+    public_gateway_container_is_safe 0 0 \
+      || die "public gateway container is outside installer policy"
+  fi
+  database_backend="$(read_manifest_value DATABASE_BACKEND || printf 'sqlite')"
+
+  log "purge identity verified; stopping exact managed runtime"
+  disable_application_update_helper
+  remove_public_gateway_container
+  compose_with "$INSTALL_DIR" "$ENV_FILE" down --remove-orphans
+  project_runtime_is_absent || die "purge could not verify complete runtime removal"
+
+  volume_is_safe || die "managed application data volume changed before removal"
+  docker volume rm -- "$DATA_VOLUME" >/dev/null \
+    || die "could not remove managed application data volume: $DATA_VOLUME"
+  if [[ "$database_backend" == "postgresql" ]]; then
+    postgres_volume_is_safe || die "managed PostgreSQL volume changed before removal"
+    docker volume rm -- "$POSTGRES_VOLUME" >/dev/null \
+      || die "could not remove managed PostgreSQL volume: $POSTGRES_VOLUME"
+  fi
+  if docker volume inspect "$PUBLIC_GATEWAY_VOLUME" >/dev/null 2>&1; then
+    public_gateway_volume_is_safe || die "managed Caddy volume changed before removal"
+    docker volume rm -- "$PUBLIC_GATEWAY_VOLUME" >/dev/null \
+      || die "could not remove managed Caddy volume: $PUBLIC_GATEWAY_VOLUME"
+  fi
+  docker volume inspect "$DATA_VOLUME" >/dev/null 2>&1 \
+    && die "managed application data volume still exists"
+  if [[ "$database_backend" == "postgresql" ]]; then
+    docker volume inspect "$POSTGRES_VOLUME" >/dev/null 2>&1 \
+      && die "managed PostgreSQL volume still exists"
+  fi
+  docker volume inspect "$PUBLIC_GATEWAY_VOLUME" >/dev/null 2>&1 \
+    && die "managed Caddy volume still exists"
+
+  remove_managed_tree "application update state" "$UPDATE_STATE_DIR" update-state
+  remove_managed_tree "backup directory" "$BACKUP_DIR" private
+  remove_managed_tree "configuration directory" "$CONFIG_DIR" private
+  remove_managed_tree "installed source" "$INSTALL_DIR" public
+  log "containers, network, application/PostgreSQL/Caddy data, source, configuration, update state, and backups were removed"
+}
+
 verify_administrator_action() {
   require_no_recovery
   require_manifest
@@ -3309,9 +3476,11 @@ main() {
       ;;
     status) show_status ;;
     uninstall) uninstall_preserving_data ;;
+    purge) purge_installation ;;
     create-admin) create_admin_action ;;
     setup) verify_administrator_action; prepare_browser_setup ;;
   esac
+  log "ACTION_COMPLETE action=$ACTION"
 }
 
 main "$@"

@@ -16,6 +16,12 @@ token. Do not reuse a production token while its previous agent is still running
 For a separately owned existing Xray service, use the
 [external systemd setup](external-systemd.md), not this managed-child installer.
 
+使用控制面生成的 Agent 命令前，先等控制面安装器真正完成。在默认公网模式中，受管
+Caddy 自动把公网 `https://IP:58090` 反向代理到宿主回环 `127.0.0.1:62031`，再进入
+应用容器的 `62031/tcp`。控制面安装器会等待可信 HTTPS 证书、规范 URL 和 `/healthz`
+连续通过，最后才输出 `ACTION_COMPLETE action=install`；在出现该标记前，不应生成或
+执行远端 Agent 安装命令。
+
 Optional [Nginx and certificate management](nginx-management.md) runs another
 owned child under this account. Set `nginx_binary` and optional `nginx_modules`
 in the installation input to copy those runtime files, without replacing any
@@ -148,6 +154,55 @@ state before upgrading across future releases with incompatible data formats;
 this mechanism does not promise reversal of arbitrary schema migrations.
 
 ## Uninstall
+
+### 中文一键卸载
+
+面板一键安装会保留可校验的 bootstrap helper。可以从官方 `main` 完整下载脚本到临时
+文件，再以 root 身份执行：
+
+```bash
+(
+  uninstaller="$(mktemp)" || exit 1
+  trap 'rm -f -- "$uninstaller"' EXIT
+  trap 'exit 1' HUP INT TERM
+  curl -fsSL https://raw.githubusercontent.com/FengYuchen1314/open-node/main/agent/uninstall.sh -o "$uninstaller" || exit 1
+  sudo bash "$uninstaller"
+)
+```
+
+也可以在已审阅的仓库 checkout 中运行 `sudo bash agent/uninstall.sh`。直接通过下文
+Host deployment CLI 安装、没有面板 bootstrap helper 的实例应使用 checkout 中的脚本。
+脚本要求标准输入、标准输出和标准错误都连接 TTY，并且只接受身份完整的受管 Agent
+安装。发现一个安装时自动选择；发现多个安装时会列出 unit、安装根和状态，并要求输入
+编号只选择一个。没有找到候选、选择无效，或安装根、unit、manifest 身份不一致时会拒绝
+继续；不会扫描后按通配符删除 `/opt` 下的目录。已知自定义身份也可以显式指定：
+
+```bash
+sudo bash agent/uninstall.sh \
+  --root /opt/open-node-agent-edge \
+  --unit open-node-agent-edge.service
+```
+
+完成身份检查后，脚本会显示所选安装根、systemd unit、状态和精确匹配的私有 bootstrap
+任务数量，再询问 `是否彻底清除以上数据？[Y/n]`。直接回车或输入 `y` 是默认的彻底
+清除；只有输入 `n` 才执行保留数据卸载。其他输入、EOF 或非交互调用均停止，不要用管道
+自动回答确认。
+
+- 输入 `n`：停用并删除 Agent unit、当前版本指针和 Agent release 虚拟环境；保留
+  `config`、Token、命令 journal、日志、状态、复制的 Xray/Nginx/NextTrace 运行文件、
+  安装清单、专用账号、本机 lifecycle helper 和匹配的私有 bootstrap 任务，以便用原
+  身份恢复或重装。
+- 直接回车：除上述运行资源外，还删除精确受管安装根、专用账号、lifecycle helper
+  单元/文件，以及与该安装身份绑定的 `/var/lib/open-node-agent-bootstrap/...` 私有恢复
+  目录。原始输入文件、受管根之外的 Xray/Nginx 文件、其他用户 home 和无关 systemd
+  服务不在删除范围；删除账号不会使用 `userdel -r`。
+
+本机彻底清除不会登录控制面删除服务器记录或撤销数据库里的 Agent Token，也不会停止
+外部 systemd Xray、删除外部 DNS/证书资源或使客户端已经取得的代理凭据失效。先按实际
+运行模式撤销公网入站和凭据，再卸载主机 Agent。可变的 Raw `main` URL 也不等于固定
+供应链；有严格要求时，应使用已审阅提交的 Raw URL。
+
+### Host deployment CLI
 
 ```bash
 sudo python3 agent/app/open_node_agent/service.py uninstall

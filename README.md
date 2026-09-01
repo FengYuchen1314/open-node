@@ -91,6 +91,11 @@ https://公网 IP:58090
 宿主 TCP 62031：仅回环上游，不应对公网放行
 ```
 
+受管 Caddy 会自动把公网 `58090` 的可信 HTTPS 请求反向代理到宿主回环
+`127.0.0.1:62031`，再进入容器的 `62031/tcp`。安装器会持续显示数据库、应用和公网
+HTTPS 的等待进度；只有可信证书、规范访问地址和 `/healthz` 连续通过后，才会输出
+`ACTION_COMPLETE action=install`。看到该完成标记前，不要把服务视为安装成功。
+
 ### 常用安装选项
 
 下面各行用于替换“一键安装”命令块中的最后一行；`as_root` 和 `$installer` 只在那个
@@ -206,6 +211,64 @@ sudo env OPEN_NODE_CONFIG_DIR=/srv/open-node-config \
 
 覆盖 `OPEN_NODE_INSTALL_DIR` 后，生命周期脚本路径也会改变；覆盖
 `OPEN_NODE_PROJECT_NAME` 后，数据卷和网页更新状态目录会使用新的项目名。
+
+## 一键卸载
+
+两份卸载脚本都必须直接在交互式终端中运行。脚本会先核对安装身份并列出目标，再显示
+`[Y/n]` 确认提示：直接回车或输入 `y` 会彻底清除，只有输入 `n` 才保留数据。TTY
+不完整、身份不匹配或输入其他内容时会停止，不会执行卸载；不要通过管道自动回答提示。
+
+### 卸载控制面
+
+新版本受管安装可以直接运行已安装的脚本：
+
+```bash
+sudo bash /opt/open-node/uninstall.sh
+```
+
+选择 `n` 时，只停止并删除控制面、可选 PostgreSQL 和公网网关容器、项目网络及网页更新
+单元；应用/PostgreSQL/Caddy 数据卷、源码、私有配置、安装清单、备份、镜像和维护状态
+仍然保留，可以按原安装身份重新安装。直接回车确认彻底清除时，还会删除三个项目专属
+数据卷中实际存在的卷，以及精确的源码、配置、备份和网页更新状态目录。Docker/Git 等
+主机依赖、Docker 镜像与构建缓存、远端 Agent、外部 DNS/证书资源和已经下载的代理凭据
+不在删除范围内。
+
+如果首次安装覆盖过 `OPEN_NODE_INSTALL_DIR`、`OPEN_NODE_CONFIG_DIR` 或
+`OPEN_NODE_BACKUP_DIR`，应从实际安装目录运行 `uninstall.sh`，并继续传入相同值。脚本不
+扫描其他目录，也不会接管身份不明的 Compose 项目。
+
+### 卸载 Agent
+
+面板一键安装的 Agent 会保留可校验的 bootstrap helper。可从官方 `main` 完整下载卸载
+脚本到临时文件，再交给 root 执行：
+
+```bash
+(
+  uninstaller="$(mktemp)" || exit 1
+  trap 'rm -f -- "$uninstaller"' EXIT
+  trap 'exit 1' HUP INT TERM
+  curl -fsSL https://raw.githubusercontent.com/FengYuchen1314/open-node/main/agent/uninstall.sh -o "$uninstaller" || exit 1
+  sudo bash "$uninstaller"
+)
+```
+
+也可以在已经审阅的仓库 checkout 中运行 `sudo bash agent/uninstall.sh`；直接通过 Host
+deployment CLI 安装、没有面板 bootstrap helper 的实例应使用这种方式。脚本会自动采用
+唯一、身份完整的受管 Agent；发现多个安装时会列出它们，并要求输入编号只选择一个。
+没有找到候选、选择无效或 unit/manifest/path 身份异常时会拒绝继续，不会按目录通配
+删除。
+
+脚本会显示所选 unit、安装根、当前状态和精确匹配的私有 bootstrap 任务数量。选择 `n`
+时会停用并删除 Agent unit、当前版本指针和版本环境，保留配置、Token、命令日志、状态、
+复制的 Xray/Nginx 运行文件、安装清单、专用账号、本机生命周期辅助文件和 bootstrap
+任务，用于恢复或重装。直接回车确认彻底清除时，还会删除精确受管安装根、专用账号、
+生命周期辅助单元及与该安装绑定的私有 bootstrap 恢复目录。原始输入文件、受管根目录
+之外的 Xray/Nginx 文件、无关 systemd 服务和其他用户目录不会删除；外部 systemd Xray
+或已下发的公网入站也不会自动停止或撤销，须由操作者另行处理。控制面中的服务器记录和
+Agent Token 也不会因本机脚本自动删除。
+
+两种卸载方式的完整身份规则、数据保留和中断恢复边界见
+[控制面部署](docs/deployment.md)与[Agent 部署](docs/agent-deployment.md)。
 
 ## 功能概览
 
