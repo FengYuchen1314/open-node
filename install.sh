@@ -7,12 +7,13 @@ readonly DEFAULT_REPOSITORY="https://github.com/FengYuchen1314/open-node.git"
 readonly DEFAULT_INSTALL_DIR="/opt/open-node"
 readonly DEFAULT_CONFIG_DIR="/etc/open-node"
 readonly DEFAULT_BACKUP_DIR="/var/backups/open-node"
-readonly MANIFEST_VERSION="1"
+readonly MANIFEST_VERSION="2"
 readonly RUNTIME_DATABASE_URL="sqlite:////var/lib/open-node/open-node.db"
 readonly POSTGRES_DATABASE_URL_PREFIX="postgresql+psycopg://open_node:"
 readonly POSTGRES_DATABASE_URL_SUFFIX="@postgres:5432/open_node"
 readonly POSTGRES_IMAGE="postgres:15.18-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf75b99e791767a7a16ce69"
-readonly RUNTIME_CONTAINER_PORT="8080"
+readonly RUNTIME_CONTAINER_PORT="62031"
+readonly DEFAULT_PUBLIC_HTTPS_PORT="58090"
 readonly RUNTIME_UID_GID="10001:10001"
 readonly HEALTH_STABLE_OBSERVATIONS="3"
 readonly PUBLIC_GATEWAY_IMAGE="caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648"
@@ -109,6 +110,85 @@ validate_public_hostname() {
     localhost|*.localhost|*.local|*.internal|*.invalid|*.test|*.example|*.arpa|*.onion)
       return 1
       ;;
+  esac
+}
+
+validate_public_ip_input() {
+  local value="$1"
+  [[ "$value" == "auto" || "$value" == "off" || -z "$value" ]] && return 0
+  [[ "${#value}" -le 64 && "$value" != *[[:space:][:cntrl:]]* \
+    && "$value" != *"/"* && "$value" != *"["* && "$value" != *"]"* \
+    && "$value" != *"%"* && "$value" =~ ^[0-9A-Fa-f:.]+$ ]]
+}
+
+normalize_public_ip() {
+  local value="$1"
+  python3 - "$value" <<'PY'
+import ipaddress
+import sys
+
+try:
+    address = ipaddress.ip_address(sys.argv[1])
+except ValueError:
+    raise SystemExit(1)
+if not address.is_global or address.is_multicast:
+    raise SystemExit(1)
+print(address.compressed)
+PY
+}
+
+detect_public_ipv4() {
+  local first second normalized_first normalized_second
+  first="$(curl --noproxy '*' --proto '=https' --tlsv1.2 --fail --silent --show-error \
+    --location --max-time 10 --retry 2 --retry-connrefused -4 https://api.ipify.org)" \
+    || die "could not detect the public IPv4 address from api.ipify.org"
+  second="$(curl --noproxy '*' --proto '=https' --tlsv1.2 --fail --silent --show-error \
+    --location --max-time 10 --retry 2 --retry-connrefused -4 https://checkip.amazonaws.com)" \
+    || die "could not detect the public IPv4 address from checkip.amazonaws.com"
+  normalized_first="$(normalize_public_ip "$first")" \
+    || die "api.ipify.org returned an invalid or non-public IPv4 address"
+  normalized_second="$(normalize_public_ip "$second")" \
+    || die "checkip.amazonaws.com returned an invalid or non-public IPv4 address"
+  [[ "$normalized_first" != *:* && "$normalized_second" != *:* \
+    && "$normalized_first" == "$normalized_second" ]] \
+    || die "public IPv4 detection disagreed; rerun with OPEN_NODE_PUBLIC_IP set explicitly"
+  printf '%s\n' "$normalized_first"
+}
+
+public_ip_authority() {
+  local value="$1"
+  if [[ "$value" == *:* ]]; then
+    printf '[%s]\n' "$value"
+  else
+    printf '%s\n' "$value"
+  fi
+}
+
+public_ip_url() {
+  local value="$1" port="$2"
+  printf 'https://%s:%s\n' "$(public_ip_authority "$value")" "$port"
+}
+
+public_gateway_mode_for() {
+  local public_ip="$1" hostname="$2"
+  if [[ -n "$public_ip" && -n "$hostname" ]]; then
+    printf 'dual\n'
+  elif [[ -n "$public_ip" ]]; then
+    printf 'ip\n'
+  elif [[ -n "$hostname" ]]; then
+    printf 'domain\n'
+  else
+    printf 'off\n'
+  fi
+}
+
+public_gateway_config_for_mode() {
+  local source_dir="$1" mode="$2"
+  case "$mode" in
+    domain) printf '%s/deploy/Caddyfile\n' "$source_dir" ;;
+    ip) printf '%s/deploy/Caddyfile.ip\n' "$source_dir" ;;
+    dual) printf '%s/deploy/Caddyfile.dual\n' "$source_dir" ;;
+    *) return 1 ;;
   esac
 }
 
@@ -486,6 +566,18 @@ validate_inputs() {
     validate_public_hostname "$OPEN_NODE_PUBLIC_HOSTNAME" \
       || die "OPEN_NODE_PUBLIC_HOSTNAME must be empty or a lowercase public DNS hostname"
   fi
+  if [[ -v OPEN_NODE_PUBLIC_IP ]]; then
+    [[ -n "$OPEN_NODE_PUBLIC_IP" ]] \
+      || die "OPEN_NODE_PUBLIC_IP must use off to disable the public IP endpoint"
+    validate_public_ip_input "$OPEN_NODE_PUBLIC_IP" \
+      || die "OPEN_NODE_PUBLIC_IP must be auto, off, or a plain public IPv4/IPv6 address"
+  fi
+  if [[ -v OPEN_NODE_PUBLIC_HTTPS_PORT ]]; then
+    [[ "$OPEN_NODE_PUBLIC_HTTPS_PORT" =~ ^[0-9]+$ \
+      && "$OPEN_NODE_PUBLIC_HTTPS_PORT" -ge 1024 \
+      && "$OPEN_NODE_PUBLIC_HTTPS_PORT" -le 65535 ]] \
+      || die "OPEN_NODE_PUBLIC_HTTPS_PORT must be between 1024 and 65535"
+  fi
 }
 
 install_dependencies() {
@@ -496,7 +588,7 @@ install_dependencies() {
   log "installing required Debian/Ubuntu packages"
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    ca-certificates coreutils curl findutils gawk git grep jq sed tar util-linux
+    ca-certificates coreutils curl findutils gawk git grep iproute2 jq python3 sed tar util-linux
   if ! command -v docker >/dev/null 2>&1; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io
   fi
@@ -510,7 +602,7 @@ install_dependencies() {
 ensure_dependencies() {
   local missing=0 compose_version compose_major command_name
   for command_name in awk curl date dirname docker find flock git grep install jq mktemp \
-    mv od realpath sed sha256sum stat sync tar tr; do
+    mv od python3 realpath sed sha256sum ss stat sync tar tr; do
     command -v "$command_name" >/dev/null 2>&1 || missing=1
   done
   if [[ "$missing" -eq 1 ]] || ! docker compose version >/dev/null 2>&1; then
@@ -559,6 +651,8 @@ compose_with() {
     -u OPEN_NODE_SHORT_LINKS_ENABLED \
     -u OPEN_NODE_TRUSTED_PROXIES \
     -u OPEN_NODE_PUBLIC_HOSTNAME \
+    -u OPEN_NODE_PUBLIC_IP \
+    -u OPEN_NODE_PUBLIC_HTTPS_PORT \
     -u OPEN_NODE_AGENT_IDENTITY_FILE \
     -u OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL \
     -u OPEN_NODE_SUBSCRIBER_TOTP_KEY \
@@ -626,9 +720,27 @@ requested_bootstrap_change() {
 }
 
 requested_public_gateway_change() {
-  [[ -v OPEN_NODE_PUBLIC_HOSTNAME ]] || return 1
-  [[ "$OPEN_NODE_PUBLIC_HOSTNAME" != \
-    "$(read_key "$ENV_FILE" OPEN_NODE_PUBLIC_HOSTNAME || true)" ]]
+  local requested current
+  if [[ -v OPEN_NODE_PUBLIC_HOSTNAME ]] \
+    && [[ "$OPEN_NODE_PUBLIC_HOSTNAME" != \
+      "$(read_key "$ENV_FILE" OPEN_NODE_PUBLIC_HOSTNAME || true)" ]]; then
+    return 0
+  fi
+  if [[ -v OPEN_NODE_PUBLIC_HTTPS_PORT ]] \
+    && [[ "$OPEN_NODE_PUBLIC_HTTPS_PORT" != \
+      "$(read_key "$ENV_FILE" OPEN_NODE_PUBLIC_HTTPS_PORT || printf '%s' "$DEFAULT_PUBLIC_HTTPS_PORT")" ]]; then
+    return 0
+  fi
+  if [[ -v OPEN_NODE_PUBLIC_IP ]]; then
+    current="$(read_key "$ENV_FILE" OPEN_NODE_PUBLIC_IP || true)"
+    case "$OPEN_NODE_PUBLIC_IP" in
+      auto) return 0 ;;
+      off|'') requested="" ;;
+      *) requested="$(normalize_public_ip "$OPEN_NODE_PUBLIC_IP")" || return 0 ;;
+    esac
+    [[ "$requested" != "$current" ]] && return 0
+  fi
+  return 1
 }
 
 require_environment_file() {
@@ -660,6 +772,8 @@ require_manifest() {
   validate_safe_file "installer manifest" "$MANIFEST_FILE" 1
   [[ "$(read_manifest_value MANIFEST_VERSION || true)" == "$MANIFEST_VERSION" ]] \
     || die "unsupported or damaged installer manifest"
+  [[ "$(read_manifest_value DEPLOYED_RUNTIME_PORT || true)" == "$RUNTIME_CONTAINER_PORT" ]] \
+    || die "installer manifest has an invalid deployed runtime port"
   [[ "$(read_manifest_value REPOSITORY || true)" == "$REPOSITORY" ]] \
     || die "OPEN_NODE_REPOSITORY conflicts with the installed manifest"
   [[ "$(read_manifest_value REF || true)" == "$REF" ]] \
@@ -766,6 +880,7 @@ write_manifest() {
     printf 'DEPLOYED_REVISION=%s\n' "$revision"
     printf 'DEPLOYED_IMAGE_TAG=%s\n' "$image_tag"
     printf 'DEPLOYED_IMAGE_ID=%s\n' "$image_id"
+    printf 'DEPLOYED_RUNTIME_PORT=%s\n' "$RUNTIME_CONTAINER_PORT"
   } > "$temporary"; then
     rm -f -- "$temporary"
     die "could not write installer manifest"
@@ -1042,12 +1157,15 @@ network_is_safe() {
 
 runtime_container_is_safe() {
   local source_dir="$1" environment_file="$2" expected_image_id="$3" require_running="${4:-0}"
+  local runtime_tcp runtime_health
   local container_id postgres_id project_containers expected_containers details expected_image expected_network expected_network_id
   local port bind_address secure_cookie short_links trusted_proxies agent_identity subscriber_totp
   local geoip_token
   local update_state_dir revision update_enabled=0
   local bootstrap_value bootstrap_environment rendered_compose database_backend database_url
   local compose_files
+  runtime_tcp="${RUNTIME_CONTAINER_PORT}/tcp"
+  runtime_health="import urllib.request; urllib.request.urlopen('http://127.0.0.1:${RUNTIME_CONTAINER_PORT}/healthz', timeout=3).read()"
   expected_network="${PROJECT_NAME}_default"
   expected_image="$(read_key "$environment_file" OPEN_NODE_IMAGE_REPOSITORY || true):$(read_key "$environment_file" OPEN_NODE_IMAGE_TAG || true)"
   port="$(read_key "$environment_file" OPEN_NODE_HTTP_PORT || true)"
@@ -1121,6 +1239,9 @@ runtime_container_is_safe() {
     --argjson update_enabled "$update_enabled" \
     --arg database_url "$database_url" \
     --arg runtime_user "$RUNTIME_UID_GID" \
+    --arg runtime_port "$RUNTIME_CONTAINER_PORT" \
+    --arg runtime_tcp "$runtime_tcp" \
+    --arg runtime_health "$runtime_health" \
     --argjson require_running "$require_running" '
     length == 1
     and (.[0] as $container
@@ -1130,10 +1251,10 @@ runtime_container_is_safe() {
       and $container.Config.WorkingDir == "/opt/open-node"
       and $container.Config.Entrypoint == ["open-node-entrypoint"]
       and $container.Config.Cmd == [
-        "uvicorn", "open_node.main:app", "--host", "0.0.0.0", "--port", "8080",
+        "uvicorn", "open_node.main:app", "--host", "0.0.0.0", "--port", $runtime_port,
         "--proxy-headers", "--no-access-log"
       ]
-      and (($container.Config.ExposedPorts | keys) == ["8080/tcp"])
+      and (($container.Config.ExposedPorts | keys) == [$runtime_tcp])
       and (($container.Config.Volumes | keys) == ["/var/lib/open-node"])
       and $container.Config.Labels["com.docker.compose.project"] == $project
       and $container.Config.Labels["com.docker.compose.service"] == "open-node"
@@ -1170,7 +1291,7 @@ runtime_container_is_safe() {
       and ([ $container.Config.Env[]? | select(startswith("FORWARDED_ALLOW_IPS=")) ] == ["FORWARDED_ALLOW_IPS=" + $trusted_proxies])
       and $container.Config.Healthcheck.Test == [
         "CMD", "python", "-c",
-        "import urllib.request; urllib.request.urlopen('\''http://127.0.0.1:8080/healthz'\'', timeout=3).read()"
+        $runtime_health
       ]
       and $container.Config.Healthcheck.Interval == 20000000000
       and $container.Config.Healthcheck.Timeout == 5000000000
@@ -1200,10 +1321,10 @@ runtime_container_is_safe() {
       and $container.HostConfig.RestartPolicy.MaximumRetryCount == 0
       and $container.HostConfig.LogConfig.Type == "local"
       and $container.HostConfig.LogConfig.Config == {"max-file": "5", "max-size": "10m"}
-      and (($container.HostConfig.PortBindings | keys) == ["8080/tcp"])
-      and ($container.HostConfig.PortBindings["8080/tcp"] | length) == 1
-      and $container.HostConfig.PortBindings["8080/tcp"][0].HostIp == $bind
-      and $container.HostConfig.PortBindings["8080/tcp"][0].HostPort == $port
+      and (($container.HostConfig.PortBindings | keys) == [$runtime_tcp])
+      and ($container.HostConfig.PortBindings[$runtime_tcp] | length) == 1
+      and $container.HostConfig.PortBindings[$runtime_tcp][0].HostIp == $bind
+      and $container.HostConfig.PortBindings[$runtime_tcp][0].HostPort == $port
       and (($container.HostConfig.Tmpfs | keys) == ["/tmp"])
       and (
         $container.HostConfig.Tmpfs["/tmp"] == "rw,nosuid,noexec,size=64m,mode=1777"
@@ -1236,10 +1357,10 @@ runtime_container_is_safe() {
       and (
         (
           $container.State.Running == true
-          and (($container.NetworkSettings.Ports | keys) == ["8080/tcp"])
-          and ($container.NetworkSettings.Ports["8080/tcp"] | length) == 1
-          and $container.NetworkSettings.Ports["8080/tcp"][0].HostIp == $bind
-          and $container.NetworkSettings.Ports["8080/tcp"][0].HostPort == $port
+          and (($container.NetworkSettings.Ports | keys) == [$runtime_tcp])
+          and ($container.NetworkSettings.Ports[$runtime_tcp] | length) == 1
+          and $container.NetworkSettings.Ports[$runtime_tcp][0].HostIp == $bind
+          and $container.NetworkSettings.Ports[$runtime_tcp][0].HostPort == $port
         )
         or (
           $require_running == 0
@@ -1278,7 +1399,9 @@ create_candidate_environment() {
   local port bind_address secure_cookie bootstrap_value rendered_compose existing_bind=""
   local geoip_token
   local database_backend database_url postgres_password
-  local public_hostname previous_public public_url trusted_proxies
+  local public_hostname previous_hostname public_url previous_url trusted_proxies
+  local public_ip_input public_ip previous_public_ip public_port previous_public_port
+  local public_mode public_config public_request=0
   if [[ -n "$base_file" ]]; then
     validate_safe_file "active environment file" "$base_file" 1
     install -m 0600 -- "$base_file" "$destination"
@@ -1314,7 +1437,7 @@ create_candidate_environment() {
   set_file_value "$destination" OPEN_NODE_DATABASE_BACKEND "$database_backend"
   set_file_value "$destination" OPEN_NODE_DATABASE_URL "$database_url"
   set_file_value "$destination" OPEN_NODE_POSTGRES_PASSWORD "$postgres_password"
-  port="${OPEN_NODE_HTTP_PORT:-$(read_key "$destination" OPEN_NODE_HTTP_PORT || printf '8080')}"
+  port="${OPEN_NODE_HTTP_PORT:-$(read_key "$destination" OPEN_NODE_HTTP_PORT || printf '%s' "$RUNTIME_CONTAINER_PORT")}"
   bind_address="${OPEN_NODE_BIND_ADDRESS:-$(read_key "$destination" OPEN_NODE_BIND_ADDRESS || printf '127.0.0.1')}"
   if [[ -n "${OPEN_NODE_SESSION_COOKIE_SECURE:-}" ]]; then
     secure_cookie="$OPEN_NODE_SESSION_COOKIE_SECURE"
@@ -1343,36 +1466,76 @@ create_candidate_environment() {
   if [[ -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL ]]; then
     bootstrap_value="$OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL"
   fi
-  previous_public="$(read_key "$destination" OPEN_NODE_PUBLIC_HOSTNAME || true)"
-  public_hostname="$previous_public"
+  previous_hostname="$(read_key "$destination" OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  previous_public_ip="$(read_key "$destination" OPEN_NODE_PUBLIC_IP || true)"
+  previous_public_port="$(read_key "$destination" OPEN_NODE_PUBLIC_HTTPS_PORT || printf '%s' "$DEFAULT_PUBLIC_HTTPS_PORT")"
+  public_hostname="$previous_hostname"
   if [[ -v OPEN_NODE_PUBLIC_HOSTNAME ]]; then
     public_hostname="$OPEN_NODE_PUBLIC_HOSTNAME"
+    public_request=1
   fi
   validate_public_hostname "$public_hostname" \
     || die "OPEN_NODE_PUBLIC_HOSTNAME must be empty or a lowercase public DNS hostname"
-  if [[ -n "$public_hostname" ]]; then
-    validate_safe_file "candidate public gateway Caddyfile" "$source_dir/deploy/Caddyfile" 0
+  public_ip_input="$previous_public_ip"
+  if [[ -v OPEN_NODE_PUBLIC_IP ]]; then
+    public_ip_input="$OPEN_NODE_PUBLIC_IP"
+    public_request=1
+  fi
+  validate_public_ip_input "$public_ip_input" \
+    || die "OPEN_NODE_PUBLIC_IP must be auto, off, or a plain public IPv4/IPv6 address"
+  case "$public_ip_input" in
+    auto) public_ip="$(detect_public_ipv4)" ;;
+    off|'') public_ip="" ;;
+    *)
+      public_ip="$(normalize_public_ip "$public_ip_input")" \
+        || die "OPEN_NODE_PUBLIC_IP must be a globally routable IPv4/IPv6 address"
+      ;;
+  esac
+  public_port="${OPEN_NODE_PUBLIC_HTTPS_PORT:-$previous_public_port}"
+  [[ "$public_port" =~ ^[0-9]+$ && "$public_port" -ge 1024 && "$public_port" -le 65535 ]] \
+    || die "OPEN_NODE_PUBLIC_HTTPS_PORT must be between 1024 and 65535"
+  if [[ -v OPEN_NODE_PUBLIC_HTTPS_PORT ]]; then public_request=1; fi
+  [[ -z "$public_ip" || "$public_port" != "$port" ]] \
+    || die "OPEN_NODE_PUBLIC_HTTPS_PORT must differ from OPEN_NODE_HTTP_PORT"
+  public_mode="$(public_gateway_mode_for "$public_ip" "$public_hostname")"
+  if [[ "$public_mode" != "off" ]]; then
+    [[ "$port" != "443" && "$public_port" != "443" && "$public_port" != "$port" ]] \
+      || die "OPEN_NODE_HTTP_PORT, OPEN_NODE_PUBLIC_HTTPS_PORT, and ACME port 443 must be distinct"
+    public_config="$(public_gateway_config_for_mode "$source_dir" "$public_mode")" \
+      || die "candidate public gateway mode is invalid"
+    validate_safe_file "candidate public gateway Caddyfile" "$public_config" 0
     [[ "$bind_address" == "127.0.0.1" ]] \
       || die "public HTTPS requires the application listener to remain on 127.0.0.1"
     [[ ! -v OPEN_NODE_SESSION_COOKIE_SECURE || "$OPEN_NODE_SESSION_COOKIE_SECURE" == "true" ]] \
       || die "public HTTPS requires OPEN_NODE_SESSION_COOKIE_SECURE=true"
     [[ ! -v OPEN_NODE_TRUSTED_PROXIES || "$OPEN_NODE_TRUSTED_PROXIES" == "*" ]] \
       || die "the managed public gateway requires OPEN_NODE_TRUSTED_PROXIES=*"
-    public_url="https://$public_hostname"
+    if [[ -n "$public_hostname" ]]; then
+      public_url="https://$public_hostname"
+    else
+      public_url="$(public_ip_url "$public_ip" "$public_port")"
+    fi
     [[ ! -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL \
       || "$OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL" == "$public_url" ]] \
       || die "the Agent bootstrap URL must equal the managed public HTTPS URL"
     secure_cookie=true
     trusted_proxies="*"
     bootstrap_value="$public_url"
-  elif [[ -v OPEN_NODE_PUBLIC_HOSTNAME && -n "$previous_public" ]]; then
-    public_url="https://$previous_public"
+  elif [[ "$public_request" -eq 1 ]]; then
+    if [[ -n "$previous_hostname" ]]; then
+      previous_url="https://$previous_hostname"
+    elif [[ -n "$previous_public_ip" && "$previous_public_ip" != "auto" \
+      && "$previous_public_ip" != "off" ]]; then
+      previous_url="$(public_ip_url "$previous_public_ip" "$previous_public_port")"
+    else
+      previous_url=""
+    fi
     if [[ ! -v OPEN_NODE_SESSION_COOKIE_SECURE ]]; then secure_cookie=false; fi
     if [[ ! -v OPEN_NODE_TRUSTED_PROXIES && "$trusted_proxies" == "*" ]]; then
       trusted_proxies=""
     fi
     if [[ ! -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL \
-      && "$bootstrap_value" == "$public_url" ]]; then
+      && "$bootstrap_value" == "$previous_url" ]]; then
       bootstrap_value=""
     fi
   fi
@@ -1392,6 +1555,8 @@ create_candidate_environment() {
   set_file_value "$destination" OPEN_NODE_SESSION_COOKIE_SECURE "$secure_cookie"
   set_file_value "$destination" OPEN_NODE_TRUSTED_PROXIES "$trusted_proxies"
   set_file_value "$destination" OPEN_NODE_PUBLIC_HOSTNAME "$public_hostname"
+  set_file_value "$destination" OPEN_NODE_PUBLIC_IP "$public_ip"
+  set_file_value "$destination" OPEN_NODE_PUBLIC_HTTPS_PORT "$public_port"
   set_file_value "$destination" OPEN_NODE_SHORT_LINKS_ENABLED \
     "$(read_key "$destination" OPEN_NODE_SHORT_LINKS_ENABLED || printf 'false')"
   set_file_value "$destination" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL "$bootstrap_value"
@@ -1496,6 +1661,7 @@ validate_candidate_compose() {
     --arg postgres_image "$POSTGRES_IMAGE" \
     --arg postgres_volume "$POSTGRES_VOLUME" \
     --arg update_state_dir "$update_state_dir" \
+    --arg runtime_port "$RUNTIME_CONTAINER_PORT" \
     --argjson update_enabled "$update_enabled" \
     --arg bootstrap_value "$bootstrap_value" \
     --argjson bootstrap_environment "$bootstrap_environment" '
@@ -1575,7 +1741,7 @@ validate_candidate_compose() {
     and (
       [$service.ports[]?] as $ports
       | ($ports | length) == 1
-      and ($ports[0].target | tostring) == "8080"
+      and ($ports[0].target | tostring) == $runtime_port
       and ($ports[0].published | tostring) == $port
       and $ports[0].host_ip == $bind
       and ($ports[0].protocol // "tcp") == "tcp"
@@ -1669,13 +1835,18 @@ validate_candidate_compose() {
 }
 
 candidate_image_is_safe_to_start() {
-  local image_id="$1" revision="$2" details
+  local image_id="$1" revision="$2" details runtime_tcp runtime_health
+  runtime_tcp="${RUNTIME_CONTAINER_PORT}/tcp"
+  runtime_health="import urllib.request; urllib.request.urlopen('http://127.0.0.1:${RUNTIME_CONTAINER_PORT}/healthz', timeout=3).read()"
   details="$(docker image inspect "$image_id" 2>/dev/null)" || return 1
   printf '%s\n' "$details" | jq -e \
     --arg image_id "$image_id" \
     --arg revision "$revision" \
     --arg database_url "$RUNTIME_DATABASE_URL" \
-    --arg runtime_user "$RUNTIME_UID_GID" '
+    --arg runtime_user "$RUNTIME_UID_GID" \
+    --arg runtime_port "$RUNTIME_CONTAINER_PORT" \
+    --arg runtime_tcp "$runtime_tcp" \
+    --arg runtime_health "$runtime_health" '
     length == 1
     and (.[0] as $image
       | $image.Id == $image_id
@@ -1683,17 +1854,17 @@ candidate_image_is_safe_to_start() {
       and $image.Config.WorkingDir == "/opt/open-node"
       and $image.Config.Entrypoint == ["open-node-entrypoint"]
       and $image.Config.Cmd == [
-        "uvicorn", "open_node.main:app", "--host", "0.0.0.0", "--port", "8080",
+        "uvicorn", "open_node.main:app", "--host", "0.0.0.0", "--port", $runtime_port,
         "--proxy-headers", "--no-access-log"
       ]
-      and (($image.Config.ExposedPorts | keys) == ["8080/tcp"])
+      and (($image.Config.ExposedPorts | keys) == [$runtime_tcp])
       and (($image.Config.Volumes | keys) == ["/var/lib/open-node"])
       and (($image.Config.OnBuild // []) | length == 0)
       and $image.Config.Labels["org.opencontainers.image.revision"] == $revision
       and ([ $image.Config.Env[]? | select(startswith("OPEN_NODE_DATABASE_URL=")) ] == ["OPEN_NODE_DATABASE_URL=" + $database_url])
       and $image.Config.Healthcheck.Test == [
         "CMD", "python", "-c",
-        "import urllib.request; urllib.request.urlopen('\''http://127.0.0.1:8080/healthz'\'', timeout=3).read()"
+        $runtime_health
       ]
       and $image.Config.Healthcheck.Interval == 20000000000
       and $image.Config.Healthcheck.Timeout == 5000000000
@@ -1817,10 +1988,23 @@ ensure_public_gateway_volume() {
 
 public_gateway_container_is_safe() {
   local require_running="${1:-0}" require_current="${2:-1}"
-  local expected_image_id details hostname upstream config
+  local expected_image_id details hostname public_ip public_port authority upstream mode config
+  local domain_config ip_config dual_config
   hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
+  public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || printf '%s' "$DEFAULT_PUBLIC_HTTPS_PORT")"
+  authority=""
+  if [[ -n "$public_ip" ]]; then authority="$(public_ip_authority "$public_ip")"; fi
   upstream="$(read_env_value OPEN_NODE_HTTP_PORT || true)"
-  config="$(realpath -m -- "$INSTALL_DIR/deploy/Caddyfile")"
+  mode="$(public_gateway_mode_for "$public_ip" "$hostname")"
+  domain_config="$(realpath -m -- "$INSTALL_DIR/deploy/Caddyfile")"
+  ip_config="$(realpath -m -- "$INSTALL_DIR/deploy/Caddyfile.ip")"
+  dual_config="$(realpath -m -- "$INSTALL_DIR/deploy/Caddyfile.dual")"
+  config=""
+  if [[ "$mode" != "off" ]]; then
+    config="$(public_gateway_config_for_mode "$INSTALL_DIR" "$mode")" || return 1
+    config="$(realpath -m -- "$config")"
+  fi
   expected_image_id="$(docker image inspect --format '{{.Id}}' "$PUBLIC_GATEWAY_IMAGE" 2>/dev/null)" \
     || return 1
   details="$(docker inspect "$PUBLIC_GATEWAY_CONTAINER" 2>/dev/null)" || return 1
@@ -1830,9 +2014,15 @@ public_gateway_container_is_safe() {
     --arg image "$PUBLIC_GATEWAY_IMAGE" \
     --arg image_id "$expected_image_id" \
     --arg hostname "$hostname" \
+    --arg public_ip_authority "$authority" \
+    --arg public_port "$public_port" \
+    --arg mode "$mode" \
     --arg upstream "$upstream" \
     --arg volume "$PUBLIC_GATEWAY_VOLUME" \
     --arg config "$config" \
+    --arg domain_config "$domain_config" \
+    --arg ip_config "$ip_config" \
+    --arg dual_config "$dual_config" \
     --argjson require_running "$require_running" \
     --argjson require_current "$require_current" '
     length == 1
@@ -1848,16 +2038,23 @@ public_gateway_container_is_safe() {
       and $container.Config.WorkingDir == "/srv"
       and $container.Config.Labels["com.open-node.installer.project"] == $project
       and $container.Config.Labels["com.open-node.installer.purpose"] == "public-gateway"
-      and ([ $container.Config.Env[]?
-        | select(startswith("OPEN_NODE_PUBLIC_HOSTNAME=")
-          or startswith("OPEN_NODE_UPSTREAM_PORT=")) ] | sort) as $managed_env
-      | ($managed_env | length) == 2
-      and any($managed_env[]; startswith("OPEN_NODE_PUBLIC_HOSTNAME="))
-      and any($managed_env[]; startswith("OPEN_NODE_UPSTREAM_PORT="))
-      and ($require_current == 0 or $managed_env == ([
-        "OPEN_NODE_PUBLIC_HOSTNAME=" + $hostname,
-        "OPEN_NODE_UPSTREAM_PORT=" + $upstream
-      ] | sort))
+      and (
+        ([ $container.Config.Env[]?
+          | select(startswith("OPEN_NODE_GATEWAY_MODE=")
+            or startswith("OPEN_NODE_PUBLIC_HOSTNAME=")
+            or startswith("OPEN_NODE_PUBLIC_IP_AUTHORITY=")
+            or startswith("OPEN_NODE_PUBLIC_HTTPS_PORT=")
+            or startswith("OPEN_NODE_UPSTREAM_PORT=")) ] | sort) as $managed_env
+        | ([
+            "OPEN_NODE_GATEWAY_MODE=" + $mode,
+            "OPEN_NODE_PUBLIC_HOSTNAME=" + $hostname,
+            "OPEN_NODE_PUBLIC_IP_AUTHORITY=" + $public_ip_authority,
+            "OPEN_NODE_PUBLIC_HTTPS_PORT=" + $public_port,
+            "OPEN_NODE_UPSTREAM_PORT=" + $upstream
+          ] | sort) as $current_env
+        | ($managed_env | length) == 5
+        and ($require_current == 0 or $managed_env == $current_env)
+      )
       and $container.HostConfig.Privileged == false
       and $container.HostConfig.ReadonlyRootfs == true
       and $container.HostConfig.CapDrop == ["ALL"]
@@ -1883,8 +2080,11 @@ public_gateway_container_is_safe() {
       and any($container.Mounts[];
         .Type == "volume" and .Name == $volume and .Destination == "/data" and .RW == true)
       and any($container.Mounts[];
-        .Type == "bind" and .Source == $config
+        .Type == "bind" and (.Source == $domain_config or .Source == $ip_config or .Source == $dual_config)
         and .Destination == "/etc/caddy/Caddyfile" and .RW == false)
+      and ($require_current == 0 or any($container.Mounts[];
+        .Type == "bind" and .Source == $config
+        and .Destination == "/etc/caddy/Caddyfile" and .RW == false))
       and ($require_running == 0 or $container.State.Running == true)
     )
   ' >/dev/null
@@ -1909,11 +2109,10 @@ ensure_public_gateway_image() {
 }
 
 wait_for_public_gateway() {
-  local hostname="$1" attempt stable=0
+  local attempt stable=0
   for attempt in $(seq 1 180); do
     if public_gateway_container_is_safe 1 \
-      && curl --noproxy '*' --fail --silent --show-error --max-time 5 \
-        --resolve "$hostname:443:127.0.0.1" "https://$hostname/healthz" >/dev/null 2>&1; then
+      && public_gateway_endpoints_are_healthy; then
       ((stable += 1))
       if [[ "$stable" -ge "$HEALTH_STABLE_OBSERVATIONS" ]]; then return 0; fi
     else
@@ -1925,29 +2124,111 @@ wait_for_public_gateway() {
   return 1
 }
 
-reconcile_public_gateway() {
-  local hostname upstream config
+tcp_port_is_listening() {
+  local port="$1" listeners
+  [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] \
+    || die "cannot inspect an invalid TCP port"
+  listeners="$(ss -H -ltn "sport = :$port")" \
+    || die "could not inspect TCP port $port"
+  [[ -n "$listeners" ]]
+}
+
+require_public_gateway_ports_available() {
+  local mode="$1" public_port="$2"
+  tcp_port_is_listening 443 \
+    && die "public TCP 443 is already in use; it is required for ACME TLS-ALPN-01"
+  if [[ "$mode" == "ip" || "$mode" == "dual" ]]; then
+    tcp_port_is_listening "$public_port" \
+      && die "public HTTPS port $public_port is already in use"
+  fi
+}
+
+preflight_fresh_ports() {
+  local environment_file="$1" upstream public_ip public_port hostname mode
+  upstream="$(read_key "$environment_file" OPEN_NODE_HTTP_PORT || true)"
+  public_ip="$(read_key "$environment_file" OPEN_NODE_PUBLIC_IP || true)"
+  public_port="$(read_key "$environment_file" OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
+  hostname="$(read_key "$environment_file" OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  [[ "$upstream" =~ ^[0-9]+$ && "$upstream" -ge 1 && "$upstream" -le 65535 ]] \
+    || die "candidate application port is invalid"
+  tcp_port_is_listening "$upstream" \
+    && die "host application port $upstream is already in use"
+  mode="$(public_gateway_mode_for "$public_ip" "$hostname")"
+  if [[ "$mode" != "off" ]]; then
+    require_public_gateway_ports_available "$mode" "$public_port"
+  fi
+}
+
+public_gateway_endpoints_are_healthy() {
+  local hostname public_ip public_port authority public_url
   hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
-  if [[ -z "$hostname" ]]; then
+  public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
+  public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
+  [[ -n "$hostname" || -n "$public_ip" ]] || return 1
+  if [[ -n "$hostname" ]]; then
+    curl --noproxy '*' --fail --silent --show-error --max-time 5 \
+      --resolve "$hostname:443:127.0.0.1" "https://$hostname/healthz" >/dev/null 2>&1 \
+      || return 1
+  fi
+  if [[ -n "$public_ip" ]]; then
+    authority="$(public_ip_authority "$public_ip")"
+    public_url="$(public_ip_url "$public_ip" "$public_port")"
+    curl --noproxy '*' --fail --silent --show-error --max-time 5 \
+      --connect-to "$authority:$public_port:127.0.0.1:$public_port" \
+      "$public_url/healthz" >/dev/null 2>&1 \
+      || return 1
+  fi
+}
+
+reconcile_public_gateway() {
+  local hostname public_ip public_port authority upstream mode config expected_url endpoint_label
+  hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
+  public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
+  mode="$(public_gateway_mode_for "$public_ip" "$hostname")"
+  if [[ "$mode" == "off" ]]; then
     remove_public_gateway_container
     return
   fi
-  validate_public_hostname "$hostname" \
+  [[ -z "$hostname" ]] || validate_public_hostname "$hostname" \
     || die "saved public hostname is invalid"
-  [[ "$(read_env_value OPEN_NODE_BIND_ADDRESS || true)" == "127.0.0.1" \
-    && "$(read_env_value OPEN_NODE_SESSION_COOKIE_SECURE || true)" == "true" \
-    && "$(read_env_value OPEN_NODE_TRUSTED_PROXIES || true)" == "*" \
-    && "$(read_env_value OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)" == "https://$hostname" ]] \
-    || die "saved public gateway environment is inconsistent"
+  if [[ -n "$public_ip" ]]; then
+    [[ "$(normalize_public_ip "$public_ip" 2>/dev/null || true)" == "$public_ip" ]] \
+      || die "saved public IP is invalid"
+    authority="$(public_ip_authority "$public_ip")"
+  else
+    authority=""
+  fi
+  [[ "$public_port" =~ ^[0-9]+$ && "$public_port" -ge 1024 && "$public_port" -le 65535 ]] \
+    || die "saved public HTTPS port is invalid"
   upstream="$(read_env_value OPEN_NODE_HTTP_PORT || true)"
   [[ "$upstream" =~ ^[0-9]+$ && "$upstream" -ge 1 && "$upstream" -le 65535 ]] \
     || die "saved public gateway upstream port is invalid"
-  config="$INSTALL_DIR/deploy/Caddyfile"
+  [[ "$upstream" != "443" && "$public_port" != "443" && "$public_port" != "$upstream" ]] \
+    || die "public gateway ports 443, $public_port, and $upstream must be distinct"
+  if [[ -n "$hostname" ]]; then
+    expected_url="https://$hostname"
+  else
+    expected_url="$(public_ip_url "$public_ip" "$public_port")"
+  fi
+  [[ "$(read_env_value OPEN_NODE_BIND_ADDRESS || true)" == "127.0.0.1" \
+    && "$(read_env_value OPEN_NODE_SESSION_COOKIE_SECURE || true)" == "true" \
+    && "$(read_env_value OPEN_NODE_TRUSTED_PROXIES || true)" == "*" \
+    && "$(read_env_value OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)" == "$expected_url" ]] \
+    || die "saved public gateway environment is inconsistent"
+  config="$(public_gateway_config_for_mode "$INSTALL_DIR" "$mode")" \
+    || die "saved public gateway mode is invalid"
   validate_safe_file "public gateway Caddyfile" "$config" 0
+  remove_public_gateway_container
+  require_public_gateway_ports_available "$mode" "$public_port"
   ensure_public_gateway_image
   ensure_public_gateway_volume
-  remove_public_gateway_container
-  log "starting managed HTTPS gateway for $hostname"
+  case "$mode" in
+    domain) endpoint_label="$hostname" ;;
+    ip) endpoint_label="$(public_ip_url "$public_ip" "$public_port")" ;;
+    dual) endpoint_label="$hostname and $(public_ip_url "$public_ip" "$public_port")" ;;
+  esac
+  log "starting managed HTTPS gateway for $endpoint_label"
   if ! docker run --detach --name "$PUBLIC_GATEWAY_CONTAINER" \
     --network host --restart unless-stopped --read-only --init \
     --cap-drop ALL --cap-add NET_BIND_SERVICE \
@@ -1955,7 +2236,10 @@ reconcile_public_gateway() {
     --log-driver local --log-opt max-size=10m --log-opt max-file=5 \
     --label "com.open-node.installer.project=$PROJECT_NAME" \
     --label "com.open-node.installer.purpose=public-gateway" \
+    --env "OPEN_NODE_GATEWAY_MODE=$mode" \
     --env "OPEN_NODE_PUBLIC_HOSTNAME=$hostname" \
+    --env "OPEN_NODE_PUBLIC_IP_AUTHORITY=$authority" \
+    --env "OPEN_NODE_PUBLIC_HTTPS_PORT=$public_port" \
     --env "OPEN_NODE_UPSTREAM_PORT=$upstream" \
     --mount "type=volume,src=$PUBLIC_GATEWAY_VOLUME,dst=/data" \
     --mount "type=bind,src=$config,dst=/etc/caddy/Caddyfile,readonly" \
@@ -1966,28 +2250,31 @@ reconcile_public_gateway() {
       && public_gateway_container_is_safe 0; then
       docker rm -f -- "$PUBLIC_GATEWAY_CONTAINER" >/dev/null || true
     fi
-    die "public HTTPS gateway could not start; check whether ports 80 and 443 are free"
+    die "public HTTPS gateway could not start; check TCP 443 and public port $public_port"
   fi
-  if ! wait_for_public_gateway "$hostname"; then
+  if ! wait_for_public_gateway; then
     remove_public_gateway_container
-    die "public HTTPS did not become trusted; verify DNS and inbound ports 80/443, rerun install, then run setup"
+    die "public HTTPS did not become trusted; verify the public IP, DNS when configured, inbound TCP 443, and public port $public_port"
   fi
 }
 
 verify_public_gateway_status() {
-  local hostname
+  local hostname public_ip public_port mode
   hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
-  if [[ -z "$hostname" ]]; then
+  public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
+  public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
+  mode="$(public_gateway_mode_for "$public_ip" "$hostname")"
+  if [[ "$mode" == "off" ]]; then
     ! docker inspect "$PUBLIC_GATEWAY_CONTAINER" >/dev/null 2>&1 \
       || die "a public gateway container exists while the feature is disabled"
     return
   fi
   public_gateway_volume_is_safe && public_gateway_container_is_safe 1 \
     || die "public HTTPS gateway is missing or outside installer policy"
-  curl --noproxy '*' --fail --silent --show-error --max-time 5 \
-    --resolve "$hostname:443:127.0.0.1" "https://$hostname/healthz" >/dev/null \
+  public_gateway_endpoints_are_healthy \
     || die "public HTTPS health check failed"
-  log "public HTTPS: https://$hostname"
+  [[ -z "$hostname" ]] || log "public HTTPS (domain): https://$hostname"
+  [[ -z "$public_ip" ]] || log "public HTTPS (IP): $(public_ip_url "$public_ip" "$public_port")"
 }
 
 safe_delete_candidate() {
@@ -2634,13 +2921,14 @@ container_state() {
 }
 
 log_success() {
-  local public_hostname
+  local public_hostname public_ip public_port
   log "deployment is healthy"
   log "local URL: http://127.0.0.1:$(read_env_value OPEN_NODE_HTTP_PORT)"
   public_hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
-  if [[ -n "$public_hostname" ]]; then
-    log "public URL: https://$public_hostname"
-  fi
+  public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
+  public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
+  [[ -z "$public_hostname" ]] || log "public URL (canonical): https://$public_hostname"
+  [[ -z "$public_ip" ]] || log "public URL (IP): $(public_ip_url "$public_ip" "$public_port")"
   log "configuration: $ENV_FILE"
   if [[ "$(read_env_value OPEN_NODE_BIND_ADDRESS)" == "0.0.0.0" ]]; then
     warn "the panel is exposed over plain HTTP by explicit operator opt-in"
@@ -2663,6 +2951,7 @@ install_fresh() {
   TXN_IMAGE_TAG="$image_tag"
   create_candidate_environment "$CANDIDATE_SOURCE" "$candidate_env"
   set_candidate_identity "$candidate_env" "$CANDIDATE_REVISION" "$image_tag"
+  preflight_fresh_ports "$candidate_env"
   if ! validate_candidate_compose "$CANDIDATE_SOURCE" "$candidate_env" "$image_reference" \
     || ! build_candidate_image "$CANDIDATE_SOURCE" "$candidate_env" "$image_reference"; then
     cleanup_candidate_artifacts || warn "candidate artifacts require manual cleanup"
@@ -2943,7 +3232,8 @@ show_status() {
   compose_with "$INSTALL_DIR" "$ENV_FILE" ps
   case "$state" in
     running)
-      wait_for_health "$INSTALL_DIR" "$ENV_FILE" "$image_id" || die "health check failed"
+      wait_for_health "$INSTALL_DIR" "$ENV_FILE" "$image_id" \
+        || die "health check failed"
       log "health check passed"
       ;;
     stopped)

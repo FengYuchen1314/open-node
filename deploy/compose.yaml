@@ -21,7 +21,7 @@ services:
     tmpfs:
       - /tmp:rw,nosuid,noexec,size=64m,mode=1777
     ports:
-      - "${OPEN_NODE_BIND_ADDRESS:-127.0.0.1}:${OPEN_NODE_HTTP_PORT:-8080}:8080"
+      - "${OPEN_NODE_BIND_ADDRESS:-127.0.0.1}:${OPEN_NODE_HTTP_PORT:-62031}:62031"
     environment:
       OPEN_NODE_DATABASE_URL: ${OPEN_NODE_DATABASE_URL:-sqlite:////var/lib/open-node/open-node.db}
       OPEN_NODE_CONTROL_STATE_DIR: /var/lib/open-node

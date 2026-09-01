@@ -258,7 +258,7 @@ def main(job):
     if operation == "frontend":
         return frontend_assets()
     if operation == "spa":
-        connection = http.client.HTTPConnection("127.0.0.1", 8080, timeout=5)
+        connection = http.client.HTTPConnection("127.0.0.1", 62031, timeout=5)
         try:
             connection.request("GET", "/notifications", headers={"Accept": "text/html"})
             response = connection.getresponse()
@@ -272,7 +272,7 @@ def main(job):
             connection.close()
     if operation == "http":
         check(job["path"].startswith(("/api/v1/", "/healthz")), "http_path")
-        connection = http.client.HTTPConnection("127.0.0.1", 8080, timeout=5)
+        connection = http.client.HTTPConnection("127.0.0.1", 62031, timeout=5)
         try:
             body = None if job.get("body") is None else json.dumps(job["body"]).encode()
             check(body is None or len(body) <= 8192, "http_request_limit")
@@ -635,7 +635,7 @@ class Fixture:
         return self.decode_helper(response.stdout)
 
     def http(self, name: str, method: str, path: str, body=None, *, status=200):
-        headers = {"Content-Type": "application/json", "Origin": "http://127.0.0.1:8080",
+        headers = {"Content-Type": "application/json", "Origin": "http://127.0.0.1:62031",
                    "X-Open-Node-Client": "browser"}
         if self.cookie:
             headers.update({"Cookie": "open_node_session=" + self.cookie,

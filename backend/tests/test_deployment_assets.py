@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -13,7 +14,10 @@ def test_production_container_disables_uvicorn_access_log():
     command = json.loads(command_line.removeprefix("CMD "))
 
     assert command[:2] == ["uvicorn", "open_node.main:app"]
+    assert command[command.index("--port") + 1] == "62031"
     assert "--no-access-log" in command
+    assert "EXPOSE 62031" in dockerfile
+    assert "http://127.0.0.1:62031/healthz" in dockerfile
 
 
 def test_nginx_example_disables_access_logs_for_redirect_and_tls_servers():
@@ -91,7 +95,7 @@ def test_compose_defaults_to_loopback_but_allows_an_explicit_installer_bind():
     compose = yaml.safe_load((ROOT / "deploy/compose.yaml").read_text())
 
     assert compose["services"]["open-node"]["ports"] == [
-        "${OPEN_NODE_BIND_ADDRESS:-127.0.0.1}:${OPEN_NODE_HTTP_PORT:-8080}:8080"
+        "${OPEN_NODE_BIND_ADDRESS:-127.0.0.1}:${OPEN_NODE_HTTP_PORT:-62031}:62031"
     ]
     assert compose["services"]["open-node"]["image"] == (
         "${OPEN_NODE_IMAGE_REPOSITORY:-open-node}:${OPEN_NODE_IMAGE_TAG:-local}"
@@ -99,12 +103,37 @@ def test_compose_defaults_to_loopback_but_allows_an_explicit_installer_bind():
     assert "OPEN_NODE_BIND_ADDRESS=127.0.0.1" in (
         ROOT / "deploy/.env.example"
     ).read_text()
+    assert "OPEN_NODE_HTTP_PORT=62031" in (ROOT / "deploy/.env.example").read_text()
+
+
+def test_installer_manifest_v2_records_the_fixed_62031_runtime_contract():
+    installer = (ROOT / "install.sh").read_text()
+    manifest_check = installer[
+        installer.index("require_manifest() {") : installer.index(
+            "\nverify_active_identity() {"
+        )
+    ]
+    manifest_write = installer[
+        installer.index("write_manifest() {") : installer.index("\nwrite_recovery_marker() {")
+    ]
+
+    assert 'readonly MANIFEST_VERSION="2"' in installer
+    assert 'readonly RUNTIME_CONTAINER_PORT="62031"' in installer
+    assert 'readonly DEFAULT_PUBLIC_HTTPS_PORT="58090"' in installer
+    assert 'read_manifest_value DEPLOYED_RUNTIME_PORT' in manifest_check
+    assert '== "$RUNTIME_CONTAINER_PORT"' in manifest_check
+    assert "unsupported or damaged installer manifest" in manifest_check
+    assert "printf 'DEPLOYED_RUNTIME_PORT=%s\\n' \"$RUNTIME_CONTAINER_PORT\"" in manifest_write
 
 
 def test_managed_public_gateway_is_pinned_and_keeps_the_app_on_loopback():
     installer = (ROOT / "install.sh").read_text()
-    caddyfile = (ROOT / "deploy/Caddyfile").read_text()
     environment = (ROOT / "deploy/.env.example").read_text()
+    caddyfiles = {
+        "domain": (ROOT / "deploy/Caddyfile").read_text(),
+        "ip": (ROOT / "deploy/Caddyfile.ip").read_text(),
+        "dual": (ROOT / "deploy/Caddyfile.dual").read_text(),
+    }
 
     assert (
         'PUBLIC_GATEWAY_IMAGE="caddy:2.11.4-alpine@sha256:'
@@ -112,17 +141,67 @@ def test_managed_public_gateway_is_pinned_and_keeps_the_app_on_loopback():
         in installer
     )
     assert "OPEN_NODE_PUBLIC_HOSTNAME=" in environment
-    assert "admin off" in caddyfile
-    assert "{$OPEN_NODE_PUBLIC_HOSTNAME}" in caddyfile
-    assert "reverse_proxy 127.0.0.1:{$OPEN_NODE_UPSTREAM_PORT}" in caddyfile
-    assert "header_up X-Forwarded-For" not in caddyfile
-    assert "header_up X-Real-IP {remote_host}" in caddyfile
-    assert "health_uri /healthz" in caddyfile
-    assert "tls internal" not in caddyfile
+    assert "OPEN_NODE_PUBLIC_IP=auto" in environment
+    assert "OPEN_NODE_PUBLIC_HTTPS_PORT=58090" in environment
+    for caddyfile in caddyfiles.values():
+        assert "admin off" in caddyfile
+        assert "auto_https disable_redirects" in caddyfile
+        assert "issuer acme" in caddyfile
+        assert "dir https://acme-v02.api.letsencrypt.org/directory" in caddyfile
+        assert "disable_http_challenge" in caddyfile
+        assert "encode zstd gzip" in caddyfile
+        assert "-Server" in caddyfile
+        assert 'Strict-Transport-Security "max-age=31536000"' in caddyfile
+        assert "reverse_proxy 127.0.0.1:{$OPEN_NODE_UPSTREAM_PORT}" in caddyfile
+        assert "header_up X-Forwarded-For" not in caddyfile
+        assert "header_up X-Real-IP {remote_host}" in caddyfile
+        assert "health_uri /healthz" in caddyfile
+        assert "health_interval 30s" in caddyfile
+        assert "tls internal" not in caddyfile
+        assert "local_certs" not in caddyfile
+        assert "self_signed" not in caddyfile
+
+    assert "{$OPEN_NODE_PUBLIC_HOSTNAME}" in caddyfiles["domain"]
+    assert "OPEN_NODE_PUBLIC_IP_AUTHORITY" not in caddyfiles["domain"]
+    assert "profile shortlived" not in caddyfiles["domain"]
+    assert caddyfiles["domain"].count("reverse_proxy ") == 1
+
+    ip_site = "https://{$OPEN_NODE_PUBLIC_IP_AUTHORITY}:{$OPEN_NODE_PUBLIC_HTTPS_PORT}"
+    assert ip_site in caddyfiles["ip"]
+    assert "OPEN_NODE_PUBLIC_HOSTNAME" not in caddyfiles["ip"]
+    assert caddyfiles["ip"].count("profile shortlived") == 1
+    assert caddyfiles["ip"].count("reverse_proxy ") == 1
+
+    assert "{$OPEN_NODE_PUBLIC_HOSTNAME}" in caddyfiles["dual"]
+    assert ip_site in caddyfiles["dual"]
+    assert caddyfiles["dual"].count("issuer acme") == 2
+    assert caddyfiles["dual"].count("disable_http_challenge") == 2
+    assert caddyfiles["dual"].count("profile shortlived") == 1
+    assert "profile shortlived" not in caddyfiles["dual"].split(ip_site, 1)[0]
+    assert caddyfiles["dual"].count("reverse_proxy ") == 2
     assert "--network host" in installer
     assert "--read-only --init" in installer
     assert "--cap-drop ALL --cap-add NET_BIND_SERVICE" in installer
+    for variable in [
+        "OPEN_NODE_GATEWAY_MODE",
+        "OPEN_NODE_PUBLIC_HOSTNAME",
+        "OPEN_NODE_PUBLIC_IP_AUTHORITY",
+        "OPEN_NODE_PUBLIC_HTTPS_PORT",
+        "OPEN_NODE_UPSTREAM_PORT",
+    ]:
+        assert f'--env "{variable}=' in installer
     assert '--resolve "$hostname:443:127.0.0.1"' in installer
+
+    health_check = installer[
+        installer.index("public_gateway_endpoints_are_healthy() {") : installer.index(
+            "\nreconcile_public_gateway() {"
+        )
+    ]
+    assert "public_ip_url" in health_check
+    assert '--connect-to "$authority:$public_port:127.0.0.1:$public_port"' in health_check
+    assert '"$public_url/healthz"' in health_check
+    assert "curl -k" not in health_check
+    assert "--insecure" not in health_check
 
 
 def test_public_gateway_docker_policy_smoke_never_starts_its_fixture():
@@ -135,6 +214,46 @@ def test_public_gateway_docker_policy_smoke_never_starts_its_fixture():
     assert "public_gateway_container_is_safe 0" in source
     assert "public_gateway_volume_is_safe" in source
     assert "Refusing to remove" in source
+
+
+def test_backend_ci_uses_twelve_complete_file_level_shards():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    backend = workflow["jobs"]["backend"]
+    lint = workflow["jobs"]["backend-lint"]
+    runner = ROOT / "scripts/ci/run_backend_test_shard.py"
+
+    assert backend["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"shard": list(range(12))},
+    }
+    backend_commands = [step.get("run", "") for step in backend["steps"]]
+    assert any(
+        "run_backend_test_shard.py" in command
+        and "--shard-count 12" in command
+        and "--shard-index ${{ matrix.shard }}" in command
+        for command in backend_commands
+    )
+    assert all("ruff check" not in command for command in backend_commands)
+    assert sum("ruff check backend" in step.get("run", "") for step in lint["steps"]) == 1
+    all_commands = [
+        step.get("run", "")
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+    ]
+    assert sum("ruff check backend" in command for command in all_commands) == 1
+
+    result = subprocess.run(
+        [sys.executable, str(runner), "--check-only"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    test_file_count = len(list((ROOT / "backend/tests").rglob("test_*.py")))
+    assert f"{test_file_count} files across 12 shards" in result.stdout
+    assert "shard 0: 1 files" in result.stdout
+    assert "(test_inventory.py)" in result.stdout
 
 
 def test_github_installer_has_safe_lifecycle_defaults_and_valid_bash():

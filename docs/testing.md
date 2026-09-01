@@ -558,7 +558,8 @@ All tests for Open Node run on the VPS at `185.99.135.224` over SSH. Local work
 is limited to editing and static inspection.
 
 GitHub also runs the same repository-level language gates on every push and
-pull request through `.github/workflows/ci.yml`: backend Ruff/pytest, Agent
+pull request through `.github/workflows/ci.yml`: backend Ruff plus a deterministic
+12-way file-level pytest matrix, Agent
 Ruff/pytest/wheel build, frontend Vitest plus both the administrator and public
 Probe production bundles, and Probe Worker behavior tests/type checking.
 Actions are pinned to immutable revisions and receive only read access to

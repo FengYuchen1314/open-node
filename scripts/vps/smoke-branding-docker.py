@@ -241,7 +241,7 @@ def main(job):
     if operation in {"http", "spa"}:
         path = "/system-settings" if operation == "spa" else job["path"]
         check(path.startswith(("/api/v1/", "/healthz", "/system-settings")), "http_path")
-        connection = http.client.HTTPConnection("127.0.0.1", 8080, timeout=5)
+        connection = http.client.HTTPConnection("127.0.0.1", 62031, timeout=5)
         try:
             body = None if job.get("body") is None else json.dumps(job["body"]).encode()
             check(body is None or len(body) <= 8192, "http_request_limit")
@@ -632,7 +632,7 @@ class Fixture:
         status=200,
         anonymous=False,
         csrf=True,
-        origin="http://127.0.0.1:8080",
+        origin="http://127.0.0.1:62031",
     ) -> dict:
         headers = {
             "Content-Type": "application/json",

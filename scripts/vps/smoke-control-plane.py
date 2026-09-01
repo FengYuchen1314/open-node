@@ -131,7 +131,7 @@ def hardening(deployment):
     assert "ALL" in info["HostConfig"]["CapDrop"]
     assert "no-new-privileges:true" in info["HostConfig"]["SecurityOpt"]
     assert info["HostConfig"]["Init"] and not info["HostConfig"]["Privileged"]
-    assert info["HostConfig"]["PortBindings"]["8080/tcp"][0]["HostIp"] == "127.0.0.1"
+    assert info["HostConfig"]["PortBindings"]["62031/tcp"][0]["HostIp"] == "127.0.0.1"
     assert info["State"]["Health"]["Status"] == "healthy"
     assert all(mount["Type"] != "bind" for mount in info["Mounts"])
     assert deployment.volume().stat().st_uid == 10001
@@ -243,7 +243,7 @@ def run(tag, nginx, output, agent_python, archive):
             "/etc/letsencrypt/live/panel.example.com/privkey.pem", str(work / "key.pem")
         )
         template = template.replace("panel.example.com", "localhost")
-        template = template.replace("http://127.0.0.1:8080", plain)
+        template = template.replace("http://127.0.0.1:62031", plain)
         config = work / "nginx.conf"
         temporary_paths = "\n".join(
             f"{kind}_temp_path {work}/{kind};"

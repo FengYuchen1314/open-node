@@ -422,7 +422,7 @@ def assert_rendered_fixture_namespace(
     } != {
         "host_ip": "127.0.0.1",
         "published": str(port),
-        "target": 8080,
+        "target": 62031,
         "protocol": "tcp",
     }:
         raise SmokeFailure(f"candidate published outside the fixture endpoint: {published!r}")
@@ -505,7 +505,7 @@ class GitFixture:
             dockerfile_source = dockerfile.read_text()
             expected = (
                 'CMD ["uvicorn", "open_node.main:app", "--host", "0.0.0.0", '
-                '"--port", "8080", "--proxy-headers", "--no-access-log"]'
+                '"--port", "62031", "--proxy-headers", "--no-access-log"]'
             )
             if expected not in dockerfile_source:
                 raise SmokeFailure("fixture could not locate the production Docker CMD")
@@ -632,6 +632,7 @@ class InstallerFixture:
             "OPEN_NODE_PROJECT_NAME": self.project,
             "OPEN_NODE_IMAGE_REPOSITORY": self.image_repository,
             "OPEN_NODE_HTTP_PORT": str(self.port),
+            "OPEN_NODE_PUBLIC_IP": "off",
             "OPEN_NODE_AUTO_INSTALL_DEPENDENCIES": "0",
             "OPEN_NODE_BUILD_PULL": "0",
             "OPEN_NODE_CREATE_ADMIN": "1",
@@ -1598,7 +1599,7 @@ print(json.dumps({
                 "--mount",
                 f"type=volume,src={restore_volume},dst=/var/lib/open-node",
                 "--publish",
-                f"127.0.0.1:{restore_port}:8080",
+                f"127.0.0.1:{restore_port}:62031",
                 rollback_image,
             )
             wait_health(restore_url)

@@ -84,6 +84,7 @@ def prepare_environment(repository, destination):
     content = (repository / "deploy/.env.example").read_text()
     replacements = {
         "OPEN_NODE_TRUSTED_PROXIES=": "OPEN_NODE_TRUSTED_PROXIES=*",
+        "OPEN_NODE_PUBLIC_IP=auto": "OPEN_NODE_PUBLIC_IP=1.1.1.1",
         "OPEN_NODE_PUBLIC_HOSTNAME=": "OPEN_NODE_PUBLIC_HOSTNAME=panel.example.com",
         "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL=": (
             "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL=https://panel.example.com"
@@ -143,13 +144,19 @@ def fixture_container_command(repository, project, container, volume, environmen
         "--label",
         "com.open-node.installer.purpose=public-gateway",
         "--env",
+        "OPEN_NODE_GATEWAY_MODE=dual",
+        "--env",
         "OPEN_NODE_PUBLIC_HOSTNAME=panel.example.com",
         "--env",
-        "OPEN_NODE_UPSTREAM_PORT=8080",
+        "OPEN_NODE_PUBLIC_IP_AUTHORITY=1.1.1.1",
+        "--env",
+        "OPEN_NODE_PUBLIC_HTTPS_PORT=58090",
+        "--env",
+        "OPEN_NODE_UPSTREAM_PORT=62031",
         "--mount",
         f"type=volume,src={volume},dst=/data",
         "--mount",
-        f"type=bind,src={repository / 'deploy/Caddyfile'},dst=/etc/caddy/Caddyfile,readonly",
+        f"type=bind,src={repository / 'deploy/Caddyfile.dual'},dst=/etc/caddy/Caddyfile,readonly",
         "--tmpfs",
         "/config:rw,nosuid,noexec,size=16m,mode=0700",
         "--tmpfs",
@@ -233,7 +240,9 @@ def main():
     require(
         repository.is_dir()
         and not repository.is_symlink()
-        and (repository / "deploy/Caddyfile").is_file(),
+        and (repository / "deploy/Caddyfile").is_file()
+        and (repository / "deploy/Caddyfile.ip").is_file()
+        and (repository / "deploy/Caddyfile.dual").is_file(),
         "Repository does not contain the public gateway deployment asset",
     )
     require(not output.is_symlink(), "Output must not be a symbolic link")

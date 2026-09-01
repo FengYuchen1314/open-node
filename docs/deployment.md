@@ -1,7 +1,7 @@
 # Control Plane Deployment
 
 The root Dockerfile builds React/Ant Design assets and installs FastAPI in one
-image. FastAPI serves both the application and API on port 8080; Node and Vite
+image. FastAPI serves both the application and API on container port 62031; Node and Vite
 are build tools, not production services. No activation or paid license is
 required. This package is usable for the implemented workflows, not a claim
 that every MMWX migration gate is complete. See [migration-map.md](migration-map.md).
@@ -10,9 +10,11 @@ that every MMWX migration gate is complete. See [migration-map.md](migration-map
 
 - A Linux Docker host with Docker Compose v2, Git, and outbound access to
   Docker Hub, npm, PyPI, GitHub, and the selected ACME/DNS services.
-- For managed public access: a hostname whose A/AAAA records already point to
-  this host, free inbound TCP ports 80/443, and outbound access to public ACME.
-  Hosts with an existing edge proxy should keep using the manual mode below.
+- For the fresh managed-public default: an operator-controlled public IPv4 or
+  IPv6, free inbound TCP 443 and the IP HTTPS service port (58090 by default),
+  and outbound access to public ACME. TCP 443 is used by TLS-ALPN-01; TCP 80 is
+  not required. A DNS hostname is optional. Hosts with an existing edge proxy
+  should keep using the manual mode below.
 - Backups on a private filesystem outside the application's volume.
 
 The shipped setup uses one backend process, either one host-local SQLite database or one
@@ -35,6 +37,13 @@ On a new Debian or Ubuntu Docker host, run:
   sudo bash "$installer"
 )
 ```
+
+On a fresh installer identity, omitted `OPEN_NODE_PUBLIC_IP` means `auto`. The
+installer discovers the actual public IPv4 or IPv6, persists the resolved
+literal, obtains a trusted short-lived certificate, and reports
+`https://IP:58090` (bracketing IPv6) only after the public gateway passes its
+certificate and health checks. The application itself remains available only
+at host loopback `127.0.0.1:62031`, mapped to container port `62031`.
 
 The anonymous Raw URL and public `main` clone were validated on 2026-08-30 in an
 unused Debian 12 VPS namespace. The release check covered fresh installation,
@@ -92,23 +101,27 @@ The installer performs these bounded actions:
    transaction-unique `source-<revision>-<transaction>` image, starts it without
    rebuilding, and verifies that the container uses the recorded image ID, has
    the requested published binding, and passes `/healthz`; and
-5. by default, prints a 30-minute one-use credential for
+5. for an enabled managed-public identity, provisions pinned Caddy, validates
+   TLS-ALPN-01 on TCP 443 and the trusted canonical HTTPS health endpoint without
+   falling back to HTTP, a self-signed certificate, or private-only success; and
+6. by default, prints a 30-minute one-use credential for
    [browser initialization](initial-setup.md). An explicit private password file
    retains terminal provisioning. `OPEN_NODE_CREATE_ADMIN=1` retains the
    interactive `/dev/tty` password flow; `0` skips administrator initialization.
 
-When `OPEN_NODE_PUBLIC_HOSTNAME` is supplied, the installer also pins the official
-Caddy image by digest, keeps the application on loopback, configures secure cookies,
-proxy trust and the Agent public URL, starts a hardened host-network HTTPS gateway,
-and waits for a trusted SNI health check before printing success. The complete
-operator flow is in [公网一键部署](public-deployment.md).
+The fresh public-IP default pins the official Caddy image by digest, configures
+secure cookies, exact proxy trust and the canonical Agent public URL, and starts
+a hardened host-network HTTPS gateway. Supplying an optional
+`OPEN_NODE_PUBLIC_HOSTNAME` adds the hostname entry and makes
+`https://hostname` canonical while retaining the IP URL. The complete operator
+flow is in [公网一键部署](public-deployment.md).
 
-The default listener is `127.0.0.1:8080` and the initial loopback/SSH-tunnel
-cookie setting is HTTP-compatible. From your workstation, open a tunnel and
-then visit `http://127.0.0.1:8080`:
+The fresh application listener is `127.0.0.1:62031`. If managed public access
+was explicitly disabled, open a tunnel from your workstation and then visit
+`http://127.0.0.1:62031`:
 
 ```bash
-ssh -L 8080:127.0.0.1:8080 root@SERVER_IP
+ssh -L 62031:127.0.0.1:62031 root@SERVER_IP
 ```
 
 For unattended installation, put the administrator password in a root-owned
@@ -188,12 +201,41 @@ Useful unattended overrides include `OPEN_NODE_REF`,
 `OPEN_NODE_DATABASE_BACKEND` (fresh install only),
 `OPEN_NODE_HTTP_PORT`, `OPEN_NODE_INSTALL_DIR`, `OPEN_NODE_CONFIG_DIR`,
 `OPEN_NODE_BACKUP_DIR`, `OPEN_NODE_PROJECT_NAME`, and
+`OPEN_NODE_PUBLIC_IP`, `OPEN_NODE_PUBLIC_HTTPS_PORT`, and
 `OPEN_NODE_PUBLIC_HOSTNAME`. A public plain-HTTP bind
 requires both `OPEN_NODE_BIND_ADDRESS=0.0.0.0` and the explicit
 `OPEN_NODE_ALLOW_PUBLIC_HTTP=1` opt-in; it is not the recommended production
 topology. For a custom proxy, set
 `OPEN_NODE_SESSION_COOKIE_SECURE=true` and configure the exact trusted proxy as
 described below.
+
+### Managed public IP and optional hostname
+
+`OPEN_NODE_PUBLIC_IP` accepts exactly `auto`, `off`, or a public IPv4/IPv6
+literal. Fresh install defaults to `auto`, resolves it, and stores the literal
+result. `OPEN_NODE_PUBLIC_HTTPS_PORT` controls the IP HTTPS endpoint and
+defaults to 58090.
+
+`OPEN_NODE_PUBLIC_HOSTNAME` remains optional and contains only a lowercase
+ASCII/punycode hostname, without scheme, port, path, credentials, query or
+fragment. If present, `https://hostname` is the canonical control-plane URL and
+the IP URL remains a secondary entry. Without it, the canonical URL is
+`https://IP:<public-https-port>`.
+
+IP and hostname are independent entries. To close every managed public entry,
+both values must be explicit:
+
+```bash
+sudo env OPEN_NODE_PUBLIC_IP=off OPEN_NODE_PUBLIC_HOSTNAME= \
+  bash /path/to/reviewed/install.sh update
+```
+
+Managed issuance always requires reachable TCP 443 for TLS-ALPN-01. It does not
+require TCP 80. The configured IP HTTPS service port (58090 by default) must
+also be reachable for the IP URL. Discovery, challenge, certificate, canonical
+URL or health failure aborts the operation; the installer does not silently
+downgrade to plaintext, a local certificate, a different public identity or a
+private-only success.
 
 This installer deliberately targets a new or already installer-managed,
 single-host Docker deployment using SQLite or the pinned managed PostgreSQL service. It does not adopt an existing manual
@@ -204,7 +246,8 @@ embedded Nginx, Windows, rootless Docker, multi-host or multi-worker operation.
 
 ### Enable panel-issued Agent commands
 
-Managed public installation sets this value automatically to its HTTPS hostname.
+Managed public installation sets this value automatically to its canonical
+HTTPS URL: the hostname when configured, otherwise the IP URL with its port.
 With a custom trusted HTTPS reverse proxy, supply the canonical control-plane
 URL to the reviewed root installer. For an existing **installer-managed**
 deployment:
@@ -239,7 +282,8 @@ Do not hand-edit the installer's environment or manifest. Manual Compose
 deployments may set the same key in their own private environment and recreate
 the reviewed service; the root installer still refuses to adopt them. The
 setting alone neither creates HTTPS infrastructure nor installs Agents automatically.
-Only `OPEN_NODE_PUBLIC_HOSTNAME` enables the managed Caddy workflow.
+Managed Caddy is enabled by at least one of an active `OPEN_NODE_PUBLIC_IP` or a
+non-empty `OPEN_NODE_PUBLIC_HOSTNAME`.
 See [panel-issued Agent installation](agent-bootstrap.md) for its new-host
 scope, secret handling and recovery rules.
 
@@ -280,7 +324,7 @@ sudo python3 scripts/vps/smoke-installer-bootstrap-setting.py \
 The public-gateway policy smoke creates a UUID-named Caddy container with
 `docker create` but never starts it. It checks the installer's exact image,
 command, capability, host-network, read-only, tmpfs, mount, label and volume
-policy, including safe removal after a hostname change, then removes only the
+policy, including safe IP/hostname transitions and removal, then removes only the
 verified fixture resources:
 
 ```bash
@@ -307,7 +351,7 @@ file private and outside version control. Then run from the repository root:
 docker compose --env-file deploy/.env -f deploy/compose.yaml build
 docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --no-build --wait
 docker compose --env-file deploy/.env -f deploy/compose.yaml exec open-node open-node-admin create
-curl --fail http://127.0.0.1:8080/healthz
+curl --fail http://127.0.0.1:62031/healthz
 ```
 
 For a manual PostgreSQL deployment, generate and store a private alphanumeric password, set
@@ -462,9 +506,10 @@ and proxy configuration alongside the backup. Prefer retaining the exact
 image artifact (`docker image save`) to rebuilding an old source revision.
 
 For restoration of that manual **SQLite** archive, use a fresh, uniquely named Compose project and an unused
-loopback port. Create a separate `deploy/.env.restore` with the original
-image tag, a different `OPEN_NODE_HTTP_PORT`, and an initially empty trusted
-proxy value. Do not change the running deployment's environment file.
+loopback port. Create a separate `deploy/.env.restore` with the original image
+tag, an explicitly selected `OPEN_NODE_HTTP_PORT`, and an initially empty
+trusted proxy value. The restore file must contain the port; do not rely on the
+normal 62031 default or copy the production port. Do not change the running deployment's environment file.
 Create the new project's empty volume without starting the service, then
 restore your trusted archive:
 
@@ -518,14 +563,16 @@ recovery. Bundles are never silently overwritten or pruned.
 #### Restore an installer PostgreSQL recovery bundle
 
 This procedure is for a trusted bundle created by `backup_stopped_volume`, not a Web v1 package.
-It deliberately creates a unique Compose project, two new empty volumes, an unused loopback port
+It deliberately creates a unique Compose project, two new empty volumes, a required operator-selected
+unused loopback port
 and an internal-only Docker network. It never edits the installed environment or names the
 production project/volumes. Use the exact image ID and revision recorded in the bundle; if the
 image is no longer in the Docker store, first load the separately retained `docker image save`
 archive and verify that it produces that ID.
 
-Run as root in Bash. Replace only `DR_BUNDLE` and, if necessary, `DR_PORT`. Do not point
-`DR_BUNDLE` at a directory that is writable by untrusted users. `SHA256SUMS` detects damaged or
+Run as root in Bash. Replace `DR_BUNDLE` and export a required, unused
+`OPEN_NODE_RESTORE_HTTP_PORT`; there is intentionally no restore-port default.
+Do not point `DR_BUNDLE` at a directory that is writable by untrusted users. `SHA256SUMS` detects damaged or
 changed bundle members but is not a signature, so the bundle source must already be trusted.
 
 ```bash
@@ -533,7 +580,8 @@ set -euo pipefail
 umask 077
 
 DR_BUNDLE=/var/backups/open-node/open-node-REPLACE-ME
-DR_PORT=18081
+: "${OPEN_NODE_RESTORE_HTTP_PORT:?Select an unused loopback restore port}"
+DR_PORT="$OPEN_NODE_RESTORE_HTTP_PORT"
 DR_PROJECT="open-node-dr-$(date -u +%Y%m%d%H%M%S)-$$"
 DR_ROOT="$(mktemp -d /var/tmp/open-node-dr.XXXXXX)"
 DR_ENV="$DR_ROOT/open-node.env"
@@ -579,6 +627,8 @@ mkdir -m 0700 "$DR_ROOT/maintenance"
   printf 'OPEN_NODE_BIND_ADDRESS=127.0.0.1\n'
   printf 'OPEN_NODE_HTTP_PORT=%s\n' "$DR_PORT"
   printf 'OPEN_NODE_TRUSTED_PROXIES=\n'
+  printf 'OPEN_NODE_PUBLIC_IP=off\n'
+  printf 'OPEN_NODE_PUBLIC_HTTPS_PORT=58090\n'
   printf 'OPEN_NODE_PUBLIC_HOSTNAME=\n'
   printf 'OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL=\n'
   printf 'OPEN_NODE_APPLICATION_UPDATE_HOST_DIR=%s\n' "$DR_ROOT/maintenance"

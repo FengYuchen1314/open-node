@@ -8,15 +8,20 @@
 
 ## 安装与打开页面
 
-默认 GitHub 安装脚本会在服务通过健康检查后显示初始化凭证，有效期 30 分钟。
-通过 SSH 隧道打开面板，或使用[公网一键部署](public-deployment.md)已经验证的
-可信 HTTPS 地址。默认端口的隧道示例：
+默认 GitHub 安装脚本会在应用和受管公网 HTTPS 都通过检查后显示初始化凭证，
+有效期 30 分钟。全新安装默认地址是 `https://<公网 IP>:58090`；IPv6 地址使用
+方括号。若安装时提供了可选 `OPEN_NODE_PUBLIC_HOSTNAME`，域名 HTTPS 地址成为
+canonical URL，IP HTTPS 地址仍可使用。
+
+明确以 `OPEN_NODE_PUBLIC_IP=off` 关闭 IP 入口，或同时设置
+`OPEN_NODE_PUBLIC_IP=off OPEN_NODE_PUBLIC_HOSTNAME=` 关闭全部受管公网入口时，
+可通过 SSH 隧道访问宿主回环端口。宿主/容器端口均为 `62031`：
 
 ```bash
-ssh -L 8080:127.0.0.1:8080 root@SERVER_IP
+ssh -L 62031:127.0.0.1:62031 root@SERVER_IP
 ```
 
-随后访问 `http://127.0.0.1:8080`。填写终端凭证、管理员用户名、密码、资料及站点名称，
+随后访问 `http://127.0.0.1:62031`。填写终端凭证、管理员用户名、密码、资料及站点名称，
 勾选新安装确认后提交。用户名为 1–64 个英文字母、数字或 `_.@-`；密码为
 12–1024 个 Unicode 字符，首尾空格原样保留。浏览器标题最多 80 个字符，
 品牌文字最多 40 个字符，均为纯文本。
@@ -84,4 +89,5 @@ docker compose exec -T open-node open-node-admin prepare-setup
 上传本项目 v1 age/明文备份；准备成功后由容器重启激活，再使用备份中的管理员复核。
 恢复不会先创建空管理员，并使初始化凭证失效。完整边界见
 [浏览器/离线恢复及首次启动复核](backups.md)。PostgreSQL 配置和 DNS 账户配置仍未包含。
-主控 HTTPS 可由根安装器在域名解析就绪后接入。
+浏览器内恢复复用当前已验证入口；另建 Compose 项目进行离线恢复时必须显式提供一个
+未占用的 `OPEN_NODE_RESTORE_HTTP_PORT`，不会继承 62031、58090 或生产端口。

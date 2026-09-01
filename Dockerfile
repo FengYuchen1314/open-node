@@ -54,8 +54,8 @@ COPY --chmod=755 scripts/container/entrypoint.sh /usr/local/bin/open-node-entryp
 WORKDIR /opt/open-node
 USER 10001:10001
 VOLUME ["/var/lib/open-node"]
-EXPOSE 8080
+EXPOSE 62031
 HEALTHCHECK --interval=20s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:62031/healthz', timeout=3).read()"]
 ENTRYPOINT ["open-node-entrypoint"]
-CMD ["uvicorn", "open_node.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--no-access-log"]
+CMD ["uvicorn", "open_node.main:app", "--host", "0.0.0.0", "--port", "62031", "--proxy-headers", "--no-access-log"]

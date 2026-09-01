@@ -18,12 +18,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend
+  backend-lint:
+    name: Backend lint
     runs-on: ubuntu-24.04
-    # The expanded integration suite exceeded the previous 60-minute cutoff
-    # without reporting a test failure on the hosted runner.
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -36,7 +34,30 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e "backend[dev]"
       - run: ruff check backend
-      - run: pytest backend/tests
+
+  backend:
+    name: Backend shard ${{ matrix.shard }}/11
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e "backend[dev]"
+      - run: >-
+          python scripts/ci/run_backend_test_shard.py
+          --shard-count 12
+          --shard-index ${{ matrix.shard }}
 
   postgresql:
     name: PostgreSQL
@@ -68,7 +89,6 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e "backend[dev]"
-      - run: ruff check backend/tests/test_backup_postgres.py backend/tests/test_postgres_security.py backend/tests/test_postgres_integration.py
       - run: pytest -q backend/tests/test_backup_postgres.py backend/tests/test_postgres_security.py backend/tests/test_postgres_integration.py
         env:
           OPEN_NODE_TEST_POSTGRES_URL: postgresql+psycopg://open_node:0123456789abcdef0123456789abcdef@127.0.0.1:5432/open_node?sslmode=disable
@@ -138,3 +158,34 @@ jobs:
         working-directory: probe-worker
       - run: npm run typecheck
         working-directory: probe-worker
+
+  deployment:
+    name: Deployment smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Validate Compose configuration
+        run: docker compose --env-file deploy/.env.example --file deploy/compose.yaml config --quiet
+      - name: Validate managed Caddy configurations
+        env:
+          CADDY_IMAGE: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+        run: |
+          docker pull "$CADDY_IMAGE"
+          for config in Caddyfile Caddyfile.ip Caddyfile.dual; do
+            docker run --rm \
+              --env OPEN_NODE_PUBLIC_HOSTNAME=panel.example.com \
+              --env OPEN_NODE_PUBLIC_IP_AUTHORITY=1.1.1.1 \
+              --env OPEN_NODE_PUBLIC_HTTPS_PORT=58090 \
+              --env OPEN_NODE_UPSTREAM_PORT=62031 \
+              --mount "type=bind,src=$PWD/deploy/$config,dst=/etc/caddy/Caddyfile,readonly" \
+              "$CADDY_IMAGE" caddy validate \
+              --config /etc/caddy/Caddyfile --adapter caddyfile
+          done
+      - name: Exercise exact gateway Docker policy
+        run: >-
+          sudo -n python3 scripts/vps/smoke-installer-public-gateway.py
+          --repository "$GITHUB_WORKSPACE"
+          --output "$RUNNER_TEMP/open-node-gateway-smoke"

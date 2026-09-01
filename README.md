@@ -180,16 +180,14 @@ headers, optional IPinfo-backed GeoIP country filters, and server-side `mmw` inl
 The root Dockerfile and [Compose deployment](docs/deployment.md) build a
 single non-root image containing FastAPI, the React production frontend, and
 pinned lego. The deployment guide covers HTTPS, administrator initialization,
-private persistent storage, backup/restore, upgrades, and explicit rollback.
-No development server is needed. The hardened `cb1eb0c` baseline now runs on
-the VPS as the persistent Compose deployment, managed by an enabled and active
-systemd unit. It binds only to `127.0.0.1:8000` and is accessed as an
-SSH-tunneled Preview. Backup, restart, Compose down/up, and isolated restore
-have been verified against the deployed state. That persistent production
-instance has not been upgraded and remains an SSH-tunneled Preview. The published
-installer now has a separate [managed public deployment](docs/public-deployment.md)
-mode: the operator supplies a prepared DNS hostname and open ports 80/443, while
-the installer provisions pinned Caddy, trusted HTTPS and the reverse proxy.
+private persistent storage, backup/restore, updates, and explicit recovery.
+No development server is needed. The root installer targets a fresh Debian or
+Ubuntu Docker host; its [managed public deployment](docs/public-deployment.md)
+mode is the default for a fresh installer identity.
+A fresh installer identity discovers and persists its public IP by default,
+provisions pinned Caddy and serves trusted `https://IP:58090`; a DNS hostname is
+optional. Public certificate validation uses TLS-ALPN-01 on TCP 443 and does not
+require port 80.
 Remaining product boundaries still apply; this is not yet full MMWX parity.
 
 The root installer is published on `main`. On 2026-08-30, the anonymous Raw
@@ -216,6 +214,13 @@ The public command downloads the script completely before running it:
 )
 ```
 
+For a fresh installation, omitted `OPEN_NODE_PUBLIC_IP` means `auto`: the
+installer confirms the actual public IPv4 through two independent HTTPS services, persists the literal value,
+and verifies trusted HTTPS before reporting success. The application container
+and host-loopback upstream both use port `62031`; Caddy exposes the IP endpoint
+on `58090` by default. The canonical URL is `https://IP:58090` (with brackets
+around IPv6).
+
 SQLite remains the default. A fresh host can select the pinned official PostgreSQL 15
 service, with a generated private password and no published database port, by running the
 same downloaded installer as
@@ -226,16 +231,17 @@ arbitrary cross-schema-version dump recovery is not promised. Before serving or 
 dedicated database role is verified as non-superuser with only the `CREATEDB` maintenance
 capability needed for isolated staging-database switching.
 
-For a fresh public deployment whose DNS already points to the host, pass the
-hostname to the same command as
-`sudo env OPEN_NODE_PUBLIC_HOSTNAME=panel.example.com bash "$installer"`.
-The application remains on loopback; the installer pins and hardens the official
-Caddy image, obtains and verifies trusted HTTPS, and configures the same public
-URL for new Agent commands. See the linked public-deployment guide before running
-it because ports 80/443 and correct A/AAAA records are prerequisites.
-
-The secure default binds the panel to `127.0.0.1:8080`; use an SSH tunnel for
-browser initialization. By default the installer prints a one-use setup
+An optional DNS hostname can be added with
+`sudo env OPEN_NODE_PUBLIC_HOSTNAME=panel.example.com bash "$installer"` after
+its A/AAAA records point to the host. The hostname becomes the canonical HTTPS
+URL for the panel and new Agent commands while the IP URL remains available.
+`OPEN_NODE_PUBLIC_IP` accepts `auto`, `off`, or a public IPv4/IPv6 literal, and
+`OPEN_NODE_PUBLIC_HTTPS_PORT` overrides the fresh default `58090`. Managed
+issuance requires reachable TCP 443 for TLS-ALPN-01 plus the configured IP HTTPS
+service port; TCP 80 is not required. Existing edge proxies remain a manual mode.
+The secure application upstream binds only to `127.0.0.1:62031`; use that
+loopback port through an SSH tunnel when managed public access is explicitly
+disabled. By default the installer prints a one-use setup
 credential; `setup` renews it if needed. Explicit terminal creation still reads
 from `/dev/tty`; unattended provisioning can use a root-owned private password
 file. The same script accepts `update`, `status`, `uninstall`, `setup`, and `create-admin`.
@@ -243,6 +249,12 @@ Updates create a stopped-volume recovery bundle before starting a candidate;
 an unhealthy candidate can leave recovery explicitly required rather than
 restart an older image against possibly migrated data. Uninstall preserves the
 named data volume, source, configuration, installer state, images, and backups.
+The browser/offline restored-instance template and the PostgreSQL recovery
+example each require an explicitly selected unused `OPEN_NODE_RESTORE_HTTP_PORT`;
+they do not inherit 62031, 58090, or a production port. A failed public-IP
+discovery, TLS-ALPN validation, certificate check, or health check fails closed
+instead of downgrading to HTTP, a self-signed
+certificate, or private-only success.
 Installer-managed official `main` deployments on a systemd host also expose a
 Chinese [administrator application-update panel](docs/application-updates.md).
 The container writes only a bounded request into a dedicated sticky directory;
@@ -254,8 +266,9 @@ The convenience URL above follows mutable `main`: it neither pins the bootstrap
 script nor cryptographically binds it to the subsequently cloned ref. Review
 and pin both inputs (for example, a commit-specific raw script URL and a reviewed
 release ref) when that supply-chain property matters. Managed public HTTPS still
-requires operator-owned DNS and reachable ports; an existing custom edge remains
-a manual deployment. See
+requires an operator-controlled public IP, reachable TCP 443 and the configured
+IP HTTPS port. Operator-owned DNS is required only when the optional hostname is
+enabled; an existing custom edge remains a manual deployment. See
 [control-plane deployment](docs/deployment.md) for the exact commands, manifest
 rules, non-interactive secret cleanup, update/recovery semantics, maintainer VPS
 smoke prerequisites, and installer support boundary.
@@ -290,9 +303,10 @@ observe the Agent connecting. It uses a ten-minute single-host ticket, checks
 the installer and versioned release hashes, and installs a dedicated non-root
 Agent with official Xray. Real WebSocket and HTTP installations, traffic and
 replay/reinstallation refusal have passed on the VPS. Configure the canonical
-HTTPS control-plane URL first. The managed public mode can provision Caddy/TLS
-after DNS is ready; it does not manage DNS, migrate an existing host, install
-fork-only protocols or add public proxy inbounds.
+HTTPS control-plane URL first. Fresh managed deployment can provision Caddy/TLS
+directly for its public IP; an optional verified hostname becomes canonical.
+It does not manage DNS, migrate an existing host, install fork-only protocols or
+add public proxy inbounds.
 The root control-plane installer and the panel's remote-host command are
 separate entry points. Neither makes the whole project feature-complete.
 

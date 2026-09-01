@@ -18,7 +18,7 @@ services:
       OPEN_NODE_SHORT_LINKS_ENABLED: ${OPEN_NODE_SHORT_LINKS_ENABLED:-false}
       FORWARDED_ALLOW_IPS: ${OPEN_NODE_TRUSTED_PROXIES:-}
     ports:
-      - "127.0.0.1:${OPEN_NODE_RESTORE_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${OPEN_NODE_RESTORE_HTTP_PORT:?Select an unused loopback restore port}:62031"
     volumes:
       - type: bind
         source: ${OPEN_NODE_RESTORE_DATA_DIR:?Select the NEW restored directory}

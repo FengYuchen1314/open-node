@@ -3,10 +3,11 @@
 	auto_https disable_redirects
 }
 
-{$OPEN_NODE_PUBLIC_HOSTNAME} {
+https://{$OPEN_NODE_PUBLIC_IP_AUTHORITY}:{$OPEN_NODE_PUBLIC_HTTPS_PORT} {
 	tls {
 		issuer acme {
 			dir https://acme-v02.api.letsencrypt.org/directory
+			profile shortlived
 			disable_http_challenge
 		}
 	}
