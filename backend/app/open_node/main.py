@@ -23,6 +23,8 @@ from open_node.core.config import Settings, get_settings
 from open_node.domain.announcements import ANNOUNCEMENT_MESSAGES, AnnouncementError
 from open_node.domain.appearance import MESSAGES as APPEARANCE_MESSAGES
 from open_node.domain.appearance import AppearanceError
+from open_node.domain.application_updates import MESSAGES as APPLICATION_UPDATE_MESSAGES
+from open_node.domain.application_updates import ApplicationUpdateError
 from open_node.domain.branding import BRANDING_ERROR_MESSAGES, BrandingError
 from open_node.domain.initial_setup import SETUP_MESSAGES, InitialSetupError
 from open_node.domain.inventory import AgentCommandPayloadError
@@ -32,6 +34,7 @@ from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.announcements import AnnouncementStore
 from open_node.services.appearance import AppearanceStore
+from open_node.services.application_updates import ApplicationUpdateStore
 from open_node.services.auth import AuthStore
 from open_node.services.backup_authorization import BackupAuthorizationError, BackupAuthorizer
 from open_node.services.backup_coordination import BackupWriteBarrier
@@ -187,6 +190,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                     active_settings.api_prefix + "/system-settings/appearance",
                     active_settings.api_prefix + "/appearance",
                     active_settings.api_prefix + "/announcements",
+                    active_settings.api_prefix + "/application-update",
                     active_settings.api_prefix + "/account/announcements",
                     active_settings.api_prefix + "/branding",
                 )
@@ -271,6 +275,21 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             content={
                 "code": exc.code,
                 "detail": ANNOUNCEMENT_MESSAGES[exc.code],
+                "license_required": False,
+            },
+            headers=headers,
+        )
+
+    @app.exception_handler(ApplicationUpdateError)
+    async def application_update_error(_request, exc):
+        headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+        if exc.status_code == 429:
+            headers["Retry-After"] = "60"
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "detail": APPLICATION_UPDATE_MESSAGES[exc.code],
                 "license_required": False,
             },
             headers=headers,
@@ -436,6 +455,12 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             raise ValueError("Notification secrets require a separate, non-overlapping directory")
     app.state.inventory.create_schema()
     app.state.announcements = AnnouncementStore(app.state.inventory)
+    app.state.application_updates = ApplicationUpdateStore(
+        active_settings.application_update_dir,
+        active_settings.source_revision,
+        active_settings.application_update_state_owner_uid,
+        active_settings.application_update_state_group_gid,
+    )
     try:
         app.state.announcements.create_schema()
     except AnnouncementError:

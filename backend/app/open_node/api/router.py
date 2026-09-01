@@ -7,6 +7,7 @@ from open_node.api.routes import (
     agents,
     announcements,
     appearance,
+    application_updates,
     auth,
     backups,
     branding,
@@ -41,6 +42,7 @@ private_router = APIRouter(
 )
 private_router.include_router(servers.router)
 private_router.include_router(announcements.router)
+private_router.include_router(application_updates.router)
 private_router.include_router(backups.router)
 private_router.include_router(agent_bootstrap.router)
 private_router.include_router(branding.router)

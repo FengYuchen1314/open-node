@@ -8,6 +8,20 @@
 导入/接管或 Telegram Bot/Mini App，也不把它们列为交付阻塞。保留此前已实现的代码，
 不因范围调整删除用户数据或已有功能。下文旧批次中的 Bot、完整迁移等优先级已失效。
 
+本轮已完成网页内应用更新候选。管理员在中文系统设置页检查官方 `main`、核对完整目标
+提交并确认短暂停机；Web 只写固定 JSON 请求，不挂载 Docker socket、源码、宿主配置或
+备份。root-owned systemd 助手重新查询官方提交后调用现有 `install.sh update`，继续执行
+fast-forward、停止数据卷备份、唯一候选镜像、健康检查和恢复标记。手工 Compose、
+自定义仓库/分支及非 systemd 主机明确显示不可用并保留 CLI。设计和官方固定源码差异见
+[application-updates.md](application-updates.md)。
+
+VPS `/tmp/open-node-app-update.2T4ehP/repo` 已通过 Ruff、后端 15 项、安装器 41 项、前端
+29 项、类型检查和生产构建。完整安装器烟测第二轮 `on-inst-5b3a3effa4f8` 通过全部安装、
+目标绑定、备份、失败隔离、恢复、卸载重装和清理场景；首轮在磁盘只剩约 1 GiB 时登录
+写会话返回 500，清理旧测试依赖后同点通过。固定助手还以 root 消费运行 UID 的请求并
+查询公开 `main`，状态所有权和权限符合约束。详细记录见 [testing.md](testing.md)。生产
+`/opt/open-node` 与共享候选未升级。下一步发布精确提交并完成官方主线上的真实网页更新。
+
 本轮已按固定官方 `miaomiaowuX` 后端补齐 Web 公告：管理员在系统设置发布普通、维护
 或订阅更新公告，可选有效期、读取生效列表并删除；登录用户只有在账户启用、已分配
 套餐且套餐未到期时才能读取。标题和正文按纯文本显示，过期公告自动隐藏，结果未知的
@@ -44,6 +58,10 @@ VPS `/tmp/open-node-public-gateway.S1vVKz/evidence` 中 Ruff 与 34 项专项测
 初始化/外观读取路径当成管理员接口；专用测试已覆盖它们的无秘密公开响应，并单独验证
 写接口仍需管理员。夹具现已排除这些已记录公开路径。新提交的完整 CI 未结束前不宣称
 hosted CI 全绿。
+
+上述两组旧夹具已由 `81d26860158eaf36580d32d5781fb07aaa8a46d6` 一并修正；GitHub
+Actions [33478847820](https://github.com/FengYuchen1314/open-node/actions/runs/33478847820)
+的 Backend、Frontend、Agent 和 Probe Worker 四项现已全部成功。
 
 本轮新增站点外观：管理员可在中文系统设置页保存 Logo、登录背景和标准 Ant Design
 浅色/深色/跟随系统主题；访客可选择站点默认或保留自己的浏览器主题偏好。支持公开

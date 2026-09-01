@@ -13,6 +13,8 @@ readonly RUNTIME_CONTAINER_PORT="8080"
 readonly RUNTIME_UID_GID="10001:10001"
 readonly HEALTH_STABLE_OBSERVATIONS="3"
 readonly PUBLIC_GATEWAY_IMAGE="caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648"
+readonly UPDATE_HELPER_BIN="/usr/local/libexec/open-node-application-update"
+readonly UPDATE_HELPER_CONFIG_ROOT="/etc/open-node-update"
 
 ACTION="${1:-install}"
 REPOSITORY="${OPEN_NODE_REPOSITORY:-$DEFAULT_REPOSITORY}"
@@ -28,6 +30,11 @@ RECOVERY_FILE="$CONFIG_DIR/installer.recovery"
 DATA_VOLUME="${PROJECT_NAME}_data"
 PUBLIC_GATEWAY_CONTAINER="${PROJECT_NAME}-public-gateway"
 PUBLIC_GATEWAY_VOLUME="${PROJECT_NAME}_caddy_data"
+UPDATE_STATE_DIR="/var/lib/open-node-maintenance-${PROJECT_NAME}"
+UPDATE_HELPER_CONFIG="${UPDATE_HELPER_CONFIG_ROOT}/${PROJECT_NAME}.json"
+UPDATE_HELPER_SERVICE="open-node-application-update-${PROJECT_NAME}.service"
+UPDATE_HELPER_PATH="open-node-application-update-${PROJECT_NAME}.path"
+EXPECTED_REVISION="${OPEN_NODE_EXPECTED_REVISION:-}"
 AUTO_INSTALL="${OPEN_NODE_AUTO_INSTALL_DEPENDENCIES:-1}"
 BUILD_PULL="${OPEN_NODE_BUILD_PULL:-1}"
 CREATE_ADMIN="${OPEN_NODE_CREATE_ADMIN:-auto}"
@@ -141,6 +148,12 @@ validate_path_separation() {
     && die "install and backup directories must not overlap"
   paths_overlap "$CONFIG_DIR" "$BACKUP_DIR" \
     && die "configuration and backup directories must not overlap"
+  paths_overlap "$INSTALL_DIR" "$UPDATE_STATE_DIR" \
+    && die "install and application update directories must not overlap"
+  paths_overlap "$CONFIG_DIR" "$UPDATE_STATE_DIR" \
+    && die "configuration and application update directories must not overlap"
+  paths_overlap "$BACKUP_DIR" "$UPDATE_STATE_DIR" \
+    && die "backup and application update directories must not overlap"
   return 0
 }
 
@@ -177,6 +190,136 @@ ensure_private_directory() {
   mkdir -p -- "$directory" || die "could not create $label"
   chmod 0700 -- "$directory" || die "could not secure $label"
   validate_safe_directory "$label" "$directory" 1
+}
+
+application_update_directory_is_safe() {
+  local owner group mode
+  [[ -d "$UPDATE_STATE_DIR" && ! -L "$UPDATE_STATE_DIR" ]] || return 1
+  owner="$(stat -c '%u' -- "$UPDATE_STATE_DIR")" || return 1
+  group="$(stat -c '%g' -- "$UPDATE_STATE_DIR")" || return 1
+  mode="$(stat -c '%a' -- "$UPDATE_STATE_DIR")" || return 1
+  [[ "$owner" == "0" && "$group" == "10001" && "$mode" == "1770" ]]
+}
+
+ensure_application_update_directory() {
+  if [[ ! -e "$UPDATE_STATE_DIR" && ! -L "$UPDATE_STATE_DIR" ]]; then
+    mkdir -p -- "$UPDATE_STATE_DIR" || die "could not create application update state directory"
+    chown 0:10001 -- "$UPDATE_STATE_DIR" \
+      || die "could not assign application update state directory ownership"
+    chmod 1770 -- "$UPDATE_STATE_DIR" \
+      || die "could not secure application update state directory"
+  fi
+  application_update_directory_is_safe \
+    || die "application update state directory is outside installer policy"
+}
+
+write_systemd_unit() {
+  local destination="$1" content="$2" temporary
+  temporary="$(mktemp "/etc/systemd/system/.$(basename -- "$destination").XXXXXX")" \
+    || die "could not create temporary systemd unit"
+  if ! printf '%s\n' "$content" > "$temporary"; then
+    rm -f -- "$temporary"
+    die "could not write temporary systemd unit"
+  fi
+  chmod 0644 -- "$temporary" || {
+    rm -f -- "$temporary"
+    die "could not secure temporary systemd unit"
+  }
+  mv -f -- "$temporary" "$destination" || {
+    rm -f -- "$temporary"
+    die "could not install systemd unit"
+  }
+}
+
+provision_application_update_helper() {
+  local source config_temp service_unit path_unit
+  if [[ "$REPOSITORY" != "$DEFAULT_REPOSITORY" || "$REF" != "main" ]]; then
+    warn "panel application updates are disabled outside the official main branch"
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1 || [[ ! -d /run/systemd/system ]]; then
+    warn "panel application updates require a systemd host; use install.sh update"
+    return 0
+  fi
+  source="$INSTALL_DIR/deploy/application_update_helper.py"
+  validate_safe_file "application update helper source" "$source" 0
+  ensure_application_update_directory
+  ensure_private_directory "application update helper configuration" "$UPDATE_HELPER_CONFIG_ROOT"
+  install -d -o root -g root -m 0755 -- "$(dirname -- "$UPDATE_HELPER_BIN")"
+  install -o root -g root -m 0755 -- "$source" "$UPDATE_HELPER_BIN" \
+    || die "could not install application update helper"
+  config_temp="$(mktemp "$UPDATE_HELPER_CONFIG_ROOT/.${PROJECT_NAME}.json.XXXXXX")" \
+    || die "could not create application update helper configuration"
+  if ! jq -n \
+    --arg project_name "$PROJECT_NAME" \
+    --arg repository "$REPOSITORY" \
+    --arg ref "$REF" \
+    --arg install_dir "$INSTALL_DIR" \
+    --arg config_dir "$CONFIG_DIR" \
+    --arg backup_dir "$BACKUP_DIR" \
+    --arg image_repository "$IMAGE_REPOSITORY" \
+    --arg state_dir "$UPDATE_STATE_DIR" '
+      {
+        schema_version: 1,
+        project_name: $project_name,
+        repository: $repository,
+        ref: $ref,
+        install_dir: $install_dir,
+        config_dir: $config_dir,
+        backup_dir: $backup_dir,
+        image_repository: $image_repository,
+        state_dir: $state_dir,
+        runtime_uid: 10001,
+        runtime_gid: 10001
+      }
+    ' > "$config_temp"; then
+    rm -f -- "$config_temp"
+    die "could not write application update helper configuration"
+  fi
+  chmod 0600 -- "$config_temp"
+  mv -f -- "$config_temp" "$UPDATE_HELPER_CONFIG"
+  sync_file_and_parent "$UPDATE_HELPER_CONFIG"
+  service_unit="[Unit]
+Description=Open Node application update for ${PROJECT_NAME}
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 ${UPDATE_HELPER_BIN} --config ${UPDATE_HELPER_CONFIG}
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true"
+  path_unit="[Unit]
+Description=Watch Open Node application update requests for ${PROJECT_NAME}
+
+[Path]
+PathExists=${UPDATE_STATE_DIR}/request.json
+Unit=${UPDATE_HELPER_SERVICE}
+
+[Install]
+WantedBy=multi-user.target"
+  write_systemd_unit "/etc/systemd/system/$UPDATE_HELPER_SERVICE" "$service_unit"
+  write_systemd_unit "/etc/systemd/system/$UPDATE_HELPER_PATH" "$path_unit"
+  systemctl daemon-reload || die "could not reload application update systemd units"
+  systemctl enable --now "$UPDATE_HELPER_PATH" >/dev/null \
+    || die "could not enable application update request watcher"
+  if [[ "${OPEN_NODE_UPDATE_HELPER_ACTIVE:-0}" != "1" ]]; then
+    "$UPDATE_HELPER_BIN" --config "$UPDATE_HELPER_CONFIG" --initialize \
+      || die "could not initialize application update state"
+  fi
+}
+
+disable_application_update_helper() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now "$UPDATE_HELPER_PATH" >/dev/null 2>&1 || true
+  fi
+  rm -f -- "/etc/systemd/system/$UPDATE_HELPER_PATH" \
+    "/etc/systemd/system/$UPDATE_HELPER_SERVICE" "$UPDATE_HELPER_CONFIG"
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
 }
 
 read_key() {
@@ -280,6 +423,10 @@ load_manifest_defaults() {
   DATA_VOLUME="${PROJECT_NAME}_data"
   PUBLIC_GATEWAY_CONTAINER="${PROJECT_NAME}-public-gateway"
   PUBLIC_GATEWAY_VOLUME="${PROJECT_NAME}_caddy_data"
+  UPDATE_STATE_DIR="/var/lib/open-node-maintenance-${PROJECT_NAME}"
+  UPDATE_HELPER_CONFIG="${UPDATE_HELPER_CONFIG_ROOT}/${PROJECT_NAME}.json"
+  UPDATE_HELPER_SERVICE="open-node-application-update-${PROJECT_NAME}.service"
+  UPDATE_HELPER_PATH="open-node-application-update-${PROJECT_NAME}.path"
 }
 
 validate_inputs() {
@@ -308,6 +455,8 @@ validate_inputs() {
     || die "OPEN_NODE_AUTO_INSTALL_DEPENDENCIES must be 0 or 1"
   [[ "$BUILD_PULL" == "0" || "$BUILD_PULL" == "1" ]] \
     || die "OPEN_NODE_BUILD_PULL must be 0 or 1"
+  [[ -z "$EXPECTED_REVISION" || "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] \
+    || die "OPEN_NODE_EXPECTED_REVISION must be a full lowercase Git commit"
   [[ "$CREATE_ADMIN" == "0" || "$CREATE_ADMIN" == "1" || "$CREATE_ADMIN" == "auto" || "$CREATE_ADMIN" == "web" ]] \
     || die "OPEN_NODE_CREATE_ADMIN must be 0, 1, auto, or web"
   [[ "$CREATE_ADMIN" != "web" || -z "$ADMIN_PASSWORD_FILE" ]] \
@@ -372,6 +521,7 @@ compose_with() {
     -u OPEN_NODE_IMAGE_REPOSITORY \
     -u OPEN_NODE_IMAGE_TAG \
     -u OPEN_NODE_REVISION \
+    -u OPEN_NODE_APPLICATION_UPDATE_HOST_DIR \
     -u OPEN_NODE_BIND_ADDRESS \
     -u OPEN_NODE_HTTP_PORT \
     -u OPEN_NODE_SESSION_COOKIE_SECURE \
@@ -703,6 +853,7 @@ runtime_container_is_safe() {
   local source_dir="$1" environment_file="$2" expected_image_id="$3" require_running="${4:-0}"
   local container_id project_containers details expected_image expected_network expected_network_id
   local port bind_address secure_cookie short_links trusted_proxies agent_identity subscriber_totp
+  local update_state_dir revision update_enabled=0
   local bootstrap_value bootstrap_environment rendered_compose
   expected_network="${PROJECT_NAME}_default"
   expected_image="$(read_key "$environment_file" OPEN_NODE_IMAGE_REPOSITORY || true):$(read_key "$environment_file" OPEN_NODE_IMAGE_TAG || true)"
@@ -714,6 +865,14 @@ runtime_container_is_safe() {
   agent_identity="$(read_key "$environment_file" OPEN_NODE_AGENT_IDENTITY_FILE || true)"
   subscriber_totp="$(read_key "$environment_file" OPEN_NODE_SUBSCRIBER_TOTP_KEY || true)"
   bootstrap_value="$(read_key "$environment_file" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
+  update_state_dir="$(read_key "$environment_file" OPEN_NODE_APPLICATION_UPDATE_HOST_DIR || true)"
+  revision="$(read_key "$environment_file" OPEN_NODE_REVISION || true)"
+  if [[ "$update_state_dir" == "$UPDATE_STATE_DIR" ]]; then
+    update_enabled=1
+    application_update_directory_is_safe || return 1
+  elif [[ -n "$update_state_dir" ]]; then
+    return 1
+  fi
   rendered_compose="$(compose_with "$source_dir" "$environment_file" config --format json 2>/dev/null)" \
     || return 1
   bootstrap_environment="$(bootstrap_environment_from_config "$rendered_compose" "$bootstrap_value")" \
@@ -744,6 +903,9 @@ runtime_container_is_safe() {
     --arg trusted_proxies "$trusted_proxies" \
     --arg agent_identity "$agent_identity" \
     --arg subscriber_totp "$subscriber_totp" \
+    --arg update_state_dir "$update_state_dir" \
+    --arg revision "$revision" \
+    --argjson update_enabled "$update_enabled" \
     --arg database_url "$RUNTIME_DATABASE_URL" \
     --arg runtime_user "$RUNTIME_UID_GID" \
     --argjson require_running "$require_running" '
@@ -770,6 +932,21 @@ runtime_container_is_safe() {
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SHORT_LINKS_ENABLED=")) ] == ["OPEN_NODE_SHORT_LINKS_ENABLED=" + $short_links])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_AGENT_IDENTITY_FILE=")) ] == ["OPEN_NODE_AGENT_IDENTITY_FILE=" + $agent_identity])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SUBSCRIBER_TOTP_KEY=")) ] == ["OPEN_NODE_SUBSCRIBER_TOTP_KEY=" + $subscriber_totp])
+      and (
+        if $update_enabled == 0 then
+          ([ $container.Config.Env[]? | select(
+            startswith("OPEN_NODE_SOURCE_REVISION=")
+            or startswith("OPEN_NODE_APPLICATION_UPDATE_DIR=")
+            or startswith("OPEN_NODE_APPLICATION_UPDATE_STATE_OWNER_UID=")
+            or startswith("OPEN_NODE_APPLICATION_UPDATE_STATE_GROUP_GID=")
+          ) ] | length) == 0
+        else
+          ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SOURCE_REVISION=")) ] == ["OPEN_NODE_SOURCE_REVISION=" + $revision])
+          and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_APPLICATION_UPDATE_DIR=")) ] == ["OPEN_NODE_APPLICATION_UPDATE_DIR=/run/open-node-maintenance"])
+          and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_APPLICATION_UPDATE_STATE_OWNER_UID=")) ] == ["OPEN_NODE_APPLICATION_UPDATE_STATE_OWNER_UID=0"])
+          and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_APPLICATION_UPDATE_STATE_GROUP_GID=")) ] == ["OPEN_NODE_APPLICATION_UPDATE_STATE_GROUP_GID=10001"])
+        end
+      )
       and ([ $container.Config.Env[]? | select(startswith("FORWARDED_ALLOW_IPS=")) ] == ["FORWARDED_ALLOW_IPS=" + $trusted_proxies])
       and $container.Config.Healthcheck.Test == [
         "CMD", "python", "-c",
@@ -813,24 +990,27 @@ runtime_container_is_safe() {
         or $container.HostConfig.Tmpfs["/tmp"] == "rw,nosuid,noexec,size=67108864,mode=1777"
       )
       and (
-        (
-          (($container.HostConfig.Binds // []) | length) == 0
-          and ($container.HostConfig.Mounts | length) == 1
-          and $container.HostConfig.Mounts[0].Type == "volume"
-          and $container.HostConfig.Mounts[0].Source == $expected_volume
-          and $container.HostConfig.Mounts[0].Target == "/var/lib/open-node"
-          and ($container.HostConfig.Mounts[0].ReadOnly // false) == false
-        )
-        or (
+        if $update_enabled == 0 then
           $container.HostConfig.Binds == [($expected_volume + ":/var/lib/open-node:rw")]
           and (($container.HostConfig.Mounts // []) | length) == 0
-        )
+        else
+          (($container.HostConfig.Binds // []) | sort) == ([
+            ($expected_volume + ":/var/lib/open-node:rw"),
+            ($update_state_dir + ":/run/open-node-maintenance:rw")
+          ] | sort)
+          and (($container.HostConfig.Mounts // []) | length) == 0
+        end
       )
-      and (($container.Mounts | length) == 1)
-      and $container.Mounts[0].Type == "volume"
-      and $container.Mounts[0].Name == $expected_volume
-      and $container.Mounts[0].Destination == "/var/lib/open-node"
-      and $container.Mounts[0].RW == true
+      and (($container.Mounts | length) == (if $update_enabled == 1 then 2 else 1 end))
+      and ([ $container.Mounts[] | select(
+        .Type == "volume" and .Name == $expected_volume
+        and .Destination == "/var/lib/open-node" and .RW == true
+      ) ] | length) == 1
+      and ([ $container.Mounts[] | select(.Destination == "/run/open-node-maintenance") ] | length) == $update_enabled
+      and ($update_enabled == 0 or ([ $container.Mounts[] | select(
+          .Type == "bind" and .Source == $update_state_dir
+          and .Destination == "/run/open-node-maintenance" and .RW == true
+        ) ] | length) == 1)
       and (($container.NetworkSettings.Networks | keys) == [$expected_network])
       and $container.NetworkSettings.Networks[$expected_network].NetworkID == $expected_network_id
       and (
@@ -948,6 +1128,7 @@ create_candidate_environment() {
   validate_agent_bootstrap_value "$bootstrap_value" \
     || die "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL must be empty or a safe canonical HTTPS URL"
   set_file_value "$destination" OPEN_NODE_IMAGE_REPOSITORY "$IMAGE_REPOSITORY"
+  set_file_value "$destination" OPEN_NODE_APPLICATION_UPDATE_HOST_DIR "$UPDATE_STATE_DIR"
   set_file_value "$destination" OPEN_NODE_BIND_ADDRESS "$bind_address"
   set_file_value "$destination" OPEN_NODE_HTTP_PORT "$port"
   set_file_value "$destination" OPEN_NODE_SESSION_COOKIE_SECURE "$secure_cookie"
@@ -975,7 +1156,7 @@ set_candidate_identity() {
 validate_candidate_compose() {
   local source_dir="$1" environment_file="$2" expected_image="$3"
   local images config_json context revision port bind_address secure_cookie short_links
-  local trusted_proxies agent_identity subscriber_totp
+  local trusted_proxies agent_identity subscriber_totp update_state_dir update_enabled=0
   local bootstrap_value bootstrap_environment
   context="$(realpath -m -- "$source_dir")"
   [[ -d "$context" && ! -L "$context" \
@@ -993,6 +1174,13 @@ validate_candidate_compose() {
   agent_identity="$(read_key "$environment_file" OPEN_NODE_AGENT_IDENTITY_FILE || true)"
   subscriber_totp="$(read_key "$environment_file" OPEN_NODE_SUBSCRIBER_TOTP_KEY || true)"
   bootstrap_value="$(read_key "$environment_file" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
+  update_state_dir="$(read_key "$environment_file" OPEN_NODE_APPLICATION_UPDATE_HOST_DIR || true)"
+  if [[ "$update_state_dir" == "$UPDATE_STATE_DIR" ]]; then
+    update_enabled=1
+  elif [[ -n "$update_state_dir" ]]; then
+    warn "candidate application update directory is invalid"
+    return 1
+  fi
   [[ "$revision" =~ ^[0-9a-f]{40,64}$ \
     && "$port" =~ ^[0-9]+$ \
     && ( "$bind_address" == "127.0.0.1" || "$bind_address" == "0.0.0.0" ) ]] || {
@@ -1029,6 +1217,8 @@ validate_candidate_compose() {
     --arg trusted_proxies "$trusted_proxies" \
     --arg agent_identity "$agent_identity" \
     --arg subscriber_totp "$subscriber_totp" \
+    --arg update_state_dir "$update_state_dir" \
+    --argjson update_enabled "$update_enabled" \
     --arg bootstrap_value "$bootstrap_value" \
     --argjson bootstrap_environment "$bootstrap_environment" '
     .services["open-node"] as $service
@@ -1076,6 +1266,11 @@ validate_candidate_compose() {
       "OPEN_NODE_SUBSCRIBER_TOTP_KEY": $subscriber_totp
     } + (if ($bootstrap_environment | length) == 1 then {
       "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL": $bootstrap_value
+    } else {} end) + (if $update_enabled == 1 then {
+      "OPEN_NODE_APPLICATION_UPDATE_DIR": "/run/open-node-maintenance",
+      "OPEN_NODE_APPLICATION_UPDATE_STATE_GROUP_GID": "10001",
+      "OPEN_NODE_APPLICATION_UPDATE_STATE_OWNER_UID": "0",
+      "OPEN_NODE_SOURCE_REVISION": $revision
     } else {} end)))
     and ($service.logging.driver == "local")
     and ($service.logging.options == {"max-file": "5", "max-size": "10m"})
@@ -1103,12 +1298,22 @@ validate_candidate_compose() {
     and (((.volumes.data | keys) - ["driver", "driver_opts", "external", "labels", "name"]) | length == 0)
     and (
       [$service.volumes[]?] as $mounts
-      | ($mounts | length) == 1
-      and $mounts[0].target == "/var/lib/open-node"
-      and $mounts[0].type == "volume"
-      and $mounts[0].source == "data"
-      and ((((($mounts[0] | keys) - ["source", "target", "type", "volume"]) | length) == 0))
-      and ((($mounts[0].volume // {}) | length) == 0)
+      | if $update_enabled == 0 then
+          ($mounts | length) == 1
+          and $mounts[0].target == "/var/lib/open-node"
+          and $mounts[0].type == "volume"
+          and $mounts[0].source == "data"
+        else
+          ($mounts | length) == 2
+          and ([ $mounts[] | select(
+        .target == "/var/lib/open-node" and .type == "volume" and .source == "data"
+          ) ] | length) == 1
+          and ([ $mounts[] | select(
+            .target == "/run/open-node-maintenance" and .type == "bind"
+            and .source == $update_state_dir and ((.read_only // false) == false)
+            and (((.bind // {}) | keys) - ["create_host_path", "propagation"] | length) == 0
+          ) ] | length) == 1
+        end
     )
   ' >/dev/null; then
     warn "candidate rendered Compose configuration is outside the installer allowlist"
@@ -1668,6 +1873,8 @@ prepare_update_candidate() {
   log "fetching candidate ref $REF"
   git -C "$INSTALL_DIR" fetch --no-tags origin "$REF"
   CANDIDATE_REVISION="$(git -C "$INSTALL_DIR" rev-parse FETCH_HEAD)"
+  [[ -z "$EXPECTED_REVISION" || "$CANDIDATE_REVISION" == "$EXPECTED_REVISION" ]] \
+    || die "candidate revision changed after the update request; check again"
   git -C "$INSTALL_DIR" merge-base --is-ancestor "$old_revision" "$CANDIDATE_REVISION" \
     || die "candidate ref is not a fast-forward descendant of the deployed revision"
   if [[ "$CANDIDATE_REVISION" == "$old_revision" ]] \
@@ -2040,6 +2247,7 @@ install_fresh() {
     || die "deployment failed its post-commit stability check"
   clear_recovery_marker
   TXN_PHASE="idle"
+  provision_application_update_helper
   reconcile_public_gateway
   [[ "$CREATE_ADMIN" == "0" ]] || create_administrator
   log_success
@@ -2086,6 +2294,7 @@ reinstall_existing() {
   TXN_CANDIDATE_ACTIVATED=0
   clear_recovery_marker
   TXN_PHASE="idle"
+  provision_application_update_helper
   reconcile_public_gateway
   log_success
 }
@@ -2217,6 +2426,7 @@ update_existing() {
     || warn "committed candidate worktree requires manual cleanup"
   CANDIDATE_SOURCE=""
   TXN_PHASE="idle"
+  provision_application_update_helper
   reconcile_public_gateway
   log_success
   log "pre-update backup: $BACKUP_PATH"
@@ -2258,6 +2468,7 @@ uninstall_preserving_data() {
   require_environment_file
   verify_checkout "$(read_manifest_value DEPLOYED_REVISION)"
   verify_active_identity
+  disable_application_update_helper
   remove_public_gateway_container
   compose_with "$INSTALL_DIR" "$ENV_FILE" down --remove-orphans
   project_runtime_is_absent || die "uninstall could not verify complete runtime removal"
@@ -2294,6 +2505,9 @@ main() {
   fi
   acquire_lock
   ensure_dependencies
+  if [[ "$ACTION" == "install" || "$ACTION" == "update" ]]; then
+    ensure_application_update_directory
+  fi
   acquire_global_lock
   case "$ACTION" in
     install)

@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     frontend_dir: Path | None = None
     agent_identity_file: Path | None = None
     agent_bootstrap_public_url: str | None = None
+    source_revision: str = "unknown"
+    application_update_dir: Path | None = None
+    application_update_state_owner_uid: int = Field(default=0, ge=0, le=2_147_483_647)
+    application_update_state_group_gid: int = Field(default=10001, ge=0, le=2_147_483_647)
     subscription_access_poll_seconds: float = Field(default=10, ge=1, le=300)
     server_traffic_poll_seconds: float = Field(default=60, ge=1, le=300)
 
@@ -124,6 +128,27 @@ class Settings(BaseSettings):
     @classmethod
     def optional_notification_state(cls, value):
         return None if value == "" else value
+
+    @field_validator("application_update_dir", mode="before")
+    @classmethod
+    def optional_application_update_dir(cls, value):
+        return None if value == "" else value
+
+    @field_validator("application_update_dir")
+    @classmethod
+    def application_update_path(cls, value: Path | None) -> Path | None:
+        if value is not None and (
+            not value.is_absolute() or value == Path(value.anchor) or ".." in value.parts
+        ):
+            raise ValueError("Application update state requires an absolute non-root path")
+        return value
+
+    @field_validator("source_revision")
+    @classmethod
+    def source_revision_value(cls, value: str) -> str:
+        if value == "unknown" or re.fullmatch(r"[0-9a-f]{40}", value):
+            return value
+        raise ValueError("Source revision must be unknown or a full lowercase Git commit")
 
     @field_validator("notifications_state_dir")
     @classmethod

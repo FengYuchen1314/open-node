@@ -38,6 +38,25 @@ def test_compose_bounds_local_container_logs():
     }
 
 
+def test_application_update_bridge_is_fixed_function_and_has_no_docker_socket_mount():
+    compose = yaml.safe_load((ROOT / "deploy/compose.yaml").read_text())
+    service = compose["services"]["open-node"]
+    mounts = service["volumes"]
+    helper = ROOT / "deploy/application_update_helper.py"
+    source = helper.read_text()
+
+    compile(source, str(helper), "exec")
+    assert any(
+        isinstance(item, dict) and item["target"] == "/run/open-node-maintenance"
+        for item in mounts
+    )
+    assert all("docker.sock" not in str(item) for item in mounts)
+    assert "OPEN_NODE_EXPECTED_REVISION" in source
+    assert '["bash", str(installer), "update"]' in source
+    assert "shell=True" not in source
+    assert "OFFICIAL_REPOSITORY" in source and 'OFFICIAL_REF = "main"' in source
+
+
 def test_compose_defaults_to_loopback_but_allows_an_explicit_installer_bind():
     compose = yaml.safe_load((ROOT / "deploy/compose.yaml").read_text())
 

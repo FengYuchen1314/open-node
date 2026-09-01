@@ -434,6 +434,11 @@ Remote host files and Agent state are not in the control-plane backup.
 `install.sh update` requires the installed checkout, manifest, private
 environment, named volume and recorded image ID to agree exactly. It fetches the
 saved ref and accepts only a fast-forward descendant of the deployed revision.
+Official `main` installations on a systemd host can request this same operation
+from the Chinese administrator page. The fixed-function handoff, exact revision
+binding and availability rules are documented in
+[网页内应用更新](application-updates.md). Manual/custom deployments continue to
+use the CLI and do not receive a Docker socket or general root command bridge.
 Each real update builds and inspects a transaction-unique image while the old
 container can continue running. If the fetched revision is already deployed,
 the command is a no-op: it does not rebuild an image, stop a container, create a

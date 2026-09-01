@@ -30,6 +30,7 @@ import secrets
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -272,6 +273,7 @@ def assert_rendered_fixture_namespace(
     image: str,
     source_root: Path,
     volume: str,
+    update_state_dir: Path,
     port: int,
 ) -> None:
     """Independently bound every candidate resource before installer build/up."""
@@ -365,17 +367,34 @@ def assert_rendered_fixture_namespace(
         raise SmokeFailure("candidate weakened no-new-privileges")
     if service.get("init") is not True or service.get("restart") != "unless-stopped":
         raise SmokeFailure("candidate changed the bounded runtime lifecycle")
-    if not isinstance(mounts, list) or len(mounts) != 1:
+    if (
+        not isinstance(mounts, list)
+        or len(mounts) != 2
+        or not all(isinstance(mount, dict) for mount in mounts)
+    ):
         raise SmokeFailure(f"candidate rendered unexpected mounts: {mounts!r}")
-    mount = mounts[0]
-    if not isinstance(mount, dict) or {
-        "type": mount.get("type"),
-        "source": mount.get("source"),
-        "target": mount.get("target"),
+    data_mounts = [mount for mount in mounts if mount.get("target") == "/var/lib/open-node"]
+    update_mounts = [
+        mount for mount in mounts if mount.get("target") == "/run/open-node-maintenance"
+    ]
+    if len(data_mounts) != 1 or {
+        "type": data_mounts[0].get("type"),
+        "source": data_mounts[0].get("source"),
+        "target": data_mounts[0].get("target"),
     } != {"type": "volume", "source": "data", "target": "/var/lib/open-node"}:
-        raise SmokeFailure(f"candidate mount escaped fixture data volume: {mount!r}")
-    if mount.get("bind") or mount.get("volume"):
-        raise SmokeFailure(f"candidate rendered mount options outside policy: {mount!r}")
+        raise SmokeFailure(f"candidate mount escaped fixture data volume: {data_mounts!r}")
+    if len(update_mounts) != 1 or {
+        "type": update_mounts[0].get("type"),
+        "source": update_mounts[0].get("source"),
+        "target": update_mounts[0].get("target"),
+    } != {
+        "type": "bind",
+        "source": str(update_state_dir),
+        "target": "/run/open-node-maintenance",
+    }:
+        raise SmokeFailure(f"candidate escaped its fixed update handoff: {update_mounts!r}")
+    if data_mounts[0].get("bind") or update_mounts[0].get("volume"):
+        raise SmokeFailure(f"candidate rendered mount options outside policy: {mounts!r}")
     if data_volume.get("name") != volume or data_volume.get("external", False):
         raise SmokeFailure(f"candidate volume escaped fixture namespace: {data_volume!r}")
     if data_volume.get("driver", "local") != "local" or data_volume.get("driver_opts"):
@@ -571,6 +590,7 @@ class InstallerFixture:
         self.project = "on-inst-" + self.nonce
         self.image_repository = "open-node-installer-" + self.nonce
         self.volume = self.project + "_data"
+        self.update_state_dir = Path("/var/lib") / f"open-node-maintenance-{self.project}"
         self.url = f"http://127.0.0.1:{self.port}"
         self.env_file = self.config_dir / "open-node.env"
         self.manifest_file: Path | None = None
@@ -652,6 +672,7 @@ class InstallerFixture:
         return self.environment(
             OPEN_NODE_IMAGE_TAG="preflight-" + revision,
             OPEN_NODE_REVISION=revision,
+            OPEN_NODE_APPLICATION_UPDATE_HOST_DIR=str(self.update_state_dir),
             OPEN_NODE_BIND_ADDRESS="127.0.0.1",
             OPEN_NODE_SESSION_COOKIE_SECURE="false",
         )
@@ -683,6 +704,7 @@ class InstallerFixture:
             image=f"{self.image_repository}:preflight-{revision}",
             source_root=source_root,
             volume=self.volume,
+            update_state_dir=self.update_state_dir,
             port=self.port,
         )
         self.preflighted_revisions.add(revision)
@@ -704,6 +726,7 @@ class InstallerFixture:
                     image=f"{self.image_repository}:preflight-{revision}",
                     source_root=source_root,
                     volume=self.volume,
+                    update_state_dir=self.update_state_dir,
                     port=self.port,
                 )
             except SmokeFailure:
@@ -1023,6 +1046,16 @@ exec "$real_docker" "$@"
         mounts = [mount["Name"] for mount in inspect["Mounts"] if mount["Type"] == "volume"]
         if mounts != [self.volume]:
             raise SmokeFailure(f"fixture container has unexpected volume mounts: {mounts}")
+        update_mounts = [
+            mount for mount in inspect["Mounts"]
+            if mount["Destination"] == "/run/open-node-maintenance"
+        ]
+        if len(update_mounts) != 1 or {
+            "Type": update_mounts[0].get("Type"),
+            "Source": update_mounts[0].get("Source"),
+            "RW": update_mounts[0].get("RW"),
+        } != {"Type": "bind", "Source": str(self.update_state_dir), "RW": True}:
+            raise SmokeFailure(f"fixture container has an unsafe update mount: {update_mounts}")
 
     def assert_namespace_unused(self) -> None:
         images = output(
@@ -1045,6 +1078,8 @@ exec "$real_docker" "$@"
         collisions = {kind: values for kind, values in resources.items() if values}
         if collisions:
             raise SmokeFailure(f"random fixture namespace was already in use: {collisions}")
+        if self.update_state_dir.exists() or self.update_state_dir.is_symlink():
+            raise SmokeFailure("random fixture update state directory was already in use")
 
     def find_manifest(self) -> Path:
         if self.manifest_file is not None:
@@ -1746,6 +1781,21 @@ print(json.dumps({
                     f"{result.stderr[-2000:]}"
                 )
 
+        if self.update_state_dir.exists() or self.update_state_dir.is_symlink():
+            info = self.update_state_dir.lstat()
+            if (
+                not self.update_state_dir.is_dir()
+                or self.update_state_dir.is_symlink()
+                or info.st_uid != 0
+                or info.st_gid != 10001
+                or stat.S_IMODE(info.st_mode) != 0o1770
+            ):
+                failures.append("refusing to clean update state directory outside fixture policy")
+            elif any(self.update_state_dir.iterdir()):
+                failures.append("fixture update state directory is not empty; preserving it")
+            else:
+                self.update_state_dir.rmdir()
+
         self.track_images()
         for image_reference in sorted(self.tracked_image_references):
             if not image_reference.startswith(self.image_repository + ":"):
@@ -1783,6 +1833,8 @@ print(json.dumps({
         residues["images"] = sorted(set(repository_residues))
         residues["backup_containers"] = self.backup_container_ids()
         residues["backup_verify_volumes"] = self.backup_verify_volume_names()
+        if self.update_state_dir.exists() or self.update_state_dir.is_symlink():
+            residues["update_state_directory"] = [str(self.update_state_dir)]
         remaining = {kind: values for kind, values in residues.items() if values}
         if remaining:
             failures.append(f"fixture resources remain after cleanup: {remaining}")
@@ -2342,6 +2394,18 @@ def run_scenarios(fixture: InstallerFixture) -> None:
     print("PASS same-revision update preserves exact deployment identity", flush=True)
 
     revision_b = fixture.git.advance("b-stopped-container")
+    backups_before_target_mismatch = fixture.backup_snapshot()
+    target_mismatch = fixture.run(
+        "update",
+        check=False,
+        overrides={"OPEN_NODE_EXPECTED_REVISION": "c" * 40},
+    )
+    fixture.assert_failed_result(target_mismatch, "candidate revision changed")
+    if fixture.assert_revision(revision_a) != identity_a:
+        raise SmokeFailure("target-mismatch refusal changed the deployed identity")
+    if fixture.backup_snapshot() != backups_before_target_mismatch:
+        raise SmokeFailure("target-mismatch refusal created or changed a backup")
+    print("PASS revision-bound update refused a changed target before backup", flush=True)
     containers = fixture.running_container_ids()
     if len(containers) != 1:
         raise SmokeFailure(f"expected one running container before stop: {containers}")

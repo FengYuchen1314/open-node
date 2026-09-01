@@ -185,6 +185,12 @@ Updates create a stopped-volume recovery bundle before starting a candidate;
 an unhealthy candidate can leave recovery explicitly required rather than
 restart an older image against possibly migrated data. Uninstall preserves the
 named data volume, source, configuration, installer state, images, and backups.
+Installer-managed official `main` deployments on a systemd host also expose a
+Chinese [administrator application-update panel](docs/application-updates.md).
+The container writes only a bounded request into a dedicated sticky directory;
+a root-owned fixed-function helper rechecks the exact official commit and calls
+the same installer transaction. The panel never receives a Docker socket,
+source/configuration mount, arbitrary command, repository, ref, or path.
 
 The convenience URL above follows mutable `main`: it neither pins the bootstrap
 script nor cryptographically binds it to the subsequently cloned ref. Review

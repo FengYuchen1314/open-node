@@ -28,9 +28,16 @@ services:
       OPEN_NODE_SHORT_LINKS_ENABLED: ${OPEN_NODE_SHORT_LINKS_ENABLED:-false}
       OPEN_NODE_AGENT_IDENTITY_FILE: ${OPEN_NODE_AGENT_IDENTITY_FILE:-}
       OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL: ${OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL:-}
+      OPEN_NODE_SOURCE_REVISION: ${OPEN_NODE_REVISION:-unknown}
+      OPEN_NODE_APPLICATION_UPDATE_DIR: /run/open-node-maintenance
+      OPEN_NODE_APPLICATION_UPDATE_STATE_OWNER_UID: "0"
+      OPEN_NODE_APPLICATION_UPDATE_STATE_GROUP_GID: "10001"
       FORWARDED_ALLOW_IPS: ${OPEN_NODE_TRUSTED_PROXIES:-}
     volumes:
       - data:/var/lib/open-node
+      - type: bind
+        source: ${OPEN_NODE_APPLICATION_UPDATE_HOST_DIR:-/var/lib/open-node-maintenance-manual}
+        target: /run/open-node-maintenance
     stop_grace_period: 30s
 volumes:
   data:
