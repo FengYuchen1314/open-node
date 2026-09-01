@@ -468,6 +468,7 @@ Probe Worker 和部署 smoke。特权宿主机、真实浏览器及 VPS 验收�
 
 | 文档 | 内容 |
 | --- | --- |
+| [实现说明与源码清单](docs/implementation/README.md) | 总体架构、各模块实现、699 个维护文件及函数/类方法索引 |
 | [公网一键部署](docs/public-deployment.md) | IP/域名 HTTPS、端口、防火墙和 Caddy 边界 |
 | [完整部署指南](docs/deployment.md) | 安装器、Compose、更新、备份、恢复和手动代理 |
 | [首次初始化](docs/initial-setup.md) | 一次性凭证、浏览器创建管理员和恢复入口 |
