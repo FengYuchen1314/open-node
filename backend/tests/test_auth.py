@@ -64,6 +64,8 @@ def test_every_management_route_requires_an_operator(tmp_path: Path):
     public_http = {
         ("get", "/api/v1/setup"),
         ("post", "/api/v1/setup"),
+        ("post", "/api/v1/setup/restore-uploads"),
+        ("post", "/api/v1/setup/restore-uploads/{upload_id}/prepare"),
         ("get", "/api/v1/auth/session"),
         ("post", "/api/v1/auth/login"),
         ("post", "/api/v1/auth/login/verify"),
