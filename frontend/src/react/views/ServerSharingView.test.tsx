@@ -15,7 +15,7 @@ const server = { id: "22222222-2222-4222-8222-222222222222", name: "边缘一号
 const share: ServerShare = { id: "11111111-1111-4111-8111-111111111111", server_id: server.id, label: "租户甲", allow_manage_xray: false, revision: 0, created_at: now, license_required: false };
 const imported: FederatedServer = {
   id: "33333333-3333-4333-8333-333333333333", name: "异地节点", owner_url: "https://owner.example", prefix: "site-", revision: 0,
-  info: { name: "上游节点", status: "connected", ip_address: "198.51.100.2", ip_address_v6: null, domain: "edge.example", domain_v6: null, ipv6_enabled: false, xray_mode: "external", traffic_limit: 0, traffic_used: 10, current_upload_speed: 1, current_download_speed: 2, xray_running: true, xray_version: "26.3.27", last_heartbeat: now, license_required: false },
+  info: { name: "上游节点", status: "connected", ip_address: "198.51.100.2", ip_address_v6: null, domain: "edge.example", domain_v6: null, ipv6_enabled: false, xray_mode: "external", traffic_limit: 0, traffic_reset_day: 0, traffic_used: 10, current_upload_speed: 1, current_download_speed: 2, xray_running: true, xray_version: "26.3.27", last_heartbeat: now, allow_manage_xray: false, license_required: false },
   last_synced_at: now, created_at: now, license_required: false,
 };
 const command: FederationCommand = { id: "44444444-4444-4444-8444-444444444444", method: "GET", path: "/api/child/inbounds", status: "succeeded", result_status: 200, result_body: { inbounds: [] }, failed: false, created_at: now, completed_at: now, license_required: false };
@@ -35,6 +35,7 @@ describe("ServerSharingView", () => {
     vi.mocked(sharing.listFederatedServers).mockResolvedValue({ servers: [imported], license_required: false });
     vi.mocked(sharing.createServerShare).mockResolvedValue({ share: { ...share, id: "55555555-5555-4555-8555-555555555555" }, share_token: "A".repeat(43), license_required: false });
     vi.mocked(sharing.addFederatedServer).mockResolvedValue({ ...imported, id: "66666666-6666-4666-8666-666666666666" });
+    vi.mocked(sharing.refreshFederatedServer).mockResolvedValue({ ...imported, revision: 1 });
     vi.mocked(sharing.manageFederatedServer).mockResolvedValue(command);
     vi.mocked(sharing.serverSharingErrorMessage).mockImplementation(() => "共享操作失败");
   });
@@ -70,5 +71,17 @@ describe("ServerSharingView", () => {
     fireEvent.click(within(manage).getByRole("button", { name: "发送命令" })); await flush();
     expect(sharing.manageFederatedServer).toHaveBeenCalledWith(imported, { method: "GET", path: "/api/child/inbounds", body: null, timeout_ms: 30000 });
     expect((within(manage).getByLabelText("联邦命令结果") as HTMLTextAreaElement).value).toBe('{\n  "inbounds": []\n}');
+  });
+
+  it("synchronizes the ordinary runtime inbound snapshot with server status", async () => {
+    render(<ServerSharingView />); await flush();
+    fireEvent.click(screen.getByRole("tab", { name: "接入的共享服务器" }));
+    fireEvent.click(screen.getByRole("button", { name: /同步状态与入站/ })); await flush();
+    expect(sharing.refreshFederatedServer).toHaveBeenCalledWith(imported);
+    expect(sharing.manageFederatedServer).toHaveBeenCalledWith(
+      { ...imported, revision: 1 },
+      { method: "GET", path: "/api/child/inbounds", body: null, timeout_ms: 30000 },
+    );
+    expect(screen.getByText(/可在配置页运行时清单中创建节点/)).toBeTruthy();
   });
 });

@@ -449,6 +449,14 @@ class SubscriptionAccessCoordinator:
                     return False
         if command.path != ENDPOINT:
             return True
+        from open_node.services.server_sharing import FederatedServerModel
+
+        if session.get(FederatedServerModel, command.server_id) is not None:
+            if access_entries(command) is None:
+                self.skip(session, command, now, "Not sent: invalid subscription access payload")
+                self.after_result(session, command, now)
+                return False
+            return True
         agent = session.scalar(select(AgentModel).where(AgentModel.server_id == command.server_id))
         error = None
         entries = access_entries(command)

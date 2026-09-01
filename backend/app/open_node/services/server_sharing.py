@@ -26,7 +26,11 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Mapped, mapped_column
 
-from open_node.domain.inventory import AgentCommandCreate, AgentCommandStatus
+from open_node.domain.inventory import (
+    AgentCommandCreate,
+    AgentCommandResultRequest,
+    AgentCommandStatus,
+)
 from open_node.domain.server_sharing import (
     TOKEN_PATTERN,
     FederatedServerCreate,
@@ -123,10 +127,22 @@ class FederatedServerModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class FederatedCommandRelayModel(Base):
+    __tablename__ = "federated_command_relays"
+
+    local_command_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("agent_commands.id", ondelete="CASCADE"), primary_key=True
+    )
+    remote_command_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ServerSharingStore:
     def __init__(self, inventory, *, transport=None):
         self.inventory = inventory
         self.transport = transport or FederationHTTPTransport()
+        self.inventory.federation_relay = self
 
     @contextmanager
     def _write(self):
@@ -236,6 +252,22 @@ class ServerSharingStore:
     def _scope(self, session, share, payload):
         if share.allow_manage_xray:
             return
+        if payload.path == "/api/child/subscription-access" and payload.method == "POST":
+            body = payload.body or {}
+            entries = body.get("entries") if isinstance(body, dict) else None
+            owned = self._owned_tags(session, share.id)
+            if (
+                isinstance(entries, list)
+                and entries
+                and all(
+                    isinstance(item, dict)
+                    and isinstance(item.get("tag"), str)
+                    and item["tag"] in owned
+                    for item in entries
+                )
+            ):
+                return
+            raise ServerSharingError(403, "server_share_forbidden")
         if payload.path != "/api/child/inbounds":
             raise ServerSharingError(403, "server_share_forbidden")
         if payload.method == "GET":
@@ -669,13 +701,183 @@ class ServerSharingStore:
         except ValidationError:
             raise ServerSharingError(422, "server_share_invalid_request") from None
         owner_url, token, prefix, _revision = self._federated_secret(identifier)
-        return self.transport.manage(
+        result = self.transport.manage(
             owner_url, token, self._prefix_payload(prefix, value)
         )
+        self._sync_federated_inbounds(identifier, result)
+        return result
 
     def federated_command(self, identifier, command_id):
         owner_url, token, _prefix, _revision = self._federated_secret(identifier)
-        return self.transport.command(owner_url, token, command_id)
+        result = self.transport.command(owner_url, token, command_id)
+        self._sync_federated_inbounds(identifier, result)
+        return result
+
+    def _sync_federated_inbounds(self, identifier, command):
+        if (
+            command.method != "GET"
+            or command.path != "/api/child/inbounds"
+            or command.status != AgentCommandStatus.SUCCEEDED.value
+            or command.failed
+            or (command.result_status is not None and command.result_status >= 400)
+        ):
+            return
+        body = command.result_body
+        if not isinstance(body, dict) or not isinstance(body.get("inbounds"), list):
+            return
+        inbounds = [item for item in body["inbounds"] if isinstance(item, dict)][:512]
+        now = datetime.now(UTC)
+        with self._write() as session:
+            row = session.get(FederatedServerModel, str(identifier))
+            if row is None:
+                raise ServerSharingError(404, "server_share_not_found")
+            scan = session.get(AgentScanResultModel, row.id)
+            if scan is None:
+                scan = AgentScanResultModel(
+                    server_id=row.id,
+                    xray_running=bool((row.snapshot or {}).get("xray_running")),
+                    xray_version=(row.snapshot or {}).get("xray_version"),
+                    xray_capabilities={},
+                    inbounds=inbounds,
+                    device_kicks={},
+                    config_modified=False,
+                    config_added_sections=[],
+                    message="分享服务器入站已从拥有方同步",
+                    reported_at=now,
+                    updated_at=now,
+                )
+                session.add(scan)
+            else:
+                scan.inbounds = inbounds
+                scan.message = "分享服务器入站已从拥有方同步"
+                scan.reported_at = now
+                scan.updated_at = now
+
+    @staticmethod
+    def _relay_allowed(command):
+        return command.method == "POST" and command.path in {
+            "/api/child/inbounds",
+            "/api/child/subscription-access",
+        } and not command.query and not command.stream
+
+    def is_federated(self, identifier):
+        with self.inventory._session() as session:
+            return session.get(FederatedServerModel, str(identifier)) is not None
+
+    def dispatch_agent_command(self, command_read):
+        now = datetime.now(UTC)
+        relay_created = False
+        with self._write() as session:
+            command = session.get(CommandModel, str(command_read.id))
+            row = session.get(FederatedServerModel, str(command_read.server_id))
+            if command is None or row is None:
+                return command_read
+            if command.status in {
+                AgentCommandStatus.SUCCEEDED.value,
+                AgentCommandStatus.FAILED.value,
+                AgentCommandStatus.SKIPPED.value,
+            }:
+                return self.inventory._command_read(command)
+            if not self._relay_allowed(command):
+                self.inventory._terminalize_unleaseable_command(
+                    session, command, now,
+                    error="Not sent: shared server operation is outside the federation scope",
+                    result_status=403,
+                )
+                session.flush()
+                return self.inventory._command_read(command)
+            relay = session.get(FederatedCommandRelayModel, command.id)
+            if relay is None:
+                if not self.inventory._claim_command_lease(session, command, now):
+                    session.flush()
+                    return self.inventory._command_read(command)
+                session.expire(command)
+                command = session.get(CommandModel, command.id)
+                relay = FederatedCommandRelayModel(
+                    local_command_id=command.id,
+                    remote_command_id=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(relay)
+                session.flush()
+                relay_created = True
+            owner_url = row.owner_url
+            token = self._open(session, row)
+            prefix = row.prefix
+            remote_id = relay.remote_command_id
+            payload = FederationCommandCreate(
+                method=command.method,
+                path=command.path,
+                body=command.body,
+                timeout_ms=command.timeout_ms,
+            )
+
+        # A durable relay with no remote id means the previous process may have
+        # died after dispatching the owner command.  Re-sending a credential
+        # mutation would be unsafe, so keep the outcome explicitly unknown.
+        if remote_id is None and not relay_created:
+            return self._finish_relay(
+                command_read.id,
+                status=502,
+                body=None,
+                error="Federation dispatch outcome is unknown; command was not retried",
+            )
+
+        try:
+            remote = (
+                self.transport.command(owner_url, token, UUID(remote_id))
+                if remote_id
+                else self.transport.manage(
+                    owner_url, token, self._prefix_payload(prefix, payload)
+                )
+            )
+        except ServerSharingError:
+            return self._finish_relay(
+                command_read.id, status=502, body=None,
+                error="Federation dispatch failed or its outcome is unknown",
+            )
+
+        with self._write() as session:
+            relay = session.get(FederatedCommandRelayModel, str(command_read.id))
+            if relay is None:
+                raise ServerSharingError(404, "server_share_not_found")
+            if relay.remote_command_id is None:
+                relay.remote_command_id = str(remote.id)
+            relay.updated_at = datetime.now(UTC)
+        if remote.status in {
+            AgentCommandStatus.SUCCEEDED.value,
+            AgentCommandStatus.FAILED.value,
+            AgentCommandStatus.SKIPPED.value,
+        }:
+            return self._finish_relay(
+                command_read.id,
+                status=remote.result_status or (502 if remote.failed else 200),
+                body=remote.result_body,
+                error="Federated owner rejected the command" if remote.failed else None,
+            )
+        with self.inventory._session() as session:
+            command = session.get(CommandModel, str(command_read.id))
+            return self.inventory._command_read(command)
+
+    def _finish_relay(self, identifier, *, status, body, error):
+        with self._write() as session:
+            command = session.get(CommandModel, str(identifier))
+            if command is None:
+                raise ServerSharingError(404, "server_share_not_found")
+            server = session.get(ServerModel, command.server_id)
+            if server is None:
+                raise ServerSharingError(404, "server_share_not_found")
+            self.inventory._apply_command_result(
+                session,
+                server,
+                command,
+                AgentCommandResultRequest(
+                    token="federation", status=status, body=body, error=error
+                ),
+            )
+            session.flush()
+            return self.inventory._command_read(command)
 
     def delete_federated(self, identifier, expected_revision):
         with self._write() as session:

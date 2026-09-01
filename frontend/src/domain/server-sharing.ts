@@ -31,12 +31,14 @@ export interface FederationServerInfo {
   ipv6_enabled: boolean;
   xray_mode: XrayMode;
   traffic_limit: number;
+  traffic_reset_day: number;
   traffic_used: number;
   current_upload_speed: number;
   current_download_speed: number;
   xray_running: boolean | null;
   xray_version: string | null;
   last_heartbeat: string | null;
+  allow_manage_xray: boolean;
   license_required: false;
 }
 

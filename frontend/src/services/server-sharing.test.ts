@@ -32,9 +32,9 @@ const imported: FederatedServer = {
   info: {
     name: "上游节点", status: "connected", ip_address: "198.51.100.2",
     ip_address_v6: null, domain: "edge.example", domain_v6: null, ipv6_enabled: false,
-    xray_mode: "external", traffic_limit: 0, traffic_used: 10,
+    xray_mode: "external", traffic_limit: 0, traffic_reset_day: 0, traffic_used: 10,
     current_upload_speed: 1, current_download_speed: 2, xray_running: true,
-    xray_version: "26.3.27", last_heartbeat: now, license_required: false,
+    xray_version: "26.3.27", last_heartbeat: now, allow_manage_xray: false, license_required: false,
   },
   last_synced_at: now,
   created_at: now,

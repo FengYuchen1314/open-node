@@ -81,8 +81,9 @@ export default function ServerSharingView() {
     try {
       const [inventory, imported] = await Promise.all([listServers(), listFederatedServers()]);
       if (!active.current || run !== sequence.current) return;
-      const target = inventory.some(item => item.id === serverId) ? serverId : inventory[0]?.id ?? "";
-      setServers(inventory); setSelected(target); setFederated(imported.servers);
+      const shareable = inventory.filter(item => !item.is_federated);
+      const target = shareable.some(item => item.id === serverId) ? serverId : shareable[0]?.id ?? "";
+      setServers(shareable); setSelected(target); setFederated(imported.servers);
       const owned = target ? await listServerShares(target) : { shares: [] as ServerShare[] };
       if (active.current && run === sequence.current) setShares(owned.shares);
     } catch (failure) { if (active.current && run === sequence.current) report(failure); }
@@ -136,6 +137,13 @@ export default function ServerSharingView() {
     try {
       const value = await refreshFederatedServer(item); if (!active.current) return;
       setFederated(previous => previous.map(row => row.id === value.id ? value : row));
+      let command = await manageFederatedServer(value, { method: "GET", path: "/api/child/inbounds", body: null, timeout_ms: 30000 });
+      for (let attempt = 0; active.current && pending.has(command.status) && attempt < 60; attempt += 1) {
+        await new Promise(resolve => window.setTimeout(resolve, 1000));
+        command = await getFederatedCommand(value, command.id);
+      }
+      if (command.failed || pending.has(command.status)) throw new Error("server_share_owner_unavailable");
+      if (active.current) setNotice("共享服务器状态与获授权入站已同步，可在配置页运行时清单中创建节点。");
     } catch (failure) { if (active.current) { report(failure); void load(); } }
     finally { if (active.current) setBusy(""); }
   }
@@ -205,7 +213,7 @@ export default function ServerSharingView() {
           { title: "服务器", key: "name", render: (_, item) => <Space orientation="vertical" size={0}><Typography.Text strong>{item.name}</Typography.Text><Typography.Text type="secondary">{item.owner_url}</Typography.Text></Space> },
           { title: "状态", key: "status", render: (_, item) => <Tag color={item.info.status === "connected" ? "success" : item.info.status === "offline" ? "error" : "default"}>{statusText[item.info.status]}</Tag> },
           { title: "实时速率", key: "speed", render: (_, item) => `${speed(item.info.current_upload_speed)} ↑ / ${speed(item.info.current_download_speed)} ↓` },
-          { title: "操作", key: "action", render: (_, item) => <Space wrap><Button icon={<LinkOutlined />} disabled={Boolean(busy)} onClick={() => openManage(item)}>管理</Button><Button icon={<ReloadOutlined />} loading={busy === `refresh:${item.id}`} disabled={Boolean(busy)} onClick={() => void refresh(item)}>同步</Button><Button danger icon={<DeleteOutlined />} disabled={Boolean(busy)} onClick={() => setRemove(item)}>移除</Button></Space> },
+          { title: "操作", key: "action", render: (_, item) => <Space wrap><Button icon={<LinkOutlined />} disabled={Boolean(busy)} onClick={() => openManage(item)}>管理</Button><Button icon={<ReloadOutlined />} loading={busy === `refresh:${item.id}`} disabled={Boolean(busy)} onClick={() => void refresh(item)}>同步状态与入站</Button><Button danger icon={<DeleteOutlined />} disabled={Boolean(busy)} onClick={() => setRemove(item)}>移除</Button></Space> },
         ]} locale={{ emptyText: "还没有接入共享服务器" }} />
       </Card> },
     ]} />

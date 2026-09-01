@@ -7,10 +7,12 @@ from uuid import uuid4
 from conftest import authenticated_client
 from fastapi.testclient import TestClient
 from open_node.core.config import Settings
+from open_node.domain.inventory import AgentCommandCreate
 from open_node.domain.server_sharing import FederationCommandRead, FederationServerInfo
 from open_node.main import create_app
 from open_node.services.external_fetch import ExternalFetchError
 from open_node.services.federation_transport import FederationHTTPTransport
+from open_node.services.subscription_access import revision
 
 
 def make_app(tmp_path: Path):
@@ -122,6 +124,27 @@ def test_limited_share_is_one_time_scoped_and_revocable(tmp_path: Path):
     lease_and_complete(
         client, server["agent_token"], added.json()["id"], {"success": True}
     )
+
+    allowed_access = client.post(
+        "/api/v1/federation/manage",
+        headers={"X-Share-Token": token},
+        json={
+            "method": "POST",
+            "path": "/api/child/subscription-access",
+            "body": {"revision": "0" * 64, "entries": [{"tag": "tenant-a"}]},
+        },
+    )
+    assert allowed_access.status_code == 201, allowed_access.text
+    forbidden_access = client.post(
+        "/api/v1/federation/manage",
+        headers={"X-Share-Token": token},
+        json={
+            "method": "POST",
+            "path": "/api/child/subscription-access",
+            "body": {"revision": "0" * 64, "entries": [{"tag": "private"}]},
+        },
+    )
+    assert forbidden_access.status_code == 403
 
     foreign_remove = client.post(
         "/api/v1/federation/manage",
@@ -238,9 +261,28 @@ class FakeFederationTransport:
     def manage(self, _owner_url, _token, payload):
         self.managed = payload
         now = datetime.now(UTC)
+        body = {"success": True}
+        if payload.method == "GET" and payload.path == "/api/child/inbounds":
+            body = {"success": True, "inbounds": [{
+                "tag": "site-demo", "protocol": "vless", "port": 443,
+                "settings": {"clients": []},
+                "streamSettings": {"network": "tcp"},
+            }]}
+        elif payload.path == "/api/child/subscription-access":
+            entries = payload.body["entries"]
+            body = {
+                "success": True,
+                "restart_required": False,
+                "access": {
+                    "applied": True,
+                    "revision": payload.body["revision"],
+                    "enabled": sum(item["enabled"] for item in entries),
+                    "disabled": sum(not item["enabled"] for item in entries),
+                },
+            }
         return FederationCommandRead(
             id=uuid4(), method=payload.method, path=payload.path, status="succeeded",
-            result_status=200, result_body={"success": True}, failed=False,
+            result_status=200, result_body=body, failed=False,
             created_at=now, completed_at=now,
         )
 
@@ -330,6 +372,47 @@ def test_imported_server_encrypts_token_prefixes_tags_and_uses_revision(tmp_path
     assert managed.status_code == 200, managed.text
     assert transport.managed.body["inbound"]["tag"] == "site-demo"
 
+    synced = client.post(
+        f"/api/v1/server-federation/{imported_id}/manage",
+        json={
+            "method": "GET", "path": "/api/child/inbounds",
+            "body": None, "timeout_ms": 30_000,
+        },
+    )
+    assert synced.status_code == 200, synced.text
+    drafts = client.get(
+        f"/api/v1/servers/{imported_id}/xray/runtime/node-drafts"
+    ).raise_for_status().json()
+    assert drafts["has_scan"] is True
+    assert drafts["drafts"][0]["source_tag"] == "site-demo"
+    assert drafts["drafts"][0]["create_available"] is True
+    imported_nodes = client.post(
+        f"/api/v1/servers/{imported_id}/xray/runtime/nodes/import", json={}
+    ).raise_for_status().json()
+    assert imported_nodes["created_count"] == 1
+    assert imported_nodes["created_nodes"][0]["server_id"] == imported_id
+    assert imported_nodes["created_nodes"][0]["inbound_tag"] == "site-demo"
+
+    entries = [{
+        "tag": "site-demo", "protocol": "vless",
+        "client": {"id": str(uuid4()), "email": "alice@shared.example"},
+        "enabled": True, "routing_user_additions": [], "limiter": None,
+    }]
+    relay_command = app.state.inventory.create_command(
+        imported_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/subscription-access",
+            body={"revision": revision(entries), "entries": entries},
+            timeout_ms=60_000,
+        ),
+    )
+    relayed = app.state.server_sharing.dispatch_agent_command(relay_command)
+    assert relayed.status.value == "succeeded"
+    assert relayed.result_body["access"]["enabled"] == 1
+    assert transport.managed.path == "/api/child/subscription-access"
+    assert app.state.server_sharing.dispatch_agent_command(relayed).attempts == 1
+
     transport.info = transport.info.model_copy(update={
         "status": "offline", "ip_address": "198.51.100.21",
         "traffic_limit": 2048, "traffic_used": 32,
@@ -367,6 +450,10 @@ def test_imported_server_encrypts_token_prefixes_tags_and_uses_revision(tmp_path
     assert all(
         server["id"] != imported_id
         for server in client.get("/api/v1/servers").raise_for_status().json()
+    )
+    assert all(
+        node["server_id"] != imported_id
+        for node in client.get("/api/v1/nodes").raise_for_status().json()["nodes"]
     )
     assert all(
         server["server_id"] != imported_id

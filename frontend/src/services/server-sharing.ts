@@ -64,20 +64,21 @@ function nullableInstant(value: unknown) { return value === null ? null : instan
 function license(value: unknown) { if (value !== false) invalid(); return false as const; }
 
 function info(value: unknown): FederationServerInfo {
-  const row = exact(value, ["name", "status", "ip_address", "ip_address_v6", "domain", "domain_v6", "ipv6_enabled", "xray_mode", "traffic_limit", "traffic_used", "current_upload_speed", "current_download_speed", "xray_running", "xray_version", "last_heartbeat", "license_required"]);
+  const row = exact(value, ["name", "status", "ip_address", "ip_address_v6", "domain", "domain_v6", "ipv6_enabled", "xray_mode", "traffic_limit", "traffic_reset_day", "traffic_used", "current_upload_speed", "current_download_speed", "xray_running", "xray_version", "last_heartbeat", "allow_manage_xray", "license_required"]);
   if (!["pending", "connected", "offline"].includes(String(row.status))
     || !["external", "embedded"].includes(String(row.xray_mode))
     || typeof row.ipv6_enabled !== "boolean"
+    || typeof row.allow_manage_xray !== "boolean"
     || row.xray_running !== null && typeof row.xray_running !== "boolean") invalid();
   return {
     name: text(row.name, 120, false), status: row.status as FederationServerInfo["status"],
     ip_address: nullableText(row.ip_address, 255), ip_address_v6: nullableText(row.ip_address_v6, 255),
     domain: nullableText(row.domain, 255), domain_v6: nullableText(row.domain_v6, 255),
     ipv6_enabled: row.ipv6_enabled, xray_mode: row.xray_mode as FederationServerInfo["xray_mode"],
-    traffic_limit: integer(row.traffic_limit), traffic_used: integer(row.traffic_used),
+    traffic_limit: integer(row.traffic_limit), traffic_reset_day: integer(row.traffic_reset_day), traffic_used: integer(row.traffic_used),
     current_upload_speed: integer(row.current_upload_speed), current_download_speed: integer(row.current_download_speed),
     xray_running: row.xray_running as boolean | null, xray_version: nullableText(row.xray_version, 120),
-    last_heartbeat: nullableInstant(row.last_heartbeat), license_required: license(row.license_required),
+    last_heartbeat: nullableInstant(row.last_heartbeat), allow_manage_xray: row.allow_manage_xray, license_required: license(row.license_required),
   };
 }
 function share(value: unknown): ServerShare {

@@ -8245,6 +8245,11 @@ class InventoryStore:
         from open_node.services.server_sharing import FederatedServerModel
 
         if session.get(FederatedServerModel, server.id) is not None:
+            if payload.method == "POST" and payload.path in {
+                "/api/child/inbounds",
+                "/api/child/subscription-access",
+            } and not payload.query and not payload.stream:
+                return
             raise AgentCapabilityUnavailableError(
                 "Shared servers are controlled through the owner's federation interface"
             )
@@ -8519,6 +8524,14 @@ class InventoryStore:
         if payload.error or payload.status >= 400:
             return
         if not cls._should_refresh_xray_snapshot_after(command.method, command.path, command.body):
+            return
+
+        # Federated mutations are relayed through the owner and the consumer never
+        # talks to the owner's Agent directly.  Its runtime cache is refreshed via
+        # the explicitly scoped federation inbounds endpoint instead.
+        from open_node.services.server_sharing import FederatedServerModel
+
+        if session.get(FederatedServerModel, server.id) is not None:
             return
 
         existing = session.scalar(
@@ -10382,6 +10395,16 @@ class InventoryStore:
 
     @staticmethod
     def _required_capability_error(session: Session, command: CommandModel) -> str | None:
+        from open_node.services.server_sharing import FederatedServerModel
+
+        if (
+            session.get(FederatedServerModel, command.server_id) is not None
+            and command.method == "POST"
+            and command.path in {"/api/child/inbounds", "/api/child/subscription-access"}
+            and not command.query
+            and not command.stream
+        ):
+            return None
         agent = session.scalar(select(AgentModel).where(AgentModel.server_id == command.server_id))
         for required_capability in required_command_capabilities(command.path, command.body):
             if not agent or not getattr(agent, "capability_" + required_capability):

@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import WebSocketDisconnect
 
 from open_node.domain.inventory import AgentCapabilities, AgentCommandRead
+from open_node.services.backup_runtime import run_in_backup_thread
 from open_node.services.inventory import (
     CommandNotFoundError,
     InventoryStore,
@@ -75,6 +76,10 @@ class AgentConnectionManager:
         store: InventoryStore,
         command: AgentCommandRead,
     ) -> AgentCommandRead:
+        relay = getattr(store, "federation_relay", None)
+        if relay is not None and relay.is_federated(command.server_id):
+            return await run_in_backup_thread(relay.dispatch_agent_command, command)
+
         connection = self._connections.get(command.server_id)
         if not connection or not connection.capabilities.rpc:
             return command
