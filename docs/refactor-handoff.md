@@ -17,9 +17,13 @@
 HMAC-SHA256、`securechan-v1` HKDF 和 AES-256-GCM，支持会话过期重协商及 HTTPS 明文
 降级；Open Node 可接入官方拥有方，官方消费方也可调用 Open Node 的
 `/api/federation/*`。VPS 隔离候选的共享/订阅/备份/身份/secure-channel 后端聚焦回归、
-配置工作区 26 项、Ruff 和类型检查通过；生产构建和发布状态见当前 Git/CI，生产
-`/opt/open-node` 未升级。商业 Reality 池和许可证逻辑继续明确排除，Agent 扫描尚无独立
-Nginx 版本字段。具体语义见 [server-sharing.md](server-sharing.md)。
+配置工作区 26 项、Ruff、类型检查和生产构建通过；部署资产、首次初始化和公网入口 41 项
+通过。随后补齐共享前端对 `nginx` / `probe_sys` 的严格响应解析，并由 Agent 0.3.0a2
+安全上报拥有运行时的 Nginx 版本，普通服务器与分享服务器的中文界面均可显示。0.3.0a2
+从精确提交 `72b38c0` 构建并公开发布，真实 systemd 新装/升级/回滚/恢复/清理，以及匿名
+GitHub 下载后的 WebSocket/HTTP 升级、VLESS 流量和回滚全部通过。生产 `/opt/open-node`
+未升级。商业 Reality 池和许可证逻辑继续明确排除。具体语义见
+[server-sharing.md](server-sharing.md)。
 
 最新候选在规则与 Provider 基础上补齐安全脚本 Hook。规则支持 DNS、rules、rule-providers 的
 替换/前置/追加、去重和缺失策略组；Provider 从已确认的加密外部订阅快照生成，公开 URL
