@@ -128,6 +128,13 @@ X25519/HMAC/HKDF/AES-GCM negotiation, HTTPS plaintext downgrade, and reverse
 `/api/federation/*` interoperability are implemented. No commercial Reality pool or license gate is
 included.
 
+[Node speed tests](docs/node-speedtests.md) provide the official master/home-tester workflow in the
+Chinese Ant Design console: real proxy download speed, connection latency, egress IP, one/eight
+threads, batch queues and durable history. Home testers use the pinned official v0.1.5 installer and
+reverse WebSocket protocol with one-time pairing tokens. Local Snell v6 tests use pinned sing-box;
+other supported nodes use pinned Mihomo. Tests reuse an already-issued subscriber credential and do
+not create or expose a synthetic credential.
+
 The [client-format guide](docs/subscription-clients.md) covers the original
 Clash, Surge, sing-box, Xray, URI and Base64 outputs plus Loon, Quantumult X,
 Shadowrocket, Stash, Surfboard and Egern. Unsupported settings are reported in

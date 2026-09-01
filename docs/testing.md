@@ -1,5 +1,24 @@
 # Testing
 
+## 节点测速与官方家庭测速端协议 — 2026-09-01
+
+隔离测试目录为 VPS `/tmp/open-node-permissions.tYdQQr/repo/speedtests.3d6eebb`；只从候选
+归档并叠加当前测速源码，没有修改生产 `/opt/open-node`、生产数据库或容器。
+
+- 后端测速专项 **6 项通过**，覆盖本机异步任务与秘密不泄露、一次性配对/反向 WebSocket
+  分发/轮换/撤销、必须复用已下发凭据、请求错误不回显输入、Snell v6 选择 sing-box，
+  以及总缓冲区上限。变更文件 Ruff 通过。
+- 固定 Mihomo v1.19.30 Linux amd64 资产实际下载、大小/SHA-256 校验、受限解压和版本执行
+  通过，状态返回 ready；固定 sing-box v1.14.0 资产也实际下载、校验、受限 tar 解压并执行
+  `sing-box version` 成功。未向真实公共节点发送测速流量。
+- 中文 Ant Design 节点测速页及严格响应解析通过类型检查和生产构建。页面覆盖主控/家庭
+  来源、单线程/8 线程、批量排队、1.5 秒运行轮询、下行/延迟/出口、历史，以及测速端
+  新建、令牌一次显示、轮换和撤销。
+- 官方 `MMWOrg/mmwX-plugins` 仓库固定在 `94cff8a…`，`speedtest-v0.1.5` 源码及 Linux/
+  Windows 安装脚本固定在 tag commit `7457360…`；两条 Raw 安装脚本 URL 均返回 HTTP 200。
+  后端兼容官方 `/api/speedtest/tester/ws` 协议路径。真实家庭宽带测速端与公网 WSS 仍需
+  操作者域名和外部主机，属于环境验收而非当前代码失败。
+
 ## 服务器共享普通资产与官方双向互通 — 2026-09-01
 
 隔离候选位于 VPS `/tmp/open-node-permissions.tYdQQr/repo`，没有修改生产

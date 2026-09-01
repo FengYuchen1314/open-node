@@ -8,6 +8,16 @@
 导入/接管或 Telegram Bot/Mini App，也不把它们列为交付阻塞。保留此前已实现的代码，
 不因范围调整删除用户数据或已有功能。下文旧批次中的 Bot、完整迁移等优先级已失效。
 
+最新候选按官方文档和 `MMWOrg/mmwX-plugins` 的 `speedtest-v0.1.5` 补齐节点测速。管理员
+可从主控本机或家庭测速端，通过真实节点代理执行约 8 秒下载、Cloudflare 三次真连接延迟、
+出口 IP、单线程/8 线程和批量串行测速；结果异步轮询并持久保存历史。家庭测速端使用一次性
+配对令牌及官方 `/api/speedtest/tester/ws` 反向 WebSocket，页面固定到官方安装脚本的精确
+提交。主控按 URL、大小和 SHA-256 准备 Mihomo v1.19.30，Snell v6 自动使用 sing-box
+v1.14.0；只复用已下发的真实套餐用户凭据，不生成或回显伪凭据。隔离 VPS 的 6 项聚焦
+后端测试通过，实际固定 Mihomo/sing-box 下载、摘要校验、解压和版本执行通过，前端类型
+检查与生产构建通过。生产 `/opt/open-node` 未升级。使用和边界见
+[node-speedtests.md](node-speedtests.md)。
+
 最新候选完成固定官方共享协议的普通资产融合和双向互通。接入的分享服务器现在以同 ID
 `ServerModel` 出现在服务器、流量、DDNS、探针、节点目录和订阅编排中；五秒后台刷新同步
 状态、IPv4/IPv6、速率、流量、Xray/Nginx 扫描状态以及 CPU/内存/磁盘/累计网络指标。
