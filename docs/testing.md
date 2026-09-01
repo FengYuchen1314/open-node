@@ -559,9 +559,9 @@ is limited to editing and static inspection.
 
 GitHub also runs the same repository-level language gates on every push and
 pull request through `.github/workflows/ci.yml`: backend Ruff plus a deterministic
-12-way file-level pytest matrix, Agent
-Ruff/pytest/wheel build, frontend Vitest plus both the administrator and public
-Probe production bundles, and Probe Worker behavior tests/type checking.
+12-way file-level pytest matrix, Agent Ruff/pytest/wheel build, a three-way
+frontend Vitest matrix plus both the administrator and public Probe production
+bundles, and Probe Worker behavior tests/type checking.
 Actions are pinned to immutable revisions and receive only read access to
 repository contents. This hosted CI is an independent clean checkout check; it
 uses the configured Python interpreter under `sudo` for the Agent tests because

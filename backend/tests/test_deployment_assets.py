@@ -216,9 +216,10 @@ def test_public_gateway_docker_policy_smoke_never_starts_its_fixture():
     assert "Refusing to remove" in source
 
 
-def test_backend_ci_uses_twelve_complete_file_level_shards():
+def test_ci_uses_parallel_backend_and_frontend_shards():
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
     backend = workflow["jobs"]["backend"]
+    frontend = workflow["jobs"]["frontend"]
     lint = workflow["jobs"]["backend-lint"]
     runner = ROOT / "scripts/ci/run_backend_test_shard.py"
 
@@ -254,6 +255,19 @@ def test_backend_ci_uses_twelve_complete_file_level_shards():
     assert f"{test_file_count} files across 12 shards" in result.stdout
     assert "shard 0: 1 files" in result.stdout
     assert "(test_inventory.py)" in result.stdout
+
+    assert frontend["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"shard": [1, 2, 3]},
+    }
+    frontend_steps = frontend["steps"]
+    assert any(
+        step.get("run") == "npm test -- --shard=${{ matrix.shard }}/3"
+        for step in frontend_steps
+    )
+    for command in ("npm run build", "npm run build:probe", "test -f dist-probe/index.html"):
+        step = next(item for item in frontend_steps if item.get("run") == command)
+        assert step["if"] == "matrix.shard == 1"
 
 
 def test_github_installer_has_safe_lifecycle_defaults_and_valid_bash():
