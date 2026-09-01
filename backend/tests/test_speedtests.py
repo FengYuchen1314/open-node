@@ -83,45 +83,54 @@ def test_local_speedtest_is_async_and_keeps_secret_proxy_out_of_responses(tmp_pa
 
 def test_speedtester_pair_rotate_revoke_and_reverse_websocket_dispatch(tmp_path):
     client = browser(tmp_path)
-    node = node_with_credential(client)
-    created = client.post("/api/v1/speedtest/testers/create", json={"name": "上海家庭宽带"})
-    assert created.status_code == 200, created.text
-    secret = created.json()
-    token, tester = secret["token"], secret["tester"]
-    assert token not in client.get("/api/v1/speedtest/testers").text
+    # A context-managed TestClient keeps one ASGI event loop alive across the
+    # HTTP request and reverse WebSocket, matching Uvicorn's runtime topology.
+    with client:
+        node = node_with_credential(client)
+        created = client.post(
+            "/api/v1/speedtest/testers/create", json={"name": "上海家庭宽带"}
+        )
+        assert created.status_code == 200, created.text
+        secret = created.json()
+        token, tester = secret["token"], secret["tester"]
+        assert token not in client.get("/api/v1/speedtest/testers").text
 
-    with client.websocket_connect(f"/api/speedtest/ws?token={token}") as websocket:
-        websocket.send_json({"type": "hello", "version": "1.2.3", "caps": ["speedtest", "probe"]})
-        assert websocket.receive_json() == {"type": "pong"}
-        online = client.get("/api/v1/speedtest/testers").json()["testers"][0]
-        assert online["online"] is True and online["version"] == "1.2.3"
+        with client.websocket_connect(f"/api/speedtest/ws?token={token}") as websocket:
+            websocket.send_json({
+                "type": "hello", "version": "1.2.3", "caps": ["speedtest", "probe"]
+            })
+            assert websocket.receive_json() == {"type": "pong"}
+            online = client.get("/api/v1/speedtest/testers").json()["testers"][0]
+            assert online["online"] is True and online["version"] == "1.2.3"
 
-        queued = client.post("/api/v1/speedtest/run", json={
-            "node_id": node["id"], "tester_id": tester["id"],
-            "threads": 1, "latency_only": True,
-        })
-        assert queued.status_code == 200, queued.text
-        command = websocket.receive_json()
-        assert command["type"] == "run" and command["latency_only"] is True
-        proxy = json.loads(command["clash_config"])
-        assert proxy["uuid"] and proxy["server"] == "edge.example.com"
-        websocket.send_json({
-            "type": "result", "job_id": command["job_id"], "status": "ok",
-            "latency_ms": 19.5, "egress_ip": "198.51.100.10",
-        })
-        result = wait_result(client, queued.json()["result"]["id"])
-        assert result["status"] == "ok" and result["latency_ms"] == 19.5
+            queued = client.post("/api/v1/speedtest/run", json={
+                "node_id": node["id"], "tester_id": tester["id"],
+                "threads": 1, "latency_only": True,
+            })
+            assert queued.status_code == 200, queued.text
+            command = websocket.receive_json()
+            assert command["type"] == "run" and command["latency_only"] is True
+            proxy = json.loads(command["clash_config"])
+            assert proxy["uuid"] and proxy["server"] == "edge.example.com"
+            websocket.send_json({
+                "type": "result", "job_id": command["job_id"], "status": "ok",
+                "latency_ms": 19.5, "egress_ip": "198.51.100.10",
+            })
+            result = wait_result(client, queued.json()["result"]["id"])
+            assert result["status"] == "ok" and result["latency_ms"] == 19.5
 
-    rotated = client.post("/api/v1/speedtest/testers/rotate-token", json={"id": tester["id"]})
-    assert rotated.status_code == 200 and rotated.json()["token"] != token
-    with client.websocket_connect(f"/api/speedtest/ws?token={token}") as rejected:
-        try:
-            rejected.receive_json()
-        except Exception:
-            pass
-    revoked = client.post("/api/v1/speedtest/testers/revoke", json={"id": tester["id"]})
-    assert revoked.status_code == 204
-    assert client.get("/api/v1/speedtest/testers").json()["testers"] == []
+        rotated = client.post(
+            "/api/v1/speedtest/testers/rotate-token", json={"id": tester["id"]}
+        )
+        assert rotated.status_code == 200 and rotated.json()["token"] != token
+        with client.websocket_connect(f"/api/speedtest/ws?token={token}") as rejected:
+            try:
+                rejected.receive_json()
+            except Exception:
+                pass
+        revoked = client.post("/api/v1/speedtest/testers/revoke", json={"id": tester["id"]})
+        assert revoked.status_code == 204
+        assert client.get("/api/v1/speedtest/testers").json()["testers"] == []
 
 
 def test_speedtest_requires_an_issued_real_credential(tmp_path):
