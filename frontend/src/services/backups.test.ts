@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validBackupId, validBackupRecipient, type BackupCreateRequest, type BackupJob } from "../domain/backups";
 import { authState } from "./auth";
-import { BackupRequestError, backupDownloadUrl, backupErrorMessage, createBackup, deleteBackup, getBackupJob, getBackups, newBackupRequestId, reviewRestore } from "./backups";
+import { BackupRequestError, backupDownloadUrl, backupErrorMessage, createBackup, deleteBackup, getBackupJob, getBackups, newBackupRequestId, prepareRestoreArchive, reviewRestore, uploadRestoreArchive } from "./backups";
 
 const id = "01234567-89ab-4cde-8fab-0123456789ab";
 const recipient = `age1${"q".repeat(58)}`;
@@ -38,7 +38,7 @@ describe("administrator backup requests", () => {
   it("reads only projected status metadata and bounds malformed or restore-ready responses", async () => {
     expect(await getBackups(vi.fn<typeof fetch>().mockResolvedValue(response({ ...listing, private_extra: "PRIVATE" })))).toEqual(listing);
     for (const value of [
-      { ...listing, restoration_supported: true }, { ...listing, jobs: [{ ...job, restoration_ready: true }] },
+      { ...listing, restoration_supported: "true" }, { ...listing, jobs: [{ ...job, restoration_ready: true }] },
       { ...listing, jobs: [{ ...job, size: "4096" }] }, { ...listing, jobs: [{ ...job, status: "PRIVATE" }] },
       { ...listing, jobs: [{ ...job, sha256: null }] }, { ...listing, jobs: [job, job] },
     ]) await expect(getBackups(vi.fn<typeof fetch>().mockResolvedValue(response(value)))).rejects.toMatchObject({ status: null });
@@ -74,6 +74,27 @@ describe("administrator backup requests", () => {
     await expect(deleteBackup(id, fetcher)).resolves.toBeUndefined();
     expect(fetcher).toHaveBeenCalledWith(`/api/v1/backups/${id}`, expect.objectContaining({ method: "DELETE", redirect: "error" }));
     await expect(deleteBackup(id, vi.fn<typeof fetch>().mockResolvedValue(response({ ok: true })))).rejects.toMatchObject({ status: null });
+  });
+  it("uploads a raw restore body, then sends secrets only in the bounded preparation body", async () => {
+    const restoredId = "11234567-89ab-4cde-8fab-0123456789ab";
+    const upload = { id, size: 22, sha256: "b".repeat(64), expires_at: job.expires_at, license_required: false };
+    const prepared = { id: restoredId, restart_required: true, automatic_restart: true, license_required: false };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response(upload, 201)).mockResolvedValueOnce(response(prepared));
+    vi.stubGlobal("fetch", fetcher);
+    const file = new Blob([new Uint8Array(22)]);
+    expect(await uploadRestoreArchive(file)).toEqual(upload);
+    const proof = { format: "age" as const, identity: "AGE-SECRET-KEY-PRIVATE", subscriber_totp_key: "",
+      password: "PRIVATE-PASSWORD", code: "123456", confirm_replace_instance: true as const,
+      confirm_trusted_backup: true as const };
+    expect(await prepareRestoreArchive(id, proof)).toEqual(prepared);
+    const [uploadPath, uploadInit] = fetcher.mock.calls[0]!;
+    expect(uploadPath).toBe("/api/v1/backups/restore-uploads"); expect(uploadInit?.body).toBe(file);
+    expect(new Headers(uploadInit?.headers).get("Content-Type")).toBe("application/octet-stream");
+    expect(new Headers(uploadInit?.headers).get("X-CSRF-Token")).toBe("CSRF-FIXTURE");
+    const [preparePath, prepareInit] = fetcher.mock.calls[1]!;
+    expect(preparePath).toBe(`/api/v1/backups/restore-uploads/${id}/prepare`);
+    expect(JSON.parse(String(prepareInit?.body))).toEqual(proof);
+    expect(String(uploadPath)).not.toContain("PRIVATE"); expect(String(preparePath)).not.toContain("PRIVATE");
   });
   it("constructs a same-origin native download URL without fetching or accepting an arbitrary URL", async () => {
     vi.stubGlobal("window", { location: { origin: "https://panel.example.test" } });

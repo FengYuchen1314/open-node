@@ -5,12 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackupJob, BackupsOverview } from "../../domain/backups";
 import { routes } from "../../routes";
 import { authState } from "../../services/auth";
-import { BackupRequestError, createBackup, deleteBackup, getBackupJob, getBackups, newBackupRequestId } from "../../services/backups";
+import { BackupRequestError, createBackup, deleteBackup, getBackupJob, getBackups, newBackupRequestId, prepareRestoreArchive, uploadRestoreArchive } from "../../services/backups";
 import { deferred, flush, installDom, renderUi } from "../test-utils";
 import BackupsView from "./BackupsView";
 
 vi.mock("../../services/backups", async original => ({ ...await original<typeof import("../../services/backups")>(),
   createBackup: vi.fn(), deleteBackup: vi.fn(), getBackupJob: vi.fn(), getBackups: vi.fn(), newBackupRequestId: vi.fn(),
+  uploadRestoreArchive: vi.fn(), prepareRestoreArchive: vi.fn(),
 }));
 const id = "01234567-89ab-4cde-8fab-0123456789ab", recipient = `age1${"q".repeat(58)}`;
 const operator = { configured: true, authenticated: true, username: "admin", csrf_token: "PRIVATE-CSRF" };
@@ -34,6 +35,8 @@ beforeEach(() => {
   vi.mocked(getBackups).mockResolvedValue({ ...initial, jobs: [] }); vi.mocked(newBackupRequestId).mockReturnValue(id);
   vi.mocked(createBackup).mockResolvedValue(queued); vi.mocked(getBackupJob).mockResolvedValue(ready);
   vi.mocked(deleteBackup).mockResolvedValue(undefined);
+  vi.mocked(uploadRestoreArchive).mockResolvedValue({ id, size: 22, sha256: "a".repeat(64), expires_at: ready.expires_at, license_required: false });
+  vi.mocked(prepareRestoreArchive).mockResolvedValue({ id, restart_required: true, automatic_restart: true, license_required: false });
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Unexpected network request"); }));
   localStorage.clear(); sessionStorage.clear();
 });
@@ -50,10 +53,29 @@ describe("administrator backup workspace", () => {
   it("survives StrictMode replay and explains the public-key-only and not-yet-restored boundaries", async () => {
     renderUi(<StrictMode><BackupsView /></StrictMode>); await flush();
     expect(button("刷新备份状态").disabled).toBe(false); expect(screen.getByRole("heading", { name: "备份与恢复" })).toBeTruthy();
-    expect(screen.getByText(/这里只接收 age 公开接收者公钥/)).toBeTruthy();
-    expect(screen.getByText(/浏览器上传恢复、旧版 mmwx 备份和 PostgreSQL 迁移暂不支持/)).toBeTruthy();
+    expect(screen.getByText(/创建备份时这里只接收 age 公钥/)).toBeTruthy();
+    expect(screen.getByText(/当前部署不支持浏览器恢复/)).toBeTruthy();
     expect(screen.getByText(/加密包保留 15 分钟，最多保留两份/)).toBeTruthy();
     expect(document.querySelector('input[type="file"]')).toBeNull(); expect(createBackup).not.toHaveBeenCalled();
+  });
+  it("prepares a selected browser restore only after credentials and both confirmations", async () => {
+    vi.mocked(getBackups).mockResolvedValue({ ...initial, restoration_supported: true });
+    await mount(); await click("上传备份并恢复");
+    const file = new File([new Uint8Array(22)], "backup.zip.age", { type: "application/octet-stream" });
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } }); await flush();
+    fill("age 恢复私钥", "AGE-SECRET-KEY-PRIVATE"); fill("当前管理员密码", "PRIVATE-PASSWORD");
+    fill("验证器验证码或恢复码", "123456");
+    fireEvent.click(screen.getByRole("checkbox", { name: /确认重启后/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /确认备份来源可信/ })); await flush();
+    await click("验证并准备恢复");
+    expect(uploadRestoreArchive).toHaveBeenCalledExactlyOnceWith(file);
+    expect(prepareRestoreArchive).toHaveBeenCalledWith(id, {
+      format: "age", identity: "AGE-SECRET-KEY-PRIVATE", subscriber_totp_key: "",
+      password: "PRIVATE-PASSWORD", code: "123456", confirm_replace_instance: true,
+      confirm_trusted_backup: true,
+    });
+    expect(screen.getByText(/服务正在重启/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("AGE-SECRET-KEY-PRIVATE");
   });
   it("offers a native same-origin download only for a ready, unexpired job", async () => {
     vi.mocked(getBackups).mockResolvedValue({ ...initial, jobs: [ready, { ...queued, id: "11234567-89ab-4cde-8fab-0123456789ab" },

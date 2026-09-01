@@ -3,14 +3,16 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { ConfigProvider } from "antd";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { completeInitialSetup, getInitialSetupStatus, InitialSetupError, type InitialSetupStatus } from "../../services/initial-setup";
+import { completeInitialSetup, getInitialSetupStatus, InitialSetupError, prepareInitialRestore, uploadInitialRestore, type InitialSetupStatus } from "../../services/initial-setup";
 import { deferred, flush, installDom, renderUi } from "../test-utils";
 import InitialSetupPanel from "./InitialSetupPanel";
 
-vi.mock("../../services/initial-setup", async original => ({ ...await original<typeof import("../../services/initial-setup")>(), getInitialSetupStatus: vi.fn(), completeInitialSetup: vi.fn() }));
+vi.mock("../../services/initial-setup", async original => ({ ...await original<typeof import("../../services/initial-setup")>(), getInitialSetupStatus: vi.fn(), completeInitialSetup: vi.fn(), uploadInitialRestore: vi.fn(), prepareInitialRestore: vi.fn() }));
 const ready: InitialSetupStatus = { configured: false, available: true, expires_at: "2026-09-01T12:00:00Z", token_required: true };
 const complete: InitialSetupStatus = { configured: true, available: false, expires_at: null, token_required: true };
-beforeEach(() => { vi.resetAllMocks(); installDom(); vi.mocked(getInitialSetupStatus).mockResolvedValue(ready); vi.mocked(completeInitialSetup).mockResolvedValue(); });
+beforeEach(() => { vi.resetAllMocks(); installDom(); vi.mocked(getInitialSetupStatus).mockResolvedValue(ready); vi.mocked(completeInitialSetup).mockResolvedValue();
+  vi.mocked(uploadInitialRestore).mockResolvedValue({ id: "01234567-89ab-4cde-8fab-0123456789ab", size: 22, sha256: "a".repeat(64), expires_at: ready.expires_at!, license_required: false });
+  vi.mocked(prepareInitialRestore).mockResolvedValue({ id: "11234567-89ab-4cde-8fab-0123456789ab", restart_required: true, automatic_restart: true, license_required: false }); });
 afterEach(async () => { cleanup(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function fill() {
   for (const [label, value] of [["初始化凭证", "a".repeat(43)], ["管理员密码", "  private-password  "], ["确认密码", "  private-password  "], ["浏览器标题", "  中文站点  "]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -62,6 +64,20 @@ describe("Chinese browser first-run setup", () => {
     renderUi(<InitialSetupPanel />); await flush();
     expect(screen.getByText("open-node-admin prepare-setup")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "完成初始化" })).toBeNull();
+  });
+  it("restores with the first-run credential without creating an empty administrator", async () => {
+    renderUi(<InitialSetupPanel />); await flush(); fireEvent.click(screen.getByRole("button", { name: "从备份恢复现有实例" }));
+    fireEvent.change(screen.getByLabelText("恢复初始化凭证"), { target: { value: "a".repeat(43) } });
+    const file = new File([new Uint8Array(22)], "backup.zip", { type: "application/zip" });
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } }); await flush();
+    fireEvent.click(screen.getByRole("radio", { name: "明文 v1 ZIP" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /确认用备份初始化/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /确认备份来源可信/ })); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "验证并准备恢复" })); await flush();
+    expect(uploadInitialRestore).toHaveBeenCalledExactlyOnceWith(file, "a".repeat(43));
+    expect(prepareInitialRestore).toHaveBeenCalledOnce(); expect(completeInitialSetup).not.toHaveBeenCalled();
+    expect(screen.getByText(/恢复包已验证并隔离准备完成/)).toBeTruthy();
+    expect(screen.queryByLabelText("恢复初始化凭证")).toBeNull();
   });
   it("ignores stale status reads across StrictMode remount and after unmount", async () => {
     const old = deferred<InitialSetupStatus>();

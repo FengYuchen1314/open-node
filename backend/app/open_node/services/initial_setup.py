@@ -98,6 +98,12 @@ class InitialSetupStore:
             db.commit()
         return token, expires_at
 
+    def authorize_restore(self, token: str) -> str:
+        """Validate without consuming the one-use setup credential; bind an upload owner."""
+        with self._session() as db:
+            self._authorize(db, token)
+        return self._digest(token)
+
     def _authorize(self, db, token):
         if self._completed(db):
             raise InitialSetupError(409, "setup_already_completed")

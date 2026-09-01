@@ -5,6 +5,8 @@ export const backupErrorCodes = [
   "backup_not_found", "backup_busy", "backup_not_ready", "backup_request_conflict",
   "backup_worker_unavailable", "backup_authorization_expired", "backup_creation_failed",
   "backup_expired", "backup_invalid_request", "backup_rate_limited",
+  "restore_upload_invalid", "restore_upload_not_found", "restore_upload_busy",
+  "restore_upload_unavailable", "restore_prepare_failed",
 ] as const;
 export type BackupErrorCode = typeof backupErrorCodes[number];
 export type BackupDisplayCode = BackupErrorCode | "backup_unknown_error";
@@ -27,7 +29,7 @@ export interface BackupsOverview {
   max_completed: 2;
   ttl_seconds: 900;
   requires_two_factor: boolean;
-  restoration_supported: false;
+  restoration_supported: boolean;
   offline_restoration_supported?: true;
   recovery?: RestoreStatus;
 }
@@ -62,6 +64,32 @@ export interface BackupCreateRequest {
   recipient: string;
   password: string;
   code: string;
+}
+
+export type RestoreArchiveFormat = "age" | "plain";
+export interface RestoreUploadReceipt {
+  id: string;
+  size: number;
+  sha256: string;
+  expires_at: string;
+  license_required: false;
+}
+export interface RestorePrepareInput {
+  format: RestoreArchiveFormat;
+  identity: string;
+  subscriber_totp_key: string;
+  confirm_replace_instance: true;
+  confirm_trusted_backup: true;
+}
+export interface AdministratorRestorePrepareInput extends RestorePrepareInput {
+  password: string;
+  code: string;
+}
+export interface RestorePreparedReceipt {
+  id: string;
+  restart_required: true;
+  automatic_restart: boolean;
+  license_required: false;
 }
 
 export const validBackupId = (value: unknown): value is string => typeof value === "string"

@@ -47,6 +47,6 @@ class BackupJobsRead(BaseModel):
     ttl_seconds: Literal[900] = 900
     requires_two_factor: bool
     # This flag describes Web upload, not the separately available offline CLI.
-    restoration_supported: Literal[False] = False
+    restoration_supported: bool = False
     offline_restoration_supported: Literal[True] = True
     recovery: RestoreStatus = Field(default_factory=RestoreStatus)

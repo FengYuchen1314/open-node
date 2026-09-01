@@ -2,7 +2,8 @@ import {
   backupErrorCodes, backupStatuses, validBackupId, validBackupRecipient,
   type BackupCreateRequest, type BackupDisplayCode, type BackupErrorCode,
   type BackupJob, type BackupsOverview, type BackupStatus,
-  type RestoreReviewRequest, type RestoreStatus,
+  type AdministratorRestorePrepareInput, type RestorePreparedReceipt,
+  type RestoreReviewRequest, type RestoreStatus, type RestoreUploadReceipt,
 } from "../domain/backups";
 import { authenticatedFetch } from "./auth";
 
@@ -20,6 +21,11 @@ const messages: Record<BackupDisplayCode, string> = {
   backup_expired: "此备份已过期，不能继续下载。",
   backup_invalid_request: "备份请求无效，请检查公钥和身份验证信息。",
   backup_rate_limited: "备份身份验证请求过于频繁，请稍后再试；不会自动重新提交。",
+  restore_upload_invalid: "恢复文件无效、损坏或超出支持范围，请确认选择的是 Open Node v1 备份。",
+  restore_upload_not_found: "恢复上传不存在、已过期或不属于当前会话，请重新选择文件。",
+  restore_upload_busy: "已有恢复正在准备或等待重启，请勿重复提交。",
+  restore_upload_unavailable: "当前部署不支持浏览器恢复，请使用离线恢复命令。",
+  restore_prepare_failed: "恢复校验未完成，当前实例没有被覆盖。请检查备份、age 私钥和 TOTP 配置密钥。",
   backup_unknown_error: "备份状态暂时无法确认，请刷新任务状态。",
 };
 
@@ -78,12 +84,13 @@ function job(value: unknown, expectedId?: string): BackupJob {
 function overview(value: unknown): BackupsOverview {
   const row = record(value);
   if (typeof row.available !== "boolean" || typeof row.requires_two_factor !== "boolean"
-    || row.max_completed !== 2 || row.ttl_seconds !== 900 || row.restoration_supported !== false
+    || row.max_completed !== 2 || row.ttl_seconds !== 900 || typeof row.restoration_supported !== "boolean"
     || !Array.isArray(row.jobs) || row.jobs.length > 64) return invalid();
   const jobs = row.jobs.map(value => job(value));
   if (new Set(jobs.map(item => item.id)).size !== jobs.length) return invalid();
   return { available: row.available, unavailable_code: code(row.unavailable_code), jobs,
-    max_completed: 2, ttl_seconds: 900, requires_two_factor: row.requires_two_factor, restoration_supported: false,
+    max_completed: 2, ttl_seconds: 900, requires_two_factor: row.requires_two_factor,
+    restoration_supported: row.restoration_supported,
     ...(row.offline_restoration_supported === true ? { offline_restoration_supported: true as const } : {}),
     ...(row.recovery === undefined ? {} : { recovery: restoreStatus(row.recovery) }) };
 }
@@ -147,6 +154,31 @@ async function request<T>(path: string, init: RequestInit, status: number, parse
   } finally { globalThis.clearTimeout(timer); }
 }
 
+function restoreUpload(value: unknown): RestoreUploadReceipt {
+  const item = record(value);
+  if (!validBackupId(item.id) || typeof item.size !== "number" || !Number.isSafeInteger(item.size)
+    || item.size < 22 || typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(item.sha256)
+    || item.license_required !== false) return invalid();
+  return { id: item.id, size: item.size, sha256: item.sha256,
+    expires_at: instant(item.expires_at), license_required: false };
+}
+function restorePrepared(value: unknown): RestorePreparedReceipt {
+  const item = record(value);
+  if (!validBackupId(item.id) || item.restart_required !== true
+    || typeof item.automatic_restart !== "boolean" || item.license_required !== false) return invalid();
+  return { id: item.id, restart_required: true,
+    automatic_restart: item.automatic_restart, license_required: false };
+}
+function validRestorePrepare(payload: AdministratorRestorePrepareInput): boolean {
+  return Boolean(payload && ["age", "plain"].includes(payload.format)
+    && typeof payload.identity === "string" && payload.identity.length <= 4096
+    && (payload.format === "age") === Boolean(payload.identity)
+    && typeof payload.subscriber_totp_key === "string" && payload.subscriber_totp_key.length <= 44
+    && typeof payload.password === "string" && payload.password.length > 0 && payload.password.length <= 1024
+    && typeof payload.code === "string" && payload.code.length <= 64
+    && payload.confirm_replace_instance === true && payload.confirm_trusted_backup === true);
+}
+
 export const getBackups = (fetcher = authenticatedFetch): Promise<BackupsOverview> => request(base, {}, 200, overview, fetcher);
 export const getRestoreStatus = (fetcher = authenticatedFetch): Promise<RestoreStatus> => request(`${base}/restore-review`, {}, 200, restoreStatus, fetcher);
 export function reviewRestore(payload: RestoreReviewRequest, fetcher = authenticatedFetch): Promise<RestoreStatus> {
@@ -175,6 +207,45 @@ export function createBackup(payload: BackupCreateRequest, fetcher = authenticat
 export function deleteBackup(id: string, fetcher = authenticatedFetch): Promise<void> {
   if (!validBackupId(id)) return invalidInput();
   return request(`${base}/${id}`, { method: "DELETE" }, 204, () => undefined, fetcher);
+}
+export async function uploadRestoreArchive(
+  file: Blob, fetcher = authenticatedFetch,
+): Promise<RestoreUploadReceipt> {
+  if (!(file instanceof Blob) || file.size < 22) return invalidInput();
+  const controller = new AbortController(), timer = globalThis.setTimeout(() => controller.abort(), 600000);
+  try {
+    const response = await fetcher(`${base}/restore-uploads`, {
+      method: "POST", body: file, signal: controller.signal, cache: "no-store",
+      redirect: "error", referrerPolicy: "no-referrer",
+      headers: { Accept: "application/json", "Content-Type": "application/octet-stream" },
+    });
+    if (!response.ok) {
+      const body = await json(response).catch(() => null);
+      throw new BackupRequestError(response.status, body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>).code : null);
+    }
+    if (response.status !== 201) return invalid();
+    const receipt = restoreUpload(await json(response));
+    if (receipt.size !== file.size) return invalid();
+    return receipt;
+  } catch (error) {
+    if (error instanceof BackupRequestError) throw error;
+    return invalid();
+  } finally { globalThis.clearTimeout(timer); }
+}
+export function prepareRestoreArchive(
+  uploadId: string, payload: AdministratorRestorePrepareInput, fetcher = authenticatedFetch,
+): Promise<RestorePreparedReceipt> {
+  if (!validBackupId(uploadId) || !validRestorePrepare(payload)) return invalidInput();
+  const body: AdministratorRestorePrepareInput = {
+    format: payload.format, identity: payload.identity,
+    subscriber_totp_key: payload.subscriber_totp_key,
+    password: payload.password, code: payload.code,
+    confirm_replace_instance: true, confirm_trusted_backup: true,
+  };
+  return request(`${base}/restore-uploads/${uploadId}/prepare`, {
+    method: "POST", body: JSON.stringify(body),
+  }, 200, restorePrepared, fetcher);
 }
 export function newBackupRequestId(): string {
   try {

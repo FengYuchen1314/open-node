@@ -937,6 +937,7 @@ runtime_container_is_safe() {
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_AGENT_IDENTITY_FILE=")) ] == ["OPEN_NODE_AGENT_IDENTITY_FILE=" + $agent_identity])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SUBSCRIBER_TOTP_KEY=")) ] == ["OPEN_NODE_SUBSCRIBER_TOTP_KEY=" + $subscriber_totp])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_GEOIP_IPINFO_TOKEN=")) ] == ["OPEN_NODE_GEOIP_IPINFO_TOKEN=" + $geoip_token])
+      and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_BROWSER_RESTORE_AUTO_RESTART=")) ] == ["OPEN_NODE_BROWSER_RESTORE_AUTO_RESTART=true"])
       and (
         if $update_enabled == 0 then
           ([ $container.Config.Env[]? | select(
@@ -1280,7 +1281,8 @@ validate_candidate_compose() {
       "OPEN_NODE_SESSION_COOKIE_SECURE": $secure_cookie,
       "OPEN_NODE_SHORT_LINKS_ENABLED": $short_links,
       "OPEN_NODE_SUBSCRIBER_TOTP_KEY": $subscriber_totp,
-      "OPEN_NODE_GEOIP_IPINFO_TOKEN": $geoip_token
+      "OPEN_NODE_GEOIP_IPINFO_TOKEN": $geoip_token,
+      "OPEN_NODE_BROWSER_RESTORE_AUTO_RESTART": "true"
     } + (if ($bootstrap_environment | length) == 1 then {
       "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL": $bootstrap_value
     } else {} end) + (if $update_enabled == 1 then {

@@ -33,6 +33,7 @@ from open_node.domain.initial_setup import SETUP_MESSAGES, InitialSetupError
 from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.domain.notifications import NotificationError
 from open_node.domain.renewals import RENEWAL_MESSAGES, RenewalError
+from open_node.domain.restore import BROWSER_RESTORE_MESSAGES, BrowserRestoreError
 from open_node.domain.security import SECURITY_MESSAGES, SecurityError
 from open_node.domain.server_sharing import MESSAGES as SERVER_SHARING_MESSAGES
 from open_node.domain.server_sharing import ServerSharingError
@@ -51,6 +52,7 @@ from open_node.services.backup_jobs import BackupJobError, BackupJobManager
 from open_node.services.backup_runtime import backup_operation, configured_backup_barrier
 from open_node.services.backup_snapshot import BackupSnapshotError, configured_backup_layout
 from open_node.services.branding import BrandingStore
+from open_node.services.browser_restore import BrowserRestoreStore
 from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
 from open_node.services.ddns import DDNSStore, DDNSWorker
@@ -405,6 +407,18 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
 
+    @app.exception_handler(BrowserRestoreError)
+    async def browser_restore_error(_request, exc):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "detail": BROWSER_RESTORE_MESSAGES[exc.code],
+                "license_required": False,
+            },
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+
     @app.exception_handler(ServerSharingError)
     async def server_sharing_error(_request, exc):
         headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
@@ -538,6 +552,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         app.state.auth, active_settings.session_idle_seconds,
     )
     app.state.backup_submission_lock = threading.Lock()
+    app.state.browser_restore = BrowserRestoreStore(active_settings)
     try:
         backup_layout = configured_backup_layout(active_settings)
     except BackupSnapshotError:

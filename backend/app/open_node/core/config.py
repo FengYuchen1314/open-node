@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     session_idle_seconds: int = Field(default=1800, ge=60, le=86400)
     subscriber_totp_key: SecretStr | None = None
     backup_temporary_directory: Path | None = None
+    browser_restore_auto_restart: bool = False
     external_subscriptions_state_dir: Path | None = None
     geoip_ipinfo_token: SecretStr | None = None
     notifications_state_dir: Path | None = None

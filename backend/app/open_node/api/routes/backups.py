@@ -3,14 +3,21 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Request, Response
 from pydantic import ValidationError
 from starlette.responses import StreamingResponse
 
 from open_node.api.auth import SESSION_COOKIE
 from open_node.api.backup import BackupAPIRoute
+from open_node.api.restore_upload import receive_restore_upload
 from open_node.domain.backup_jobs import BackupCreateRequest, BackupJobRead, BackupJobsRead
-from open_node.domain.restore import RestoreReviewRequest, RestoreStatus
+from open_node.domain.restore import (
+    AdministratorRestorePrepareRequest,
+    RestorePreparedRead,
+    RestoreReviewRequest,
+    RestoreStatus,
+    RestoreUploadRead,
+)
 from open_node.services.backup_authorization import backup_session_hash
 from open_node.services.backup_jobs import BackupJobError
 from open_node.services.backup_runtime import run_in_backup_threadpool
@@ -96,6 +103,7 @@ def list_backups(request: Request):
         unavailable_code=None if available else "backup_worker_unavailable",
         jobs=manager.list_jobs(_owner(request)) if available else [],
         requires_two_factor=request.app.state.auth.security().totp_enabled,
+        restoration_supported=request.app.state.browser_restore.available,
         recovery=recovery,
     )
 
@@ -148,6 +156,29 @@ def _create(request: Request, payload: BackupCreateRequest):
 async def create_backup(request: Request):
     payload = await _payload(request)
     return await run_in_backup_threadpool(_create, request, payload)
+
+
+@router.post("/restore-uploads", response_model=RestoreUploadRead, status_code=201)
+async def upload_restore(request: Request):
+    return await receive_restore_upload(request, _owner(request))
+
+
+def _prepare_restore(request: Request, identifier: UUID, payload):
+    with request.app.state.backup_submission_lock:
+        request.app.state.backup_authorizer.issue(
+            request.cookies[SESSION_COOKIE], payload.password.get_secret_value(),
+            payload.code.get_secret_value(),
+        )
+        return request.app.state.browser_restore.prepare(identifier, _owner(request), payload)
+
+
+@router.post("/restore-uploads/{upload_id}/prepare", response_model=RestorePreparedRead)
+async def prepare_restore(upload_id: str, request: Request, background: BackgroundTasks):
+    identifier = UUID(_job_id(upload_id))
+    payload = await _payload(request, AdministratorRestorePrepareRequest)
+    result = await run_in_backup_threadpool(_prepare_restore, request, identifier, payload)
+    background.add_task(request.app.state.browser_restore.request_restart)
+    return result
 
 
 @router.get("/{job_id}", response_model=BackupJobRead)
