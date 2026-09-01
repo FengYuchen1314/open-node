@@ -490,10 +490,16 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                               if identity else None),
             temporary_directory=active_settings.backup_temporary_directory,
         )
+    from open_node.services.geoip import IPInfoCountryLookup
+
     app.state.inventory = InventoryStore(
         active_settings.database_url,
         short_links_enabled=active_settings.short_links_enabled,
         external_subscriptions_state_dir=active_settings.external_subscriptions_state_dir,
+        geoip_country_lookup=IPInfoCountryLookup(
+            active_settings.geoip_ipinfo_token.get_secret_value()
+            if active_settings.geoip_ipinfo_token else None
+        ),
     )
     notification_state_dir = active_settings.notifications_state_dir
     database_file = app.state.inventory._engine.url.database

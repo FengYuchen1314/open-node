@@ -25,10 +25,10 @@ const rule: CustomRule = {
 };
 const provider: ProxyProvider = {
   id: "provider/id", owner_username: "alice", external_source_id: "source-id",
-  name: "机场", type: "http", interval: 3600, proxy: "DIRECT", size_limit: 0,
+  name: "机场", type: "http", interval: 3600, proxy: "DIRECT", size_limit: 0, header: {},
   health_check_enabled: true, health_check_url: "https://www.gstatic.com/generate_204",
   health_check_interval: 300, health_check_timeout: 5000, health_check_lazy: true,
-  health_check_expected_status: 204, filter: "", exclude_filter: "", exclude_type: "",
+  health_check_expected_status: 204, filter: "", exclude_filter: "", exclude_type: "", geo_ip_filter: "",
   override: {}, process_mode: "client", enabled: true, revision: 3,
   created_at: now, updated_at: now,
 };
@@ -128,7 +128,7 @@ describe("subscription customizations service", () => {
     const providerWrite = {
       owner_username: provider.owner_username, external_source_id: provider.external_source_id,
       name: provider.name, type: provider.type, interval: provider.interval,
-      proxy: provider.proxy, size_limit: provider.size_limit,
+      proxy: provider.proxy, size_limit: provider.size_limit, header: provider.header,
       health_check_enabled: provider.health_check_enabled,
       health_check_url: provider.health_check_url,
       health_check_interval: provider.health_check_interval,
@@ -136,7 +136,7 @@ describe("subscription customizations service", () => {
       health_check_lazy: provider.health_check_lazy,
       health_check_expected_status: provider.health_check_expected_status,
       filter: provider.filter, exclude_filter: provider.exclude_filter,
-      exclude_type: provider.exclude_type, override: provider.override,
+      exclude_type: provider.exclude_type, geo_ip_filter: provider.geo_ip_filter, override: provider.override,
       process_mode: provider.process_mode, enabled: provider.enabled,
     };
     await api.listCustomRules(); await api.createCustomRule(ruleWrite);

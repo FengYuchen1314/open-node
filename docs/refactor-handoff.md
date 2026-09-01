@@ -16,8 +16,11 @@
 跳过且不回显输入。删除规则、Provider、脚本或外部来源会同步清理档案引用。用法和边界见
 [subscription-customizations.md](subscription-customizations.md)。VPS 隔离候选的后端规则、
 Provider 与外部订阅共 52 项；脚本与相邻后端 19 项、前端服务/页面/账户/主导航与订阅配置
-累计 48 项、Ruff、类型检查、生产构建和隔离 Docker/QuickJS 运行通过。生产 `/opt/open-node`
-未升级。剩余订阅生态是服务端 `mmw` Provider、GeoIP 和自定义上游头。
+累计 48 项、Ruff、类型检查、生产构建和隔离 Docker/QuickJS 运行通过。高级 Provider
+随后补齐 Mihomo 请求头、服务端 `mmw` 同名代理组，以及使用部署者 IPinfo token 的隔离
+GeoIP 国家过滤；聚焦后端 7 项、前端 4 项、Ruff、类型检查、生产构建及安装器 55 场景
+无容器烟测通过。生产 `/opt/open-node` 未升级。官方落盘 `custom_rule_applications` 历史
+仍由每次请求的受管模板重渲染替代，不声称存储结构一比一。
 
 最新已发布批次完成本地 Agent 服务器 DDNS。证书页已有的加密凭据可用于 Cloudflare、阿里云、
 腾讯云 DNSPod v3、DNSPod Token、GoDaddy 和 NameSilo；支持 A/AAAA、独立 v6 域名、
@@ -27,8 +30,8 @@ Provider 与外部订阅共 52 项；脚本与相邻后端 19 项、前端服务
 检查通过；供应商请求用固定模拟响应，没有操作者真实 DNS 账号，因此不声称六家公网写入
 均已实账验收。使用和边界见 [ddns.md](ddns.md)。生产 `/opt/open-node` 未升级。
 
-DDNS 不覆盖独立联邦工作区，也不负责给面板配置 DNS、开放防火墙或签发公网证书。脚本
-候选发布后，下一步补高级 Provider，再进入联邦服务器普通资产融合和其他剩余边界。
+DDNS 不覆盖独立联邦工作区，也不负责给面板配置 DNS、开放防火墙或签发公网证书。高级
+Provider 发布后，下一步进入联邦服务器普通资产融合和其他剩余边界。
 
 当前批次完成服务器共享/联邦首版。拥有方可为本地 Agent 服务器签发只显示一次的令牌，
 选择有限入站权限或完整的已支持 Agent 权限，吊销时可排队清理该分享创建的入站；接入方

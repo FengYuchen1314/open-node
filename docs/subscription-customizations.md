@@ -18,6 +18,10 @@ Proxy Provider 和 JavaScript 覆写脚本。管理员入口是“订阅自定�
 - `internal/storage/traffic.go`：`CustomRule`、`ProxyProviderConfig` 和订阅文件选择字段；
 - `internal/storage/subscribe_files.go`：空选择表示全部已启用资源；
 - `internal/storage/nodes.go`：删除外部来源时级联清理 Provider。
+- `internal/handler/proxy_provider_configs.go`：Provider 字段、所有者隔离及
+  `client` / `mmw` 处理模式；
+- `internal/handler/proxy_provider_serve.go`：名称、排除和 GeoIP 的匹配优先级；
+- `internal/handler/subscription.go`：客户端 `use` 与服务端同名代理组引用语义；
 - `internal/scriptengine/engine.go`：`post_fetch`、`pre_save_nodes`、`main` 返回值、
   `produce`、5 秒预算和日志接口；
 - `internal/handler/override_scripts.go`：脚本保存时检查语法和用户所有权。
@@ -52,17 +56,42 @@ Provider 必须引用同一用户已经保存的外部订阅来源。客户端�
 上游订阅 URL、User-Agent 或其他来源凭据。客户端下载 Provider 时，服务器只读取已经
 确认并加密保存的节点快照，不会借一次客户端下载触发上游网络请求。
 
-当前支持官方客户端处理模式中的以下字段：
+当前支持以下官方字段：
 
 - HTTP Provider、客户端刷新间隔、拉取代理和大小限制；
 - 健康检查 URL、间隔、超时、惰性检查和期望状态码；
 - 名称包含/排除正则、协议排除；
+- GeoIP 两位国家代码过滤；名称包含正则与 GeoIP 取并集，排除正则最先执行；
+- Mihomo 官方 `header: map[string][]string` 客户端请求头；
 - Mihomo `override` 节点覆写；
+- 客户端 `client` 与服务端 `mmw` 两种处理模式；
 - Provider 启用/停用及订阅档案选择。
 
 Provider 会在模板渲染前写入 `proxy-providers`，因此现有
 `__PROXY_PROVIDERS__` 占位符可以直接使用。如果模板没有引用任何 Provider，系统会把
 选中的 Provider 通过 `use` 接入第一个代理组，避免生成“存在但不可选择”的无效配置。
+
+`mmw` 模式不生成公开 Provider URL。服务器从已确认快照执行相同过滤和覆写，然后把命中
+节点内联到主订阅，并创建或填充与 Provider 同名的 `select` 代理组。没有命中节点时该组
+显式回退到 `REJECT`；同名内置策略或代理会拒绝渲染，不会产生含义不确定的配置。官方固定
+源码只定义了 `ListMMWProxyProviderConfigs` 和引用识别，没有完整的定时同步调用点；这里
+补成每次订阅请求都可执行的受管快照语义。
+
+GeoIP 沿用官方对节点 `server`（IP 或域名）查询国家代码的行为，但不复制源码中的硬编码
+第三方 token。部署者必须在私有 `deploy/.env` 设置：
+
+```dotenv
+OPEN_NODE_GEOIP_IPINFO_TOKEN=自己的_IPinfo_token
+```
+
+DNS 解析在可强制终止的隔离进程中执行，只接受公网地址；IPinfo HTTPS 请求复用外部订阅的
+拒绝私网、拒绝重定向、有界响应和总超时边界。单个 Provider 最多查询 64 个唯一服务器，
+成功结果在当前 Web 进程缓存。没有 token 时仍可使用名称/协议过滤，但保存 GeoIP 条件会
+返回固定错误。节点地址会发送给 IPinfo，介意这一外部依赖时不要启用 GeoIP。
+
+客户端 `header` 只写入 Mihomo 拉取 Open Node 快照的配置，不用于重新请求外部订阅，也不
+改变外部来源自己的 User-Agent。请求头会出现在用户下载的订阅正文中，因此界面明确禁止
+把密码、Cookie 或其他秘密放进去。
 
 删除规则或 Provider 会同步移除订阅档案中的 ID。删除外部订阅来源会在同一写事务中
 删除引用它的 Provider，并清理档案引用。
@@ -117,13 +146,14 @@ Open Node 明确把它接到每次订阅的最终节点渲染阶段，不拦截�
 - YAML 拒绝重复映射键、非字符串键、别名/重复节点、过深或过大的结构；
 - 规则正文最多 512 KiB，解析节点最多 20,000 个；
 - Provider 正则在保存时编译检查，公开快照最多 8 MiB；
+- Provider 请求头最多 32 项、每项最多 8 个值、合计最多 16 KiB，拒绝控制字符；
+- GeoIP 国家代码最多 64 个，单次渲染最多解析 64 个唯一服务器；
 - 覆写脚本的 QuickJS 运行时和返回结构按上述资源、时间与格式边界检查；
 - 资源 CRUD 使用修订号比较，冲突时必须重新读取；
 - 错误响应不会回显 YAML、上游 URL、正则原文或订阅密钥。
 
-尚未实现的官方能力：
+尚未实现的官方存储细节：
 
-- Provider 的服务端 `mmw` 处理模式、GeoIP 过滤和自定义上游请求头；
 - 官方按落盘订阅文件维护的 `custom_rule_applications` 历史。Open Node 每次请求从受管
   模板重新渲染并去重，因此不需要用历史记录从旧文件中撤销上一次注入，但不把这一点
   称为官方落盘文件的一比一实现。

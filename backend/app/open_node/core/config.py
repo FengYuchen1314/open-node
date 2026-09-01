@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     subscriber_totp_key: SecretStr | None = None
     backup_temporary_directory: Path | None = None
     external_subscriptions_state_dir: Path | None = None
+    geoip_ipinfo_token: SecretStr | None = None
     notifications_state_dir: Path | None = None
     notifications_poll_seconds: float = Field(default=1, ge=0.25, le=60)
     short_links_enabled: bool = False
@@ -91,6 +92,16 @@ class Settings(BaseSettings):
                 Fernet(value.get_secret_value())
             except (ValueError, TypeError):
                 raise ValueError("Subscriber TOTP key must be a Fernet key") from None
+        return value
+
+    @field_validator("geoip_ipinfo_token")
+    @classmethod
+    def geoip_token(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None or not value.get_secret_value().strip():
+            return None
+        token = value.get_secret_value()
+        if len(token) > 256 or any(ord(char) < 33 or ord(char) > 126 for char in token):
+            raise ValueError("IPinfo token must contain 1-256 visible ASCII characters")
         return value
 
     @field_validator("certificate_webroots")

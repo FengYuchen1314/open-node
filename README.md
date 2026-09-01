@@ -151,8 +151,8 @@ MMWX DNS/rules/rule-providers replace/prepend/append workflow, owner-scoped admi
 and subscriber CRUD, named-profile selection, snapshot-backed Mihomo Providers, and isolated
 QuickJS `post_fetch` / `pre_save_nodes` hooks with bounded `produce()` conversion. Public
 Provider URLs reuse subscription short-code and IP-policy checks and never disclose or fetch
-the upstream URL during a client download. Server-side Provider processing, GeoIP filtering
-and custom upstream headers remain separate work.
+the upstream URL during a client download. Advanced Providers also support Mihomo request
+headers, optional IPinfo-backed GeoIP country filters, and server-side `mmw` inline groups.
 
 ## Deployment
 

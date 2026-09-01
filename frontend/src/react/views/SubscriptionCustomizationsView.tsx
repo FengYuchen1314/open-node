@@ -65,10 +65,10 @@ const emptyRule = {
 };
 const emptyProvider: ProxyProviderWrite = {
   owner_username: "", external_source_id: "", name: "", type: "http", interval: 3600,
-  proxy: "DIRECT", size_limit: 0, health_check_enabled: true,
+  proxy: "DIRECT", size_limit: 0, header: {}, health_check_enabled: true,
   health_check_url: "https://www.gstatic.com/generate_204", health_check_interval: 300,
   health_check_timeout: 5000, health_check_lazy: true, health_check_expected_status: 204,
-  filter: "", exclude_filter: "", exclude_type: "", override: {},
+  filter: "", exclude_filter: "", exclude_type: "", geo_ip_filter: "", override: {},
   process_mode: "client", enabled: true,
 };
 const emptyScript: OverrideScriptWrite = {
@@ -112,6 +112,7 @@ export default function SubscriptionCustomizationsView({
   const [providerEdit, setProviderEdit] = useState<ProxyProvider | "new" | null>(null);
   const [providerDraft, setProviderDraft] = useState<ProxyProviderWrite>(emptyProvider);
   const [overrideText, setOverrideText] = useState("{}");
+  const [headerText, setHeaderText] = useState("{}");
   const [scriptEdit, setScriptEdit] = useState<OverrideScript | "new" | null>(null);
   const [scriptDraft, setScriptDraft] = useState<OverrideScriptWrite>(emptyScript);
   const [scriptRemove, setScriptRemove] = useState<OverrideScript | null>(null);
@@ -176,35 +177,42 @@ export default function SubscriptionCustomizationsView({
     const draft = value === "new" ? { ...emptyProvider, owner_username: users[0]?.username ?? "" } : {
       owner_username: value.owner_username, external_source_id: value.external_source_id,
       name: value.name, type: value.type, interval: value.interval, proxy: value.proxy,
-      size_limit: value.size_limit, health_check_enabled: value.health_check_enabled,
+      size_limit: value.size_limit, header: value.header, health_check_enabled: value.health_check_enabled,
       health_check_url: value.health_check_url,
       health_check_interval: value.health_check_interval,
       health_check_timeout: value.health_check_timeout,
       health_check_lazy: value.health_check_lazy,
       health_check_expected_status: value.health_check_expected_status,
       filter: value.filter, exclude_filter: value.exclude_filter,
-      exclude_type: value.exclude_type, override: value.override,
+      exclude_type: value.exclude_type, geo_ip_filter: value.geo_ip_filter, override: value.override,
       process_mode: value.process_mode, enabled: value.enabled,
     };
     setProviderDraft(draft); setOverrideText(JSON.stringify(draft.override, null, 2));
+    setHeaderText(JSON.stringify(draft.header, null, 2));
   }
   async function saveProvider() {
     if (!providerEdit || busy || !providerDraft.owner_username || !providerDraft.external_source_id || !providerDraft.name.trim()) return;
-    let override: Record<string, unknown>;
+    let override: Record<string, unknown>, header: Record<string, string[]>;
     try {
       const value = JSON.parse(overrideText || "{}") as unknown;
       if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
       override = value as Record<string, unknown>;
     } catch { setError("节点覆写必须是 JSON 对象；当前内容没有提交。"); return; }
+    try {
+      const value = JSON.parse(headerText || "{}") as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
+      header = value as Record<string, string[]>;
+      if (Object.values(header).some(values => !Array.isArray(values) || values.some(item => typeof item !== "string"))) throw new Error();
+    } catch { setError("请求头必须是“名称 → 字符串数组”的 JSON 对象；当前内容没有提交。"); return; }
     setBusy("provider"); setError("");
     try {
-      const payload = { ...providerDraft, name: providerDraft.name.trim(), override };
+      const payload = { ...providerDraft, name: providerDraft.name.trim(), header, override };
       const value = providerEdit === "new"
         ? await (accountApi ? accountApi.createProxyProvider(payload) : createProxyProvider(payload))
         : await (accountApi ? accountApi.updateProxyProvider(providerEdit, payload) : updateProxyProvider(providerEdit, payload));
       if (!active.current) return;
       setProviders(previous => providerEdit === "new" ? [...previous, value] : previous.map(item => item.id === value.id ? value : item));
-      setProviderEdit(null); setNotice("Proxy Provider 已保存；它只读取已确认的外部订阅快照。 ");
+      setProviderEdit(null); setNotice("Proxy Provider 已保存；客户端模式生成 Mihomo Provider，服务端模式直接生成同名代理组。 ");
     } catch (failure) { if (active.current) setError(message(failure)); }
     finally { if (active.current) setBusy(""); }
   }
@@ -273,6 +281,7 @@ export default function SubscriptionCustomizationsView({
       <Table<ProxyProvider> rowKey="id" dataSource={providers} loading={busy === "load"} scroll={{ x: 920 }} columns={[
         { title: "名称", dataIndex: "name", render: (value, item) => <Space orientation="vertical" size={0}><Typography.Text strong>{value}</Typography.Text>{!subscriberUsername && <Typography.Text type="secondary">{item.owner_username}</Typography.Text>}</Space> },
         { title: "外部订阅快照", dataIndex: "external_source_id", render: value => sourceName.get(value) ?? "来源已删除" },
+        { title: "处理模式", dataIndex: "process_mode", render: value => value === "mmw" ? <Tag color="processing">服务端</Tag> : <Tag>客户端</Tag> },
         { title: "刷新间隔", dataIndex: "interval", render: value => `${value} 秒` },
         { title: "状态", dataIndex: "enabled", render: value => <Tag color={value ? "success" : "default"}>{value ? "已启用" : "已停用"}</Tag> },
         { title: "操作", fixed: "right" as const, width: 170, render: (_: unknown, item: ProxyProvider) => <Space><Button icon={<EditOutlined />} onClick={() => openProvider(item)}>编辑</Button><Button danger icon={<DeleteOutlined />} onClick={() => setRemove(item)}>删除</Button></Space> },
@@ -304,7 +313,16 @@ export default function SubscriptionCustomizationsView({
     </Modal>
 
     <Modal width={820} open={Boolean(providerEdit)} title={providerEdit === "new" ? "新建 Proxy Provider" : "编辑 Proxy Provider"} okText="保存" confirmLoading={busy === "provider"} okButtonProps={{ disabled: !providerDraft.owner_username || !providerDraft.external_source_id || !providerDraft.name.trim() }} onOk={() => void saveProvider()} onCancel={() => !busy && setProviderEdit(null)} destroyOnHidden>
-      <Form layout="vertical" disabled={busy === "provider"}><Flex gap="middle"><Form.Item label="所属用户" required style={{ flex: 1 }}><Select aria-label="代理集合所属用户" disabled={Boolean(subscriberUsername) || providerEdit !== "new"} value={providerDraft.owner_username} options={userOptions} onChange={owner_username => setProviderDraft(value => ({ ...value, owner_username, external_source_id: "" }))} /></Form.Item><Form.Item label="外部订阅快照" required style={{ flex: 1 }}><Select aria-label="代理集合外部来源" value={providerDraft.external_source_id} options={providerSources.map(source => ({ value: source.id, label: `${source.name} · ${source.available_node_count} 个可用节点` }))} onChange={external_source_id => setProviderDraft(value => ({ ...value, external_source_id }))} /></Form.Item></Flex><Flex gap="middle"><Form.Item label="名称" required style={{ flex: 1 }}><Input aria-label="代理集合名称" maxLength={120} value={providerDraft.name} onChange={event => setProviderDraft(value => ({ ...value, name: event.target.value }))} /></Form.Item><Form.Item label="客户端刷新间隔（秒）" style={{ flex: 1 }}><InputNumber aria-label="代理集合刷新间隔" min={60} max={604800} style={{ width: "100%" }} value={providerDraft.interval} onChange={interval => setProviderDraft(value => ({ ...value, interval: interval ?? 3600 }))} /></Form.Item></Flex><Flex gap="middle"><Form.Item label="包含名称正则" style={{ flex: 1 }}><Input aria-label="代理集合包含正则" maxLength={1000} value={providerDraft.filter} onChange={event => setProviderDraft(value => ({ ...value, filter: event.target.value }))} /></Form.Item><Form.Item label="排除名称正则" style={{ flex: 1 }}><Input aria-label="代理集合排除正则" maxLength={1000} value={providerDraft.exclude_filter} onChange={event => setProviderDraft(value => ({ ...value, exclude_filter: event.target.value }))} /></Form.Item></Flex><Flex gap="middle"><Form.Item label="排除协议（用 | 分隔）" style={{ flex: 1 }}><Input aria-label="代理集合排除协议" maxLength={1000} value={providerDraft.exclude_type} onChange={event => setProviderDraft(value => ({ ...value, exclude_type: event.target.value }))} /></Form.Item><Form.Item label="拉取代理" style={{ flex: 1 }}><Input aria-label="代理集合拉取代理" maxLength={120} value={providerDraft.proxy} onChange={event => setProviderDraft(value => ({ ...value, proxy: event.target.value }))} /></Form.Item></Flex><Checkbox checked={providerDraft.health_check_enabled} onChange={event => setProviderDraft(value => ({ ...value, health_check_enabled: event.target.checked }))}>启用客户端健康检查</Checkbox>{providerDraft.health_check_enabled && <Flex gap="middle" style={{ marginTop: 16 }}><Form.Item label="健康检查 HTTPS 地址" style={{ flex: 2 }}><Input aria-label="代理集合健康检查地址" value={providerDraft.health_check_url} onChange={event => setProviderDraft(value => ({ ...value, health_check_url: event.target.value }))} /></Form.Item><Form.Item label="间隔（秒）" style={{ flex: 1 }}><InputNumber aria-label="代理集合健康检查间隔" min={30} max={604800} value={providerDraft.health_check_interval} onChange={health_check_interval => setProviderDraft(value => ({ ...value, health_check_interval: health_check_interval ?? 300 }))} /></Form.Item></Flex>}<Form.Item label="节点覆写 JSON" extra="作为 Mihomo proxy-provider 的 override，并在快照输出时应用。"><Input.TextArea aria-label="代理集合节点覆写" rows={5} value={overrideText} onChange={event => setOverrideText(event.target.value)} /></Form.Item><Flex justify="space-between"><Typography.Text>启用</Typography.Text><Switch aria-label="启用代理集合" checked={providerDraft.enabled} onChange={enabled => setProviderDraft(value => ({ ...value, enabled }))} /></Flex></Form>
+      <Form layout="vertical" disabled={busy === "provider"}>
+        <Flex gap="middle"><Form.Item label="所属用户" required style={{ flex: 1 }}><Select aria-label="代理集合所属用户" disabled={Boolean(subscriberUsername) || providerEdit !== "new"} value={providerDraft.owner_username} options={userOptions} onChange={owner_username => setProviderDraft(value => ({ ...value, owner_username, external_source_id: "" }))} /></Form.Item><Form.Item label="外部订阅快照" required style={{ flex: 1 }}><Select aria-label="代理集合外部来源" value={providerDraft.external_source_id} options={providerSources.map(source => ({ value: source.id, label: `${source.name} · ${source.available_node_count} 个可用节点` }))} onChange={external_source_id => setProviderDraft(value => ({ ...value, external_source_id }))} /></Form.Item></Flex>
+        <Flex gap="middle"><Form.Item label="名称" required style={{ flex: 1 }}><Input aria-label="代理集合名称" maxLength={120} value={providerDraft.name} onChange={event => setProviderDraft(value => ({ ...value, name: event.target.value }))} /></Form.Item><Form.Item label="处理模式" style={{ flex: 1 }}><Select aria-label="代理集合处理模式" value={providerDraft.process_mode} options={[{ value: "client", label: "客户端模式（Mihomo 拉取）" }, { value: "mmw", label: "服务端模式（内联代理组）" }]} onChange={process_mode => setProviderDraft(value => ({ ...value, process_mode }))} /></Form.Item></Flex>
+        {providerDraft.process_mode === "client" && <Flex gap="middle"><Form.Item label="客户端刷新间隔（秒）" style={{ flex: 1 }}><InputNumber aria-label="代理集合刷新间隔" min={60} max={604800} style={{ width: "100%" }} value={providerDraft.interval} onChange={interval => setProviderDraft(value => ({ ...value, interval: interval ?? 3600 }))} /></Form.Item><Form.Item label="拉取代理" style={{ flex: 1 }}><Input aria-label="代理集合拉取代理" maxLength={120} value={providerDraft.proxy} onChange={event => setProviderDraft(value => ({ ...value, proxy: event.target.value }))} /></Form.Item></Flex>}
+        <Flex gap="middle"><Form.Item label="包含名称正则" extra="与 GeoIP 国家过滤取并集" style={{ flex: 1 }}><Input aria-label="代理集合包含正则" maxLength={1000} value={providerDraft.filter} onChange={event => setProviderDraft(value => ({ ...value, filter: event.target.value }))} /></Form.Item><Form.Item label="排除名称正则" extra="最先执行" style={{ flex: 1 }}><Input aria-label="代理集合排除正则" maxLength={1000} value={providerDraft.exclude_filter} onChange={event => setProviderDraft(value => ({ ...value, exclude_filter: event.target.value }))} /></Form.Item></Flex>
+        <Flex gap="middle"><Form.Item label="排除协议（用 | 分隔）" style={{ flex: 1 }}><Input aria-label="代理集合排除协议" maxLength={1000} value={providerDraft.exclude_type} onChange={event => setProviderDraft(value => ({ ...value, exclude_type: event.target.value }))} /></Form.Item><Form.Item label="GeoIP 国家代码" extra="例如 HK,JP；需要部署者配置 IPinfo token" style={{ flex: 1 }}><Input aria-label="代理集合 GeoIP 国家代码" maxLength={512} placeholder="HK,JP" value={providerDraft.geo_ip_filter} onChange={event => setProviderDraft(value => ({ ...value, geo_ip_filter: event.target.value }))} /></Form.Item></Flex>
+        {providerDraft.process_mode === "client" && <Form.Item label="客户端请求头 JSON" extra={'Mihomo 官方格式，例如 {"User-Agent":["mihomo"]}；内容会写入订阅，请勿填写秘密。'}><Input.TextArea aria-label="代理集合请求头" rows={4} value={headerText} onChange={event => setHeaderText(event.target.value)} /></Form.Item>}
+        {providerDraft.process_mode === "client" && <><Checkbox checked={providerDraft.health_check_enabled} onChange={event => setProviderDraft(value => ({ ...value, health_check_enabled: event.target.checked }))}>启用客户端健康检查</Checkbox>{providerDraft.health_check_enabled && <Flex gap="middle" style={{ marginTop: 16 }}><Form.Item label="健康检查 HTTPS 地址" style={{ flex: 2 }}><Input aria-label="代理集合健康检查地址" value={providerDraft.health_check_url} onChange={event => setProviderDraft(value => ({ ...value, health_check_url: event.target.value }))} /></Form.Item><Form.Item label="间隔（秒）" style={{ flex: 1 }}><InputNumber aria-label="代理集合健康检查间隔" min={30} max={604800} value={providerDraft.health_check_interval} onChange={health_check_interval => setProviderDraft(value => ({ ...value, health_check_interval: health_check_interval ?? 300 }))} /></Form.Item></Flex>}</>}
+        <Form.Item label="节点覆写 JSON" extra="客户端模式同时写入 Mihomo override；快照输出和服务端模式会应用到节点。"><Input.TextArea aria-label="代理集合节点覆写" rows={5} value={overrideText} onChange={event => setOverrideText(event.target.value)} /></Form.Item><Flex justify="space-between"><Typography.Text>启用</Typography.Text><Switch aria-label="启用代理集合" checked={providerDraft.enabled} onChange={enabled => setProviderDraft(value => ({ ...value, enabled }))} /></Flex>
+      </Form>
     </Modal>
     <Modal width={820} open={Boolean(scriptEdit)} title={scriptEdit === "new" ? "新建覆写脚本" : "编辑覆写脚本"} okText="保存并检查语法" confirmLoading={busy === "script"} okButtonProps={{ disabled: !scriptDraft.owner_username || !scriptDraft.name.trim() || !scriptDraft.content.trim() }} onOk={() => void saveScript()} onCancel={() => !busy && setScriptEdit(null)} destroyOnHidden>
       <Form layout="vertical" disabled={busy === "script"}>

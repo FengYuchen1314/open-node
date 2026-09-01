@@ -32,6 +32,7 @@ export interface ProxyProvider {
   interval: number;
   proxy: string;
   size_limit: number;
+  header: Record<string, string[]>;
   health_check_enabled: boolean;
   health_check_url: string;
   health_check_interval: number;
@@ -41,8 +42,9 @@ export interface ProxyProvider {
   filter: string;
   exclude_filter: string;
   exclude_type: string;
+  geo_ip_filter: string;
   override: Record<string, unknown>;
-  process_mode: "client";
+  process_mode: "client" | "mmw";
   enabled: boolean;
   revision: number;
   created_at: string;

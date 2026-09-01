@@ -1619,11 +1619,13 @@ class InventoryStore:
         *,
         short_links_enabled: bool = False,
         external_subscriptions_state_dir: Path | None = None,
+        geoip_country_lookup=None,
     ) -> None:
         self.short_links_enabled = short_links_enabled
         self._engine = create_inventory_engine(database_url)
         self._session_factory = sessionmaker(self._engine, expire_on_commit=False)
         self.external_subscriptions_state_dir = external_subscriptions_state_dir
+        self.geoip_country_lookup = geoip_country_lookup
         self.federation_state_dir: Path | None = None
         database_file = self._engine.url.database
         if (
@@ -1722,6 +1724,15 @@ class InventoryStore:
                     "selected_proxy_provider_ids": "JSON NOT NULL DEFAULT '[]'",
                     "override_scripts_enabled": "BOOLEAN NOT NULL DEFAULT 0",
                     "selected_override_script_ids": "JSON NOT NULL DEFAULT '[]'",
+                },
+            )
+        if "subscription_proxy_providers" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector,
+                "subscription_proxy_providers",
+                {
+                    "header": "JSON NOT NULL DEFAULT '{}'",
+                    "geo_ip_filter": "TEXT NOT NULL DEFAULT ''",
                 },
             )
         if "product_user_subscription_tokens" in table_names:
@@ -4244,6 +4255,21 @@ class InventoryStore:
         content, media_type, extension = self._render_subscription_content(
             proxies, client_format, template_content
         )
+        if clash_customization and proxy_providers_enabled:
+            try:
+                content, server_provider_count = (
+                    self.subscription_customizations().apply_server_providers(
+                        session,
+                        content,
+                        customization_owner,
+                        selected_proxy_provider_ids or [],
+                        client_format.value,
+                    )
+                )
+            except ValueError as exc:
+                raise SubscriptionUnavailableError(str(exc)) from exc
+            if server_provider_count is not None:
+                proxies = yaml.safe_load(content)["proxies"]
         if clash_customization and custom_rules_enabled:
             if not customization_owner:
                 raise SubscriptionUnavailableError(

@@ -363,6 +363,7 @@ class SubscriptionProfiles:
                 not profile.proxy_providers_enabled
                 or provider is None
                 or not provider.enabled
+                or provider.process_mode != "client"
                 or provider.owner_username != profile.owner_username
                 or selected and provider.id not in selected
             ):

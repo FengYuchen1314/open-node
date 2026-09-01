@@ -531,6 +531,7 @@ compose_with() {
     -u OPEN_NODE_AGENT_IDENTITY_FILE \
     -u OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL \
     -u OPEN_NODE_SUBSCRIBER_TOTP_KEY \
+    -u OPEN_NODE_GEOIP_IPINFO_TOKEN \
     "${COMPOSE[@]}" --env-file "$environment_file" --project-name "$PROJECT_NAME" \
       --project-directory "$source_dir/deploy" \
       --file "$source_dir/deploy/compose.yaml" "$@"
@@ -853,6 +854,7 @@ runtime_container_is_safe() {
   local source_dir="$1" environment_file="$2" expected_image_id="$3" require_running="${4:-0}"
   local container_id project_containers details expected_image expected_network expected_network_id
   local port bind_address secure_cookie short_links trusted_proxies agent_identity subscriber_totp
+  local geoip_token
   local update_state_dir revision update_enabled=0
   local bootstrap_value bootstrap_environment rendered_compose
   expected_network="${PROJECT_NAME}_default"
@@ -864,6 +866,7 @@ runtime_container_is_safe() {
   trusted_proxies="$(read_key "$environment_file" OPEN_NODE_TRUSTED_PROXIES || true)"
   agent_identity="$(read_key "$environment_file" OPEN_NODE_AGENT_IDENTITY_FILE || true)"
   subscriber_totp="$(read_key "$environment_file" OPEN_NODE_SUBSCRIBER_TOTP_KEY || true)"
+  geoip_token="$(read_key "$environment_file" OPEN_NODE_GEOIP_IPINFO_TOKEN || true)"
   bootstrap_value="$(read_key "$environment_file" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
   update_state_dir="$(read_key "$environment_file" OPEN_NODE_APPLICATION_UPDATE_HOST_DIR || true)"
   revision="$(read_key "$environment_file" OPEN_NODE_REVISION || true)"
@@ -903,6 +906,7 @@ runtime_container_is_safe() {
     --arg trusted_proxies "$trusted_proxies" \
     --arg agent_identity "$agent_identity" \
     --arg subscriber_totp "$subscriber_totp" \
+    --arg geoip_token "$geoip_token" \
     --arg update_state_dir "$update_state_dir" \
     --arg revision "$revision" \
     --argjson update_enabled "$update_enabled" \
@@ -932,6 +936,7 @@ runtime_container_is_safe() {
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SHORT_LINKS_ENABLED=")) ] == ["OPEN_NODE_SHORT_LINKS_ENABLED=" + $short_links])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_AGENT_IDENTITY_FILE=")) ] == ["OPEN_NODE_AGENT_IDENTITY_FILE=" + $agent_identity])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SUBSCRIBER_TOTP_KEY=")) ] == ["OPEN_NODE_SUBSCRIBER_TOTP_KEY=" + $subscriber_totp])
+      and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_GEOIP_IPINFO_TOKEN=")) ] == ["OPEN_NODE_GEOIP_IPINFO_TOKEN=" + $geoip_token])
       and (
         if $update_enabled == 0 then
           ([ $container.Config.Env[]? | select(
@@ -1054,6 +1059,7 @@ require_fresh_project() {
 create_candidate_environment() {
   local source_dir="$1" destination="$2" base_file="${3:-}" created=0
   local port bind_address secure_cookie bootstrap_value rendered_compose existing_bind=""
+  local geoip_token
   local public_hostname previous_public public_url trusted_proxies
   if [[ -n "$base_file" ]]; then
     validate_safe_file "active environment file" "$base_file" 1
@@ -1127,6 +1133,13 @@ create_candidate_environment() {
   fi
   validate_agent_bootstrap_value "$bootstrap_value" \
     || die "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL must be empty or a safe canonical HTTPS URL"
+  geoip_token="$(read_key "$destination" OPEN_NODE_GEOIP_IPINFO_TOKEN || true)"
+  if [[ -v OPEN_NODE_GEOIP_IPINFO_TOKEN ]]; then
+    geoip_token="$OPEN_NODE_GEOIP_IPINFO_TOKEN"
+  fi
+  [[ -z "$geoip_token" || ( "${#geoip_token}" -le 256 \
+    && "$geoip_token" =~ ^[A-Za-z0-9._~-]+$ ) ]] \
+    || die "OPEN_NODE_GEOIP_IPINFO_TOKEN must be an empty or 1-256 character token"
   set_file_value "$destination" OPEN_NODE_IMAGE_REPOSITORY "$IMAGE_REPOSITORY"
   set_file_value "$destination" OPEN_NODE_APPLICATION_UPDATE_HOST_DIR "$UPDATE_STATE_DIR"
   set_file_value "$destination" OPEN_NODE_BIND_ADDRESS "$bind_address"
@@ -1137,6 +1150,7 @@ create_candidate_environment() {
   set_file_value "$destination" OPEN_NODE_SHORT_LINKS_ENABLED \
     "$(read_key "$destination" OPEN_NODE_SHORT_LINKS_ENABLED || printf 'false')"
   set_file_value "$destination" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL "$bootstrap_value"
+  set_file_value "$destination" OPEN_NODE_GEOIP_IPINFO_TOKEN "$geoip_token"
   if [[ -v OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL && -n "$bootstrap_value" ]]; then
     rendered_compose="$(compose_with "$source_dir" "$destination" config --format json)" \
       || die "candidate Compose could not be inspected for Agent bootstrap support"
@@ -1156,7 +1170,7 @@ set_candidate_identity() {
 validate_candidate_compose() {
   local source_dir="$1" environment_file="$2" expected_image="$3"
   local images config_json context revision port bind_address secure_cookie short_links
-  local trusted_proxies agent_identity subscriber_totp update_state_dir update_enabled=0
+  local trusted_proxies agent_identity subscriber_totp geoip_token update_state_dir update_enabled=0
   local bootstrap_value bootstrap_environment
   context="$(realpath -m -- "$source_dir")"
   [[ -d "$context" && ! -L "$context" \
@@ -1173,6 +1187,7 @@ validate_candidate_compose() {
   trusted_proxies="$(read_key "$environment_file" OPEN_NODE_TRUSTED_PROXIES || true)"
   agent_identity="$(read_key "$environment_file" OPEN_NODE_AGENT_IDENTITY_FILE || true)"
   subscriber_totp="$(read_key "$environment_file" OPEN_NODE_SUBSCRIBER_TOTP_KEY || true)"
+  geoip_token="$(read_key "$environment_file" OPEN_NODE_GEOIP_IPINFO_TOKEN || true)"
   bootstrap_value="$(read_key "$environment_file" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
   update_state_dir="$(read_key "$environment_file" OPEN_NODE_APPLICATION_UPDATE_HOST_DIR || true)"
   if [[ "$update_state_dir" == "$UPDATE_STATE_DIR" ]]; then
@@ -1217,6 +1232,7 @@ validate_candidate_compose() {
     --arg trusted_proxies "$trusted_proxies" \
     --arg agent_identity "$agent_identity" \
     --arg subscriber_totp "$subscriber_totp" \
+    --arg geoip_token "$geoip_token" \
     --arg update_state_dir "$update_state_dir" \
     --argjson update_enabled "$update_enabled" \
     --arg bootstrap_value "$bootstrap_value" \
@@ -1263,7 +1279,8 @@ validate_candidate_compose() {
       "OPEN_NODE_AGENT_IDENTITY_FILE": $agent_identity,
       "OPEN_NODE_SESSION_COOKIE_SECURE": $secure_cookie,
       "OPEN_NODE_SHORT_LINKS_ENABLED": $short_links,
-      "OPEN_NODE_SUBSCRIBER_TOTP_KEY": $subscriber_totp
+      "OPEN_NODE_SUBSCRIBER_TOTP_KEY": $subscriber_totp,
+      "OPEN_NODE_GEOIP_IPINFO_TOKEN": $geoip_token
     } + (if ($bootstrap_environment | length) == 1 then {
       "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL": $bootstrap_value
     } else {} end) + (if $update_enabled == 1 then {

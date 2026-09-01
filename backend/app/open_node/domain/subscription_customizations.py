@@ -51,6 +51,10 @@ class ProxyProviderFields(CustomizationModel):
     interval: int = Field(default=3600, ge=60, le=604_800)
     proxy: str = Field(default="DIRECT", min_length=1, max_length=120)
     size_limit: int = Field(default=0, ge=0, le=1024)
+    # Header values may contain credentials even though the UI warns against it.
+    # Accept the raw JSON shape here and validate it in the service so a 422
+    # response never includes the submitted values in Pydantic's error input.
+    header: Any = Field(default_factory=dict)
     health_check_enabled: bool = True
     health_check_url: str = Field(
         default="https://www.gstatic.com/generate_204", min_length=1, max_length=2048
@@ -62,8 +66,9 @@ class ProxyProviderFields(CustomizationModel):
     filter: str = Field(default="", max_length=1000)
     exclude_filter: str = Field(default="", max_length=1000)
     exclude_type: str = Field(default="", max_length=1000)
+    geo_ip_filter: str = Field(default="", max_length=512)
     override: dict[str, Any] = Field(default_factory=dict)
-    process_mode: Literal["client"] = "client"
+    process_mode: Literal["client", "mmw"] = "client"
     enabled: bool = True
 
     @field_validator("health_check_url")
@@ -79,6 +84,16 @@ class ProxyProviderFields(CustomizationModel):
         if len(value) > 64:
             raise ValueError("Provider override has too many fields")
         return value
+
+    @field_validator("geo_ip_filter")
+    @classmethod
+    def country_codes(cls, value: str):
+        import re
+
+        codes = [item.strip().upper() for item in re.split(r"[,\s]+", value) if item.strip()]
+        if len(codes) > 64 or any(re.fullmatch(r"[A-Z]{2}", item) is None for item in codes):
+            raise ValueError("GeoIP filter must contain comma-separated two-letter country codes")
+        return ",".join(dict.fromkeys(codes))
 
 
 class ProxyProviderCreate(ProxyProviderFields):

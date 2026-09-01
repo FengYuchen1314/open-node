@@ -21,10 +21,10 @@ const rule: CustomRule = {
 };
 const provider: ProxyProvider = {
   id: "provider-id", owner_username: "alice", external_source_id: "source-id",
-  name: "机场节点", type: "http", interval: 3600, proxy: "DIRECT", size_limit: 0,
+  name: "机场节点", type: "http", interval: 3600, proxy: "DIRECT", size_limit: 0, header: {},
   health_check_enabled: true, health_check_url: "https://www.gstatic.com/generate_204",
   health_check_interval: 300, health_check_timeout: 5000, health_check_lazy: true,
-  health_check_expected_status: 204, filter: "", exclude_filter: "", exclude_type: "",
+  health_check_expected_status: 204, filter: "", exclude_filter: "", exclude_type: "", geo_ip_filter: "",
   override: {}, process_mode: "client", enabled: true, revision: 1,
   created_at: now, updated_at: now,
 };

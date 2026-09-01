@@ -1,6 +1,7 @@
 """Durable subscription rules and snapshot-backed Clash proxy providers."""
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from datetime import UTC, datetime
 from urllib.parse import quote
@@ -36,6 +37,7 @@ MAX_RENDERED_BYTES = 8 * 1024 * 1024
 BUILTIN_POLICIES = {
     "DIRECT", "REJECT", "REJECT-DROP", "PASS", "GLOBAL", "COMPATIBLE", "PROXY"
 }
+HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+\Z")
 
 
 class CustomizationLoader(yaml.SafeLoader):
@@ -103,6 +105,7 @@ class ProxyProviderModel(Base):
     interval: Mapped[int] = mapped_column(Integer, default=3600)
     proxy: Mapped[str] = mapped_column(String(120), default="DIRECT")
     size_limit: Mapped[int] = mapped_column(Integer, default=0)
+    header: Mapped[dict] = mapped_column(JSON, default=dict)
     health_check_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     health_check_url: Mapped[str] = mapped_column(String(2048))
     health_check_interval: Mapped[int] = mapped_column(Integer, default=300)
@@ -112,6 +115,7 @@ class ProxyProviderModel(Base):
     filter: Mapped[str] = mapped_column(Text, default="")
     exclude_filter: Mapped[str] = mapped_column(Text, default="")
     exclude_type: Mapped[str] = mapped_column(Text, default="")
+    geo_ip_filter: Mapped[str] = mapped_column(Text, default="")
     override: Mapped[dict] = mapped_column(JSON, default=dict)
     process_mode: Mapped[str] = mapped_column(String(16), default="client")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
@@ -221,6 +225,29 @@ def _regex(value: str, label: str):
 def _provider_values(payload):
     _regex(payload.filter, "Provider filter")
     _regex(payload.exclude_filter, "Provider exclude filter")
+    if not isinstance(payload.header, dict) or len(payload.header) > 32:
+        raise SubscriptionCustomizationError("Provider headers are invalid")
+    header_bytes = 0
+    for name, values in payload.header.items():
+        if (
+            not isinstance(name, str)
+            or HEADER_NAME.fullmatch(name) is None
+            or not isinstance(values, list)
+            or not values
+            or len(values) > 8
+        ):
+            raise SubscriptionCustomizationError("Provider headers are invalid")
+        for item in values:
+            if (
+                not isinstance(item, str)
+                or not item
+                or len(item) > 2048
+                or any(ord(char) < 32 or ord(char) == 127 for char in item)
+            ):
+                raise SubscriptionCustomizationError("Provider headers are invalid")
+            header_bytes += len(name.encode()) + len(item.encode())
+    if header_bytes > 16_384:
+        raise SubscriptionCustomizationError("Provider headers are invalid")
     if any(ord(char) < 32 for char in payload.proxy):
         raise SubscriptionCustomizationError("Provider proxy contains control characters")
     _bounded_yaml(yaml.safe_dump(payload.override, allow_unicode=True, sort_keys=False))
@@ -252,6 +279,7 @@ class SubscriptionCustomizations:
             id=row.id, owner_username=row.owner_username,
             external_source_id=row.external_source_id, name=row.name, type=row.type,
             interval=row.interval, proxy=row.proxy, size_limit=row.size_limit,
+            header=row.header or {},
             health_check_enabled=row.health_check_enabled,
             health_check_url=row.health_check_url,
             health_check_interval=row.health_check_interval,
@@ -259,7 +287,8 @@ class SubscriptionCustomizations:
             health_check_lazy=row.health_check_lazy,
             health_check_expected_status=row.health_check_expected_status,
             filter=row.filter, exclude_filter=row.exclude_filter,
-            exclude_type=row.exclude_type, override=row.override or {},
+            exclude_type=row.exclude_type, geo_ip_filter=row.geo_ip_filter,
+            override=row.override or {},
             process_mode=row.process_mode, enabled=row.enabled, revision=row.revision,
             created_at=row.created_at, updated_at=row.updated_at,
         )
@@ -363,6 +392,7 @@ class SubscriptionCustomizations:
             raise SubscriptionCustomizationNotFound("Subscriber not found")
         now = datetime.now(UTC)
         values = _provider_values(payload)
+        self._require_geoip(payload.geo_ip_filter)
         values["external_source_id"] = str(payload.external_source_id)
         values["name"] = _name(payload.name)
         row = ProxyProviderModel(
@@ -385,6 +415,7 @@ class SubscriptionCustomizations:
 
     def update_provider(self, identifier, payload: ProxyProviderUpdate, *, owner_username=None):
         values = _provider_values(payload)
+        self._require_geoip(payload.geo_ip_filter)
         values["external_source_id"] = str(payload.external_source_id)
         values["name"] = _name(payload.name)
         with self.store._coordinated_session() as session:
@@ -410,6 +441,13 @@ class SubscriptionCustomizations:
             result = self._provider_read(row)
             session.commit()
             return result
+
+    def _require_geoip(self, value):
+        lookup = self.store.geoip_country_lookup
+        if value and (lookup is None or not lookup.configured):
+            raise SubscriptionCustomizationError(
+                "GeoIP filtering requires OPEN_NODE_GEOIP_IPINFO_TOKEN"
+            )
 
     def delete_provider(self, identifier, expected_revision, *, owner_username=None):
         with self.store._coordinated_session() as session:
@@ -466,6 +504,8 @@ class SubscriptionCustomizations:
         encoded_code = quote(subscription_code, safe="")
         provider_names = []
         for provider in providers:
+            if provider.process_mode != "client":
+                continue
             if provider.name in target:
                 raise SubscriptionCustomizationConflict(
                     f"Proxy provider name conflicts with the selected template: {provider.name}"
@@ -482,6 +522,8 @@ class SubscriptionCustomizations:
             }
             if provider.size_limit:
                 entry["size-limit"] = provider.size_limit
+            if provider.header:
+                entry["header"] = deepcopy(provider.header)
             if provider.health_check_enabled:
                 entry["health-check"] = {
                     "enable": True,
@@ -623,7 +665,7 @@ class SubscriptionCustomizations:
             })
             names.add(policy)
 
-    def provider_payload(self, session, provider):
+    def _provider_proxies(self, session, provider):
         candidates, _unavailable, _warnings = (
             self.store.external_subscriptions().source_candidates(
                 session, provider.owner_username, provider.external_source_id
@@ -634,14 +676,60 @@ class SubscriptionCustomizations:
         excluded_types = {
             item.strip().casefold() for item in provider.exclude_type.split("|") if item.strip()
         }
+        country_codes = {
+            item.strip().upper() for item in provider.geo_ip_filter.split(",") if item.strip()
+        }
+        pending_servers = []
+        if country_codes:
+            for _identifier, original in candidates:
+                name = str(original.get("name") or "Node")
+                if exclude and exclude.search(name):
+                    continue
+                if str(original.get("type") or "").casefold() in excluded_types:
+                    continue
+                if include and include.search(name):
+                    continue
+                server = original.get("server")
+                if isinstance(server, str) and server.strip():
+                    pending_servers.append(server.strip())
+        pending_servers = list(dict.fromkeys(pending_servers))
+        if len(pending_servers) > 64:
+            raise SubscriptionCustomizationError(
+                "GeoIP filtering supports at most 64 unique node servers per Provider"
+            )
+        countries = {}
+        lookup = self.store.geoip_country_lookup
+        if pending_servers and (lookup is None or not lookup.configured):
+            raise SubscriptionCustomizationError("GeoIP filtering is not configured")
+        if pending_servers:
+            from open_node.services.geoip import GeoIPLookupError
+
+            with ThreadPoolExecutor(max_workers=min(4, len(pending_servers))) as executor:
+                tasks = {
+                    executor.submit(lookup.lookup, server): server
+                    for server in pending_servers
+                }
+                for task in as_completed(tasks):
+                    try:
+                        countries[tasks[task]] = task.result()
+                    except GeoIPLookupError:
+                        countries[tasks[task]] = ""
         proxies = []
         used_names = set()
         for _identifier, original in candidates:
             proxy = deepcopy(original)
             name = str(proxy.get("name") or "Node")
-            if include and not include.search(name) or exclude and exclude.search(name):
+            if exclude and exclude.search(name):
                 continue
             if str(proxy.get("type") or "").casefold() in excluded_types:
+                continue
+            name_matches = bool(include and include.search(name))
+            geo_matches = bool(
+                country_codes
+                and isinstance(proxy.get("server"), str)
+                and countries.get(proxy["server"].strip()) in country_codes
+            )
+            if (include or country_codes) and not (name_matches or geo_matches):
                 continue
             proxy.update(deepcopy(provider.override or {}))
             base, suffix = name, 2
@@ -651,7 +739,94 @@ class SubscriptionCustomizations:
             proxy["name"] = name
             used_names.add(name)
             proxies.append(proxy)
+        return proxies
+
+    def provider_payload(self, session, provider):
+        proxies = self._provider_proxies(session, provider)
         rendered = yaml.safe_dump({"proxies": proxies}, allow_unicode=True, sort_keys=False)
         if len(rendered.encode()) > MAX_RENDERED_BYTES:
             raise SubscriptionCustomizationError("Proxy provider output exceeds 8 MiB")
+        return rendered, len(proxies)
+
+    def apply_server_providers(
+        self, session, content, owner_username, provider_ids, client_format
+    ):
+        providers = [
+            provider for provider in self._selected_rows(
+                session, ProxyProviderModel, owner_username, provider_ids
+            )
+            if provider.process_mode == "mmw"
+        ]
+        if not providers:
+            return content, None
+        value = _bounded_yaml(content)
+        if not isinstance(value, dict):
+            raise SubscriptionCustomizationError("Clash subscription must be a mapping")
+        proxies = value.get("proxies", [])
+        groups = value.get("proxy-groups", [])
+        if not isinstance(proxies, list) or not isinstance(groups, list):
+            raise SubscriptionCustomizationError("Clash proxies and groups must be lists")
+        from open_node.services import subscription_clients
+        from open_node.services.subscription_extra_clients import yaml_proxy
+
+        group_names = {
+            group.get("name") for group in groups
+            if isinstance(group, dict) and isinstance(group.get("name"), str)
+        }
+        used_names = {
+            proxy.get("name") for proxy in proxies
+            if isinstance(proxy, dict) and isinstance(proxy.get("name"), str)
+        }
+        reusable_names = set(used_names)
+        used_names.update(BUILTIN_POLICIES)
+        for provider in providers:
+            if provider.name in BUILTIN_POLICIES or provider.name in used_names:
+                raise SubscriptionCustomizationConflict(
+                    "Server Provider name conflicts with a proxy or built-in policy: "
+                    + provider.name
+                )
+            group = next(
+                (
+                    item for item in groups
+                    if isinstance(item, dict) and item.get("name") == provider.name
+                ),
+                None,
+            )
+            if group is None:
+                group = {"name": provider.name, "type": "select", "proxies": []}
+                groups.append(group)
+                group_names.add(provider.name)
+            elif not isinstance(group.get("type"), str):
+                raise SubscriptionCustomizationConflict(
+                    f"Server Provider group is invalid: {provider.name}"
+                )
+            names = []
+            for original in self._provider_proxies(session, provider):
+                original_name = str(original.get("name") or "Node")
+                if not provider.override and original_name in reusable_names:
+                    names.append(original_name)
+                    continue
+                proxy = (
+                    yaml_proxy(original, "stash")
+                    if client_format == "stash"
+                    else subscription_clients.clash_proxy(original)
+                )
+                base = str(proxy.get("name") or "Node")
+                name, suffix = base, 2
+                while name in used_names or name in group_names:
+                    name = f"{base} ({suffix})"
+                    suffix += 1
+                proxy["name"] = name
+                proxies.append(proxy)
+                names.append(name)
+                used_names.add(name)
+            group["proxies"] = names or ["REJECT"]
+            group.pop("use", None)
+        value["proxies"], value["proxy-groups"] = proxies, groups
+        rendered = yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
+        if len(rendered.encode()) > MAX_RENDERED_BYTES:
+            raise SubscriptionCustomizationError("Server Provider output exceeds 8 MiB")
+        from open_node.services.template_rendering import parse_template
+
+        parse_template(rendered, "clash")
         return rendered, len(proxies)

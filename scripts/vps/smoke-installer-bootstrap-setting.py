@@ -44,6 +44,7 @@ trap - EXIT INT TERM HUP
 COMPOSE=(docker compose)
 PROJECT_NAME="$SMOKE_PROJECT"
 DATA_VOLUME="${PROJECT_NAME}_data"
+UPDATE_STATE_DIR="/var/lib/open-node-maintenance-${PROJECT_NAME}"
 IMAGE_REPOSITORY="$SMOKE_IMAGE"
 ENV_FILE="$environment_file"
 case "$operation" in
@@ -288,6 +289,10 @@ def preflight_matrix(repository, work):
             "OPEN_NODE_HTTP_PORT": "38080", "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
             "OPEN_NODE_SHORT_LINKS_ENABLED": "false", "OPEN_NODE_TRUSTED_PROXIES": "",
             "OPEN_NODE_AGENT_IDENTITY_FILE": "", "OPEN_NODE_SUBSCRIBER_TOTP_KEY": "",
+            "OPEN_NODE_GEOIP_IPINFO_TOKEN": "",
+            "OPEN_NODE_APPLICATION_UPDATE_HOST_DIR": (
+                "/var/lib/open-node-maintenance-" + project
+            ),
         }
         if value is not ABSENT:
             entries[KEY] = value
@@ -310,7 +315,12 @@ def preflight_matrix(repository, work):
             input=HARNESS, text=True, capture_output=True, check=False, env=environ, timeout=40,
             cwd=work,
         )
-        require((result.returncode == 0) == accepted, "Compose preflight scenario failed: " + name)
+        diagnostic = result.stderr.strip().splitlines()
+        require(
+            (result.returncode == 0) == accepted,
+            "Compose preflight scenario failed: " + name
+            + (" (" + diagnostic[-1] + ")" if diagnostic else ""),
+        )
         checks.append(name)
         print("PASS " + name, flush=True)
         return result.stdout

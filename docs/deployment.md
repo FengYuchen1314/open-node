@@ -294,6 +294,13 @@ private configuration backup, not in Git or a database export. See
 [subscriber accounts](subscriber-accounts.md) for key generation and recovery.
 An empty value disables new authenticator enrollment, not password login.
 
+Proxy Provider GeoIP filtering is optional. To enable it, put a private IPinfo token in
+`OPEN_NODE_GEOIP_IPINFO_TOKEN` in `deploy/.env`. The installer preserves the value across
+updates and passes it only to the application container. Leave it empty if GeoIP filtering
+is not used; ordinary name/protocol Provider filters do not need a third-party account.
+Node IPs or resolved public addresses are sent to IPinfo only while a selected Provider has
+a GeoIP condition. See [subscription customizations](subscription-customizations.md).
+
 The port is bound to host loopback only. The service runs as UID/GID 10001,
 with no capabilities, no privilege escalation, a read-only image filesystem,
 a temporary `/tmp`, and a private named volume at `/var/lib/open-node`.

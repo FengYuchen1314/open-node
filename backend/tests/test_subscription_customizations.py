@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import pytest
 import yaml
+from open_node.services.external_fetch import ExternalFetchResult
 from open_node.services.inventory import SubscriptionProfileModel
 from test_subscriber_auth import login, make
 
@@ -84,6 +86,7 @@ def test_profile_rules_and_snapshot_provider_render_as_one_clash_subscription(tm
             "external_source_id": source["id"],
             "name": "Airport",
             "filter": "Hong Kong|Japan",
+            "header": {"User-Agent": ["mihomo", "Open Node"]},
         },
     ).raise_for_status().json()
     current = admin.get("/api/v1/subscription-profiles").json()["profiles"][0]
@@ -109,6 +112,9 @@ def test_profile_rules_and_snapshot_provider_render_as_one_clash_subscription(tm
     assert provider_url == (
         f"https://testserver/api/v1/proxy-provider/customized/{provider['id']}"
     )
+    assert value["proxy-providers"]["Airport"]["header"] == {
+        "User-Agent": ["mihomo", "Open Node"]
+    }
     assert "provider.example" not in rendered.text and "never-return-this" not in rendered.text
     provider_response = admin.get(provider_url)
     assert provider_response.status_code == 200
@@ -270,3 +276,136 @@ def test_deleting_external_source_cascades_provider_and_profile_reference(tmp_pa
     assert admin.get("/api/v1/subscription-profiles").json()["profiles"][0][
         "selected_proxy_provider_ids"
     ] == []
+
+
+def test_mmw_provider_inlines_filtered_snapshot_as_same_name_group(tmp_path):
+    app, admin, _subscriber = make(tmp_path, catalog=True)
+    profile_id = profile(app, code="server-provider")
+    source = admin.post(
+        "/api/v1/external-subscriptions",
+        json={
+            "owner_username": "alice",
+            "name": "Geo snapshot",
+            "url": "https://provider.example/mmw",
+        },
+    ).raise_for_status().json()
+    nodes = [
+        {
+            "name": "Hong Kong A", "type": "vless", "server": "8.8.8.8", "port": 443,
+            "uuid": "4ac23fce-f91b-4e5f-a722-d2a85b8c3324", "tls": True,
+        },
+        {
+            "name": "Osaka A", "type": "vless", "server": "1.1.1.1", "port": 443,
+            "uuid": "5fb3a937-aa3b-4bc8-ae30-8ce19356e741", "tls": True,
+        },
+        {
+            "name": "Blocked JP", "type": "vless", "server": "9.9.9.9", "port": 443,
+            "uuid": "6fc3a937-aa3b-4bc8-ae30-8ce19356e742", "tls": True,
+        },
+    ]
+    body = yaml.safe_dump({"proxies": nodes}, allow_unicode=True).encode()
+    app.state.external_subscriptions.fetcher = lambda _url, *, user_agent: ExternalFetchResult(
+        body=body
+    )
+    preview = admin.post(
+        f"/api/v1/external-subscriptions/{source['id']}/previews",
+        json={"expected_revision": source["revision"]},
+    ).raise_for_status().json()
+    admin.post(
+        f"/api/v1/external-subscriptions/{source['id']}/previews/{preview['id']}/confirm",
+        json={
+            "expected_revision": preview["source_revision"],
+            "accept_changes": True,
+            "selected_node_ids": [item["node_id"] for item in preview["nodes"]],
+        },
+    ).raise_for_status()
+
+    class Countries:
+        configured = True
+
+        @staticmethod
+        def lookup(server):
+            return {"1.1.1.1": "JP", "9.9.9.9": "JP"}.get(server, "US")
+
+    app.state.inventory.geoip_country_lookup = Countries()
+    provider = admin.post(
+        BASE + "/providers",
+        json={
+            "owner_username": "alice",
+            "external_source_id": source["id"],
+            "name": "Asia",
+            "process_mode": "mmw",
+            "filter": "Hong Kong",
+            "exclude_filter": "Blocked",
+            "geo_ip_filter": "jp",
+        },
+    ).raise_for_status().json()
+    assert provider["geo_ip_filter"] == "JP"
+    current = admin.get("/api/v1/subscription-profiles").json()["profiles"][0]
+    admin.put(
+        f"/api/v1/subscription-profiles/{profile_id}",
+        json=profile_update(
+            current,
+            proxy_providers_enabled=True,
+            selected_proxy_provider_ids=[provider["id"]],
+        ),
+    ).raise_for_status()
+    response = admin.get("/x/server-provider")
+    assert response.status_code == 200, response.text
+    rendered = yaml.safe_load(response.text)
+    assert rendered.get("proxy-providers") == {}
+    group = next(item for item in rendered["proxy-groups"] if item["name"] == "Asia")
+    assert set(group["proxies"]) == {"Hong Kong A", "Osaka A"}
+    assert admin.get(
+        f"/api/v1/proxy-provider/server-provider/{provider['id']}"
+    ).status_code == 404
+
+
+def test_geoip_and_header_validation_fail_closed_without_echo(tmp_path):
+    _app, admin, _subscriber = make(tmp_path, catalog=True)
+    source = admin.post(
+        "/api/v1/external-subscriptions",
+        json={
+            "owner_username": "alice", "name": "Validation source",
+            "url": "https://provider.example/validation",
+        },
+    ).raise_for_status().json()
+    missing_token = admin.post(
+        BASE + "/providers",
+        json={
+            "owner_username": "alice", "external_source_id": source["id"],
+            "name": "Geo", "geo_ip_filter": "HK",
+        },
+    )
+    assert missing_token.status_code == 422
+    invalid_header = admin.post(
+        BASE + "/providers",
+        json={
+            "owner_username": "alice", "external_source_id": source["id"],
+            "name": "Header", "header": {"X-Test": ["secret\r\nInjected: yes"]},
+        },
+    )
+    assert invalid_header.status_code == 422
+    assert "Injected" not in invalid_header.text
+
+
+def test_geoip_lookup_uses_official_lite_endpoint_caches_and_rejects_private(monkeypatch):
+    from open_node.services import external_fetch
+    from open_node.services.geoip import GeoIPLookupError, IPInfoCountryLookup
+
+    calls = []
+
+    def fetch(url, **kwargs):
+        calls.append((url, kwargs))
+        return ExternalFetchResult(body=b'{"country_code":"US"}')
+
+    monkeypatch.setattr(external_fetch, "fetch_external_subscription", fetch)
+    lookup = IPInfoCountryLookup("fixture-token")
+    assert lookup.lookup("8.8.8.8") == lookup.lookup("8.8.8.8") == "US"
+    assert calls == [(
+        "https://api.ipinfo.io/lite/8.8.8.8?token=fixture-token",
+        {"user_agent": "OpenNode/0.1 GeoIP", "timeout": 4, "max_bytes": 4096},
+    )]
+    with pytest.raises(GeoIPLookupError, match="public"):
+        lookup.lookup("127.0.0.1")
+    assert len(calls) == 1
