@@ -1,5 +1,21 @@
 # Testing
 
+## 首次初始化管理员资料 — 2026-09-01
+
+实现依据为固定官方 `internal/handler/setup.go` 与 `profile.go`。Linux 隔离目录继续使用
+`/tmp/open-node-permissions.tYdQQr/repo/speedtests.3d6eebb`，没有修改生产
+`/opt/open-node`、生产数据库或容器。
+
+- 初始化测试文件 **35 项通过**，其中新增资料聚焦 **7 项通过**。覆盖昵称/邮箱/HTTPS
+  头像与管理员、品牌、永久标记和凭证消费原子提交，登录后读取、版本化修改、旧版本冲突、
+  非法邮箱、超长/控制字符昵称、HTTP/file/内嵌凭据头像拒绝及秘密不回显。
+- 前端初始化服务与面板 **32 项通过**，管理员资料面板 **2 项通过**；类型检查和生产构建
+  通过。保存结果不确定时只重新读取，不自动重放 PUT。构建只有既有大 chunk 提示。
+- 资料存入独立 `administrator_profiles` 表，现有 SQLite 启动时安全补表；内容随一致 SQLite
+  备份保存。头像是浏览器直接使用的外部 HTTPS 地址，主控不下载图片或保存远端正文。
+- Windows 本地后端收集因既有 Linux `fcntl` 依赖不可运行，最终结果来自 VPS Python 3.11
+  隔离环境。变更文件 Ruff 与 `git diff --check` 通过。
+
 ## 节点测速与官方家庭测速端协议 — 2026-09-01
 
 隔离测试目录为 VPS `/tmp/open-node-permissions.tYdQQr/repo/speedtests.3d6eebb`；只从候选

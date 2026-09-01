@@ -22,7 +22,7 @@ describe("Chinese browser first-run setup", () => {
     renderUi(<InitialSetupPanel />); await flush(); fill();
     const form = screen.getByLabelText("管理员密码").closest("form")!;
     fireEvent.submit(form); fireEvent.submit(form); await flush();
-    expect(completeInitialSetup).toHaveBeenCalledExactlyOnceWith({ setup_token: "a".repeat(43), username: "admin", password: "  private-password  ", site_title: "中文站点", brand_title: "Open Node", confirm_new_install: true });
+    expect(completeInitialSetup).toHaveBeenCalledExactlyOnceWith({ setup_token: "a".repeat(43), username: "admin", password: "  private-password  ", site_title: "中文站点", brand_title: "Open Node", email: "", nickname: "", avatar_url: "", confirm_new_install: true });
     expect((screen.getByLabelText("初始化凭证") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("管理员密码") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("确认密码") as HTMLInputElement).value).toBe("");

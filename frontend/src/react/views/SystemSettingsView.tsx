@@ -10,6 +10,7 @@ import { useAdministratorSession } from "../hooks/useSession";
 import AppearancePanel from "../components/AppearancePanel";
 import AnnouncementsPanel from "../components/AnnouncementsPanel";
 import ApplicationUpdatePanel from "../components/ApplicationUpdatePanel";
+import AdministratorProfilePanel from "../components/AdministratorProfilePanel";
 import SubscriberPermissionsPanel from "../components/SubscriberPermissionsPanel";
 
 export default function SystemSettingsView() {
@@ -107,6 +108,7 @@ function BrandingEditor({ operator }: { operator: OperatorSession }) {
         <Typography.Text type="secondary">恢复默认只回填草稿，仍需保存。重新读取会丢弃未保存的草稿。</Typography.Text>
       </Space>
     </Card>
+    <AdministratorProfilePanel operator={operator} />
     <AppearancePanel operator={operator} />
     <SubscriberPermissionsPanel operator={operator} />
     <AnnouncementsPanel operator={operator} />

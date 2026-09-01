@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, field_validator
 
-from open_node.domain.auth import AdministratorCredentials
+from open_node.domain.auth import AdministratorCredentials, AdministratorProfileUpdate
 from open_node.domain.branding import (
     DEFAULT_BRAND_TITLE,
     DEFAULT_SITE_TITLE,
@@ -35,6 +35,9 @@ class InitialSetupRequest(AdministratorCredentials):
     setup_token: SecretStr = Field(min_length=43, max_length=43)
     site_title: str = DEFAULT_SITE_TITLE
     brand_title: str = DEFAULT_BRAND_TITLE
+    email: str = ""
+    nickname: str = ""
+    avatar_url: str = ""
     confirm_new_install: StrictBool
 
     @field_validator("setup_token")
@@ -60,6 +63,18 @@ class InitialSetupRequest(AdministratorCredentials):
         if not value:
             raise ValueError("Explicit first-administrator confirmation is required")
         return value
+
+    @field_validator("email", "nickname", "avatar_url")
+    @classmethod
+    def profile_fields(cls, value, info):
+        payload = {
+            "email": "",
+            "nickname": "",
+            "avatar_url": "",
+            "expected_revision": 0,
+        }
+        payload[info.field_name] = value
+        return getattr(AdministratorProfileUpdate.model_validate(payload), info.field_name)
 
 
 class InitialSetupStatus(BaseModel):

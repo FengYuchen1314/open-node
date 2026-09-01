@@ -10,6 +10,7 @@ export default function InitialSetupPanel() {
   const [token, setToken] = useState(""), [username, setUsername] = useState("admin");
   const [password, setPassword] = useState(""), [confirmation, setConfirmation] = useState("");
   const [site, setSite] = useState("Open Node"), [brand, setBrand] = useState("Open Node");
+  const [email, setEmail] = useState(""), [nickname, setNickname] = useState(""), [avatarUrl, setAvatarUrl] = useState("");
   const [accepted, setAccepted] = useState(false);
   const refresh = useCallback(async () => {
     if (busyRef.current) return;
@@ -30,7 +31,8 @@ export default function InitialSetupPanel() {
     if (password !== confirmation) { setError("两次输入的密码不一致。"); return; }
     let payload;
     try {
-      payload = validateSetupInput({ setup_token: token, username, password, site_title: site, brand_title: brand, confirm_new_install: accepted });
+      payload = validateSetupInput({ setup_token: token, username, password, site_title: site, brand_title: brand,
+        email, nickname, avatar_url: avatarUrl, confirm_new_install: accepted });
     } catch (cause) { setError(setupErrorMessage(cause)); return; }
     const generation = scope.begin(); busyRef.current = true; setBusy(true); setError("");
     setToken(""); setPassword(""); setConfirmation(""); setAccepted(false);
@@ -63,6 +65,9 @@ export default function InitialSetupPanel() {
     </> : <Form layout="vertical" onFinish={() => void submit()} style={{ width: "100%" }}>
       <Form.Item label="初始化凭证" htmlFor="setup-token" required><Input.Password id="setup-token" value={token} onChange={e => setToken(e.target.value)} autoComplete="off" maxLength={43} disabled={busy} /></Form.Item>
       <Form.Item label="管理员用户名" htmlFor="setup-username" required extra="1–64 个英文字母、数字或 _.@- 字符。"><Input id="setup-username" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" maxLength={64} disabled={busy} /></Form.Item>
+      <Form.Item label="管理员昵称" htmlFor="setup-nickname" extra="可选；留空时使用管理员用户名。"><Input id="setup-nickname" value={nickname} onChange={e => setNickname(e.target.value)} autoComplete="name" maxLength={120} disabled={busy} /></Form.Item>
+      <Form.Item label="管理员邮箱" htmlFor="setup-email" extra="可选；用于显示资料，不作为登录凭据。"><Input id="setup-email" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" maxLength={254} disabled={busy} /></Form.Item>
+      <Form.Item label="头像 HTTPS 地址" htmlFor="setup-avatar" extra="可选；只接受 HTTPS，不会把图片上传到主控。"><Input id="setup-avatar" type="url" value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} autoComplete="url" maxLength={2048} disabled={busy} /></Form.Item>
       <Form.Item label="管理员密码" htmlFor="setup-password" required extra="至少 12 个字符，保留首尾空格。"><Input.Password id="setup-password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" disabled={busy} /></Form.Item>
       <Form.Item label="确认密码" htmlFor="setup-confirm" required><Input.Password id="setup-confirm" value={confirmation} onChange={e => setConfirmation(e.target.value)} autoComplete="new-password" disabled={busy} /></Form.Item>
       <Form.Item label="浏览器标题" htmlFor="setup-site" required><Input id="setup-site" value={site} onChange={e => setSite(e.target.value)} disabled={busy} /></Form.Item>

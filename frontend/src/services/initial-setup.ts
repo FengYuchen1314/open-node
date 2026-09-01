@@ -12,6 +12,9 @@ export interface InitialSetupInput {
   password: string;
   site_title: string;
   brand_title: string;
+  email: string;
+  nickname: string;
+  avatar_url: string;
   confirm_new_install: boolean;
 }
 const messages: Record<string, string> = {
@@ -41,12 +44,20 @@ function row(value: unknown, keys: string[]): Record<string, unknown> {
 }
 export function validateSetupInput(value: InitialSetupInput): InitialSetupInput {
   const site = normalizeBrandingText(value.site_title, 80), brand = normalizeBrandingText(value.brand_title, 40);
+  const email = value.email.trim(), nickname = value.nickname.trim().replace(/\s+/g, " "), avatar = value.avatar_url.trim();
+  let avatarUrl = "";
+  if (avatar) {
+    try { const parsed = new URL(avatar); if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error(); avatarUrl = parsed.href; }
+    catch { throw new InitialSetupError(422, "setup_invalid_request"); }
+  }
   if (typeof value.setup_token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value.setup_token)
     || typeof value.username !== "string" || !/^[a-zA-Z0-9_.@-]{1,64}$/.test(value.username)
     || typeof value.password !== "string" || Array.from(value.password).length < 12 || Array.from(value.password).length > 1024
-    || site === null || brand === null || value.confirm_new_install !== true) throw new InitialSetupError(422, "setup_invalid_request");
+    || site === null || brand === null || /[\u0000-\u001f\u007f]/.test(value.nickname) || Array.from(nickname).length > 120
+    || (email !== "" && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || Array.from(email).length > 254))
+    || Array.from(avatarUrl).length > 2048 || value.confirm_new_install !== true) throw new InitialSetupError(422, "setup_invalid_request");
   return { setup_token: value.setup_token, username: value.username, password: value.password,
-    site_title: site, brand_title: brand, confirm_new_install: true };
+    site_title: site, brand_title: brand, email, nickname, avatar_url: avatarUrl, confirm_new_install: true };
 }
 async function readJson(response: Response): Promise<unknown> {
   if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get("Content-Type") ?? "")) return invalid();

@@ -14,6 +14,7 @@ from open_node.domain.initial_setup import InitialSetupError, InitialSetupStatus
 from open_node.services.auth import (
     Administrator,
     AdministratorBackupEpoch,
+    AdministratorProfile,
     InitialSetupTicket,
     OperatorChallenge,
     OperatorSession,
@@ -124,6 +125,13 @@ class InitialSetupStore:
             branding.brand_title = payload.brand_title
             branding.revision += 1
             db.add(Administrator(id=1, username=payload.username, password_hash=hashed))
+            db.add(AdministratorProfile(
+                administrator_id=1,
+                email=payload.email,
+                nickname=payload.nickname or payload.username,
+                avatar_url=payload.avatar_url,
+                revision=0,
+            ))
             self.auth._advance_backup_epoch(db)
             db.execute(delete(OperatorSession))
             db.execute(delete(OperatorChallenge))

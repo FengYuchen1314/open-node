@@ -7,6 +7,8 @@ from open_node.api.backup import BackupAPIRoute
 from open_node.domain.auth import (
     AdministratorCode,
     AdministratorPolicyUpdate,
+    AdministratorProfileRead,
+    AdministratorProfileUpdate,
     AdministratorProof,
     AdministratorRecoveryCodes,
     AdministratorSecurityRead,
@@ -276,3 +278,28 @@ def update_security_policy(
         payload.required,
     )
     return AdministratorSecurityRead(**result.__dict__)
+
+
+@router.get("/profile", response_model=AdministratorProfileRead)
+def administrator_profile(
+    request: Request,
+    identity: Annotated[SessionIdentity, Depends(require_administrator)],
+) -> AdministratorProfileRead:
+    return AdministratorProfileRead(**request.app.state.auth.profile(identity.username).__dict__)
+
+
+@router.put("/profile", response_model=AdministratorProfileRead)
+def update_administrator_profile(
+    payload: AdministratorProfileUpdate,
+    request: Request,
+    identity: Annotated[SessionIdentity, Depends(require_administrator)],
+) -> AdministratorProfileRead:
+    result = invoke(
+        request.app.state.auth.update_profile,
+        identity.username,
+        email=payload.email,
+        nickname=payload.nickname,
+        avatar_url=payload.avatar_url,
+        expected_revision=payload.expected_revision,
+    )
+    return AdministratorProfileRead(**result.__dict__)

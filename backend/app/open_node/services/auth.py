@@ -44,6 +44,18 @@ class Administrator(AuthBase):
     password_hash: Mapped[str] = mapped_column(String(512))
 
 
+class AdministratorProfile(AuthBase):
+    __tablename__ = "administrator_profiles"
+
+    administrator_id: Mapped[int] = mapped_column(
+        ForeignKey("administrator.id", ondelete="CASCADE"), primary_key=True
+    )
+    email: Mapped[str] = mapped_column(String(254), default="")
+    nickname: Mapped[str] = mapped_column(String(120), default="")
+    avatar_url: Mapped[str] = mapped_column(String(2048), default="")
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class AdministratorFactor(AuthBase):
     __tablename__ = "administrator_factors"
 
@@ -142,6 +154,15 @@ class AdministratorSecurityState:
     require_totp: bool
 
 
+@dataclass(frozen=True)
+class AdministratorProfileState:
+    username: str
+    email: str
+    nickname: str
+    avatar_url: str
+    revision: int
+
+
 class AdministratorAuthenticationError(ValueError):
     pass
 
@@ -183,6 +204,51 @@ class AuthStore:
             return db.get(Administrator, 1) is not None
 
     @staticmethod
+    def _profile_state(administrator, profile) -> AdministratorProfileState:
+        return AdministratorProfileState(
+            username=administrator.username,
+            email=profile.email if profile else "",
+            nickname=(profile.nickname if profile and profile.nickname else administrator.username),
+            avatar_url=profile.avatar_url if profile else "",
+            revision=profile.revision if profile else 0,
+        )
+
+    def profile(self, username: str) -> AdministratorProfileState:
+        with self.session() as db:
+            administrator = db.get(Administrator, 1)
+            if administrator is None or administrator.username != username:
+                raise AdministratorAuthenticationError("Administrator profile is unavailable")
+            return self._profile_state(administrator, db.get(AdministratorProfile, 1))
+
+    def update_profile(
+        self,
+        username: str,
+        *,
+        email: str,
+        nickname: str,
+        avatar_url: str,
+        expected_revision: int,
+    ) -> AdministratorProfileState:
+        with self._coordinated_session() as db:
+            administrator = db.get(Administrator, 1)
+            if administrator is None or administrator.username != username:
+                raise AdministratorAuthenticationError("Administrator profile is unavailable")
+            profile = db.get(AdministratorProfile, 1)
+            current_revision = profile.revision if profile else 0
+            if current_revision != expected_revision:
+                raise AdministratorSecurityConflict("Administrator profile changed; reload it")
+            if profile is None:
+                profile = AdministratorProfile(administrator_id=1)
+                db.add(profile)
+            profile.email = email
+            profile.nickname = nickname or administrator.username
+            profile.avatar_url = avatar_url
+            profile.revision = current_revision + 1
+            self._advance_backup_epoch(db)
+            db.commit()
+            return self._profile_state(administrator, profile)
+
+    @staticmethod
     def _advance_backup_epoch(db) -> None:
         # Retaining the current browser session after a security change must not
         # retain its already-approved backup downloads. An epoch also prevents
@@ -211,6 +277,7 @@ class AuthStore:
                     policy.require_totp = False
             else:
                 db.add(Administrator(id=1, username=username, password_hash=hashed))
+                db.add(AdministratorProfile(administrator_id=1, nickname=username))
             self._advance_backup_epoch(db)
             ticket = db.get(InitialSetupTicket, 1)
             if ticket is not None:

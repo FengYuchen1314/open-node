@@ -29,6 +29,14 @@ export interface AdministratorSecurity {
   require_totp: boolean;
 }
 
+export interface AdministratorProfile {
+  username: string;
+  email: string;
+  nickname: string;
+  avatar_url: string;
+  revision: number;
+}
+
 const authStore = createObservableState({
   ready: false,
   error: "",
@@ -152,6 +160,32 @@ export async function updateAdministratorTotpPolicy(required: boolean, password:
     method: "PUT", body: JSON.stringify({ required, password, code }),
   }, fetcher);
   return await response.json() as AdministratorSecurity;
+}
+
+function administratorProfile(value: unknown): AdministratorProfile {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("管理员资料响应无效。");
+  const row = value as Record<string, unknown>, keys = ["username", "email", "nickname", "avatar_url", "revision"];
+  if (Object.keys(row).length !== keys.length || keys.some(key => !Object.hasOwn(row, key))
+    || typeof row.username !== "string" || typeof row.email !== "string" || typeof row.nickname !== "string"
+    || typeof row.avatar_url !== "string" || !Number.isInteger(row.revision) || (row.revision as number) < 0) {
+    throw new Error("管理员资料响应无效。");
+  }
+  return row as unknown as AdministratorProfile;
+}
+
+export async function loadAdministratorProfile(fetcher = fetch) {
+  return administratorProfile(await (await authRequest("profile", {}, fetcher)).json());
+}
+
+export async function saveAdministratorProfile(
+  payload: Pick<AdministratorProfile, "email" | "nickname" | "avatar_url" | "revision">,
+  fetcher = fetch,
+) {
+  const response = await authRequest("profile", { method: "PUT", body: JSON.stringify({
+    email: payload.email, nickname: payload.nickname, avatar_url: payload.avatar_url,
+    expected_revision: payload.revision,
+  }) }, fetcher);
+  return administratorProfile(await response.json());
 }
 
 export const authenticatedFetch: typeof fetch = async (input, init = {}) => {

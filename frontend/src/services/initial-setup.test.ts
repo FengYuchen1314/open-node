@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { completeInitialSetup, getInitialSetupStatus, InitialSetupError, setupErrorMessage, validateSetupInput, type InitialSetupInput } from "./initial-setup";
 
-const input: InitialSetupInput = { setup_token: "a".repeat(43), username: "admin", password: "  private-password  ", site_title: "  中文 🧭 ", brand_title: "站点", confirm_new_install: true };
+const input: InitialSetupInput = { setup_token: "a".repeat(43), username: "admin", password: "  private-password  ", site_title: "  中文 🧭 ", brand_title: "站点", email: " operator@example.test ", nickname: " 运维  管理员 ", avatar_url: "https://cdn.example.test/avatar.png", confirm_new_install: true };
 const ready = { configured: false, available: true, expires_at: "2026-09-01T12:00:00Z", token_required: true };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -17,12 +17,14 @@ describe("first-run setup transport", () => {
       expect(options).toMatchObject({ credentials: "omit", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer" });
       expect(JSON.stringify(options?.headers)).not.toContain(input.setup_token);
     }
-    expect(JSON.parse(fetcher.mock.calls[1][1]!.body as string)).toEqual({ ...input, site_title: "中文 🧭" });
+    expect(JSON.parse(fetcher.mock.calls[1][1]!.body as string)).toEqual({ ...input, site_title: "中文 🧭", email: "operator@example.test", nickname: "运维 管理员" });
   });
   it.each([
     { confirm_new_install: false }, { confirm_new_install: "true" }, { setup_token: "中".repeat(43) },
     { username: "invalid space" }, { password: "short" }, { password: "a".repeat(1025) },
-    { site_title: "\u202eabc" }, { brand_title: "a".repeat(41) },
+    { site_title: "\u202eabc" }, { brand_title: "a".repeat(41) }, { email: "invalid" },
+    { nickname: "a".repeat(121) }, { avatar_url: "http://example.test/avatar.png" },
+    { nickname: "控制\n字符" }, { avatar_url: "https://user:secret@example.test/avatar.png" },
   ])("rejects invalid input before sending %j", async changes => {
     const fetcher = vi.fn<typeof fetch>();
     await expect(completeInitialSetup({ ...input, ...changes } as InitialSetupInput, fetcher)).rejects.toBeInstanceOf(InitialSetupError);

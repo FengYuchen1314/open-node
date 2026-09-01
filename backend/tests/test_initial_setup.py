@@ -13,7 +13,12 @@ from fastapi.testclient import TestClient
 from open_node.core.config import Settings
 from open_node.domain.initial_setup import InitialSetupError, InitialSetupRequest
 from open_node.main import create_app
-from open_node.services.auth import Administrator, InitialSetupTicket, password_hash
+from open_node.services.auth import (
+    Administrator,
+    AdministratorProfile,
+    InitialSetupTicket,
+    password_hash,
+)
 from open_node.services.backup_restore import _quiesce
 from open_node.services.branding import BrandingSettingsModel
 from open_node.services.initial_setup import InitialSetupStore
@@ -45,7 +50,7 @@ def payload(token, **changes):
 def test_issue_complete_login_and_no_remote_reissue(setup_app):
     app = setup_app
     store = InitialSetupStore(app.state.auth)
-    client = TestClient(app)
+    client = TestClient(app, base_url="https://testserver")
     initial = client.get("/api/v1/setup")
     assert initial.json() == dict(configured=False, available=False, expires_at=None,
                                  token_required=True)
@@ -77,6 +82,71 @@ def test_issue_complete_login_and_no_remote_reissue(setup_app):
     with app.state.auth.session() as db:
         ticket = db.get(InitialSetupTicket, 1)
         assert ticket.token_hash is None and ticket.completed_at is not None
+        profile = db.get(AdministratorProfile, 1)
+        assert (profile.email, profile.nickname, profile.avatar_url, profile.revision) == (
+            "", "first-admin", "", 0,
+        )
+
+
+def test_initial_profile_and_versioned_administrator_update(setup_app):
+    app = setup_app
+    token, _ = InitialSetupStore(app.state.auth).issue()
+    client = TestClient(app, base_url="https://testserver")
+    created = client.post("/api/v1/setup", headers=HEADERS, json=payload(
+        token,
+        email=" operator@example.test ",
+        nickname="  运维   管理员  ",
+        avatar_url="https://cdn.example.test/avatar.png",
+    ))
+    assert created.status_code == 201
+    login = client.post("/api/v1/auth/login", headers=HEADERS, json={
+        "username": "first-admin", "password": PASSWORD,
+    })
+    assert login.status_code == 200
+    csrf = login.json()["csrf_token"]
+    profile = client.get("/api/v1/auth/profile")
+    assert profile.json() == {
+        "username": "first-admin",
+        "email": "operator@example.test",
+        "nickname": "运维 管理员",
+        "avatar_url": "https://cdn.example.test/avatar.png",
+        "revision": 0,
+    }
+    updated = client.put("/api/v1/auth/profile", headers={"X-CSRF-Token": csrf}, json={
+        "email": "next@example.test",
+        "nickname": "主控管理员",
+        "avatar_url": "",
+        "expected_revision": 0,
+    })
+    assert updated.status_code == 200
+    assert updated.json()["revision"] == 1
+    conflict = client.put("/api/v1/auth/profile", headers={"X-CSRF-Token": csrf}, json={
+        "email": "private@example.test",
+        "nickname": "旧草稿",
+        "avatar_url": "",
+        "expected_revision": 0,
+    })
+    assert conflict.status_code == 409
+    assert "private@example.test" not in conflict.text
+    assert client.get("/api/v1/auth/profile").json()["email"] == "next@example.test"
+
+
+@pytest.mark.parametrize("changes", [
+    {"email": "invalid"},
+    {"nickname": "x" * 121},
+    {"nickname": "控制\n字符"},
+    {"avatar_url": "http://example.test/avatar.png"},
+    {"avatar_url": "https://user:secret@example.test/avatar.png"},
+    {"avatar_url": "file:///etc/passwd"},
+])
+def test_initial_profile_fields_are_safe(setup_app, changes):
+    token, _ = InitialSetupStore(setup_app.state.auth).issue()
+    response = TestClient(setup_app).post(
+        "/api/v1/setup", headers=HEADERS, json=payload(token, **changes),
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "setup_invalid_request"
+    assert not setup_app.state.auth.configured()
 
 
 def test_expiry_reissue_and_no_hash_for_invalid_token(setup_app, monkeypatch):

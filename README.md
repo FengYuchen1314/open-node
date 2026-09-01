@@ -48,7 +48,9 @@ Management APIs require a local administrator session. There is no default
 password or activation key. Fresh installations support
 [Chinese browser initialization](docs/initial-setup.md): the installer prints a
 30-minute one-use credential, then the browser creates the administrator and
-site titles. `open-node-admin create` remains available for terminal setup.
+site titles. Optional nickname, email and an HTTPS avatar URL are committed in
+the same transaction and remain editable in the Chinese system settings page.
+`open-node-admin create` remains available for terminal setup.
 [Administrator setup and recovery](docs/administrator-access.md)
 also covers HTTPS cookies, local previews, session expiry, and API clients.
 [Administrator MFA](docs/administrator-security.md) adds encrypted authenticator
