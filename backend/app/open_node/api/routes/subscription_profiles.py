@@ -5,6 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_inventory_store
+from open_node.api.routes.security import (
+    failed_public_subscription,
+    guard_public_subscription,
+    successful_public_subscription,
+)
 from open_node.api.routes.subscriptions import (
     enforce_subscription_ip,
     rendered_subscription_response,
@@ -63,6 +68,7 @@ def render_legacy_mmwx_subscription(
     t: str | None = None,
     node_id: UUID | None = None,
 ):
+    peer = guard_public_subscription(request)
     if not request.app.state.settings.short_links_enabled:
         raise HTTPException(404, "Subscription not found")
     profiles = request.app.state.inventory._subscription_profiles()
@@ -77,8 +83,13 @@ def render_legacy_mmwx_subscription(
                 str(request.base_url).rstrip("/") + request.app.state.settings.api_prefix
             ),
         )
-    except (SubscriptionTokenNotFoundError, SubscriptionUnavailableError) as exc:
+    except SubscriptionTokenNotFoundError as exc:
+        failed_public_subscription(request, peer, "/x/{code}")
+        raise HTTPException(404, "subscription not found") from exc
+    except SubscriptionUnavailableError as exc:
+        successful_public_subscription(request, peer)
         raise HTTPException(404, str(exc)) from exc
+    successful_public_subscription(request, peer)
     enforce_subscription_ip(request.app.state.inventory, rendered.username, request)
     return rendered_subscription_response(rendered)
 
@@ -88,14 +99,21 @@ def render_legacy_mmwx_subscription(
     name="render_subscription_proxy_provider",
 )
 def render_proxy_provider(code: str, provider_id: str, request: Request):
+    peer = guard_public_subscription(request)
     try:
         username, name, content, count = (
             request.app.state.inventory._subscription_profiles().provider(code, provider_id)
         )
-    except (SubscriptionTokenNotFoundError, SubscriptionUnavailableError) as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except SubscriptionCustomizationError as exc:
+    except SubscriptionTokenNotFoundError as exc:
+        failed_public_subscription(request, peer, "/proxy-provider/{code}/{provider}")
         raise HTTPException(404, "proxy provider unavailable") from exc
+    except SubscriptionUnavailableError as exc:
+        successful_public_subscription(request, peer)
+        raise HTTPException(404, "proxy provider unavailable") from exc
+    except SubscriptionCustomizationError as exc:
+        successful_public_subscription(request, peer)
+        raise HTTPException(404, "proxy provider unavailable") from exc
+    successful_public_subscription(request, peer)
     enforce_subscription_ip(request.app.state.inventory, username, request)
     return Response(
         content,

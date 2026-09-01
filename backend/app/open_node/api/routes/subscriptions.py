@@ -7,6 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 
 from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
+from open_node.api.routes.security import (
+    failed_public_subscription,
+    guard_public_subscription,
+    successful_public_subscription,
+)
 from open_node.domain.subscription_links import SubscriptionShortCodeUpdate
 from open_node.domain.subscriptions import (
     ManagedNodeCreate,
@@ -428,6 +433,7 @@ def render_user_subscription(
     ] = None,
     node_id: UUID | None = None,
 ) -> Response:
+    peer = guard_public_subscription(request)
     try:
         rendered = store.render_subscription(
             subscription_key,
@@ -436,10 +442,15 @@ def render_user_subscription(
             allow_short=request.app.state.settings.short_links_enabled,
         )
     except SubscriptionTokenNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        failed_public_subscription(request, peer, "/api/v1/subscribe/{key}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="subscription not found"
+        ) from exc
     except SubscriptionUnavailableError as exc:
+        successful_public_subscription(request, peer)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    successful_public_subscription(request, peer)
     enforce_subscription_ip(store, rendered.username, request)
     return rendered_subscription_response(rendered)
 

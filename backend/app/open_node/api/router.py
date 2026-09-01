@@ -26,6 +26,7 @@ from open_node.api.routes import (
     public,
     registration_invitations,
     renewals,
+    security,
     server_management,
     server_sharing,
     servers,
@@ -71,6 +72,7 @@ private_router.include_router(temporary_subscriptions.router)
 private_router.include_router(private_routed_nodes.router)
 private_router.include_router(registration_invitations.router)
 private_router.include_router(renewals.router)
+private_router.include_router(security.router)
 private_router.include_router(plan_management.router)
 private_router.include_router(user_management.router)
 private_router.include_router(node_management.router)

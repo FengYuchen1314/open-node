@@ -159,15 +159,32 @@ async def register(payload: RegistrationClaim, request: Request):
 @router.post("/login", response_model=SubscriberSessionRead)
 def login(payload: SubscriberLogin, request: Request, response: Response):
     login_request(request)
-    peer = limit(request, payload.username)
-    token, identity, challenge = invoke(
-        request.app.state.subscriber_auth.login,
-        payload.username,
-        payload.password.get_secret_value(),
-        peer,
-        request.headers.get("user-agent", ""),
-        login=True,
-    )
+    try:
+        peer = limit(request, payload.username)
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            request.app.state.security.record_login_failure(
+                request.client.host if request.client else "",
+                payload.username,
+                locked=True,
+                path="/api/v1/account/login",
+            )
+        raise
+    try:
+        token, identity, challenge = invoke(
+            request.app.state.subscriber_auth.login,
+            payload.username,
+            payload.password.get_secret_value(),
+            peer,
+            request.headers.get("user-agent", ""),
+            login=True,
+        )
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            request.app.state.security.record_login_failure(
+                peer, payload.username, path="/api/v1/account/login",
+            )
+        raise
     if challenge:
         return SubscriberSessionRead(requires_2fa=True, challenge=challenge)
     return issued_session(request, response, token, identity)

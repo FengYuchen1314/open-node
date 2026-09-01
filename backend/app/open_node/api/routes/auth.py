@@ -117,7 +117,14 @@ def get_session(request: Request, response: Response) -> SessionResponse:
 
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, request: Request, response: Response) -> LoginResponse:
-    login_request(request)
+    try:
+        login_request(request)
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            request.app.state.security.record_login_failure(
+                request.client.host if request.client else "", payload.username, locked=True,
+            )
+        raise
     settings = request.app.state.settings
     result = invoke(
         request.app.state.auth.login,
@@ -127,6 +134,9 @@ def login(payload: LoginRequest, request: Request, response: Response) -> LoginR
         login=True,
     )
     if not result:
+        request.app.state.security.record_login_failure(
+            request.client.host if request.client else "", payload.username,
+        )
         raise HTTPException(
             401, "Invalid username or password", headers={"Cache-Control": "no-store"}
         )

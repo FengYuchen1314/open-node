@@ -33,6 +33,7 @@ from open_node.domain.initial_setup import SETUP_MESSAGES, InitialSetupError
 from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.domain.notifications import NotificationError
 from open_node.domain.renewals import RENEWAL_MESSAGES, RenewalError
+from open_node.domain.security import SECURITY_MESSAGES, SecurityError
 from open_node.domain.server_sharing import MESSAGES as SERVER_SHARING_MESSAGES
 from open_node.domain.server_sharing import ServerSharingError
 from open_node.domain.speedtests import SPEEDTEST_MESSAGES, SpeedTestError
@@ -67,6 +68,7 @@ from open_node.services.restore_state import (
     RestoreStateError,
 )
 from open_node.services.secure_channel import AgentIdentity, decode_public_key
+from open_node.services.security import SecurityStore
 from open_node.services.server_sharing import FederationRefreshWorker, ServerSharingStore
 from open_node.services.server_traffic import ServerTrafficWorker
 from open_node.services.speedtests import (
@@ -226,6 +228,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                     active_settings.api_prefix + "/server-shares",
                     active_settings.api_prefix + "/server-federation",
                     active_settings.api_prefix + "/speedtest",
+                    active_settings.api_prefix + "/security",
                     active_settings.api_prefix + "/federation",
                     active_settings.api_prefix + "/ddns",
                     active_settings.api_prefix + "/account/announcements",
@@ -259,6 +262,12 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 },
                 headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
             )
+        if request.url.path.startswith(active_settings.api_prefix + "/security"):
+            return JSONResponse(status_code=422, content={
+                "code": "security_invalid_request",
+                "detail": SECURITY_MESSAGES["security_invalid_request"],
+                "license_required": False,
+            }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
         if request.url.path.startswith(active_settings.api_prefix + "/ddns"):
             return JSONResponse(status_code=422, content={
                 "code": "ddns_invalid_request",
@@ -379,6 +388,18 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             content={
                 "code": exc.code,
                 "detail": SPEEDTEST_MESSAGES[exc.code],
+                "license_required": False,
+            },
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+
+    @app.exception_handler(SecurityError)
+    async def security_error(_request, exc):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "detail": SECURITY_MESSAGES[exc.code],
                 "license_required": False,
             },
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
@@ -564,6 +585,8 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         ):
             raise ValueError("Notification secrets require a separate, non-overlapping directory")
     app.state.inventory.create_schema()
+    app.state.security = SecurityStore(app.state.inventory, backup_writes)
+    app.state.security.create_schema()
     speedtest_state_dir = active_settings.speedtest_state_dir
     if (
         speedtest_state_dir is None
