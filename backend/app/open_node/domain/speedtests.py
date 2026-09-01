@@ -112,7 +112,7 @@ class SpeedTesterRead(BaseModel):
 class SpeedTesterSecret(BaseModel):
     tester: SpeedTesterRead
     token: str
-    websocket_path: str = "/api/speedtest/ws"
+    websocket_path: str = "/api/speedtest/tester/ws"
     license_required: Literal[False] = False
 
 

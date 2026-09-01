@@ -624,6 +624,9 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.state.public_probe_streams = PublicProbeStreamManager()
     app.include_router(api_router, prefix=active_settings.api_prefix)
     app.add_api_websocket_route("/api/remote/ws", agent_websocket)
+    app.add_api_websocket_route("/api/speedtest/tester/ws", speedtester_websocket)
+    # Early Open Node candidates used the shorter path. Keep it as an alias;
+    # official mmwx-speedtester binaries always use the route above.
     app.add_api_websocket_route("/api/speedtest/ws", speedtester_websocket)
     app.include_router(public_router, prefix="/api")
     app.include_router(federation_legacy_router)

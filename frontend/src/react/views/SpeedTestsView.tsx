@@ -173,9 +173,14 @@ export default function SpeedTestsView() {
   const sourceOptions = [{ value: "master", label: "主控本机" }, ...testers.map(item => ({
     value: item.id, label: `${item.name}（${item.online ? "在线" : "离线"}）`, disabled: !item.online,
   }))];
-  const active = nodes.filter(node => node.enabled);
   const master = typeof window === "undefined" ? "https://你的主控.example.com" : window.location.origin;
-  const command = secret ? `mmwx-speedtester -master ${master} -token ${secret.token}` : "";
+  const officialScript = "https://raw.githubusercontent.com/MMWOrg/mmwX-plugins/7457360b40fb2045a7eeee4b9c68358cdbaf94e4/speedtest/scripts";
+  const linuxCommand = secret
+    ? `curl -fsSL ${officialScript}/install.sh | bash -s -- -master '${master}' -token '${secret.token}'`
+    : "";
+  const windowsCommand = secret
+    ? `irm ${officialScript}/install.ps1 -OutFile mmwx-speedtester-install.ps1\n.\\mmwx-speedtester-install.ps1 -Master '${master}' -Token '${secret.token}'`
+    : "";
 
   return <Space orientation="vertical" size="large" style={{ width: "100%" }}>
     <Flex justify="space-between" align="center" gap={16} wrap>
@@ -232,9 +237,11 @@ export default function SpeedTestsView() {
         { key: "ws", label: "WebSocket 路径", children: <Typography.Text code>{secret?.websocket_path}</Typography.Text> },
         { key: "token", label: "配对令牌", children: <Typography.Text copyable code>{secret?.token}</Typography.Text> },
       ]} />
-      <Typography.Title level={5}>官方测速端启动命令</Typography.Title>
-      <Input.TextArea aria-label="家用测速端启动命令" readOnly autoSize={{ minRows: 2, maxRows: 4 }} value={command} />
-      <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}><HomeOutlined /> 请从 <Typography.Link href="https://github.com/MMWOrg/mmwX-plugins/releases/latest" target="_blank" rel="noreferrer">官方 mmwX-plugins 发布页</Typography.Link> 下载当前平台的 mmwx-speedtester，再运行上面的命令。Linux 可自行配置 systemd；Windows 可配置开机自启。</Typography.Paragraph>
+      <Typography.Title level={5}>Linux / macOS 官方一键命令</Typography.Title>
+      <Input.TextArea aria-label="Linux 家用测速端安装命令" readOnly autoSize={{ minRows: 2, maxRows: 4 }} value={linuxCommand} />
+      <Typography.Title level={5}>Windows PowerShell 官方一键命令</Typography.Title>
+      <Input.TextArea aria-label="Windows 家用测速端安装命令" readOnly autoSize={{ minRows: 3, maxRows: 5 }} value={windowsCommand} />
+      <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}><HomeOutlined /> 命令固定引用官方 speedtest-v0.1.5 对应提交中的安装脚本；脚本会从 <Typography.Link href="https://github.com/MMWOrg/mmwX-plugins/releases/latest" target="_blank" rel="noreferrer">官方 mmwX-plugins 发布页</Typography.Link> 下载当前平台二进制并启动。若需要长期后台运行，请按所在系统配置 systemd 或开机自启。</Typography.Paragraph>
     </Modal>
   </Space>;
 }

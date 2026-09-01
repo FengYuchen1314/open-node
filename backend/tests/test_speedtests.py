@@ -95,7 +95,8 @@ def test_speedtester_pair_rotate_revoke_and_reverse_websocket_dispatch(tmp_path)
         token, tester = secret["token"], secret["tester"]
         assert token not in client.get("/api/v1/speedtest/testers").text
 
-        with client.websocket_connect(f"/api/speedtest/ws?token={token}") as websocket:
+        assert secret["websocket_path"] == "/api/speedtest/tester/ws"
+        with client.websocket_connect(f"{secret['websocket_path']}?token={token}") as websocket:
             websocket.send_json({
                 "type": "hello", "version": "1.2.3", "caps": ["speedtest", "probe"]
             })
@@ -123,7 +124,7 @@ def test_speedtester_pair_rotate_revoke_and_reverse_websocket_dispatch(tmp_path)
             "/api/v1/speedtest/testers/rotate-token", json={"id": tester["id"]}
         )
         assert rotated.status_code == 200 and rotated.json()["token"] != token
-        with client.websocket_connect(f"/api/speedtest/ws?token={token}") as rejected:
+        with client.websocket_connect(f"/api/speedtest/tester/ws?token={token}") as rejected:
             try:
                 rejected.receive_json()
             except Exception:
