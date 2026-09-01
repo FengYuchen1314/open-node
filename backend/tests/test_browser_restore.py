@@ -17,6 +17,7 @@ from open_node.services.browser_restore import (
 )
 from open_node.services.initial_setup import InitialSetupStore
 from test_backup_encryption import official_age as official_age
+from test_backup_encryption import real_age_keys as real_age_keys
 from test_backup_restore import close_app, settings
 from test_backup_restore import saved as saved
 
