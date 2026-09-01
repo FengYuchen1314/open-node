@@ -26,6 +26,7 @@ from open_node.domain.appearance import AppearanceError
 from open_node.domain.application_updates import MESSAGES as APPLICATION_UPDATE_MESSAGES
 from open_node.domain.application_updates import ApplicationUpdateError
 from open_node.domain.branding import BRANDING_ERROR_MESSAGES, BrandingError
+from open_node.domain.ddns import DDNS_MESSAGES, DDNSError
 from open_node.domain.initial_setup import SETUP_MESSAGES, InitialSetupError
 from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.domain.notifications import NotificationError
@@ -48,6 +49,7 @@ from open_node.services.backup_snapshot import BackupSnapshotError, configured_b
 from open_node.services.branding import BrandingStore
 from open_node.services.certificate_worker import CertificateWorker
 from open_node.services.certificates import CertificateStore
+from open_node.services.ddns import DDNSStore, DDNSWorker
 from open_node.services.external_refresh import ExternalRefreshWorker
 from open_node.services.external_subscriptions import ExternalSubscriptionError
 from open_node.services.inventory import InventoryStore, ManagedNodeConflict
@@ -132,6 +134,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             external_refresh = ExternalRefreshWorker(
                 app.state.external_subscriptions, backup_writes=backup_writes,
             )
+            ddns = DDNSWorker(app.state.ddns, backup_writes=backup_writes)
         # Each actual cycle establishes its own lease. Idle workers must not
         # inherit an initialization operation or prevent a snapshot forever.
         task = asyncio.create_task(worker.run())
@@ -139,6 +142,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         traffic_task = asyncio.create_task(traffic.run())
         notification_task = asyncio.create_task(notification.run())
         external_refresh_task = asyncio.create_task(external_refresh.run())
+        ddns_task = asyncio.create_task(ddns.run())
         try:
             if app.state.backup_jobs is not None:
                 await asyncio.to_thread(app.state.backup_jobs.start)
@@ -149,6 +153,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             traffic_task.cancel()
             notification_task.cancel()
             external_refresh_task.cancel()
+            ddns_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             with contextlib.suppress(asyncio.CancelledError):
@@ -159,6 +164,8 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 await notification_task
             with contextlib.suppress(asyncio.CancelledError):
                 await external_refresh_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await ddns_task
             if app.state.backup_jobs is not None:
                 # A timeout stops admission, not the actual producer thread.
                 # It retains its barrier and closes private resources on exit.
@@ -201,6 +208,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                     active_settings.api_prefix + "/server-shares",
                     active_settings.api_prefix + "/server-federation",
                     active_settings.api_prefix + "/federation",
+                    active_settings.api_prefix + "/ddns",
                     active_settings.api_prefix + "/account/announcements",
                     active_settings.api_prefix + "/branding",
                 )
@@ -222,6 +230,12 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
+        if request.url.path.startswith(active_settings.api_prefix + "/ddns"):
+            return JSONResponse(status_code=422, content={
+                "code": "ddns_invalid_request",
+                "detail": DDNS_MESSAGES["ddns_invalid_request"],
+                "license_required": False,
+            }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
         if request.url.path.startswith((
             active_settings.api_prefix + "/announcements",
             active_settings.api_prefix + "/account/announcements",
@@ -342,6 +356,18 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 "license_required": False,
             },
             headers=headers,
+        )
+
+    @app.exception_handler(DDNSError)
+    async def ddns_error(_request, exc):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "detail": DDNS_MESSAGES[exc.code],
+                "license_required": False,
+            },
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
 
     @app.exception_handler(AgentCommandPayloadError)
@@ -525,6 +551,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.state.agent_bootstrap = AgentBootstrapStore(app.state.inventory)
     app.state.subscriber_auth = SubscriberAuthStore(app.state.inventory, active_settings)
     app.state.certificates = CertificateStore(active_settings, app.state.inventory)
+    app.state.ddns = DDNSStore(app.state.inventory, app.state.certificates)
     app.state.agent_connections = AgentConnectionManager()
     app.state.public_probe_streams = PublicProbeStreamManager()
     app.include_router(api_router, prefix=active_settings.api_prefix)

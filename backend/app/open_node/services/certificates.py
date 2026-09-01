@@ -311,6 +311,12 @@ class CertificateStore:
         with self.write() as db:
             row = self.get(db, DNSProvider, identifier)
             if db.scalar(
+                select(ServerModel.id)
+                .where(ServerModel.ddns_provider_id == row.id)
+                .limit(1)
+            ):
+                raise CertificateError("DNS provider is still used by server DDNS")
+            if db.scalar(
                 select(ManagedCertificate.id)
                 .where(ManagedCertificate.provider_id == row.id)
                 .limit(1)

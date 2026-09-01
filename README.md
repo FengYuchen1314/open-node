@@ -139,6 +139,13 @@ option for DNS and IP SANs alongside ACME, import/export and Agent deployment.
 Self-signed generation does not configure trusted public HTTPS or automatically
 replace a running certificate.
 
+[Dynamic DNS](docs/ddns.md) reuses the encrypted certificate-provider credentials
+for Cloudflare, AliDNS, Tencent DNSPod, DNSPod Token, GoDaddy and NameSilo. A durable
+worker updates A/AAAA records after Agent public-IP drift, supports certificate-first
+automatic provider selection, manual synchronization, status and retry, and has a
+Chinese Ant Design workspace. It does not delete records when disabled or configure
+DNS/firewalls for the public panel; real provider accounts remain an operator check.
+
 ## Deployment
 
 The root Dockerfile and [Compose deployment](docs/deployment.md) build a

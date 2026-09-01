@@ -807,6 +807,18 @@ class ServerModel(Base):
     pull_address_v6: Mapped[str | None] = mapped_column(String(255), nullable=True)
     pull_port: Mapped[int] = mapped_column(Integer)
     ipv6_enabled: Mapped[bool] = mapped_column(Boolean)
+    ddns_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    ddns_provider_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    ddns_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ddns_last_error: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ddns_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    ddns_force: Mapped[bool] = mapped_column(Boolean, default=False)
+    ddns_revision: Mapped[int] = mapped_column(Integer, default=0)
+    ddns_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ddns_attempt_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    ddns_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ddns_last_ipv4: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ddns_last_ipv6: Mapped[str | None] = mapped_column(String(255), nullable=True)
     traffic_limit: Mapped[int] = mapped_column(Integer)
     traffic_reset_day: Mapped[int] = mapped_column(Integer, default=0)
     last_traffic_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1728,6 +1740,25 @@ class InventoryStore:
                     "capability_agent_switch_listen_port": "BOOLEAN NOT NULL DEFAULT 0",
                     "capability_agent_probe_master_url": "BOOLEAN NOT NULL DEFAULT 0",
                     "capability_agent_update_master_url": "BOOLEAN NOT NULL DEFAULT 0",
+                },
+            )
+        if "servers" in table_names:
+            self._sqlite_add_missing_columns(
+                inspector,
+                "servers",
+                {
+                    "ddns_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+                    "ddns_provider_id": "VARCHAR(36)",
+                    "ddns_last_synced_at": "DATETIME",
+                    "ddns_last_error": "VARCHAR(120)",
+                    "ddns_pending": "BOOLEAN NOT NULL DEFAULT 0",
+                    "ddns_force": "BOOLEAN NOT NULL DEFAULT 0",
+                    "ddns_revision": "INTEGER NOT NULL DEFAULT 0",
+                    "ddns_next_attempt_at": "DATETIME",
+                    "ddns_attempt_id": "VARCHAR(36)",
+                    "ddns_lease_until": "DATETIME",
+                    "ddns_last_ipv4": "VARCHAR(255)",
+                    "ddns_last_ipv6": "VARCHAR(255)",
                 },
             )
         if "agent_change_sets" in table_names:

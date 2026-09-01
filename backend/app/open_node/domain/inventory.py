@@ -393,6 +393,12 @@ class ServerRead(BaseModel):
     pull_address_v6: str | None = None
     pull_port: int
     ipv6_enabled: bool
+    ddns_enabled: bool = False
+    ddns_provider_id: UUID | None = None
+    ddns_last_synced_at: datetime | None = None
+    ddns_last_error: str | None = None
+    ddns_pending: bool = False
+    ddns_revision: int = 0
     traffic_limit: int
     traffic_reset_day: int = 0
     last_traffic_reset_at: datetime | None = None

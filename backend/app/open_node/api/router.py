@@ -13,6 +13,7 @@ from open_node.api.routes import (
     branding,
     certificates,
     changes,
+    ddns,
     external_subscriptions,
     initial_setup,
     legacy_mmwx,
@@ -52,6 +53,7 @@ private_router.include_router(appearance.router)
 private_router.include_router(server_management.router)
 private_router.include_router(server_sharing.router)
 private_router.include_router(server_sharing.consumer_router)
+private_router.include_router(ddns.router)
 private_router.include_router(certificates.router)
 private_router.include_router(changes.router)
 private_router.include_router(external_subscriptions.router)
