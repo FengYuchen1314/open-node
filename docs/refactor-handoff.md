@@ -20,7 +20,11 @@ VPS `/tmp/open-node-app-update.2T4ehP/repo` 已通过 Ruff、后端 15 项、安
 目标绑定、备份、失败隔离、恢复、卸载重装和清理场景；首轮在磁盘只剩约 1 GiB 时登录
 写会话返回 500，清理旧测试依赖后同点通过。固定助手还以 root 消费运行 UID 的请求并
 查询公开 `main`，状态所有权和权限符合约束。详细记录见 [testing.md](testing.md)。生产
-`/opt/open-node` 与共享候选未升级。下一步发布精确提交并完成官方主线上的真实网页更新。
+`/opt/open-node` 与共享候选未升级。功能提交
+`ff010413f4a163a4f24493039ca9d6f052a1643e` 已发布到官方 `main`；公开 Raw 安装器在
+`/root/open-node-web-update-e2e-pfH7xWRr` 完成独立新装，精确 manifest、健康容器、固定
+维护 bind、active/enabled systemd watcher 和 `idle` 状态均已核对。下一步把本次纯文档
+后继提交作为目标，完成真实网页更新。
 
 本轮已按固定官方 `miaomiaowuX` 后端补齐 Web 公告：管理员在系统设置发布普通、维护
 或订阅更新公告，可选有效期、读取生效列表并删除；登录用户只有在账户启用、已分配
