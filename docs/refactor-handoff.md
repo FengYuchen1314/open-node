@@ -23,8 +23,11 @@ VPS `/tmp/open-node-app-update.2T4ehP/repo` 已通过 Ruff、后端 15 项、安
 `/opt/open-node` 与共享候选未升级。功能提交
 `ff010413f4a163a4f24493039ca9d6f052a1643e` 已发布到官方 `main`；公开 Raw 安装器在
 `/root/open-node-web-update-e2e-pfH7xWRr` 完成独立新装，精确 manifest、健康容器、固定
-维护 bind、active/enabled systemd watcher 和 `idle` 状态均已核对。下一步把本次纯文档
-后继提交作为目标，完成真实网页更新。
+维护 bind、active/enabled systemd watcher 和 `idle` 状态均已核对。随后 Web API 检查
+到纯文档后继 `285c0517691280929d5187ab73b2df70bcee56ec`，经管理员确认后进入
+`updating` 并完成；最终状态、manifest、环境、源码、镜像 ID/OCI revision 全部一致，
+私有备份存在、无恢复标记、生产与隔离实例健康。网页内应用更新至此完成真实发布验收。
+下一步进入权限与共享缺项。
 
 本轮已按固定官方 `miaomiaowuX` 后端补齐 Web 公告：管理员在系统设置发布普通、维护
 或订阅更新公告，可选有效期、读取生效列表并删除；登录用户只有在账户启用、已分配
