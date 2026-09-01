@@ -716,7 +716,12 @@ print("PURE_IMPORT_OK")
 '''
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-B", "-c", script, str(APP_ROOT)],
-        cwd=tmp_path, env={"OPEN_NODE_DATABASE_URL": "invalid", "TMPDIR": str(tmp_path / "bad")},
+        cwd=tmp_path,
+        env={
+            "OPEN_NODE_DATABASE_URL": "invalid",
+            "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
+            "TMPDIR": str(tmp_path / "bad"),
+        },
         stdin=subprocess.DEVNULL, capture_output=True, timeout=10, check=False,
     )
     assert result.returncode == 0 and result.stdout == b"PURE_IMPORT_OK\n" and not result.stderr

@@ -877,6 +877,7 @@ def exercise_mode(
 def run(wheel, nginx, archive, output):
     output.mkdir(parents=True, exist_ok=True)
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    os.environ["OPEN_NODE_TRUSTED_AUTHORITIES"] = "[]"
 
     def exercise(work, first, wheel, xray, client, backend, echo):
         with (

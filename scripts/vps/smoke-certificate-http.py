@@ -346,6 +346,7 @@ http {{
                 "PYTHONPATH": str(ROOT / "backend/app"),
                 "OPEN_NODE_DATABASE_URL": f"sqlite:///{work / 'backend.db'}",
                 "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+                "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
                 "OPEN_NODE_CERTIFICATE_STATE_DIR": str(work / "vault"),
                 "OPEN_NODE_CERTIFICATE_LEGO_BINARY": str(args.lego),
                 "OPEN_NODE_CERTIFICATE_CA_FILE": str(cert_path),

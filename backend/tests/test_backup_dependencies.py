@@ -1125,6 +1125,7 @@ print(json.dumps({"checked": True, "restoration_ready": False, "blocked_imports"
     env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(APP), "PYTHONNOUSERSITE": "1",
            "PYTHONDONTWRITEBYTECODE": "1",
            "OPEN_NODE_DATABASE_URL": "sqlite:///" + str(poison / "db.sqlite3"),
+           "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
            "OPEN_NODE_CERTIFICATE_STATE_DIR": str(poison / "certificates"),
            "OPEN_NODE_SUBSCRIBER_TOTP_KEY": "invalid-unused-environment-key", "HOME": str(tmp_path),
            "LANG": "C.UTF-8"}

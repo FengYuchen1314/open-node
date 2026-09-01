@@ -84,6 +84,10 @@ def prepare_environment(repository, destination):
     content = (repository / "deploy/.env.example").read_text()
     replacements = {
         "OPEN_NODE_TRUSTED_PROXIES=": "OPEN_NODE_TRUSTED_PROXIES=*",
+        "OPEN_NODE_TRUSTED_AUTHORITIES=[]": (
+            'OPEN_NODE_TRUSTED_AUTHORITIES=["127.0.0.1:62031",'
+            '"panel.example.com","1.1.1.1:58090"]'
+        ),
         "OPEN_NODE_PUBLIC_IP=auto": "OPEN_NODE_PUBLIC_IP=1.1.1.1",
         "OPEN_NODE_PUBLIC_HOSTNAME=": "OPEN_NODE_PUBLIC_HOSTNAME=panel.example.com",
         "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL=": (

@@ -37,6 +37,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     OPEN_NODE_CERTIFICATE_LEGO_BINARY="/usr/local/bin/lego" \
     OPEN_NODE_FRONTEND_DIR="/opt/open-node/frontend" \
     OPEN_NODE_CORS_ORIGINS="[]" \
+    OPEN_NODE_TRUSTED_AUTHORITIES="[]" \
     FORWARDED_ALLOW_IPS=""
 RUN groupadd --gid 10001 open-node && useradd --uid 10001 --gid 10001 --no-create-home open-node \
     && install -d -m 0700 -o 10001 -g 10001 /var/lib/open-node \

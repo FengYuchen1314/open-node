@@ -21,6 +21,7 @@ from open_node.api.routes.speedtests import speedtester_websocket
 from open_node.api.routes.subscription_profiles import legacy_router
 from open_node.api.routes.system import healthz
 from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
+from open_node.core.authority import TrustedAuthorityMiddleware
 from open_node.core.config import Settings, get_settings
 from open_node.domain.announcements import ANNOUNCEMENT_MESSAGES, AnnouncementError
 from open_node.domain.appearance import MESSAGES as APPEARANCE_MESSAGES
@@ -542,6 +543,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.add_middleware(
         RestoreIsolationMiddleware, state=restore_state, api_prefix=active_settings.api_prefix
     )
+    app.add_middleware(TrustedAuthorityMiddleware, authorities=active_settings.trusted_authorities)
     app.state.restore_state = restore_state
     app.state.settings = active_settings
     # This barrier belongs to the app, not a single lifespan context. Actual

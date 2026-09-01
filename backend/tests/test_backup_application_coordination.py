@@ -197,6 +197,7 @@ def invoke_admin(tmp_path, action):
     environment = {
         **os.environ,
         "OPEN_NODE_DATABASE_URL": settings_for(tmp_path).database_url,
+        "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONNOUSERSITE": "1",
@@ -248,6 +249,7 @@ def invoke_identity(tmp_path, action, path, **environment):
         env={
             **os.environ,
             "OPEN_NODE_DATABASE_URL": settings_for(tmp_path).database_url,
+            "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONIOENCODING": "utf-8",
             "PYTHONNOUSERSITE": "1",

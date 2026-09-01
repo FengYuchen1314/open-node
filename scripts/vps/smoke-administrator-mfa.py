@@ -231,6 +231,7 @@ def run(output):
             "PYTHONPATH": str(root / "backend/app"),
             "OPEN_NODE_DATABASE_URL": f"sqlite:///{database}",
             "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+            "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
             "OPEN_NODE_SUBSCRIBER_TOTP_KEY": Fernet.generate_key().decode(),
             "OPEN_NODE_FRONTEND_DIR": str(root / "frontend/dist"),
             "OPEN_NODE_CERTIFICATE_STATE_DIR": str(work / "certificates"),

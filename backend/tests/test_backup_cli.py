@@ -113,6 +113,7 @@ def invoke(
         "PYTHONPATH": os.pathsep.join((str(guard), str(APP_ROOT))),
         "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": child_encoding,
         "OPEN_NODE_DATABASE_URL": f"sqlite:///{application_data}/open-node.db",
+        "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
         "OPEN_NODE_CERTIFICATE_STATE_DIR": str(application_data / "certificates"),
         "OPEN_NODE_NOTIFICATIONS_STATE_DIR": str(application_data / "notifications"),
         "OPEN_NODE_AGENT_IDENTITY_FILE": str(application_data / "missing-identity.seed"),

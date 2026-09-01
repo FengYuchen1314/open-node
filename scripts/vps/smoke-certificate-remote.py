@@ -281,6 +281,7 @@ def run(args):
                 **os.environ,
                 "PYTHONPATH": str(ROOT / "backend/app"),
                 "OPEN_NODE_DATABASE_URL": f"sqlite:///{work / 'db.sqlite'}",
+                "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
                 "OPEN_NODE_CERTIFICATE_STATE_DIR": str(work / "vault"),
                 "OPEN_NODE_CERTIFICATE_CA_FILE": str(cert),
                 "OPEN_NODE_CERTIFICATE_ACME_DIRECTORIES": json.dumps([ca_url]),

@@ -396,6 +396,7 @@ def run(agent_python, archive, output):
                 PYTHONPATH=str(ROOT / "backend/app"),
                 OPEN_NODE_DATABASE_URL=f"sqlite:///{work / 'backend.db'}",
                 OPEN_NODE_SESSION_COOKIE_SECURE="false",
+                OPEN_NODE_TRUSTED_AUTHORITIES="[]",
                 OPEN_NODE_FRONTEND_DIR=str(ROOT / "frontend/dist"),
             )
             subprocess.run(

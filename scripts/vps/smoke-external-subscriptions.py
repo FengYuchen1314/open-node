@@ -770,6 +770,7 @@ def environment(database, ca):
         "PYTHONPATH": str(ROOT / "backend/app"),
         "OPEN_NODE_DATABASE_URL": f"sqlite:///{database}",
         "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+        "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
         "OPEN_NODE_FRONTEND_DIR": str(ROOT / "frontend/dist"),
         "OPEN_NODE_CERTIFICATE_STATE_DIR": str(database.parent / "certificates"),
         "SSL_CERT_FILE": str(ca),

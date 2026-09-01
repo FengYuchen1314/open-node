@@ -173,6 +173,21 @@ public_ip_url() {
   printf 'https://%s:%s\n' "$(public_ip_authority "$value")" "$port"
 }
 
+managed_trusted_authorities() {
+  local public_ip="$1" hostname="$2" public_port="$3" upstream_port="$4"
+  local values="[\"127.0.0.1:$RUNTIME_CONTAINER_PORT\""
+  if [[ "$upstream_port" != "$RUNTIME_CONTAINER_PORT" ]]; then
+    values+=",\"127.0.0.1:$upstream_port\""
+  fi
+  if [[ -n "$hostname" ]]; then
+    values+=",\"$hostname\""
+  fi
+  if [[ -n "$public_ip" ]]; then
+    values+=",\"$(public_ip_authority "$public_ip"):$public_port\""
+  fi
+  printf '%s]\n' "$values"
+}
+
 public_gateway_mode_for() {
   local public_ip="$1" hostname="$2"
   if [[ -n "$public_ip" && -n "$hostname" ]]; then
@@ -654,6 +669,7 @@ compose_with() {
     -u OPEN_NODE_SESSION_COOKIE_SECURE \
     -u OPEN_NODE_SHORT_LINKS_ENABLED \
     -u OPEN_NODE_TRUSTED_PROXIES \
+    -u OPEN_NODE_TRUSTED_AUTHORITIES \
     -u OPEN_NODE_PUBLIC_HOSTNAME \
     -u OPEN_NODE_PUBLIC_IP \
     -u OPEN_NODE_PUBLIC_HTTPS_PORT \
@@ -1163,7 +1179,8 @@ runtime_container_is_safe() {
   local source_dir="$1" environment_file="$2" expected_image_id="$3" require_running="${4:-0}"
   local runtime_tcp runtime_health
   local container_id postgres_id project_containers expected_containers details expected_image expected_network expected_network_id
-  local port bind_address secure_cookie short_links trusted_proxies agent_identity subscriber_totp
+  local port bind_address secure_cookie short_links trusted_proxies trusted_authorities
+  local agent_identity subscriber_totp
   local geoip_token
   local update_state_dir revision update_enabled=0
   local bootstrap_value bootstrap_environment rendered_compose database_backend database_url
@@ -1177,6 +1194,7 @@ runtime_container_is_safe() {
   secure_cookie="$(read_key "$environment_file" OPEN_NODE_SESSION_COOKIE_SECURE || true)"
   short_links="$(read_key "$environment_file" OPEN_NODE_SHORT_LINKS_ENABLED || true)"
   trusted_proxies="$(read_key "$environment_file" OPEN_NODE_TRUSTED_PROXIES || true)"
+  trusted_authorities="$(read_key "$environment_file" OPEN_NODE_TRUSTED_AUTHORITIES || true)"
   agent_identity="$(read_key "$environment_file" OPEN_NODE_AGENT_IDENTITY_FILE || true)"
   subscriber_totp="$(read_key "$environment_file" OPEN_NODE_SUBSCRIBER_TOTP_KEY || true)"
   geoip_token="$(read_key "$environment_file" OPEN_NODE_GEOIP_IPINFO_TOKEN || true)"
@@ -1235,6 +1253,7 @@ runtime_container_is_safe() {
     --arg secure_cookie "$secure_cookie" \
     --arg short_links "$short_links" \
     --arg trusted_proxies "$trusted_proxies" \
+    --arg trusted_authorities "$trusted_authorities" \
     --arg agent_identity "$agent_identity" \
     --arg subscriber_totp "$subscriber_totp" \
     --arg geoip_token "$geoip_token" \
@@ -1272,6 +1291,7 @@ runtime_container_is_safe() {
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_NOTIFICATIONS_STATE_DIR=")) ] == ["OPEN_NODE_NOTIFICATIONS_STATE_DIR=/var/lib/open-node/notifications"])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SPEEDTEST_STATE_DIR=")) ] == ["OPEN_NODE_SPEEDTEST_STATE_DIR=/var/lib/open-node/speedtests"])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SESSION_COOKIE_SECURE=")) ] == ["OPEN_NODE_SESSION_COOKIE_SECURE=" + $secure_cookie])
+      and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_TRUSTED_AUTHORITIES=")) ] == ["OPEN_NODE_TRUSTED_AUTHORITIES=" + $trusted_authorities])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SHORT_LINKS_ENABLED=")) ] == ["OPEN_NODE_SHORT_LINKS_ENABLED=" + $short_links])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_AGENT_IDENTITY_FILE=")) ] == ["OPEN_NODE_AGENT_IDENTITY_FILE=" + $agent_identity])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SUBSCRIBER_TOTP_KEY=")) ] == ["OPEN_NODE_SUBSCRIBER_TOTP_KEY=" + $subscriber_totp])
@@ -1404,6 +1424,7 @@ create_candidate_environment() {
   local geoip_token
   local database_backend database_url postgres_password
   local public_hostname previous_hostname public_url previous_url trusted_proxies
+  local trusted_authorities
   local public_ip_input public_ip previous_public_ip public_port previous_public_port
   local public_mode public_config public_request=0
   if [[ -n "$base_file" ]]; then
@@ -1528,6 +1549,8 @@ create_candidate_environment() {
       || die "the Agent bootstrap URL must equal the managed public HTTPS URL"
     secure_cookie=true
     trusted_proxies="*"
+    trusted_authorities="$(managed_trusted_authorities \
+      "$public_ip" "$public_hostname" "$public_port" "$port")"
     bootstrap_value="$public_url"
   elif [[ "$public_request" -eq 1 ]]; then
     if [[ -n "$previous_hostname" ]]; then
@@ -1546,6 +1569,9 @@ create_candidate_environment() {
       && "$bootstrap_value" == "$previous_url" ]]; then
       bootstrap_value=""
     fi
+    trusted_authorities="[]"
+  else
+    trusted_authorities="$(read_key "$destination" OPEN_NODE_TRUSTED_AUTHORITIES || printf '[]')"
   fi
   validate_agent_bootstrap_value "$bootstrap_value" \
     || die "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL must be empty or a safe canonical HTTPS URL"
@@ -1562,6 +1588,7 @@ create_candidate_environment() {
   set_file_value "$destination" OPEN_NODE_HTTP_PORT "$port"
   set_file_value "$destination" OPEN_NODE_SESSION_COOKIE_SECURE "$secure_cookie"
   set_file_value "$destination" OPEN_NODE_TRUSTED_PROXIES "$trusted_proxies"
+  set_file_value "$destination" OPEN_NODE_TRUSTED_AUTHORITIES "$trusted_authorities"
   set_file_value "$destination" OPEN_NODE_PUBLIC_HOSTNAME "$public_hostname"
   set_file_value "$destination" OPEN_NODE_PUBLIC_IP "$public_ip"
   set_file_value "$destination" OPEN_NODE_PUBLIC_HTTPS_PORT "$public_port"
@@ -1588,7 +1615,8 @@ set_candidate_identity() {
 validate_candidate_compose() {
   local source_dir="$1" environment_file="$2" expected_image="$3"
   local images expected_images config_json context revision port bind_address secure_cookie short_links
-  local trusted_proxies agent_identity subscriber_totp geoip_token update_state_dir update_enabled=0
+  local trusted_proxies trusted_authorities agent_identity subscriber_totp geoip_token
+  local update_state_dir update_enabled=0
   local bootstrap_value bootstrap_environment database_backend database_url postgres_password
   context="$(realpath -m -- "$source_dir")"
   [[ -d "$context" && ! -L "$context" \
@@ -1603,6 +1631,7 @@ validate_candidate_compose() {
   secure_cookie="$(read_key "$environment_file" OPEN_NODE_SESSION_COOKIE_SECURE || true)"
   short_links="$(read_key "$environment_file" OPEN_NODE_SHORT_LINKS_ENABLED || true)"
   trusted_proxies="$(read_key "$environment_file" OPEN_NODE_TRUSTED_PROXIES || true)"
+  trusted_authorities="$(read_key "$environment_file" OPEN_NODE_TRUSTED_AUTHORITIES || true)"
   agent_identity="$(read_key "$environment_file" OPEN_NODE_AGENT_IDENTITY_FILE || true)"
   subscriber_totp="$(read_key "$environment_file" OPEN_NODE_SUBSCRIBER_TOTP_KEY || true)"
   geoip_token="$(read_key "$environment_file" OPEN_NODE_GEOIP_IPINFO_TOKEN || true)"
@@ -1660,6 +1689,7 @@ validate_candidate_compose() {
     --arg secure_cookie "$secure_cookie" \
     --arg short_links "$short_links" \
     --arg trusted_proxies "$trusted_proxies" \
+    --arg trusted_authorities "$trusted_authorities" \
     --arg agent_identity "$agent_identity" \
     --arg subscriber_totp "$subscriber_totp" \
     --arg geoip_token "$geoip_token" \
@@ -1724,6 +1754,7 @@ validate_candidate_compose() {
       "OPEN_NODE_EXTERNAL_SUBSCRIPTIONS_STATE_DIR": "/var/lib/open-node/external-subscriptions",
       "OPEN_NODE_FEDERATION_STATE_DIR": "/var/lib/open-node/federation",
       "OPEN_NODE_SESSION_COOKIE_SECURE": $secure_cookie,
+      "OPEN_NODE_TRUSTED_AUTHORITIES": $trusted_authorities,
       "OPEN_NODE_SHORT_LINKS_ENABLED": $short_links,
       "OPEN_NODE_SUBSCRIBER_TOTP_KEY": $subscriber_totp,
       "OPEN_NODE_GEOIP_IPINFO_TOKEN": $geoip_token,
@@ -2138,12 +2169,28 @@ public_gateway_container_is_safe() {
   ' >/dev/null
 }
 
+public_gateway_container_exists() {
+  local names
+  daemon_identity_is_current \
+    || die "could not verify the Docker daemon before inspecting the public gateway"
+  names="$(docker ps -a --filter "name=^/${PUBLIC_GATEWAY_CONTAINER}$" --format '{{.Names}}')" \
+    || die "could not inspect the managed public gateway container"
+  if [[ -z "$names" ]]; then
+    return 1
+  fi
+  [[ "$names" == "$PUBLIC_GATEWAY_CONTAINER" ]] \
+    || die "public gateway container name lookup returned an ambiguous result"
+  return 0
+}
+
 remove_public_gateway_container() {
-  docker inspect "$PUBLIC_GATEWAY_CONTAINER" >/dev/null 2>&1 || return 0
+  public_gateway_container_exists || return 0
   public_gateway_container_is_safe 0 0 \
     || die "refusing to remove a public gateway container outside installer policy"
   docker rm -f -- "$PUBLIC_GATEWAY_CONTAINER" >/dev/null \
     || die "could not remove the managed public gateway container"
+  ! public_gateway_container_exists \
+    || die "managed public gateway container still exists after removal"
 }
 
 ensure_public_gateway_image() {
@@ -2267,6 +2314,7 @@ public_gateway_endpoints_are_healthy() {
 
 reconcile_public_gateway() {
   local hostname public_ip public_port authority upstream mode config expected_url endpoint_label
+  local expected_authorities
   hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
   public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
   public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
@@ -2296,9 +2344,12 @@ reconcile_public_gateway() {
   else
     expected_url="$(public_ip_url "$public_ip" "$public_port")"
   fi
+  expected_authorities="$(managed_trusted_authorities \
+    "$public_ip" "$hostname" "$public_port" "$upstream")"
   [[ "$(read_env_value OPEN_NODE_BIND_ADDRESS || true)" == "127.0.0.1" \
     && "$(read_env_value OPEN_NODE_SESSION_COOKIE_SECURE || true)" == "true" \
     && "$(read_env_value OPEN_NODE_TRUSTED_PROXIES || true)" == "*" \
+    && "$(read_env_value OPEN_NODE_TRUSTED_AUTHORITIES || true)" == "$expected_authorities" \
     && "$(read_env_value OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)" == "$expected_url" ]] \
     || die "saved public gateway environment is inconsistent"
   config="$(public_gateway_config_for_mode "$INSTALL_DIR" "$mode")" \
@@ -2341,6 +2392,21 @@ reconcile_public_gateway() {
     remove_public_gateway_container
     die "public HTTPS did not become trusted; verify the public IP, DNS when configured, inbound TCP 443, and public port $public_port"
   fi
+}
+
+remove_public_gateway_before_disabled_candidate() {
+  local environment_file="$1" hostname public_ip mode
+  hostname="$(read_key "$environment_file" OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  public_ip="$(read_key "$environment_file" OPEN_NODE_PUBLIC_IP || true)"
+  mode="$(public_gateway_mode_for "$public_ip" "$hostname")"
+  [[ "$mode" == "off" ]] || return 0
+  log "removing the managed HTTPS gateway before starting a public-disabled candidate"
+  remove_public_gateway_container
+}
+
+provision_committed_host_integrations() {
+  reconcile_public_gateway
+  provision_application_update_helper
 }
 
 verify_public_gateway_status() {
@@ -3135,8 +3201,7 @@ install_fresh() {
     || die "deployment failed its post-commit stability check"
   clear_recovery_marker
   TXN_PHASE="idle"
-  provision_application_update_helper
-  reconcile_public_gateway
+  provision_committed_host_integrations
   ensure_administrator_setup
   log_success
 }
@@ -3154,8 +3219,7 @@ reinstall_existing() {
   if [[ "$state" == "running" ]]; then
     wait_for_health "$INSTALL_DIR" "$ENV_FILE" "$image_id" \
       || die "deployment is unhealthy"
-    provision_application_update_helper
-    reconcile_public_gateway
+    provision_committed_host_integrations
     ensure_administrator_setup
     log_success
     return
@@ -3185,8 +3249,7 @@ reinstall_existing() {
   TXN_CANDIDATE_ACTIVATED=0
   clear_recovery_marker
   TXN_PHASE="idle"
-  provision_application_update_helper
-  reconcile_public_gateway
+  provision_committed_host_integrations
   ensure_administrator_setup
   log_success
 }
@@ -3249,6 +3312,7 @@ update_existing() {
   fi
   TXN_PHASE="backup-complete"
   write_recovery_marker "backup-complete" "$CANDIDATE_REVISION" "$image_tag" "$BACKUP_PATH"
+  remove_public_gateway_before_disabled_candidate "$candidate_env"
   log "starting candidate Open Node image"
   TXN_PHASE="candidate-starting"
   TXN_CANDIDATE_ACTIVATED=1
@@ -3320,8 +3384,7 @@ update_existing() {
     || warn "committed candidate worktree requires manual cleanup"
   CANDIDATE_SOURCE=""
   TXN_PHASE="idle"
-  provision_application_update_helper
-  reconcile_public_gateway
+  provision_committed_host_integrations
   log_success
   log "pre-update backup: $BACKUP_PATH"
 }

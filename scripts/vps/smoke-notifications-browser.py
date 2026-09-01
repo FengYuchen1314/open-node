@@ -235,6 +235,7 @@ def serve(args):
         database_url="sqlite:///" + str(work / "application.db"),
         frontend_dir=args.frontend_dir,
         session_cookie_secure=False,
+        trusted_authorities=[],
         subscriber_totp_key=Fernet.generate_key().decode(),
         certificate_state_dir=work / "certificates",
         notifications_state_dir=work / "notifications",
@@ -250,6 +251,7 @@ def serve(args):
             "OPEN_NODE_EXTERNAL_SUBSCRIPTIONS_STATE_DIR": str(
                 settings.external_subscriptions_state_dir
             ),
+            "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
         }
     )
     from open_node.main import create_app

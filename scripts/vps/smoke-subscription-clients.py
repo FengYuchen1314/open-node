@@ -955,6 +955,7 @@ def run(args):
                 raise
 
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    os.environ["OPEN_NODE_TRUSTED_AUTHORITIES"] = "[]"
     service.exercise = callback
     service.Fixture = TrackedFixture
     try:

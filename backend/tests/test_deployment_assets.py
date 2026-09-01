@@ -108,6 +108,25 @@ def test_compose_defaults_to_loopback_but_allows_an_explicit_installer_bind():
         ROOT / "deploy/.env.example"
     ).read_text()
     assert "OPEN_NODE_HTTP_PORT=62031" in (ROOT / "deploy/.env.example").read_text()
+    assert "OPEN_NODE_TRUSTED_AUTHORITIES=[]" in (
+        ROOT / "deploy/.env.example"
+    ).read_text()
+    assert compose["services"]["open-node"]["environment"][
+        "OPEN_NODE_TRUSTED_AUTHORITIES"
+    ] == "${OPEN_NODE_TRUSTED_AUTHORITIES:-[]}"
+    restore = yaml.safe_load(
+        (ROOT / "deploy/compose.restore.example.yaml").read_text(encoding="utf-8")
+    )
+    assert restore["services"]["open-node"]["environment"][
+        "OPEN_NODE_TRUSTED_AUTHORITIES"
+    ] == "${OPEN_NODE_TRUSTED_AUTHORITIES:-[]}"
+
+
+def test_manual_restore_guidance_resets_authority_trust_for_private_staging():
+    deployment = (ROOT / "docs/deployment.md").read_text(encoding="utf-8")
+
+    assert "Set `OPEN_NODE_TRUSTED_AUTHORITIES=[]`" in deployment
+    assert "printf 'OPEN_NODE_TRUSTED_AUTHORITIES=[]\\n'" in deployment
 
 
 def test_installer_manifest_v2_records_the_fixed_62031_runtime_contract():
@@ -129,6 +148,11 @@ def test_installer_manifest_v2_records_the_fixed_62031_runtime_contract():
     reinstall = installer[
         reinstall_start : installer.index("\nupdate_existing() {", reinstall_start)
     ]
+    host_integrations = installer[
+        installer.index("provision_committed_host_integrations() {") : installer.index(
+            "\nverify_public_gateway_status() {"
+        )
+    ]
 
     assert 'readonly MANIFEST_VERSION="2"' in installer
     assert 'readonly RUNTIME_CONTAINER_PORT="62031"' in installer
@@ -137,15 +161,17 @@ def test_installer_manifest_v2_records_the_fixed_62031_runtime_contract():
     assert '== "$RUNTIME_CONTAINER_PORT"' in manifest_check
     assert "unsupported or damaged installer manifest" in manifest_check
     assert "printf 'DEPLOYED_RUNTIME_PORT=%s\\n' \"$RUNTIME_CONTAINER_PORT\"" in manifest_write
-    assert "provision_application_update_helper" in reinstall_running
-    assert reinstall_running.index("provision_application_update_helper") < reinstall_running.index(
-        "reconcile_public_gateway"
+    assert host_integrations.index("reconcile_public_gateway") < host_integrations.index(
+        "provision_application_update_helper"
     )
-    assert reinstall_running.index("reconcile_public_gateway") < reinstall_running.index(
-        "ensure_administrator_setup"
-    ) < reinstall_running.index("log_success")
+    assert "provision_committed_host_integrations" in reinstall_running
+    assert (
+        reinstall_running.index("provision_committed_host_integrations")
+        < reinstall_running.index("ensure_administrator_setup")
+        < reinstall_running.index("log_success")
+    )
     assert reinstall.count("ensure_administrator_setup") == 2
-    assert reinstall.rindex("reconcile_public_gateway") < reinstall.rindex(
+    assert reinstall.rindex("provision_committed_host_integrations") < reinstall.rindex(
         "ensure_administrator_setup"
     ) < reinstall.rindex("log_success")
 
@@ -237,7 +263,38 @@ def test_public_gateway_docker_policy_smoke_never_starts_its_fixture():
     assert '"docker", "run"' not in source
     assert "public_gateway_container_is_safe 0" in source
     assert "public_gateway_volume_is_safe" in source
+    assert 'OPEN_NODE_TRUSTED_AUTHORITIES=["127.0.0.1:62031",' in source
+    assert '"panel.example.com","1.1.1.1:58090"]' in source
     assert "Refusing to remove" in source
+
+
+def test_vps_backend_smoke_environments_do_not_inherit_authority_policy():
+    smoke_directory = ROOT / "scripts/vps"
+    audited = []
+    for smoke in smoke_directory.glob("*.py"):
+        source = smoke.read_text(encoding="utf-8")
+        if "OPEN_NODE_DATABASE_URL" not in source and "OPEN_NODE_FRONTEND_DIR" not in source:
+            continue
+        audited.append(smoke.name)
+        assert "OPEN_NODE_TRUSTED_AUTHORITIES" in source, smoke.name
+
+    assert "smoke-control-plane.py" in audited
+    assert "smoke-branding-browser.py" in audited
+    assert "smoke-nginx.py" in audited
+
+
+def test_backend_subprocess_environment_fixtures_pin_private_authority_policy():
+    audited = []
+    for test_module in (ROOT / "backend/tests").glob("test_*.py"):
+        source = test_module.read_text(encoding="utf-8")
+        if "OPEN_NODE_DATABASE_URL" not in source:
+            continue
+        audited.append(test_module.name)
+        assert "OPEN_NODE_TRUSTED_AUTHORITIES" in source, test_module.name
+
+    assert "test_auth.py" in audited
+    assert "test_backup_restore.py" in audited
+    assert "test_initial_setup.py" in audited
 
 
 def test_ci_uses_parallel_backend_and_frontend_shards():
@@ -391,6 +448,7 @@ def test_installer_vps_smoke_keeps_destructive_resources_isolated():
     assert 'dir="/root"' in source
     assert "OPEN_NODE_IMAGE_REPOSITORY" in source
     assert "OPEN_NODE_PROJECT_NAME" in source
+    assert '"OPEN_NODE_TRUSTED_AUTHORITIES": "[]"' in source
     assert "fixture.volume" in source
     assert "run_missing_volume_scenario" in source
     assert "run_concurrent_lock_scenario" in source

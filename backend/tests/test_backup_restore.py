@@ -326,12 +326,16 @@ def test_restore_compose_template_parses_with_private_environment(tmp_path):
         pytest.skip("Docker Compose configuration parser is not installed")
     source = Path(__file__).resolve().parents[2] / "deploy/compose.restore.example.yaml"
     environment = tmp_path / "restore.env"
-    environment.write_text("OPEN_NODE_DATABASE_URL=sqlite:////var/lib/open-node/open-node.db\n")
+    environment.write_text(
+        "OPEN_NODE_DATABASE_URL=sqlite:////var/lib/open-node/open-node.db\n"
+        "OPEN_NODE_TRUSTED_AUTHORITIES=[]\n"
+    )
     environment.chmod(0o600)
     base_environment = {
         "PATH": os.environ["PATH"],
         "OPEN_NODE_RESTORE_IMAGE": "open-node:restore-test",
         "OPEN_NODE_RESTORE_DATA_DIR": str(tmp_path),
+        "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
     }
     missing_port = subprocess.run(
         ["docker", "compose", "-f", str(source), "config", "--quiet"],

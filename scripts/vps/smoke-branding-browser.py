@@ -204,6 +204,7 @@ def serve(args):
     settings = Settings(
         _env_file=None, database_url="sqlite:///" + str(database), frontend_dir=frontend,
         session_cookie_secure=False, subscriber_totp_key=SecretStr(bootstrap["totp_key"]),
+        trusted_authorities=[],
         certificate_state_dir=work / ("certificates-" + args._serve),
         notifications_state_dir=work / "notifications",
         external_subscriptions_state_dir=work / "external-subscriptions",
@@ -216,6 +217,7 @@ def serve(args):
         "OPEN_NODE_EXTERNAL_SUBSCRIPTIONS_STATE_DIR": str(
             settings.external_subscriptions_state_dir
         ),
+        "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
     })
     from open_node.main import create_app
 

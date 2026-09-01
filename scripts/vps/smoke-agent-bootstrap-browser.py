@@ -56,6 +56,7 @@ def backend(repository, frontend, configured, private, output):
             "PYTHONPATH": str(repository / "backend/app"),
             "OPEN_NODE_DATABASE_URL": f"sqlite:///{work / 'browser.db'}",
             "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+            "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
             "OPEN_NODE_FRONTEND_DIR": str(frontend),
             "OPEN_NODE_CERTIFICATE_STATE_DIR": str(work / "certificates"),
             "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL": CANONICAL_URL if configured else "",

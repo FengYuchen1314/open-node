@@ -465,6 +465,7 @@ def run(agent_python, archive):
                 "PYTHONPATH": str(root / "backend" / "app"),
                 "OPEN_NODE_DATABASE_URL": f"sqlite:///{database}",
                 "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+                "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
             }
             subprocess.run(
                 [sys.executable, "-m", "open_node.admin", "create", "--password-stdin"],

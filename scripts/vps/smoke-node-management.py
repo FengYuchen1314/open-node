@@ -541,6 +541,7 @@ def run(args):
 
     service.exercise = callback
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    os.environ["OPEN_NODE_TRUSTED_AUTHORITIES"] = "[]"
     os.environ["OPEN_NODE_SUBSCRIPTION_ACCESS_POLL_SECONDS"] = "1"
     service.run(args.wheel, args.xray_archive)
     print("PASS node management end-to-end " + args.transport, flush=True)

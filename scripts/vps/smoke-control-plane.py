@@ -59,7 +59,11 @@ class Deployment:
             for key, value in os.environ.items()
             if not key.startswith(("OPEN_NODE_", "COMPOSE_"))
         }
-        self.env.update(OPEN_NODE_IMAGE_TAG=tag, OPEN_NODE_HTTP_PORT=str(self.port))
+        self.env.update(
+            OPEN_NODE_IMAGE_TAG=tag,
+            OPEN_NODE_HTTP_PORT=str(self.port),
+            OPEN_NODE_TRUSTED_AUTHORITIES="[]",
+        )
         self.args = [
             "docker",
             "compose",

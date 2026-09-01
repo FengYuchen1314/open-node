@@ -633,6 +633,7 @@ class InstallerFixture:
             "OPEN_NODE_IMAGE_REPOSITORY": self.image_repository,
             "OPEN_NODE_HTTP_PORT": str(self.port),
             "OPEN_NODE_PUBLIC_IP": "off",
+            "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
             "OPEN_NODE_AUTO_INSTALL_DEPENDENCIES": "0",
             "OPEN_NODE_BUILD_PULL": "0",
             "OPEN_NODE_CREATE_ADMIN": "1",

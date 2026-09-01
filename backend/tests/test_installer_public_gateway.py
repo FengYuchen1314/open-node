@@ -17,6 +17,7 @@ PUBLIC_KEYS = {
     "OPEN_NODE_BIND_ADDRESS",
     "OPEN_NODE_SESSION_COOKIE_SECURE",
     "OPEN_NODE_TRUSTED_PROXIES",
+    "OPEN_NODE_TRUSTED_AUTHORITIES",
     "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL",
     "OPEN_NODE_TEST_DETECTED_PUBLIC_IP",
 }
@@ -230,6 +231,9 @@ def test_fresh_default_auto_ip_gateway_sets_consistent_private_runtime(tmp_path)
     assert values["OPEN_NODE_HTTP_PORT"] == "62031"
     assert values["OPEN_NODE_SESSION_COOKIE_SECURE"] == "true"
     assert values["OPEN_NODE_TRUSTED_PROXIES"] == "*"
+    assert values["OPEN_NODE_TRUSTED_AUTHORITIES"] == (
+        '["127.0.0.1:62031","1.1.1.1:58090"]'
+    )
     assert values["OPEN_NODE_PUBLIC_IP"] == "1.1.1.1"
     assert values["OPEN_NODE_PUBLIC_HTTPS_PORT"] == "58090"
     assert values["OPEN_NODE_PUBLIC_HOSTNAME"] == ""
@@ -263,6 +267,110 @@ printf 'preflight-complete\n'
     )
     assert preflight.returncode == 0, preflight.stderr
     assert preflight.stdout == "preflight-complete\n"
+
+
+@pytest.mark.parametrize(
+    ("busy_port", "expected_error"),
+    [
+        ("62031", "host application port 62031 is already in use"),
+        ("443", "public TCP 443 is already in use"),
+        ("58090", "public HTTPS port 58090 is already in use"),
+    ],
+    ids=["loopback-upstream", "acme-tls-alpn", "public-ip-https"],
+)
+def test_fresh_public_port_preflight_fails_closed_for_each_busy_listener(
+    tmp_path, busy_port, expected_error
+):
+    definitions = installer_definitions(tmp_path)
+    candidate = tmp_path / "candidate.env"
+    candidate.write_text(
+        "OPEN_NODE_HTTP_PORT=62031\n"
+        "OPEN_NODE_PUBLIC_IP=1.1.1.1\n"
+        "OPEN_NODE_PUBLIC_HTTPS_PORT=58090\n"
+        "OPEN_NODE_PUBLIC_HOSTNAME=\n",
+        encoding="utf-8",
+    )
+    preflight = run_bash(
+        r'''
+source "$1"
+trap - EXIT INT TERM HUP
+busy_port="$3"
+tcp_port_is_listening() { [[ "$1" == "$busy_port" ]]; }
+preflight_fresh_ports "$2"
+printf 'preflight-incorrectly-completed\n'
+''',
+        definitions=definitions,
+        arguments=(candidate, busy_port),
+    )
+    assert preflight.returncode != 0
+    assert expected_error in preflight.stderr
+    assert "preflight-incorrectly-completed" not in preflight.stdout
+
+
+def test_public_disabled_update_removes_old_gateway_before_candidate_start(tmp_path):
+    definitions = installer_definitions(tmp_path)
+    candidate = tmp_path / "candidate.env"
+    candidate.write_text(
+        "OPEN_NODE_PUBLIC_IP=\nOPEN_NODE_PUBLIC_HOSTNAME=\n",
+        encoding="utf-8",
+    )
+    result = run_bash(
+        r'''
+source "$1"
+trap - EXIT INT TERM HUP
+gateway_state=present
+remove_public_gateway_container() { gateway_state=removed; }
+docker() {
+  [[ "$1" == inspect && "$gateway_state" == present ]]
+}
+remove_public_gateway_before_disabled_candidate "$2"
+printf '%s\n' "$gateway_state"
+''',
+        definitions=definitions,
+        arguments=(candidate,),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "removing the managed HTTPS gateway" in result.stdout
+    assert result.stdout.endswith("removed\n")
+
+
+def test_gateway_reconcile_precedes_update_helper_even_when_helper_fails(tmp_path):
+    definitions = installer_definitions(tmp_path)
+    result = run_bash(
+        r'''
+source "$1"
+trap - EXIT INT TERM HUP
+gateway_state=stale
+reconcile_public_gateway() { gateway_state=reconciled; }
+provision_application_update_helper() { return 71; }
+if provision_committed_host_integrations; then
+  printf 'helper-incorrectly-succeeded\n'
+  exit 1
+fi
+printf '%s\n' "$gateway_state"
+''',
+        definitions=definitions,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "reconciled\n"
+
+
+def test_gateway_removal_does_not_treat_docker_api_failure_as_absence(tmp_path):
+    definitions = installer_definitions(tmp_path)
+    result = run_bash(
+        r'''
+source "$1"
+trap - EXIT INT TERM HUP
+daemon_identity_is_current() { return 0; }
+docker() { return 75; }
+remove_public_gateway_container
+printf 'gateway-incorrectly-treated-as-absent\n'
+''',
+        definitions=definitions,
+    )
+    assert result.returncode != 0
+    assert "could not inspect the managed public gateway container" in result.stderr
+    assert "gateway-incorrectly-treated-as-absent" not in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -312,6 +420,15 @@ def test_fresh_ip_domain_and_dual_modes_have_one_canonical_url(
     assert values["OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL"] == expected_url
     assert values["OPEN_NODE_SESSION_COOKIE_SECURE"] == "true"
     assert values["OPEN_NODE_TRUSTED_PROXIES"] == "*"
+    expected_authorities = ['127.0.0.1:62031']
+    if expected_hostname:
+        expected_authorities.append(expected_hostname)
+    if expected_ip:
+        authority = f"[{expected_ip}]" if ":" in expected_ip else expected_ip
+        expected_authorities.append(f"{authority}:58090")
+    assert values["OPEN_NODE_TRUSTED_AUTHORITIES"] == (
+        "[" + ",".join(f'\"{value}\"' for value in expected_authorities) + "]"
+    )
 
 
 def test_fresh_public_ip_can_use_an_explicit_public_https_port(tmp_path):
@@ -326,6 +443,9 @@ def test_fresh_public_ip_can_use_an_explicit_public_https_port(tmp_path):
     values = parse_environment(candidate)
     assert values["OPEN_NODE_PUBLIC_HTTPS_PORT"] == "58443"
     assert values["OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL"] == "https://8.8.8.8:58443"
+    assert values["OPEN_NODE_TRUSTED_AUTHORITIES"] == (
+        '["127.0.0.1:62031","8.8.8.8:58443"]'
+    )
 
 
 def test_gateway_asset_is_required_only_when_public_mode_is_enabled(tmp_path):
@@ -379,6 +499,7 @@ def test_fresh_explicit_off_disables_all_public_defaults(tmp_path):
     assert values["OPEN_NODE_PUBLIC_HOSTNAME"] == ""
     assert values["OPEN_NODE_SESSION_COOKIE_SECURE"] == "false"
     assert values["OPEN_NODE_TRUSTED_PROXIES"] == ""
+    assert values["OPEN_NODE_TRUSTED_AUTHORITIES"] == "[]"
     assert values["OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL"] == ""
 
 

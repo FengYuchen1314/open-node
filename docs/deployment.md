@@ -446,7 +446,21 @@ docker inspect "$CID" --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{
 ```
 
 For this host-proxy-to-published-loopback-port topology, set
-`OPEN_NODE_TRUSTED_PROXIES` in `deploy/.env` to that exact address. Apply it:
+`OPEN_NODE_TRUSTED_PROXIES` in `deploy/.env` to that exact address. Also set
+`OPEN_NODE_TRUSTED_AUTHORITIES` to a JSON array containing the container health
+authority and every exact browser-facing authority. For example:
+
+```dotenv
+OPEN_NODE_TRUSTED_AUTHORITIES=["127.0.0.1:62031","panel.example.com"]
+```
+
+Authority entries contain no scheme or path. Include a non-default public port
+when one is used (`panel.example.com:58090`), and bracket an IPv6 literal
+(`[2001:db8::10]:58090`). Never use a wildcard. The managed installer derives
+this list automatically for its IP, domain, or dual-entry gateway; this manual
+setting is required only when operating your own proxy.
+
+Apply both settings:
 
 ```bash
 docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --no-build --wait
@@ -455,8 +469,11 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --no-build --
 Keep `OPEN_NODE_SESSION_COOKIE_SECURE=true`. Open your HTTPS hostname and
 sign in. Test a direct page reload at `/config`, and verify the Agent's
 `wss://` endpoint if attaching nodes. HTTPS Origin validation requires the
-original scheme and Host. A 403 after login can indicate a missing proxy
-trust setting; do not fix it by allowing arbitrary Origins or disabling CSRF.
+original scheme and Host. A 400 response indicates that the request Host is
+absent, malformed, or not in `OPEN_NODE_TRUSTED_AUTHORITIES`. A 403 after login
+can indicate a missing proxy trust setting or an Origin that does not exactly
+match the browser-facing authority. Do not fix either condition by trusting
+wildcards, allowing arbitrary Origins, or disabling CSRF.
 
 Trust only the actual proxy address, never `*` or a whole shared Docker
 subnet. Check the address again after network recreation. Other proxy
@@ -508,7 +525,9 @@ image artifact (`docker image save`) to rebuilding an old source revision.
 For restoration of that manual **SQLite** archive, use a fresh, uniquely named Compose project and an unused
 loopback port. Create a separate `deploy/.env.restore` with the original image
 tag, an explicitly selected `OPEN_NODE_HTTP_PORT`, and an initially empty
-trusted proxy value. The restore file must contain the port; do not rely on the
+trusted proxy value. Set `OPEN_NODE_TRUSTED_AUTHORITIES=[]` while this disposable
+instance remains reachable only through its private loopback URL. The restore
+file must contain the port; do not rely on the
 normal 62031 default or copy the production port. Do not change the running deployment's environment file.
 Create the new project's empty volume without starting the service, then
 restore your trusted archive:
@@ -627,6 +646,7 @@ mkdir -m 0700 "$DR_ROOT/maintenance"
   printf 'OPEN_NODE_BIND_ADDRESS=127.0.0.1\n'
   printf 'OPEN_NODE_HTTP_PORT=%s\n' "$DR_PORT"
   printf 'OPEN_NODE_TRUSTED_PROXIES=\n'
+  printf 'OPEN_NODE_TRUSTED_AUTHORITIES=[]\n'
   printf 'OPEN_NODE_PUBLIC_IP=off\n'
   printf 'OPEN_NODE_PUBLIC_HTTPS_PORT=58090\n'
   printf 'OPEN_NODE_PUBLIC_HOSTNAME=\n'

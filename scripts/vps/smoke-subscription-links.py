@@ -423,6 +423,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
 def run(args):
     args.output.mkdir(parents=True, exist_ok=True)
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    os.environ["OPEN_NODE_TRUSTED_AUTHORITIES"] = "[]"
     # This compatibility gate opts in; production keeps secure long links by default.
     os.environ["OPEN_NODE_SHORT_LINKS_ENABLED"] = "true"
     os.environ["OPEN_NODE_SUBSCRIBER_TOTP_KEY"] = (

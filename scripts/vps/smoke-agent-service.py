@@ -440,6 +440,7 @@ def run(wheel, archive):
                 "PYTHONPATH": str(ROOT / "backend/app"),
                 "OPEN_NODE_DATABASE_URL": f"sqlite:///{work / 'backend.db'}",
                 "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+                "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
             }
             subprocess.run(
                 [sys.executable, "-m", "open_node.admin", "create", "--password-stdin"],

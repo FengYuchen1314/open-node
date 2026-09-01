@@ -314,7 +314,10 @@ def test_local_creation_deletion_and_restore_do_not_reopen_setup(setup_app):
 
 def test_cli_issue_does_not_read_password_and_rejects_existing_admin(setup_app):
     app = setup_app
-    environment = os.environ | {"OPEN_NODE_DATABASE_URL": str(app.state.auth.engine.url)}
+    environment = os.environ | {
+        "OPEN_NODE_DATABASE_URL": str(app.state.auth.engine.url),
+        "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
+    }
 
     def run(*args):
         return subprocess.run([sys.executable, "-m", "open_node.admin", *args],

@@ -457,6 +457,7 @@ def run(args):
     before = network_state()
     args.output.mkdir(parents=True, exist_ok=True)
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    os.environ["OPEN_NODE_TRUSTED_AUTHORITIES"] = "[]"
 
     def exercise(work, first, wheel, xray, client, backend, echo):
         with lifecycle.gateway(work, args.nginx, backend) as (endpoint, ca, _):

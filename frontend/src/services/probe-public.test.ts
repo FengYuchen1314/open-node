@@ -28,6 +28,7 @@ describe("anonymous public Probe client", () => {
   });
   it("keeps public stream URLs free of tokens and browser state", () => {
     expect(getPublicProbeStreamUrl({ origin: "https://probe.example.test" })).toBe("wss://probe.example.test/api/v1/public/probe-ws");
+    expect(getPublicProbeStreamUrl({ origin: "https://1.1.1.1:58090" })).toBe("wss://1.1.1.1:58090/api/v1/public/probe-ws");
     expect(getPublicProbeStreamUrl({ origin: "http://localhost:8000" })).toBe("ws://localhost:8000/api/v1/public/probe-ws");
   });
   it("preserves bounded API errors and handles a non-JSON denial", async () => {

@@ -7,6 +7,8 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
+from open_node.core.authority import InvalidAuthority, normalize_authorities
+
 
 class Settings(BaseSettings):
     app_name: str = "Open Node"
@@ -15,6 +17,7 @@ class Settings(BaseSettings):
     control_state_dir: Path | None = None
     license_required: bool = False
     cors_origins: list[str] = ["http://localhost:5173"]
+    trusted_authorities: list[str] = []
     session_cookie_secure: bool = True
     session_lifetime_seconds: int = Field(default=43200, ge=60, le=604800)
     session_idle_seconds: int = Field(default=1800, ge=60, le=86400)
@@ -238,6 +241,14 @@ class Settings(BaseSettings):
         if any("*" in origin for origin in origins):
             raise ValueError("Authenticated CORS requires explicit origins")
         return origins
+
+    @field_validator("trusted_authorities")
+    @classmethod
+    def valid_trusted_authorities(cls, authorities: list[str]) -> list[str]:
+        try:
+            return normalize_authorities(authorities)
+        except InvalidAuthority as exc:
+            raise ValueError(str(exc)) from None
 
     model_config = SettingsConfigDict(
         env_file=".env",

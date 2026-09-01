@@ -603,7 +603,11 @@ def test_public_endpoints_and_agent_tokens_remain_separate(tmp_path: Path):
 
 def test_cli_create_and_reset_without_exposing_password(tmp_path: Path):
     app = make_app(tmp_path)
-    env = {**os.environ, "OPEN_NODE_DATABASE_URL": f"sqlite:///{tmp_path / 'auth.db'}"}
+    env = {
+        **os.environ,
+        "OPEN_NODE_DATABASE_URL": f"sqlite:///{tmp_path / 'auth.db'}",
+        "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
+    }
 
     def invoke(action, password):
         return subprocess.run(

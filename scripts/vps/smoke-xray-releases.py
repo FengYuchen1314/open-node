@@ -421,6 +421,7 @@ if __name__ == "__main__":
         if key.startswith("OPEN_NODE_"):
             del os.environ[key]
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    os.environ["OPEN_NODE_TRUSTED_AUTHORITIES"] = "[]"
     service.exercise = lambda *arguments: exercise(*arguments, output)
     service.run(
         args.wheel.resolve(), args.xray_archive.resolve() if args.xray_archive else None

@@ -467,6 +467,7 @@ def run(args):
             "OPEN_NODE_DATABASE_URL": f"sqlite:///{target}",
             "OPEN_NODE_FRONTEND_DIR": str(ROOT / "frontend/dist"),
             "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+            "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
             # Legacy token, short-code and /x compatibility is opt-in.
             "OPEN_NODE_SHORT_LINKS_ENABLED": "true",
             "OPEN_NODE_SUBSCRIBER_TOTP_KEY": Fernet.generate_key().decode(),

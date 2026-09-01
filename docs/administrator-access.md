@@ -53,13 +53,13 @@ Preserve the original Host header at the reverse proxy, proxy `/api` to
 FastAPI, and restrict trusted forwarded headers to your own proxy addresses.
 Keep the backend listener private. The proxy should apply request-size limits,
 additional login rate limits, and normal TLS hardening. Use the shipped
-[Compose and HTTPS deployment guide](deployment.md). The current VPS Preview
-runs the hardened `cb1eb0c` baseline in persistent Compose under an enabled and
-active systemd unit. It listens only on `127.0.0.1:8000` and is reached through
-an SSH tunnel. Backup, restart, Compose down/up, and isolated restore have been
-verified. This is operational persistence, not public HTTPS acceptance: a
-production hostname, DNS, trusted certificate, and public reverse-proxy
-configuration still require operator input.
+[Compose and HTTPS deployment guide](deployment.md). A fresh managed install
+keeps the application on `127.0.0.1:62031` and, by default, obtains a trusted
+short-lived certificate for `https://public-IP:58090`; public TCP 443 is reserved
+for ACME TLS-ALPN-01 validation and renewal. The installer declares the exact
+IP/domain authorities accepted by the backend. A manual proxy deployment must
+set both its exact proxy source and exact browser-facing authorities as described
+in the deployment guide.
 
 Subscription and temporary-link bearer credentials can appear in request paths.
 The hardened baseline therefore disables Uvicorn and edge-proxy access logs and
@@ -91,9 +91,9 @@ Human-readable generated/custom subscription aliases and legacy `/x` routes are
 disabled by default with `OPEN_NODE_SHORT_LINKS_ENABLED=false`. Keep that setting
 for a normal public deployment; only the long 256-bit subscription token is then
 accepted. Enable aliases only for a controlled legacy migration on a restricted
-endpoint. The `cb1eb0c` hardened baseline also rotates legacy subscription
-bearers when compatibility remains disabled; the deployed persistent Compose
-database passed the upgrade and regression gates.
+endpoint. Startup also rotates legacy subscription bearers when compatibility
+remains disabled; current deployments track secure generation so later restarts
+do not rotate those values again.
 
 The same baseline enables SQLite foreign-key enforcement for every application
 connection. The persistent Compose startup verified `PRAGMA foreign_keys` is

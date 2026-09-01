@@ -6,6 +6,7 @@ import os
 import sys
 from unittest.mock import AsyncMock
 
+import httpx
 import open_node_agent.runtime as runtime_module
 import pytest
 import yaml
@@ -85,6 +86,37 @@ def test_tls_and_secret_configuration(tmp_path):
     with pytest.raises(ValueError) as malformed:
         load_config(path)
     assert "secret" not in str(malformed.value)
+
+
+async def test_public_ip_https_port_is_preserved_for_http_and_websocket(config, monkeypatch):
+    public = AgentConfig.model_validate(
+        {**config.model_dump(), "master_url": "https://1.1.1.1:58090"}
+    )
+    assert public.master_url == "https://1.1.1.1:58090"
+    assert public.websocket_url() == "wss://1.1.1.1:58090/api/v1/agents/ws"
+
+    requests = []
+
+    async def controller(request):
+        requests.append(str(request.url))
+        return httpx.Response(200, json={})
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        "open_node_agent.client.httpx.AsyncClient",
+        lambda **kwargs: original_client(
+            transport=httpx.MockTransport(controller),
+            **kwargs,
+        ),
+    )
+    agent = Agent(public)
+    try:
+        await agent.http_session(duration=0)
+    finally:
+        await agent.close()
+
+    assert requests[0] == "https://1.1.1.1:58090/api/v1/agents/register"
+    assert all(url.startswith("https://1.1.1.1:58090/api/v1/agents/") for url in requests)
 
 
 async def test_master_url_update_is_private_atomic_and_recovery_guarded(config, tmp_path):

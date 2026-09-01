@@ -72,6 +72,7 @@ def run(image: str, secure_channel: bool = False) -> None:
                 "PYTHONPATH": str(root / "backend" / "app"),
                 "OPEN_NODE_DATABASE_URL": f"sqlite:///{work / 'open-node.db'}",
                 "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+                "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
             }
             if identity:
                 backend_env["OPEN_NODE_AGENT_IDENTITY_FILE"] = str(work / "identity" / "seed")

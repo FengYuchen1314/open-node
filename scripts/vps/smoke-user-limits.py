@@ -402,6 +402,7 @@ def exercise(work, fixture, args, client, backend, endpoint, ca):
 def run(args):
     args.output.mkdir(parents=True, exist_ok=True)
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    os.environ["OPEN_NODE_TRUSTED_AUTHORITIES"] = "[]"
 
     def callback(work, fixture, wheel, stock, client, backend, echo):
         with lifecycle.gateway(work, args.nginx, backend) as (endpoint, ca, _):

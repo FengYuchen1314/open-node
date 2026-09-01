@@ -607,6 +607,7 @@ def run(output: Path) -> None:
             "PYTHONPATH": str(root / "backend" / "app"),
             "OPEN_NODE_DATABASE_URL": database_url,
             "OPEN_NODE_SESSION_COOKIE_SECURE": "false",
+            "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
             "OPEN_NODE_AGENT_IDENTITY_FILE": str(work / "identity" / "seed"),
             "OPEN_NODE_CERTIFICATE_STATE_DIR": str(work / "certificates"),
             "OPEN_NODE_FRONTEND_DIR": str(assets),

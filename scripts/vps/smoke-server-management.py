@@ -508,6 +508,7 @@ def run(args):
 
     service.exercise = callback
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    os.environ["OPEN_NODE_TRUSTED_AUTHORITIES"] = "[]"
     service.run(args.wheel, args.xray_archive)
     print("PASS server management end-to-end " + args.transport, flush=True)
 

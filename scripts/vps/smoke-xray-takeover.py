@@ -581,6 +581,7 @@ def exercise_mode(
 
 def run(args):
     os.environ["OPEN_NODE_FRONTEND_DIR"] = str(ROOT / "frontend/dist")
+    os.environ["OPEN_NODE_TRUSTED_AUTHORITIES"] = "[]"
     environment = Path("/opt") / ("open-node-takeover-venv-" + uuid4().hex[:8])
     environment.mkdir(mode=0o755)
     try:

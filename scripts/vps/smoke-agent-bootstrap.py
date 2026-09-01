@@ -618,6 +618,7 @@ def exercise(repository, output):
                 **environment, "PYTHONPATH": str(repository / "backend/app"),
                 "OPEN_NODE_DATABASE_URL": f"sqlite:///{work / 'backend.sqlite'}",
                 "OPEN_NODE_SESSION_COOKIE_SECURE": "true",
+                "OPEN_NODE_TRUSTED_AUTHORITIES": "[]",
                 "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL": url,
                 "OPEN_NODE_CORS_ORIGINS": json.dumps([url]),
                 "OPEN_NODE_CERTIFICATE_STATE_DIR": str(work / "certificate-state"),
