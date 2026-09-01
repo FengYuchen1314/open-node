@@ -69,6 +69,26 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("React configuration workspace", () => {
+  it("keeps a shared server inside its official node and credential scope", async () => {
+    vi.mocked(inventory.listServers).mockResolvedValue([{
+      ...server,
+      is_federated: true,
+      federation_owner_url: "https://owner.example",
+      federation_prefix: "shared-",
+      federation_allow_manage_xray: false,
+    }]);
+    vi.mocked(inventory.listAgents).mockResolvedValue([]);
+    render(<ConfigView />); await flush();
+    expect(screen.getByText("分享服务器由拥有方控制")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "运行时" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Xray" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Nginx" })).toBeNull();
+    expect(screen.queryByText("部署隧道", { selector: ".ant-card-head-title" })).toBeNull();
+    expect(screen.queryByText("运行时操作", { selector: ".ant-card-head-title" })).toBeNull();
+    expect(screen.getByRole("button", { name: "导入缺失节点" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "补齐客户端" })).toBeTruthy();
+  });
+
   it("loads in StrictMode and keeps all seven workflow tabs", async () => {
     render(<StrictMode><ConfigView /></StrictMode>); await flush();
     for (const name of ["Xray", "系统", "运行时", "限制", "Nginx", "网站", "文件"]) expect(screen.getByRole("tab", { name })).toBeTruthy();

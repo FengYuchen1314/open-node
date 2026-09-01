@@ -120,10 +120,13 @@ SQLite write transaction rather than relying on hidden navigation.
 [Server sharing and federation](docs/server-sharing.md) now lets an administrator issue a one-time
 token for one Agent server, choose limited inbound ownership or full supported-Agent access, revoke
 it with optional inbound cleanup, and connect another controller over pinned-address HTTPS. Imported
-tokens are encrypted at rest and the Chinese Ant Design workspace can refresh status and submit or
-poll durable commands. This is a usable first slice: imported servers remain outside the ordinary
-inventory/node catalog, optional official message-layer encryption and reverse official-client
-interop are not yet implemented, and no commercial Reality pool or license gate is included.
+tokens are encrypted at rest. Shared servers appear in the ordinary inventory, traffic, DDNS, probe,
+runtime-node and subscription workflows; status and system metrics refresh every five seconds, while
+inbound and user-credential changes are relayed through the owner without direct Agent access. The
+Chinese Ant Design workspace exposes only the consumer's node/credential scope. Official
+X25519/HMAC/HKDF/AES-GCM negotiation, HTTPS plaintext downgrade, and reverse
+`/api/federation/*` interoperability are implemented. No commercial Reality pool or license gate is
+included.
 
 The [client-format guide](docs/subscription-clients.md) covers the original
 Clash, Surge, sing-box, Xray, URI and Base64 outputs plus Loon, Quantumult X,

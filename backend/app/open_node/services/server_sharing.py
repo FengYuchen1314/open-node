@@ -1,11 +1,16 @@
 """Owner and consumer storage for durable server federation."""
 
+import asyncio
 import hashlib
 import json
+import logging
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from secrets import token_urlsafe
+from time import monotonic
 from uuid import UUID, uuid4
 
 from cryptography.fernet import InvalidToken
@@ -30,6 +35,7 @@ from open_node.domain.inventory import (
     AgentCommandCreate,
     AgentCommandResultRequest,
     AgentCommandStatus,
+    ProbeSysMetrics,
 )
 from open_node.domain.server_sharing import (
     TOKEN_PATTERN,
@@ -47,7 +53,10 @@ from open_node.domain.server_sharing import (
     ServerSharesResponse,
     ServerSharingError,
 )
+from open_node.services.backup_coordination import BackupBusyError
+from open_node.services.backup_runtime import backup_operation, run_in_backup_thread
 from open_node.services.certificate_vault import CertificateVault
+from open_node.services.federation_crypto import FederationSessionCache
 from open_node.services.federation_transport import (
     FederationHTTPTransport,
     normalize_owner_url,
@@ -60,7 +69,22 @@ from open_node.services.inventory import (
     ServerModel,
     ServerNotFoundError,
     ServerTrafficModel,
+    TelemetrySnapshotModel,
 )
+
+log = logging.getLogger(__name__)
+FEDERATION_REFRESH_SECONDS = 5
+FEDERATION_REFRESH_FAILURE_SECONDS = 30
+FEDERATION_REFRESH_BATCH = 64
+
+
+@dataclass(frozen=True, repr=False)
+class FederationRefreshJob:
+    identifier: str
+    owner_url: str
+    token: str = dataclass_field(repr=False)
+    token_secret: str = dataclass_field(repr=False)
+    revision: int
 
 
 def _utc(value):
@@ -142,6 +166,7 @@ class ServerSharingStore:
     def __init__(self, inventory, *, transport=None):
         self.inventory = inventory
         self.transport = transport or FederationHTTPTransport()
+        self.legacy_sessions = FederationSessionCache()
         self.inventory.federation_relay = self
 
     @contextmanager
@@ -373,6 +398,27 @@ class ServerSharingStore:
             if server is None:
                 raise ServerSharingError(404, "server_share_not_found")
             scan = session.get(AgentScanResultModel, server.id)
+            telemetry = session.scalar(
+                select(TelemetrySnapshotModel)
+                .where(TelemetrySnapshotModel.server_id == server.id)
+                .order_by(TelemetrySnapshotModel.received_at.desc())
+                .limit(1)
+            )
+            probe_sys = None
+            if telemetry is not None and telemetry.sysmetrics:
+                metrics = ProbeSysMetrics.model_validate(telemetry.sysmetrics)
+                probe_sys = {
+                    **metrics.model_dump(mode="json"),
+                    "upload_speed": server.current_upload_speed,
+                    "download_speed": server.current_download_speed,
+                    "cumulative_up": telemetry.system_tx_total or 0,
+                    "cumulative_down": telemetry.system_rx_total or 0,
+                    "has_network": (
+                        telemetry.system_tx_total is not None
+                        or telemetry.system_rx_total is not None
+                    ),
+                    "at": int(_utc(telemetry.received_at).timestamp()),
+                }
             identifier = UUID(server.id)
             data = dict(
                 name=server.name, status=server.status, ip_address=server.ip_address,
@@ -384,6 +430,8 @@ class ServerSharingStore:
                 current_download_speed=server.current_download_speed,
                 xray_running=scan.xray_running if scan else None,
                 xray_version=scan.xray_version if scan else None,
+                nginx=scan.nginx if scan else None,
+                probe_sys=probe_sys,
                 last_heartbeat=_utc(server.last_heartbeat), license_required=False,
                 allow_manage_xray=share.allow_manage_xray,
             )
@@ -565,6 +613,7 @@ class ServerSharingStore:
             scan = AgentScanResultModel(
                 server_id=server.id,
                 xray_running=bool(info.xray_running),
+                nginx=info.nginx.model_dump(mode="json") if info.nginx else None,
                 xray_version=info.xray_version,
                 xray_capabilities={},
                 inbounds=[],
@@ -579,9 +628,33 @@ class ServerSharingStore:
         else:
             scan.xray_running = bool(info.xray_running)
             scan.xray_version = info.xray_version
+            if info.nginx is not None:
+                scan.nginx = info.nginx.model_dump(mode="json")
             scan.message = "分享服务器状态来自拥有方联邦快照"
             scan.reported_at = _utc(info.last_heartbeat) or now
             scan.updated_at = now
+
+        if info.probe_sys is not None:
+            metrics = ProbeSysMetrics.model_validate(info.probe_sys.model_dump(mode="json"))
+            latest = session.scalar(
+                select(TelemetrySnapshotModel)
+                .where(TelemetrySnapshotModel.server_id == server.id)
+                .order_by(TelemetrySnapshotModel.received_at.desc())
+                .limit(1)
+            )
+            if latest is None or now - _utc(latest.received_at) >= timedelta(seconds=30):
+                latest = TelemetrySnapshotModel(
+                    id=str(uuid4()), server_id=server.id, reported_at=now, received_at=now,
+                    stats=None, online_users={}, online_collection=None,
+                    user_speeds={}, conn_counts={}, latency=[],
+                )
+                session.add(latest)
+            latest.reported_at = now
+            latest.received_at = now
+            latest.system_rx_total = info.probe_sys.cumulative_down
+            latest.system_tx_total = info.probe_sys.cumulative_up
+            latest.system_boot_time_unix = max(0, int(now.timestamp()) - metrics.uptime)
+            latest.sysmetrics = metrics.model_dump(mode="json")
 
     def ensure_projections(self):
         with self._write() as session:
@@ -675,6 +748,53 @@ class ServerSharingStore:
             self._sync_projection(session, server, row.name, info, now)
             session.flush()
             return self._federated_read(row)
+
+    def automatic_refresh_jobs(self, *, now=None):
+        now = now or datetime.now(UTC)
+        due = now - timedelta(seconds=FEDERATION_REFRESH_SECONDS)
+        jobs = []
+        with self.inventory._session() as session:
+            rows = session.scalars(
+                select(FederatedServerModel)
+                .where(FederatedServerModel.last_synced_at <= due)
+                .order_by(FederatedServerModel.last_synced_at, FederatedServerModel.id)
+                .limit(FEDERATION_REFRESH_BATCH)
+            ).all()
+            for row in rows:
+                try:
+                    token = self._open(session, row)
+                except ServerSharingError:
+                    continue
+                jobs.append(FederationRefreshJob(
+                    identifier=row.id,
+                    owner_url=row.owner_url,
+                    token=token,
+                    token_secret=row.token_secret,
+                    revision=row.revision,
+                ))
+        return jobs
+
+    def apply_automatic_refresh(self, job, info, *, now=None):
+        now = now or datetime.now(UTC)
+        with self._write() as session:
+            row = session.get(FederatedServerModel, job.identifier)
+            if (
+                row is None
+                or row.owner_url != job.owner_url
+                or row.token_secret != job.token_secret
+                or row.revision != job.revision
+            ):
+                return False
+            row.snapshot = info.model_dump(mode="json")
+            row.last_synced_at = now
+            server = session.get(ServerModel, row.id)
+            if server is None:
+                server = self._new_projection(row.id, row.name, info, now)
+                session.add(server)
+                session.flush()
+            self._sync_projection(session, server, row.name, info, now)
+            session.flush()
+            return True
 
     @staticmethod
     def _prefix_payload(prefix, payload):
@@ -891,3 +1011,56 @@ class ServerSharingStore:
             session.flush()
             if server is not None:
                 session.delete(server)
+
+
+class FederationRefreshWorker:
+    def __init__(self, store, *, backup_writes, interval=FEDERATION_REFRESH_SECONDS):
+        self.store = store
+        self.backup_writes = backup_writes
+        self.interval = interval
+        self.failure_until = {}
+
+    async def tick(self):
+        with backup_operation(self.backup_writes):
+            jobs = await run_in_backup_thread(self.store.automatic_refresh_jobs)
+        if not jobs:
+            return False
+
+        attempted = False
+        for job in jobs:
+            if monotonic() < self.failure_until.get(job.identifier, 0):
+                continue
+            attempted = True
+            try:
+                info = await asyncio.to_thread(
+                    self.store.transport.server_info, job.owner_url, job.token
+                )
+            except ServerSharingError:
+                self.failure_until[job.identifier] = (
+                    monotonic() + FEDERATION_REFRESH_FAILURE_SECONDS
+                )
+                continue
+            with backup_operation(self.backup_writes):
+                applied = await run_in_backup_thread(
+                    self.store.apply_automatic_refresh, job, info
+                )
+            if applied:
+                self.failure_until.pop(job.identifier, None)
+        return attempted
+
+    async def run(self):
+        while True:
+            try:
+                worked = await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except BackupBusyError:
+                worked = False
+            except Exception as exc:
+                log.warning(
+                    "Federation refresh cycle failed (%s); saved state is retained",
+                    type(exc).__name__,
+                )
+                await asyncio.sleep(self.interval)
+                continue
+            await asyncio.sleep(1 if worked else self.interval)

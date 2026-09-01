@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from open_node.domain.inventory import AgentNginxScan
+
 MAX_REVISION = 2**53 - 1
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}")
 MESSAGES = {
@@ -86,6 +88,31 @@ class ServerShareRevoke(StrictModel):
     delete_inbounds: bool = True
 
 
+class FederationProbeSys(StrictModel):
+    cpu_pct: float = Field(default=0, ge=0)
+    loadavg: str = Field(default="", max_length=120)
+    mem_used: int = Field(default=0, ge=0)
+    mem_total: int = Field(default=0, ge=0)
+    disk_used: int = Field(default=0, ge=0)
+    disk_total: int = Field(default=0, ge=0)
+    uptime: int = Field(default=0, ge=0)
+    cpu_model: str = Field(default="", max_length=255)
+    cpu_cores: int = Field(default=0, ge=0)
+    cpu_threads: int = Field(default=0, ge=0)
+    os: str = Field(default="", max_length=255)
+    kernel: str = Field(default="", max_length=255)
+    arch: str = Field(default="", max_length=120)
+    upload_speed: int = Field(default=0, ge=0)
+    download_speed: int = Field(default=0, ge=0)
+    cumulative_up: int = Field(default=0, ge=0)
+    cumulative_down: int = Field(default=0, ge=0)
+    has_cpu: bool = False
+    has_mem: bool = False
+    has_disk: bool = False
+    has_network: bool = False
+    at: int = Field(default=0, ge=0)
+
+
 class FederationServerInfo(StrictModel):
     name: str = Field(min_length=1, max_length=120)
     status: Literal["pending", "connected", "offline"]
@@ -102,6 +129,8 @@ class FederationServerInfo(StrictModel):
     current_download_speed: int = Field(ge=0)
     xray_running: bool | None = None
     xray_version: str | None = Field(default=None, max_length=120)
+    nginx: AgentNginxScan | None = None
+    probe_sys: FederationProbeSys | None = None
     last_heartbeat: datetime | None = None
     allow_manage_xray: bool = False
     license_required: Literal[False] = False

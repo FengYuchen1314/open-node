@@ -1,5 +1,7 @@
+import base64
+import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -7,11 +9,18 @@ from uuid import uuid4
 from conftest import authenticated_client
 from fastapi.testclient import TestClient
 from open_node.core.config import Settings
-from open_node.domain.inventory import AgentCommandCreate
+from open_node.domain.inventory import AgentCommandCreate, AgentCommandResultRequest
 from open_node.domain.server_sharing import FederationCommandRead, FederationServerInfo
 from open_node.main import create_app
 from open_node.services.external_fetch import ExternalFetchError
+from open_node.services.federation_crypto import (
+    FEDERATION_ENCRYPTED_HEADER,
+    FEDERATION_KEY_EXCHANGE_HEADER,
+    derive_federation_session,
+    generate_ephemeral,
+)
 from open_node.services.federation_transport import FederationHTTPTransport
+from open_node.services.secure_channel import decode_public_key
 from open_node.services.subscription_access import revision
 
 
@@ -244,6 +253,81 @@ def test_failed_add_is_removed_from_limited_share_ownership(tmp_path: Path):
     assert "private" not in polled.text
 
 
+def test_official_consumer_can_manage_through_encrypted_legacy_owner_route(tmp_path: Path):
+    app, _database = make_app(tmp_path)
+    client = authenticated_client(app)
+    server = create_server(client)
+    shared = client.post(
+        "/api/v1/server-shares",
+        json={"server_id": server["server"]["id"]},
+    ).raise_for_status().json()
+    token = shared["share_token"]
+
+    async def complete_immediately(store, command):
+        leased = store.lease_command_for_push(command.id)
+        assert leased is not None
+        return store.complete_command(
+            leased.id,
+            AgentCommandResultRequest(
+                token=server["agent_token"],
+                status=200,
+                body={"success": True, "owner": "open-node"},
+            ),
+        )
+
+    app.state.agent_connections.dispatch_command = complete_immediately
+
+    def wire(tag):
+        body = json.dumps(
+            {"action": "add", "inbound": {"tag": tag}}, separators=(",", ":")
+        ).encode()
+        return json.dumps(
+            {
+                "method": "POST",
+                "path": "/api/child/inbounds",
+                "body": base64.b64encode(body).decode(),
+            },
+            separators=(",", ":"),
+        ).encode()
+
+    consumer_private, consumer_public = generate_ephemeral()
+    negotiated = client.post(
+        "/api/federation/manage",
+        content=wire("official-one"),
+        headers={
+            "Content-Type": "application/json",
+            "X-Share-Token": token,
+            FEDERATION_KEY_EXCHANGE_HEADER: base64.b64encode(consumer_public).decode(),
+        },
+    )
+    assert negotiated.status_code == 200, negotiated.text
+    assert negotiated.json() == {"success": True, "owner": "open-node"}
+    owner_public = decode_public_key(negotiated.headers[FEDERATION_KEY_EXCHANGE_HEADER])
+    session = derive_federation_session(
+        consumer_private,
+        owner_public,
+        consumer_public,
+        token,
+        is_initiator=True,
+    )
+
+    encrypted = client.post(
+        "/api/federation/manage",
+        content=session.encrypt(wire("official-two")),
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-Share-Token": token,
+            FEDERATION_ENCRYPTED_HEADER: "1",
+        },
+    )
+    assert encrypted.status_code == 200
+    assert encrypted.headers[FEDERATION_ENCRYPTED_HEADER] == "1"
+    assert json.loads(session.decrypt(encrypted.content)) == {
+        "success": True,
+        "owner": "open-node",
+    }
+
+
 class FakeFederationTransport:
     def __init__(self):
         self.info = FederationServerInfo(
@@ -251,7 +335,25 @@ class FakeFederationTransport:
             ip_address_v6=None, domain="owner-edge.example", domain_v6=None,
             ipv6_enabled=False, xray_mode="external", traffic_limit=1024,
             traffic_used=16, current_upload_speed=2, current_download_speed=3,
-            xray_running=True, xray_version="25.8.3", last_heartbeat=datetime.now(UTC),
+            xray_running=True, xray_version="25.8.3",
+            nginx={
+                "running": True, "installed": True, "available": True,
+                "tunnel_deploy": 1, "mode": "managed",
+                "config_path": "/etc/nginx/nginx.conf",
+                "certificate_dir": "/etc/nginx/certs", "html_path": "/var/www/html",
+            },
+            probe_sys={
+                "cpu_pct": 12.5, "loadavg": "0.1 0.2 0.3",
+                "mem_used": 128, "mem_total": 512,
+                "disk_used": 1024, "disk_total": 4096,
+                "uptime": 3600, "cpu_model": "Shared CPU", "cpu_cores": 2,
+                "cpu_threads": 4, "os": "Debian", "kernel": "6.1", "arch": "amd64",
+                "upload_speed": 2, "download_speed": 3,
+                "cumulative_up": 100, "cumulative_down": 200,
+                "has_cpu": True, "has_mem": True, "has_disk": True,
+                "has_network": True, "at": int(datetime.now(UTC).timestamp()),
+            },
+            last_heartbeat=datetime.now(UTC),
         )
         self.managed = None
 
@@ -334,9 +436,30 @@ def test_imported_server_encrypts_token_prefixes_tags_and_uses_revision(tmp_path
     ).raise_for_status().json()["scan"]
     assert scan["xray_running"] is True
     assert scan["xray_version"] == "25.8.3"
+    assert scan["nginx"]["running"] is True
+    telemetry = client.get(
+        f"/api/v1/servers/{imported_id}/telemetry/latest"
+    ).raise_for_status().json()["latest"]
+    assert telemetry["sysmetrics"]["cpu_pct"] == 12.5
+    assert telemetry["system"]["tx_total"] == 100
+    assert telemetry["system"]["rx_total"] == 200
     ddns = client.get("/api/v1/ddns").raise_for_status().json()["servers"]
     shared_ddns = next(server for server in ddns if server["server_id"] == imported_id)
     assert shared_ddns["is_federated"] is True
+
+    transport.info = transport.info.model_copy(update={
+        "traffic_used": 24, "current_upload_speed": 4, "current_download_speed": 6,
+    })
+    auto_now = datetime.now(UTC) + timedelta(seconds=6)
+    jobs = app.state.server_sharing.automatic_refresh_jobs(now=auto_now)
+    assert len(jobs) == 1
+    assert app.state.server_sharing.apply_automatic_refresh(
+        jobs[0], transport.info, now=auto_now
+    ) is True
+    automatically_refreshed = client.get("/api/v1/server-federation").json()["servers"][0]
+    assert automatically_refreshed["revision"] == 0
+    assert automatically_refreshed["info"]["traffic_used"] == 24
+    assert client.get(f"/api/v1/servers/{imported_id}/traffic").json()["used"] == 24
     assert client.get(f"/api/v1/servers/{imported_id}/removal").status_code == 409
     assert client.put(
         f"/api/v1/servers/{imported_id}/traffic",

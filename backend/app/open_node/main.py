@@ -16,6 +16,7 @@ from open_node.api.router import api_router
 from open_node.api.routes.agents import agent_websocket
 from open_node.api.routes.backups import BACKUP_ERROR_MESSAGES
 from open_node.api.routes.public import router as public_router
+from open_node.api.routes.server_sharing import legacy_router as federation_legacy_router
 from open_node.api.routes.subscription_profiles import legacy_router
 from open_node.api.routes.system import healthz
 from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
@@ -63,7 +64,7 @@ from open_node.services.restore_state import (
     RestoreStateError,
 )
 from open_node.services.secure_channel import AgentIdentity, decode_public_key
-from open_node.services.server_sharing import ServerSharingStore
+from open_node.services.server_sharing import FederationRefreshWorker, ServerSharingStore
 from open_node.services.server_traffic import ServerTrafficWorker
 from open_node.services.subscriber_auth import SubscriberAuthStore
 from open_node.services.subscriber_permissions import SubscriberPermissionsStore
@@ -135,6 +136,9 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 app.state.external_subscriptions, backup_writes=backup_writes,
             )
             ddns = DDNSWorker(app.state.ddns, backup_writes=backup_writes)
+            federation_refresh = FederationRefreshWorker(
+                app.state.server_sharing, backup_writes=backup_writes
+            )
         # Each actual cycle establishes its own lease. Idle workers must not
         # inherit an initialization operation or prevent a snapshot forever.
         task = asyncio.create_task(worker.run())
@@ -143,6 +147,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         notification_task = asyncio.create_task(notification.run())
         external_refresh_task = asyncio.create_task(external_refresh.run())
         ddns_task = asyncio.create_task(ddns.run())
+        federation_refresh_task = asyncio.create_task(federation_refresh.run())
         try:
             if app.state.backup_jobs is not None:
                 await asyncio.to_thread(app.state.backup_jobs.start)
@@ -154,6 +159,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             notification_task.cancel()
             external_refresh_task.cancel()
             ddns_task.cancel()
+            federation_refresh_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             with contextlib.suppress(asyncio.CancelledError):
@@ -166,6 +172,8 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 await external_refresh_task
             with contextlib.suppress(asyncio.CancelledError):
                 await ddns_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await federation_refresh_task
             if app.state.backup_jobs is not None:
                 # A timeout stops admission, not the actual producer thread.
                 # It retains its barrier and closes private resources on exit.
@@ -564,6 +572,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.include_router(api_router, prefix=active_settings.api_prefix)
     app.add_api_websocket_route("/api/remote/ws", agent_websocket)
     app.include_router(public_router, prefix="/api")
+    app.include_router(federation_legacy_router)
     app.include_router(legacy_router)
     app.include_router(temporary_public_router)
     app.add_api_route("/healthz", healthz, methods=["GET"], include_in_schema=False)
