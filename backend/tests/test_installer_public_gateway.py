@@ -83,6 +83,21 @@ def candidate_environment(tmp_path, *, source=ROOT, base=None, overrides=None):
     script = r'''
 source "$1"
 trap - EXIT INT TERM HUP
+# The real installer runs as root.  This isolated unit test may run under an
+# unprivileged CI account, so keep every file/mode/symlink check while trusting
+# the current test owner in place of uid 0.  The root-only policy has separate
+# static and root-run VPS coverage.
+validate_safe_file() {
+  local label="$1" path="$2" private="${3:-0}" owner mode
+  [[ -f "$path" && ! -L "$path" ]] || die "$label must be a regular non-symlink file: $path"
+  owner="$(stat -c '%u' -- "$path")" || die "could not inspect $label"
+  mode="$(stat -c '%a' -- "$path")" || die "could not inspect $label"
+  [[ "$owner" == "$(id -u)" ]] || die "$label must be owned by the isolated test account: $path"
+  (( (8#$mode & 022) == 0 )) || die "$label must not be group/world writable: $path"
+  if [[ "$private" == "1" ]]; then
+    (( (8#$mode & 077) == 0 )) || die "$label must not grant group/other access: $path"
+  fi
+}
 IMAGE_REPOSITORY=open-node-test
 create_candidate_environment "$2" "$3" "${4:-}"
 '''

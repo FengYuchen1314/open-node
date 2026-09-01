@@ -33,6 +33,12 @@ VPS `/tmp/open-node-public-gateway.S1vVKz/evidence` 中 Ruff 与 34 项专项测
 生产 `/opt/open-node` 没有升级。下一步转向恢复/更新入口、权限与共享、DDNS 和规则
 生态。
 
+公网提交 `1691e62` 的 CI 中 Frontend、Agent、Probe Worker 成功；Backend 为 4,954
+通过、116 跳过、7 失败。失败均由 GitHub 非 root runner 无法生成 root-owned checkout
+和 `tmp_path` 引起，安装器在业务断言前正确拒绝夹具。产品的 root 所有权检查未改；
+单元夹具只在隔离脚本内以当前测试账户代替 uid 0，同时保留文件类型、符号链接和权限
+检查。修正后的 25 项在 VPS 上以 root 和 `nobody` 两种身份均通过。
+
 外观提交 `8dd3d07` 的 CI 中 Frontend、Agent、Probe Worker 成功；Backend 完成全套后为
 4,932 通过、116 跳过、2 失败。两项来自同一个旧的订阅角色隔离枚举，误把新增的匿名
 初始化/外观读取路径当成管理员接口；专用测试已覆盖它们的无秘密公开响应，并单独验证
