@@ -96,12 +96,14 @@ class FederationServerInfo(StrictModel):
     ipv6_enabled: bool
     xray_mode: Literal["external", "embedded"]
     traffic_limit: int = Field(ge=0)
+    traffic_reset_day: int = Field(default=0, ge=0, le=31)
     traffic_used: int = Field(ge=0)
     current_upload_speed: int = Field(ge=0)
     current_download_speed: int = Field(ge=0)
     xray_running: bool | None = None
     xray_version: str | None = Field(default=None, max_length=120)
     last_heartbeat: datetime | None = None
+    allow_manage_xray: bool = False
     license_required: Literal[False] = False
 
     @field_validator("last_heartbeat", mode="before")

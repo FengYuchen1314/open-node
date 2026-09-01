@@ -35,11 +35,12 @@ export default function ServerTrafficPanel({ servers }: ServerTrafficPanelProps)
   const limitBytes = Math.round((form.limit ?? Number.NaN) * 1024 ** 3);
   const valid = form.limit !== null && Number.isFinite(form.limit) && form.limit >= 0
     && Number.isSafeInteger(limitBytes) && (form.limit === 0 || limitBytes > 0);
+  const federated = servers.find(server => server.id === selected)?.is_federated === true;
   const quota = state?.traffic_limit ? Math.min(100, state.used / state.traffic_limit * 100) : 0;
   const requestRef = useRef<(action: Action, replaceForm?: boolean) => Promise<void>>(async () => {});
   async function request(action: Action, replaceForm = false) {
     if (model.current.disposed || !selected || model.current.selected !== selected
-      || (action !== "read" && model.current.busy) || (action === "save" && !valid)) return;
+      || (action !== "read" && (model.current.busy || federated)) || (action === "save" && !valid)) return;
     const id = selected;
     const run = ++model.current.version;
     clearTimeout(model.current.timer);
@@ -101,9 +102,10 @@ export default function ServerTrafficPanel({ servers }: ServerTrafficPanelProps)
       <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
         <Form.Item label="流量服务器" style={{ marginBottom: 0 }}>
           <Select aria-label="流量服务器" value={selected || undefined} disabled={busy || !servers.length}
-            options={servers.map(server => ({ label: server.name, value: server.id }))} onChange={setSelected} />
+            options={servers.map(server => ({ label: `${server.name}${server.is_federated ? "（分享）" : ""}`, value: server.id }))} onChange={setSelected} />
         </Form.Item>
         {error && <Alert type="error" showIcon title={zhMessage(error)} />}
+        {federated && <Alert type="info" showIcon title="分享服务器流量由拥有方统计" description="这里展示最近一次同步的配额和用量；修改与重置只能由拥有方执行。" />}
         {state && <>
           <Space wrap aria-live="polite">
             <Typography.Text strong data-testid="server-traffic-used">{bytes(state.used)}</Typography.Text>
@@ -120,20 +122,20 @@ export default function ServerTrafficPanel({ servers }: ServerTrafficPanelProps)
           <Form layout="vertical" onFinish={() => void request("save", true)}>
             <Row gutter={16}>
               <Col xs={24} sm={12}><Form.Item label="流量来源"><Select aria-label="流量来源"
-                value={form.source} options={sources} disabled={busy} onChange={source => setForm(previous => ({ ...previous, source }))} /></Form.Item></Col>
+                value={form.source} options={sources} disabled={busy || federated} onChange={source => setForm(previous => ({ ...previous, source }))} /></Form.Item></Col>
               <Col xs={24} sm={12}><Form.Item label="统计方向"><Select aria-label="统计方向"
-                value={form.mode} options={modes} disabled={busy} onChange={mode => setForm(previous => ({ ...previous, mode }))} /></Form.Item></Col>
+                value={form.mode} options={modes} disabled={busy || federated} onChange={mode => setForm(previous => ({ ...previous, mode }))} /></Form.Item></Col>
               <Col xs={24} sm={12}><Form.Item label="流量限额（GiB，0 表示不限额）" validateStatus={valid ? undefined : "error"}
                 help={valid ? undefined : "输入 0 表示不限额；正数限额至少为 1 字节，且须在安全整数范围内。"}>
                 <StrictInputNumber aria-label="流量限额（GiB，0 表示不限额）" value={form.limit} aria-valuemin={0}
-                  aria-valuemax={Number.MAX_SAFE_INTEGER / 1024 ** 3} aria-invalid={!valid} disabled={busy}
+                  aria-valuemax={Number.MAX_SAFE_INTEGER / 1024 ** 3} aria-invalid={!valid} disabled={busy || federated}
                   style={{ width: "100%" }}
                   onChange={limit => setForm(previous => ({ ...previous, limit }))} /></Form.Item></Col>
               <Col xs={24} sm={12}><Form.Item label="每月重置日（UTC）"><Select aria-label="每月重置日（UTC）"
-                value={form.day} options={days} disabled={busy} onChange={day => setForm(previous => ({ ...previous, day }))} /></Form.Item></Col>
+                value={form.day} options={days} disabled={busy || federated} onChange={day => setForm(previous => ({ ...previous, day }))} /></Form.Item></Col>
             </Row>
-            <Space wrap><Button type="primary" htmlType="submit" aria-label="保存" icon={<SaveOutlined aria-hidden />} disabled={busy || !valid}>保存</Button>
-              <Button aria-label="重置周期" disabled={busy} onClick={() => setConfirmation(true)}>重置周期</Button></Space>
+            <Space wrap><Button type="primary" htmlType="submit" aria-label="保存" icon={<SaveOutlined aria-hidden />} disabled={busy || federated || !valid}>保存</Button>
+              <Button aria-label="重置周期" disabled={busy || federated} onClick={() => setConfirmation(true)}>重置周期</Button></Space>
           </Form>
         </>}
       </Space>

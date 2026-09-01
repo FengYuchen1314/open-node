@@ -420,6 +420,11 @@ class ServerRead(BaseModel):
     current_upload_speed: int = 0
     current_download_speed: int = 0
     last_heartbeat: datetime | None = None
+    is_federated: bool = False
+    federation_owner_url: str | None = None
+    federation_prefix: str | None = None
+    federation_allow_manage_xray: bool = False
+    federation_revision: int | None = None
     created_at: datetime
     updated_at: datetime
 

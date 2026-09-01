@@ -10,6 +10,7 @@ from open_node.domain.probe import ProbeDailyTraffic
 from open_node.services.backup_coordination import BackupBusyError, BackupWriteBarrier
 from open_node.services.backup_runtime import backup_operation, run_in_backup_thread
 from open_node.services.inventory import (
+    AgentCapabilityUnavailableError,
     ServerModel,
     ServerNotFoundError,
     ServerTrafficDailyModel,
@@ -43,6 +44,15 @@ class ServerTrafficCoordinator:
         if server is None:
             raise ServerNotFoundError(f"server not found: {server_id}")
         return server
+
+    @staticmethod
+    def _require_local(session, server):
+        from open_node.services.server_sharing import FederatedServerModel
+
+        if session.get(FederatedServerModel, server.id) is not None:
+            raise AgentCapabilityUnavailableError(
+                "Shared server traffic settings are controlled by the owner"
+            )
 
     @staticmethod
     def _state(session, server_id, source):
@@ -187,6 +197,7 @@ class ServerTrafficCoordinator:
     def update(self, server_id, payload):
         with self.store._coordinated_session() as session:
             server = self._server(session, server_id)
+            self._require_local(session, server)
             for key, value in payload.model_dump(mode="json").items():
                 setattr(server, key, value)
             server.updated_at = datetime.now(UTC)
@@ -204,6 +215,7 @@ class ServerTrafficCoordinator:
     def reset(self, server_id, now=None):
         with self.store._coordinated_session() as session:
             server = self._server(session, server_id)
+            self._require_local(session, server)
             self._reset(session, server, aware(now or datetime.now(UTC)))
             session.commit()
             return self.read_in_session(session, server, now)
@@ -212,10 +224,15 @@ class ServerTrafficCoordinator:
         now = aware(now or datetime.now(UTC))
         count = 0
         with self.store._coordinated_session() as session:
+            from open_node.services.server_sharing import FederatedServerModel
+
+            federated = set(session.scalars(select(FederatedServerModel.id)))
             servers = session.scalars(
                 select(ServerModel).where(ServerModel.traffic_reset_day > 0)
             ).all()
             for server in servers:
+                if server.id in federated:
+                    continue
                 due = boundary(now, server.traffic_reset_day)
                 last = aware(server.last_traffic_reset_at or server.created_at)
                 if now >= due and last < due.replace(minute=0):

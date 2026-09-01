@@ -29,6 +29,15 @@ describe("React server traffic settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" })); await flush();
     expect(updateServerTraffic).toHaveBeenCalledWith("edge", { traffic_limit: 2.5 * 1024 ** 3, traffic_reset_day: 15, traffic_source: "xray", traffic_stats_mode: "both" });
   });
+  it("keeps shared traffic readable but owner-controlled", async () => {
+    render(<ServerTrafficPanel servers={[{ ...server, is_federated: true }]} />); await flush();
+    expect(screen.getByText("分享服务器流量由拥有方统计")).toBeTruthy();
+    expect(screen.getByTestId("server-traffic-used").textContent).toBe("1.00 KiB");
+    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "重置周期" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.submit(screen.getByRole("button", { name: "保存" }).closest("form")!); await flush();
+    expect(updateServerTraffic).not.toHaveBeenCalled(); expect(resetServerTraffic).not.toHaveBeenCalled();
+  });
   it("rejects blank and unsafe quotas without issuing a mutation", async () => {
     render(<ServerTrafficPanel servers={[server]} />); await flush();
     const quota = screen.getByLabelText("流量限额（GiB，0 表示不限额）");

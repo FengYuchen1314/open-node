@@ -10,7 +10,7 @@ import DDNSView from "./DDNSView";
 vi.mock("../../services/ddns");
 const item: DDNSServer = {
   server_id: "11111111-1111-4111-8111-111111111111", server_name: "动态节点",
-  server_status: "connected", enabled: false,
+  server_status: "connected", is_federated: false, enabled: false,
   provider_id: null, provider_name: null, provider_type: null,
   pull_address: null, pull_address_v6: null, ip_address: "203.0.113.2",
   ip_address_v6: "2001:db8::2", ipv6_enabled: true, last_synced_at: null,

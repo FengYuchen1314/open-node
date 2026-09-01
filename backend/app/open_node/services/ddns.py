@@ -66,10 +66,11 @@ class DDNSStore:
             raise DDNSError(422, "ddns_provider_unsupported")
         return row
 
-    def _read(self, row, providers):
+    def _read(self, row, providers, *, is_federated=False):
         provider = providers.get(row.ddns_provider_id)
         return DDNSServerRead(
             server_id=row.id, server_name=row.name, server_status=row.status,
+            is_federated=is_federated,
             enabled=row.ddns_enabled, provider_id=row.ddns_provider_id,
             provider_name=provider.name if provider else None,
             provider_type=provider.provider if provider else None,
@@ -82,11 +83,17 @@ class DDNSStore:
 
     def workspace(self):
         with self.inventory._session_factory() as db:
+            from open_node.services.server_sharing import FederatedServerModel
+
             providers = list(db.scalars(select(DNSProvider).order_by(DNSProvider.name)))
             provider_map = {row.id: row for row in providers}
             servers = list(db.scalars(select(ServerModel).order_by(ServerModel.name)))
+            federated = set(db.scalars(select(FederatedServerModel.id)))
             return DDNSWorkspaceRead(
-                servers=[self._read(row, provider_map) for row in servers],
+                servers=[
+                    self._read(row, provider_map, is_federated=row.id in federated)
+                    for row in servers
+                ],
                 providers=[DDNSProviderRead(
                     id=row.id, name=row.name, provider=row.provider,
                     supported=row.provider in SUPPORTED_DDNS_PROVIDERS,
@@ -126,7 +133,12 @@ class DDNSStore:
                 provider = self._provider(db, row.ddns_provider_id)
                 provider_map[provider.id] = provider
             db.flush()
-            return self._read(row, provider_map)
+            from open_node.services.server_sharing import FederatedServerModel
+
+            return self._read(
+                row, provider_map,
+                is_federated=db.get(FederatedServerModel, row.id) is not None,
+            )
 
     def queue(self, identifier: UUID):
         now = self.clock()
@@ -149,7 +161,15 @@ class DDNSStore:
                 provider = self._provider(db, row.ddns_provider_id)
                 providers[provider.id] = provider
             db.flush()
-            return DDNSSyncRead(server=self._read(row, providers), queued=True)
+            from open_node.services.server_sharing import FederatedServerModel
+
+            return DDNSSyncRead(
+                server=self._read(
+                    row, providers,
+                    is_federated=db.get(FederatedServerModel, row.id) is not None,
+                ),
+                queued=True,
+            )
 
     def claim(self):
         now = self.clock()

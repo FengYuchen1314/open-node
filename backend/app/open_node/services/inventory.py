@@ -2013,8 +2013,15 @@ class InventoryStore:
 
     def list_servers(self) -> list[ServerRead]:
         with self._session() as session:
+            from open_node.services.server_sharing import FederatedServerModel
+
             servers = session.scalars(select(ServerModel).order_by(ServerModel.created_at)).all()
-            return [self._public_server(server) for server in servers]
+            federated = {
+                row.id: row for row in session.scalars(select(FederatedServerModel)).all()
+            }
+            return [
+                self._public_server(server, federated.get(server.id)) for server in servers
+            ]
 
     def create_server(self, payload: ServerCreate) -> ServerRecord:
         now = datetime.now(tz=UTC)
@@ -2079,6 +2086,12 @@ class InventoryStore:
             server = session.get(ServerModel, str(server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {server_id}")
+            from open_node.services.server_sharing import FederatedServerModel
+
+            if session.get(FederatedServerModel, server.id) is not None:
+                raise AgentCapabilityUnavailableError(
+                    "Shared server metadata is controlled by the owner"
+                )
             for field, value in payload.model_dump(exclude_unset=True).items():
                 if field == "renewal_cycle" and value is not None:
                     value = RenewalCycle(value).value
@@ -7997,7 +8010,7 @@ class InventoryStore:
         return NodeManagement(self)
 
     @staticmethod
-    def _server_record(server: ServerModel) -> ServerRecord:
+    def _server_record(server: ServerModel, federated=None) -> ServerRecord:
         return ServerRecord(
             id=UUID(server.id),
             name=server.name,
@@ -8035,14 +8048,24 @@ class InventoryStore:
             current_upload_speed=server.current_upload_speed,
             current_download_speed=server.current_download_speed,
             last_heartbeat=server.last_heartbeat,
+            is_federated=federated is not None,
+            federation_owner_url=federated.owner_url if federated is not None else None,
+            federation_prefix=federated.prefix if federated is not None else None,
+            federation_allow_manage_xray=(
+                bool((federated.snapshot or {}).get("allow_manage_xray"))
+                if federated is not None else False
+            ),
+            federation_revision=federated.revision if federated is not None else None,
             created_at=server.created_at,
             updated_at=server.updated_at,
             agent_token=server.agent_token,
         )
 
     @staticmethod
-    def _public_server(server: ServerModel) -> ServerRead:
-        payload = InventoryStore._server_record(server).model_dump(exclude={"agent_token"})
+    def _public_server(server: ServerModel, federated=None) -> ServerRead:
+        payload = InventoryStore._server_record(
+            server, federated
+        ).model_dump(exclude={"agent_token"})
         return ServerRead(**payload)
 
     @staticmethod
@@ -8219,6 +8242,12 @@ class InventoryStore:
         server: ServerModel,
         payload: AgentCommandCreate,
     ) -> None:
+        from open_node.services.server_sharing import FederatedServerModel
+
+        if session.get(FederatedServerModel, server.id) is not None:
+            raise AgentCapabilityUnavailableError(
+                "Shared servers are controlled through the owner's federation interface"
+            )
         # Limiter and cleanup commands historically enter the durable queue and
         # are terminalized at lease time when an Agent cannot execute them. Keep
         # that observable workflow while preflighting newly introduced surfaces

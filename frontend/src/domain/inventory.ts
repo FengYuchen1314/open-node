@@ -205,6 +205,11 @@ export interface ServerSummary {
   current_upload_speed: number;
   current_download_speed: number;
   last_heartbeat?: string | null;
+  is_federated?: boolean;
+  federation_owner_url?: string | null;
+  federation_prefix?: string | null;
+  federation_allow_manage_xray?: boolean;
+  federation_revision?: number | null;
   created_at: string;
   updated_at: string;
 }

@@ -6,7 +6,7 @@ import { loadDDNS, saveDDNS, syncDDNS } from "./ddns";
 const now = "2026-09-01T00:00:00Z";
 const item: DDNSServer = {
   server_id: "11111111-1111-4111-8111-111111111111", server_name: "动态节点",
-  server_status: "connected", enabled: true,
+  server_status: "connected", is_federated: false, enabled: true,
   provider_id: "22222222-2222-4222-8222-222222222222", provider_name: "主 DNS",
   provider_type: "cloudflare", pull_address: "edge.example.com", pull_address_v6: null,
   ip_address: "203.0.113.2", ip_address_v6: "2001:db8::2", ipv6_enabled: true,

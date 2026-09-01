@@ -52,11 +52,11 @@ function provider(value: unknown): DDNSProvider {
   return { id: uuid(row.id), name: text(row.name, 120, true), provider: text(row.provider, 32, true), supported: row.supported };
 }
 function server(value: unknown): DDNSServer {
-  const row = exact(value, ["server_id", "server_name", "server_status", "enabled", "provider_id", "provider_name", "provider_type", "pull_address", "pull_address_v6", "ip_address", "ip_address_v6", "ipv6_enabled", "last_synced_at", "last_error", "pending", "revision", "license_required"]);
-  if (typeof row.enabled !== "boolean" || typeof row.ipv6_enabled !== "boolean" || typeof row.pending !== "boolean") invalid();
+  const row = exact(value, ["server_id", "server_name", "server_status", "is_federated", "enabled", "provider_id", "provider_name", "provider_type", "pull_address", "pull_address_v6", "ip_address", "ip_address_v6", "ipv6_enabled", "last_synced_at", "last_error", "pending", "revision", "license_required"]);
+  if (typeof row.is_federated !== "boolean" || typeof row.enabled !== "boolean" || typeof row.ipv6_enabled !== "boolean" || typeof row.pending !== "boolean") invalid();
   return {
     server_id: uuid(row.server_id), server_name: text(row.server_name, 120, true), server_status: text(row.server_status, 24, true),
-    enabled: row.enabled, provider_id: row.provider_id === null ? null : uuid(row.provider_id),
+    is_federated: row.is_federated, enabled: row.enabled, provider_id: row.provider_id === null ? null : uuid(row.provider_id),
     provider_name: nullableText(row.provider_name, 120), provider_type: nullableText(row.provider_type, 32),
     pull_address: nullableText(row.pull_address, 255), pull_address_v6: nullableText(row.pull_address_v6, 255),
     ip_address: nullableText(row.ip_address, 255), ip_address_v6: nullableText(row.ip_address_v6, 255), ipv6_enabled: row.ipv6_enabled,

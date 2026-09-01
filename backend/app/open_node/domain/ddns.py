@@ -82,6 +82,7 @@ class DDNSServerRead(BaseModel):
     server_id: UUID
     server_name: str
     server_status: str
+    is_federated: bool = False
     enabled: bool
     provider_id: UUID | None = None
     provider_name: str | None = None

@@ -57,6 +57,15 @@ class ServerManagement:
             raise ServerNotFoundError(f"server not found: {identifier}")
         return server
 
+    @staticmethod
+    def _require_local(session, server):
+        from open_node.services.server_sharing import FederatedServerModel
+
+        if session.get(FederatedServerModel, server.id) is not None:
+            raise ServerManagementConflict(
+                "Shared servers must be changed or removed from server sharing"
+            )
+
     def _settings(self, server, updated=()):
         return ServerSettingsResponse(
             server=self.store._public_server(server),
@@ -71,6 +80,7 @@ class ServerManagement:
     def update(self, identifier, payload):
         with self.store._coordinated_session() as session:
             server = self._server(session, identifier)
+            self._require_local(session, server)
             if self._settings(server).revision != payload.expected_revision:
                 raise ServerManagementConflict("Server settings changed; refresh before saving")
             if session.scalar(
@@ -274,11 +284,14 @@ class ServerManagement:
 
     def preview(self, identifier):
         with self.store._session() as session:
-            return self._impact(session, self._server(session, identifier))[0]
+            server = self._server(session, identifier)
+            self._require_local(session, server)
+            return self._impact(session, server)[0]
 
     def remove(self, identifier, payload):
         with self.store._coordinated_session() as session:
             server = self._server(session, identifier)
+            self._require_local(session, server)
             preview, nodes, plans, changes, commands, users, validations, targets = self._impact(
                 session, server
             )

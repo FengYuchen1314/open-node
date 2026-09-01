@@ -120,16 +120,21 @@ export default function DashboardView(_props: DashboardViewProps) {
     saving: false, savingMetadata: false, savingCommand: false, savingOperation: false, target: "", metadataTarget: "", servers: [] as ServerSummary[] });
   const poll = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refreshRef = useRef<() => Promise<void>>(async () => {});
+  const selectedServer = servers.find(server => server.id === command.server_id);
+  const selectedFederated = selectedServer?.is_federated === true;
   const selectedAgent = agents[command.server_id];
   const workspace = selectedAgent?.capabilities.xray_config_workspace === true;
   const capabilities = selectedAgent?.capabilities;
   const workspaceMessage = !command.server_id ? "请选择服务器以管理其 Xray 配置文件。"
+    : selectedFederated ? "分享服务器由拥有方控制 Agent；请在服务器分享页面管理获授权的入站。"
     : !selectedAgent ? "请先安装并连接升级后的 Agent，再管理 Xray 配置文件。"
       : "此 Agent 版本未上报 xray_config_workspace 能力，请先升级 Agent。";
-  const settingsMessage = !command.server_id ? "请选择服务器以管理其 Agent 设置。" : !selectedAgent
+  const settingsMessage = !command.server_id ? "请选择服务器以管理其 Agent 设置。" : selectedFederated
+    ? "分享服务器的 Agent 仅由拥有方控制，本控制台保留状态、流量和获授权入站的只读/受限能力。" : !selectedAgent
     ? "请先连接 Agent，再管理 Agent 设置。" : "根据 Agent 上报的能力，已禁用不支持的控件。";
-  const options = servers.map(server => ({ value: server.id, label: server.name }));
-  const blocked = !command.server_id || Boolean(savingOperation);
+  const options = servers.map(server => ({ value: server.id, label: `${server.name}${server.is_federated ? "（分享）" : ""}` }));
+  const metadataOptions = servers.filter(server => !server.is_federated).map(server => ({ value: server.id, label: server.name }));
+  const blocked = !command.server_id || selectedFederated || Boolean(savingOperation);
   const current = (epoch: number) => control.current.active && control.current.epoch === epoch;
   function report(failure: unknown) { setError(failure instanceof Error ? failure.message : "请求失败。"); }
 
@@ -154,7 +159,8 @@ export default function DashboardView(_props: DashboardViewProps) {
       setAgents(Object.fromEntries(nextAgents.map(agent => [agent.server_id, agent])));
       const target = next.some(server => server.id === control.current.target) ? control.current.target : next[0]?.id ?? "";
       control.current.target = target; setCommand(previous => ({ ...previous, server_id: target }));
-      const metadataId = next.some(server => server.id === control.current.metadataTarget) ? control.current.metadataTarget : next[0]?.id ?? "";
+      const local = next.filter(server => !server.is_federated);
+      const metadataId = local.some(server => server.id === control.current.metadataTarget) ? control.current.metadataTarget : local[0]?.id ?? "";
       control.current.metadataTarget = metadataId; setMetadataTarget(metadataId); setMetadata(metadataFor(next.find(server => server.id === metadataId)));
       const [nextTelemetry, nextScans] = await Promise.all([
         Promise.all(next.map(async server => [server.id, (await getLatestTelemetry(server.id).catch(() => null))?.latest ?? null] as const)),
@@ -211,7 +217,7 @@ export default function DashboardView(_props: DashboardViewProps) {
     finally { if (current(epoch)) { control.current.saving = false; setSaving(false); } }
   }
   async function submitMetadata() {
-    if (!metadataTarget || control.current.savingMetadata) return;
+    if (!metadataTarget || control.current.savingMetadata || servers.find(server => server.id === metadataTarget)?.is_federated) return;
     if (!validPrice(metadata.renewal_price) || !validPrice(metadata.renewal_price_cny)) { setError("续费价格可留空；填写时必须是有限的非负数。"); return; }
     const target = metadataTarget; const epoch = control.current.epoch;
     control.current.savingMetadata = true; setSavingMetadata(true); setError(""); setSuccess("");
@@ -228,7 +234,8 @@ export default function DashboardView(_props: DashboardViewProps) {
     finally { if (current(epoch)) { control.current.savingMetadata = false; setSavingMetadata(false); } }
   }
   async function queue(kind: AgentOperationKind, payload?: AgentOperationPayload, target = command.server_id) {
-    if (!target || control.current.savingOperation || !control.current.active) return false;
+    if (!target || control.current.savingOperation || !control.current.active
+      || control.current.servers.find(server => server.id === target)?.is_federated) return false;
     const epoch = control.current.epoch;
     control.current.savingOperation = true; setSavingOperation(kind); setError(""); setSuccess("");
     try {
@@ -240,7 +247,7 @@ export default function DashboardView(_props: DashboardViewProps) {
     finally { if (current(epoch)) { control.current.savingOperation = false; setSavingOperation(""); } }
   }
   function quick(kind: AgentOperationKind) {
-    if (!command.server_id || control.current.savingOperation) return;
+    if (!command.server_id || selectedFederated || control.current.savingOperation) return;
     if (["xray_system_config_read", "xray_config_files_list"].includes(kind) && !workspace) { setError(workspaceMessage); return; }
     if (kind === "xray_install" || kind === "xray_remove" || kind === "xray_rollback") {
       setError(""); setXrayDialog({ action: kind, target: command.server_id, confirmed: false }); return;
@@ -320,7 +327,7 @@ export default function DashboardView(_props: DashboardViewProps) {
       command_timeout_ms: targets.length * route.timeout_seconds * 1000 + 5000 });
   }
   async function submitCommand() {
-    if (!command.server_id || !command.path.trim() || control.current.savingCommand) return;
+    if (!command.server_id || selectedFederated || !command.path.trim() || control.current.savingCommand) return;
     if (!integerInRange(command.timeout_ms, 1000, 300000)) { setError("命令超时必须是 1000 至 300000 之间的整数，单位为毫秒。"); return; }
     let body: unknown = null;
     try { if (command.bodyText.trim()) body = JSON.parse(command.bodyText); }
@@ -339,14 +346,15 @@ export default function DashboardView(_props: DashboardViewProps) {
 
   const columns: ColumnsType<ServerSummary> = [
     { title: "名称", key: "name", width: 200, render: (_, server) => <Space orientation="vertical" size={2}>
-      <Typography.Text strong>{server.name}</Typography.Text><Typography.Text type="secondary">{server.xray_mode === "embedded" ? "嵌入式" : zhStatus(server.xray_mode)} Xray</Typography.Text>
-      <Space size={0}><Button type="text" icon={<DownloadOutlined />} aria-label={`在 ${server.name} 上安装 Agent`}
+      <Space><Typography.Text strong>{server.name}</Typography.Text>{server.is_federated && <Tag color="purple">分享</Tag>}</Space>
+      <Typography.Text type="secondary">{server.xray_mode === "embedded" ? "嵌入式" : zhStatus(server.xray_mode)} Xray</Typography.Text>
+      {!server.is_federated && <Space size={0}><Button type="text" icon={<DownloadOutlined />} aria-label={`在 ${server.name} 上安装 Agent`}
         onClick={() => setBootstrap({ open: true, serverId: server.id, serverName: server.name })} />
         <Button type="text" icon={<EditOutlined />} aria-label={`编辑 ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "edit" })} />
-        <Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除 ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "remove" })} /></Space>
+        <Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除 ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "remove" })} /></Space>}
     </Space> },
     { title: "状态", key: "status", width: 110, render: (_, server) => <Tag color={{ pending: "gold", connected: "green", offline: "default" }[server.status]}>
-      {{ pending: "待连接", connected: "已连接", offline: "离线" }[server.status]}</Tag> },
+      {server.is_federated ? server.status === "connected" ? "拥有方在线" : "拥有方离线" : { pending: "待连接", connected: "已连接", offline: "离线" }[server.status]}</Tag> },
     { title: "连接地址", key: "endpoint", width: 180, render: (_, server) => server.domain || server.ip_address || server.domain_v6 || server.ip_address_v6 || "未分配" },
     { title: "探针", key: "probe", width: 220, render: (_, server) => <Space orientation="vertical" size={0}>
       <span>{[server.region_city || server.region_name || server.region, server.region_country].filter(Boolean).join(" · ") || "暂无地区"}</span>
@@ -410,7 +418,7 @@ export default function DashboardView(_props: DashboardViewProps) {
               <Button aria-label="隐藏令牌" onClick={() => setToken(null)}>隐藏令牌</Button></Space></Space>} />}
         </Card>
         <Card title="探针元数据"><Form layout="vertical" onFinish={() => void submitMetadata()}>
-          <Form.Item label="服务器"><Select aria-label="元数据服务器" value={metadataTarget || undefined} options={options} disabled={!servers.length || savingMetadata}
+          <Form.Item label="服务器"><Select aria-label="元数据服务器" value={metadataTarget || undefined} options={metadataOptions} disabled={!metadataOptions.length || savingMetadata}
             onChange={value => { control.current.metadataTarget = value; setMetadataTarget(value); setMetadata(metadataFor(servers.find(server => server.id === value))); }} /></Form.Item>
           <Row gutter={12}>{([
             ["region", "地区代码"], ["region_country", "国家"], ["region_name", "地区"], ["region_city", "城市"],
@@ -434,6 +442,7 @@ export default function DashboardView(_props: DashboardViewProps) {
       <Col xs={24} xl={15}><Card title="命令队列"><Space orientation="vertical" size="middle" style={{ width: "100%" }}>
         <Form layout="vertical"><Form.Item label="目标服务器"><Select aria-label="目标服务器" value={command.server_id || undefined} options={options} disabled={!servers.length}
           onChange={value => { control.current.target = value; setCommand(previous => ({ ...previous, server_id: value })); }} /></Form.Item></Form>
+        {selectedFederated && <Alert type="info" showIcon title="分享服务器不接受本地 Agent 命令" description="状态、速度、流量和 Xray 版本来自拥有方；获授权的入站请在服务器分享页面管理。" />}
         {operationButtons(quickOperations)}
         <Typography.Title level={5}>诊断</Typography.Title>{operationButtons(diagnosticOperations)}
         <Typography.Title level={5}>维护操作</Typography.Title>{operationButtons(maintenanceOperations)}
@@ -495,7 +504,7 @@ export default function DashboardView(_props: DashboardViewProps) {
           <Form.Item label="查询参数"><Input aria-label="查询参数" value={command.query} onChange={event => setCommand({ ...command, query: event.target.value })} /></Form.Item>
           <Form.Item label="JSON 请求体"><Input.TextArea aria-label="JSON 请求体" value={command.bodyText} rows={2} onChange={event => setCommand({ ...command, bodyText: event.target.value })} style={{ fontFamily: "monospace" }} /></Form.Item>
           <Form.Item label="流式输出"><Switch aria-label="流式输出" checked={command.stream} onChange={value => setCommand({ ...command, stream: value })} /></Form.Item>
-          <Button htmlType="submit" type="primary" aria-label="下发命令" disabled={!command.server_id || savingCommand} loading={savingCommand}>下发命令</Button>
+          <Button htmlType="submit" type="primary" aria-label="下发命令" disabled={!command.server_id || selectedFederated || savingCommand} loading={savingCommand}>下发命令</Button>
         </Form>
         <CommandInspector commands={commands[command.server_id] ?? []} streamFramesByCommand={frames} />
       </Space></Card></Col>

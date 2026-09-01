@@ -271,8 +271,49 @@ def test_imported_server_encrypts_token_prefixes_tags_and_uses_revision(tmp_path
     )
     assert created.status_code == 201, created.text
     imported = created.json()
+    imported_id = imported["id"]
     assert imported["owner_url"] == "https://owner.example/control"
     assert imported["info"]["name"] == "上游共享机"
+    servers = client.get("/api/v1/servers").raise_for_status().json()
+    projection = next(server for server in servers if server["id"] == imported_id)
+    assert projection["name"] == "异地节点"
+    assert projection["status"] == "connected"
+    assert projection["ip_address"] == "198.51.100.20"
+    assert projection["current_upload_speed"] == 2
+    assert projection["current_download_speed"] == 3
+    assert projection["is_federated"] is True
+    assert projection["federation_owner_url"] == "https://owner.example/control"
+    assert projection["federation_prefix"] == "site-"
+    assert projection["federation_allow_manage_xray"] is False
+    traffic = client.get(f"/api/v1/servers/{imported_id}/traffic").raise_for_status().json()
+    assert traffic["used"] == 16
+    scan = client.get(
+        f"/api/v1/servers/{imported_id}/scan/latest"
+    ).raise_for_status().json()["scan"]
+    assert scan["xray_running"] is True
+    assert scan["xray_version"] == "25.8.3"
+    ddns = client.get("/api/v1/ddns").raise_for_status().json()["servers"]
+    shared_ddns = next(server for server in ddns if server["server_id"] == imported_id)
+    assert shared_ddns["is_federated"] is True
+    assert client.get(f"/api/v1/servers/{imported_id}/removal").status_code == 409
+    assert client.put(
+        f"/api/v1/servers/{imported_id}/traffic",
+        json={
+            "traffic_limit": 2048,
+            "traffic_reset_day": 1,
+            "traffic_source": "xray",
+            "traffic_stats_mode": "both",
+        },
+    ).status_code == 409
+    assert client.post(f"/api/v1/servers/{imported_id}/traffic/reset").status_code == 409
+    assert client.post(
+        f"/api/v1/servers/{imported_id}/commands",
+        json={"method": "GET", "path": "/api/child/system/info"},
+    ).status_code == 409
+    assert client.post(
+        "/api/v1/server-shares",
+        json={"server_id": imported_id, "label": "禁止二次分享"},
+    ).status_code == 403
     with sqlite3.connect(database) as connection:
         sealed = connection.execute("SELECT token_secret FROM federated_servers").fetchone()[0]
         assert token not in sealed
@@ -289,12 +330,29 @@ def test_imported_server_encrypts_token_prefixes_tags_and_uses_revision(tmp_path
     assert managed.status_code == 200, managed.text
     assert transport.managed.body["inbound"]["tag"] == "site-demo"
 
+    transport.info = transport.info.model_copy(update={
+        "status": "offline", "ip_address": "198.51.100.21",
+        "traffic_limit": 2048, "traffic_used": 32,
+        "current_upload_speed": 5, "current_download_speed": 8,
+        "xray_running": False, "xray_version": "26.8.31",
+    })
     refreshed = client.post(
         f"/api/v1/server-federation/{imported['id']}/refresh",
         json={"expected_revision": imported["revision"]},
     )
     assert refreshed.status_code == 200, refreshed.text
     assert refreshed.json()["revision"] == 1
+    projection = next(
+        server for server in client.get("/api/v1/servers").raise_for_status().json()
+        if server["id"] == imported_id
+    )
+    assert (projection["status"], projection["ip_address"]) == (
+        "offline", "198.51.100.21"
+    )
+    assert (projection["current_upload_speed"], projection["current_download_speed"]) == (5, 8)
+    assert client.get(f"/api/v1/servers/{imported_id}/traffic").json()["used"] == 32
+    scan = client.get(f"/api/v1/servers/{imported_id}/scan/latest").json()["scan"]
+    assert (scan["xray_running"], scan["xray_version"]) == (False, "26.8.31")
     stale = client.post(
         f"/api/v1/server-federation/{imported['id']}/refresh",
         json={"expected_revision": 0},
@@ -306,6 +364,14 @@ def test_imported_server_encrypts_token_prefixes_tags_and_uses_revision(tmp_path
     )
     assert deleted.status_code == 204
     assert client.get("/api/v1/server-federation").json()["servers"] == []
+    assert all(
+        server["id"] != imported_id
+        for server in client.get("/api/v1/servers").raise_for_status().json()
+    )
+    assert all(
+        server["server_id"] != imported_id
+        for server in client.get("/api/v1/ddns").raise_for_status().json()["servers"]
+    )
 
 
 def test_federation_transport_maps_private_owner_without_network_disclosure():

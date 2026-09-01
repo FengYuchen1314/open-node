@@ -9,6 +9,7 @@ export interface DDNSServer {
   server_id: string;
   server_name: string;
   server_status: string;
+  is_federated: boolean;
   enabled: boolean;
   provider_id: string | null;
   provider_name: string | null;

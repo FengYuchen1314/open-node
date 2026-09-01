@@ -526,6 +526,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.state.subscriber_permissions = SubscriberPermissionsStore(app.state.inventory)
     app.state.subscriber_permissions.create_schema()
     app.state.server_sharing = ServerSharingStore(app.state.inventory)
+    app.state.server_sharing.ensure_projections()
     app.state.announcements = AnnouncementStore(app.state.inventory)
     app.state.application_updates = ApplicationUpdateStore(
         active_settings.application_update_dir,

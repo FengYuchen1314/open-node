@@ -55,6 +55,7 @@ from open_node.services.inventory import (
     CommandModel,
     ServerModel,
     ServerNotFoundError,
+    ServerTrafficModel,
 )
 
 
@@ -109,7 +110,9 @@ class ServerShareCommandModel(Base):
 class FederatedServerModel(Base):
     __tablename__ = "federated_servers"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
     name: Mapped[str] = mapped_column(String(120), unique=True)
     owner_url: Mapped[str] = mapped_column(String(2048))
     token_secret: Mapped[str] = mapped_column(Text)
@@ -182,6 +185,8 @@ class ServerSharingStore:
         with self._write() as session:
             if session.get(ServerModel, str(value.server_id)) is None:
                 raise ServerSharingError(404, "server_share_not_found")
+            if session.get(FederatedServerModel, str(value.server_id)) is not None:
+                raise ServerSharingError(403, "server_share_forbidden")
             count = session.scalar(select(func.count()).select_from(ServerShareModel).where(
                 ServerShareModel.server_id == str(value.server_id),
                 ServerShareModel.revoked_at.is_(None),
@@ -342,11 +347,13 @@ class ServerSharingStore:
                 ip_address_v6=server.ip_address_v6, domain=server.domain,
                 domain_v6=server.domain_v6, ipv6_enabled=server.ipv6_enabled,
                 xray_mode=server.xray_mode, traffic_limit=server.traffic_limit,
+                traffic_reset_day=server.traffic_reset_day,
                 current_upload_speed=server.current_upload_speed,
                 current_download_speed=server.current_download_speed,
                 xray_running=scan.xray_running if scan else None,
                 xray_version=scan.xray_version if scan else None,
                 last_heartbeat=_utc(server.last_heartbeat), license_required=False,
+                allow_manage_xray=share.allow_manage_xray,
             )
         try:
             traffic_used = self.inventory._server_traffic().read(identifier).used
@@ -446,6 +453,122 @@ class ServerSharingStore:
                 503, "server_share_storage_unavailable"
             ) from None
 
+    @staticmethod
+    def _projection_name(session, preferred, identifier):
+        base = preferred.strip() or "共享服务器"
+        existing = session.scalar(select(ServerModel.id).where(ServerModel.name == base))
+        if existing in {None, identifier}:
+            return base
+        suffix = f" · 分享 {identifier[:8]}"
+        candidate = base[: max(1, 120 - len(suffix))] + suffix
+        if session.scalar(select(ServerModel.id).where(ServerModel.name == candidate)):
+            raise ServerSharingError(409, "server_share_conflict")
+        return candidate
+
+    @staticmethod
+    def _new_projection(identifier, name, info, now):
+        return ServerModel(
+            id=identifier,
+            name=name,
+            agent_token=token_urlsafe(32),
+            status=info.status,
+            ip_address=info.ip_address,
+            ip_address_v6=info.ip_address_v6,
+            domain=info.domain,
+            domain_v6=info.domain_v6,
+            connection_mode="auto",
+            listen_port=0,
+            pull_address=None,
+            pull_address_v6=None,
+            pull_port=0,
+            ipv6_enabled=info.ipv6_enabled,
+            traffic_limit=info.traffic_limit,
+            traffic_reset_day=info.traffic_reset_day,
+            last_traffic_reset_at=now,
+            traffic_stats_mode="both",
+            traffic_source="xray",
+            xray_mode=info.xray_mode,
+            current_upload_speed=info.current_upload_speed,
+            current_download_speed=info.current_download_speed,
+            last_heartbeat=_utc(info.last_heartbeat),
+            created_at=now,
+            updated_at=now,
+        )
+
+    @staticmethod
+    def _sync_projection(session, server, name, info, now):
+        server.name = name
+        for field in (
+            "status", "ip_address", "ip_address_v6", "domain", "domain_v6",
+            "ipv6_enabled", "traffic_limit", "traffic_reset_day", "xray_mode",
+            "current_upload_speed", "current_download_speed", "last_heartbeat",
+        ):
+            value = getattr(info, field)
+            if field == "last_heartbeat":
+                value = _utc(value)
+            setattr(server, field, value)
+        server.updated_at = now
+
+        traffic = session.get(ServerTrafficModel, (server.id, "xray"))
+        if traffic is None:
+            traffic = ServerTrafficModel(
+                server_id=server.id,
+                source="xray",
+                counters={},
+                upload=0,
+                download=0,
+                baseline_upload=0,
+                baseline_download=0,
+            )
+            session.add(traffic)
+        traffic.counters = {"federation_snapshot": [info.traffic_used, 0]}
+        traffic.upload = info.traffic_used
+        traffic.download = 0
+        traffic.baseline_upload = 0
+        traffic.baseline_download = 0
+        traffic.last_reported_at = now
+
+        scan = session.get(AgentScanResultModel, server.id)
+        if scan is None:
+            scan = AgentScanResultModel(
+                server_id=server.id,
+                xray_running=bool(info.xray_running),
+                xray_version=info.xray_version,
+                xray_capabilities={},
+                inbounds=[],
+                device_kicks={},
+                config_modified=False,
+                config_added_sections=[],
+                message="分享服务器状态来自拥有方联邦快照",
+                reported_at=_utc(info.last_heartbeat) or now,
+                updated_at=now,
+            )
+            session.add(scan)
+        else:
+            scan.xray_running = bool(info.xray_running)
+            scan.xray_version = info.xray_version
+            scan.message = "分享服务器状态来自拥有方联邦快照"
+            scan.reported_at = _utc(info.last_heartbeat) or now
+            scan.updated_at = now
+
+    def ensure_projections(self):
+        with self._write() as session:
+            rows = session.scalars(
+                select(FederatedServerModel).order_by(FederatedServerModel.created_at)
+            ).all()
+            for row in rows:
+                info = FederationServerInfo.model_validate(row.snapshot)
+                server = session.get(ServerModel, row.id)
+                if server is None:
+                    name = self._projection_name(session, row.name, row.id)
+                    row.name = name
+                    server = self._new_projection(row.id, name, info, _utc(row.created_at))
+                    session.add(server)
+                    session.flush()
+                self._sync_projection(
+                    session, server, row.name, info, _utc(row.last_synced_at)
+                )
+
     def add_federated(self, payload):
         try:
             value = FederatedServerCreate.model_validate(payload)
@@ -459,7 +582,7 @@ class ServerSharingStore:
             name = value.name or info.name
             if session.scalar(select(FederatedServerModel.id).where(
                 FederatedServerModel.name == name
-            )):
+            )) or session.scalar(select(ServerModel.id).where(ServerModel.name == name)):
                 raise ServerSharingError(409, "server_share_conflict")
             row = FederatedServerModel(
                 id=identifier, name=name, owner_url=owner_url,
@@ -467,7 +590,10 @@ class ServerSharingStore:
                 prefix=value.prefix, snapshot=info.model_dump(mode="json"), revision=0,
                 last_synced_at=now, created_at=now,
             )
-            session.add(row)
+            server = self._new_projection(identifier, name, info, now)
+            session.add_all([server, row])
+            session.flush()
+            self._sync_projection(session, server, name, info, now)
             session.flush()
             return self._federated_read(row)
 
@@ -508,7 +634,15 @@ class ServerSharingStore:
             if changed.rowcount != 1:
                 raise ServerSharingError(409, "server_share_conflict")
             session.expire_all()
-            return self._federated_read(session.get(FederatedServerModel, row.id))
+            row = session.get(FederatedServerModel, row.id)
+            server = session.get(ServerModel, row.id)
+            if server is None:
+                server = self._new_projection(row.id, row.name, info, now)
+                session.add(server)
+                session.flush()
+            self._sync_projection(session, server, row.name, info, now)
+            session.flush()
+            return self._federated_read(row)
 
     @staticmethod
     def _prefix_payload(prefix, payload):
@@ -550,4 +684,8 @@ class ServerSharingStore:
                 raise ServerSharingError(404, "server_share_not_found")
             if row.revision != expected_revision:
                 raise ServerSharingError(409, "server_share_conflict")
+            server = session.get(ServerModel, row.id)
             session.delete(row)
+            session.flush()
+            if server is not None:
+                session.delete(server)

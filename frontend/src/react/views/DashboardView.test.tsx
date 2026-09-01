@@ -19,6 +19,8 @@ const edge: ServerSummary = { id: "edge", name: "Edge", ip_address: "192.0.2.1",
   ipv6_enabled: true, traffic_limit: 0, xray_mode: "external", region_city: "Tokyo", provider_name: "Example", renewal_price: 10, renewal_currency: "USD",
   current_upload_speed: 1024, current_download_speed: 2048, created_at: "2026-08-31", updated_at: "2026-08-31" };
 const other = { ...edge, id: "other", name: "Other", ip_address: "192.0.2.2", status: "offline" as const };
+const shared = { ...edge, id: "shared", name: "Shared", ip_address: "198.51.100.20", is_federated: true,
+  federation_owner_url: "https://owner.example", federation_prefix: "site-" };
 function cmd(overrides: Partial<AgentCommand> = {}): AgentCommand {
   return { id: "cmd", server_id: "edge", request_id: "request", method: "GET", path: "/api/child/system/info", query: "", timeout_ms: 30000,
     stream: false, status: "succeeded", attempts: 1, created_at: "2026-08-31", updated_at: "2026-08-31", ...overrides };
@@ -89,6 +91,17 @@ describe("React Dashboard workflows", () => {
     fireEvent.click(getButton("编辑 Other")); expect(screen.getByTestId("management-dialog-target").textContent).toBe("other:edit");
     fireEvent.click(getButton("删除 Edge")); expect(screen.getByTestId("management-dialog-target").textContent).toBe("edge:remove");
     expect(queueAgentOperation).not.toHaveBeenCalled();
+  }, 30000);
+  it("shows shared servers in the ordinary inventory without exposing local Agent controls", async () => {
+    vi.mocked(listServers).mockResolvedValue([edge, shared]); await mount();
+    expect(screen.getByText("分享")).toBeTruthy(); expect(screen.getByText("拥有方在线")).toBeTruthy();
+    expect(screen.queryByLabelText("在 Shared 上安装 Agent")).toBeNull();
+    expect(screen.queryByLabelText("编辑 Shared")).toBeNull(); expect(screen.queryByLabelText("删除 Shared")).toBeNull();
+    await select("目标服务器", "Shared（分享）");
+    expect(screen.getByText("分享服务器不接受本地 Agent 命令")).toBeTruthy();
+    expect((getButton("系统信息") as HTMLButtonElement).disabled).toBe(true);
+    expect((getButton("下发命令") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(getButton("系统信息")); expect(queueAgentOperation).not.toHaveBeenCalled();
   }, 30000);
   it("creates the complete default request and keeps its manual token private and dismissible", async () => {
     await mount(); fireEvent.change(screen.getByLabelText("名称"), { target: { value: " New edge " } });

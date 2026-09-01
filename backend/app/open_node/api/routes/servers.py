@@ -135,6 +135,8 @@ def update_server_probe_metadata(
         server = store.update_server_probe_metadata(server_id, payload)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AgentCapabilityUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return ServerResponse(server=server)
 
 
@@ -171,6 +173,8 @@ def update_server_traffic(
         return store._server_traffic().update(server_id, payload)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentCapabilityUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.post("/{server_id}/traffic/reset", response_model=ServerTrafficRead)
@@ -182,6 +186,8 @@ def reset_server_traffic(
         return store._server_traffic().reset(server_id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentCapabilityUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.get("/{server_id}/scan/latest", response_model=ServerScanResultResponse)
