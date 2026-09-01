@@ -13,6 +13,7 @@ vi.mock("../../services/branding", async original => ({ ...await original<typeof
   getBrandingSettings: vi.fn(), getPublicBranding: vi.fn(), updateBrandingSettings: vi.fn(),
 }));
 vi.mock("../components/AppearancePanel", () => ({ default: () => <div>外观设置工作区</div> }));
+vi.mock("../components/AnnouncementsPanel", () => ({ default: () => <div>公告设置工作区</div> }));
 const initial: BrandingSettings = { site_title: "已保存的标题", brand_title: "已保存的品牌", revision: 4, license_required: false };
 const administrator = { configured: true, authenticated: true, username: "admin", csrf_token: "PRIVATE-CSRF" };
 let stored: BrandingSettings;

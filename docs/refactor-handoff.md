@@ -8,6 +8,17 @@
 导入/接管或 Telegram Bot/Mini App，也不把它们列为交付阻塞。保留此前已实现的代码，
 不因范围调整删除用户数据或已有功能。下文旧批次中的 Bot、完整迁移等优先级已失效。
 
+本轮已按固定官方 `miaomiaowuX` 后端补齐 Web 公告：管理员在系统设置发布普通、维护
+或订阅更新公告，可选有效期、读取生效列表并删除；登录用户只有在账户启用、已分配
+套餐且套餐未到期时才能读取。标题和正文按纯文本显示，过期公告自动隐藏，结果未知的
+写请求只重新读取、不自动重发。没有新增已读协议，也没有加入 Bot/Mini App 或自动
+节点阻断广播。用法和官方差异见 [announcements.md](announcements.md)。
+
+VPS `/tmp/open-node-announcements.SUpJlc/repo` 已通过后端 Ruff 和 10 项公告 API/存储测试；
+前端通过类型检查、20 项公告服务/管理组件测试、14 项用户中心回归和生产构建。
+生产 `/opt/open-node` 与共享候选均未升级。下一步是恢复/更新入口、权限与共享、DDNS
+以及规则生态缺项。
+
 本轮已实现新部署公网入口：根安装器接受 `OPEN_NODE_PUBLIC_HOSTNAME`，要求应用保持
 回环监听，自动设置安全 Cookie、可信代理和 Agent 公网地址，并运行固定摘要的官方
 Caddy 2.11.4。网关自动申请/续期可信证书、HTTP 跳转、WebSocket 反代、压缩和 HSTS；
@@ -19,8 +30,8 @@ VPS `/tmp/open-node-public-gateway.S1vVKz/evidence` 中 Ruff 与 34 项专项测
 官方镜像 Caddyfile 校验通过。Docker 策略烟测创建但不启动 UUID 容器，实测固定
 镜像/命令、host 网络、能力、只读根、tmpfs、挂载、日志和标签，并覆盖换域名后的
 安全删除，所有夹具资源已清理。没有操作者正式域名，因此未申请真实公网证书，
-生产 `/opt/open-node` 没有升级。下一步转向 Web 公告、恢复/更新入口、权限与共享、
-DDNS 和规则生态。
+生产 `/opt/open-node` 没有升级。下一步转向恢复/更新入口、权限与共享、DDNS 和规则
+生态。
 
 外观提交 `8dd3d07` 的 CI 中 Frontend、Agent、Probe Worker 成功；Backend 完成全套后为
 4,932 通过、116 跳过、2 失败。两项来自同一个旧的订阅角色隔离枚举，误把新增的匿名
@@ -56,7 +67,7 @@ VPS R1 后端 210 通过、2 个测试预期失败；前端 82 通过、2 个测
 R2 修正用例及格式后，初始化/安装器 33 项、前端 47 项通过，Ruff、App/Node 类型检查
 和主站构建通过。最后补齐 Bash 条件上下文中的 CLI 失败传播，安装器 6 项通过。
 原失败证据保留；没有重跑历史完整 Docker/浏览器审计，也没有升级生产或共享候选。
-接下来继续新部署公网配置和其余公告、共享、权限、DDNS、规则缺项。
+后续继续恢复/更新入口、共享、权限、DDNS 和规则缺项。
 
 上一版 `2367439` 的完整 CI [33422768101](https://github.com/FengYuchen1314/open-node/actions/runs/33422768101)
 已全部成功；后续发布的源码与 CI 状态仍以 GitHub 精确提交为准。
@@ -91,8 +102,8 @@ SQLite 非普通 schema、复核记录、安装票据撤销与 Compose 模板等
 上版 CI `33412367798`（`562413e`）已完成：Agent、Probe Worker、Frontend 成功；
 Backend 为 4841 通过、104 跳过、1 失败（路由数量旧断言 34，实际 38），并非整体通过。
 已把发现数量改为不低于当前基线，同时仍逐条检查所有路由的停写保护；R3 定点用例通过。
-继续按用户要求补功能，不重跑历史完整验收。后续优先 Bot/Mini App、通用设置、完整迁移与
-缺失恢复模式；整个 goal 仍未完成。
+继续按用户要求补功能，不重跑历史完整验收。后续优先应用内恢复/更新入口、权限与共享、
+DDNS 和规则生态；Bot/Mini App 与旧 MMWX 迁移已经排除，整个 goal 仍未完成。
 
 上一轮新增在线用户/IP 完整链路，功能提交 `1484aeb`，Agent 版本 `0.3.0a1`。
 参照固定官方 Xray 分支的在线统计 API，中文入口为“配置工作区 → 在线用户”。
@@ -614,6 +625,7 @@ ssh root@185.99.135.224 "git -C /opt/open-node status --short; git -C /opt/open-
 - [`external-subscriptions.md`](external-subscriptions.md)
 - [`notifications-plan.md`](notifications-plan.md)（首批实现边界与官方源码接点）
 - [`notifications.md`](notifications.md)（已发布的首批通知功能用法与真实投递边界）
+- [`announcements.md`](announcements.md)（Web 公告、套餐过滤及官方实现边界）
 
 工作约束：
 

@@ -19,6 +19,8 @@ import { useBranding } from "../hooks/useBranding";
 import { useSubscriberSession } from "../hooks/useSession";
 import { zhMessage } from "../../i18n/zh-CN";
 import { LoginWallpaper, SiteLogo, ThemeSelector } from "../components/AppearanceChrome";
+import type { Announcement, AnnouncementType } from "../../domain/announcements";
+import { accountAnnouncements } from "../../services/announcements";
 
 const formats: { label: string; value: SubscriptionClientFormat }[] = [
   { label: "Clash / Mihomo", value: "clash" }, { label: "sing-box", value: "sing-box" }, { label: "Surge", value: "surge" },
@@ -26,6 +28,9 @@ const formats: { label: string; value: SubscriptionClientFormat }[] = [
   ...extraSubscriptionFormats,
 ];
 const date = (value?: string | null) => value ? new Date(value).toLocaleDateString("zh-CN") : "无";
+const announcementKind: Record<AnnouncementType, "info" | "warning" | "success"> = {
+  general: "info", maintenance: "warning", sub_update: "success",
+};
 function bytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
   const unit = Math.min(Math.floor(Math.log(value) / Math.log(1024)), 4);
@@ -126,6 +131,8 @@ function SubscriberWorkspace({ username }: { username: string }) {
   const [profile, setProfile] = useState<SubscriberProfile | null>(null);
   const [subscription, setSubscription] = useState<ProductUserSubscriptionToken | null>(null);
   const [profiles, setProfiles] = useState<SubscriberSubscriptionProfile[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [announcementWarning, setAnnouncementWarning] = useState(false);
   const [configuration, setConfiguration] = useState("default");
   const [format, setFormat] = useState<SubscriptionClientFormat>("clash");
   const [linkType, setLinkType] = useState("full");
@@ -146,9 +153,13 @@ function SubscriberWorkspace({ username }: { username: string }) {
   const load = useCallback(async () => {
     const current = scope.begin(); setLoading(true); setError("");
     try {
-      const [account, token, extra] = await Promise.all([subscriberProfile(), subscriberToken(), subscriberProfiles()]);
+      const [account, token, extra, notices] = await Promise.all([
+        subscriberProfile(), subscriberToken(), subscriberProfiles(), accountAnnouncements().catch(() => null),
+      ]);
       if (!scope.isCurrent(current)) return;
       setProfile(account); setSubscription(token); setProfiles(extra.profiles);
+      if (notices) { setAnnouncements(notices.announcements); setAnnouncementWarning(false); }
+      else setAnnouncementWarning(true);
       setConfiguration(previous => previous === "default" || extra.profiles.some(item => item.id === previous) ? previous : "default");
     } catch (failure) {
       if (scope.isCurrent(current)) setError(zhMessage(failure, "暂时无法加载账户信息。"));
@@ -206,6 +217,9 @@ function SubscriberWorkspace({ username }: { username: string }) {
     <Layout.Content className="account-content"><Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       <Flex gap="middle" justify="space-between" align="center"><Typography.Title level={2}>{profile?.display_name || username}</Typography.Title><Button icon={<ReloadOutlined aria-hidden />} aria-label="刷新账户" loading={loading} onClick={() => void load()} /></Flex>
       {error && <Alert type="error" showIcon title={error} />}
+      {announcementWarning && <Alert type="warning" showIcon title="暂时无法读取公告；账户和订阅功能仍可继续使用。" />}
+      {announcements.map(item => <Alert key={item.id} type={announcementKind[item.type]} showIcon title={item.title}
+        description={<Typography.Paragraph style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{item.body}</Typography.Paragraph>} />)}
       {loading && <Spin aria-label="正在刷新账户" />}
       <Tabs activeKey={tab} onChange={setTab} destroyOnHidden items={[
         { key: "subscription", label: "订阅", children: subscriptionContent },

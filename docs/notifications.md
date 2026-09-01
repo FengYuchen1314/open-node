@@ -17,8 +17,9 @@
 [notify_config.go](https://github.com/tajiaoyezi/miaomiaowuX/blob/c12ce653bc07fe30426b7dfcb85076974b7be0e0/internal/handler/notify_config.go)、
 [notify_scheduler.go](https://github.com/tajiaoyezi/miaomiaowuX/blob/c12ce653bc07fe30426b7dfcb85076974b7be0e0/internal/handler/notify_scheduler.go)。
 这里没有移植完整的 [mmwX-tgbot](https://miaomiaowux.com/docs/en/tool-mmwx-tgbot/)：
-用户 Telegram 绑定、Bot 命令、Mini App、20 点日报、登录/流量/服务器阈值提醒、
-公告和人工续费审批均未接入。通知不会扣款、延长套餐、重置流量或下发 Agent 命令，
+用户 Telegram 绑定、Bot 命令、Mini App、20 点日报、登录/流量/服务器阈值提醒和
+人工续费审批均未接入。本页也不负责公告投递；独立的[Web 公告](announcements.md)
+不经过 Telegram。通知不会扣款、延长套餐、重置流量或下发 Agent 命令，
 也没有激活码或许可证门槛。
 
 ## 配置与测试

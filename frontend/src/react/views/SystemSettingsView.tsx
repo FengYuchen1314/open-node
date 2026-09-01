@@ -8,6 +8,7 @@ import { useAsyncScope } from "../hooks/useAsyncScope";
 import { useBranding } from "../hooks/useBranding";
 import { useAdministratorSession } from "../hooks/useSession";
 import AppearancePanel from "../components/AppearancePanel";
+import AnnouncementsPanel from "../components/AnnouncementsPanel";
 
 export default function SystemSettingsView() {
   const auth = useAdministratorSession();
@@ -105,5 +106,6 @@ function BrandingEditor({ operator }: { operator: OperatorSession }) {
       </Space>
     </Card>
     <AppearancePanel operator={operator} />
+    <AnnouncementsPanel operator={operator} />
   </section>;
 }

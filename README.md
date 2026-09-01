@@ -75,6 +75,11 @@ browser and page titles. [Appearance settings](docs/appearance.md) add a public
 Logo, login background and standard Ant Design light/dark/system themes with
 bounded uploads. Both use versioned atomic saves, persist in SQLite and have no
 license gate. Probe-only titles and security settings remain independent.
+[Web announcements](docs/announcements.md) let administrators publish bounded
+plain-text general, maintenance or subscription-update notices with optional
+expiry, list or delete active instances, and show them only to signed-in users
+with an active package. Bot/Mini App delivery and automatic node-block notices
+remain outside the requested scope.
 
 [Backup v1 format tools](docs/backup-format.md) add strict manifest/ZIP checking,
 an internal staging writer and `open-node-backup validate PATH [--json]` with

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProductUserSubscriptionToken } from "../../domain/subscriptions";
 import { getPublicBranding } from "../../services/branding";
+import { accountAnnouncements } from "../../services/announcements";
 import { BrandingProvider } from "../hooks/useBranding";
 import {
   loadSubscriberSession, subscriberProfile, subscriberProfiles, subscriberRegister,
@@ -18,6 +19,7 @@ vi.mock("../../services/subscriber-auth", async original => ({
   subscriberRegister: vi.fn(), subscriberProfile: vi.fn(), subscriberProfiles: vi.fn(), subscriberToken: vi.fn(),
 }));
 vi.mock("../../services/branding", async original => ({ ...await original<typeof import("../../services/branding")>(), getPublicBranding: vi.fn() }));
+vi.mock("../../services/announcements", async original => ({ ...await original<typeof import("../../services/announcements")>(), accountAnnouncements: vi.fn() }));
 vi.mock("../components/PrivateRoutedNodesPanel", () => ({ default: () => <div>用户路由工作区</div> }));
 vi.mock("../components/SubscriberSecurityPanel", () => ({ default: () => <div>账户安全工作区</div> }));
 vi.mock("../components/TemplatesWorkspace", () => ({ default: () => <div>订阅模板工作区</div> }));
@@ -49,6 +51,7 @@ beforeEach(() => {
   vi.mocked(subscriberProfile).mockResolvedValue(profile);
   vi.mocked(subscriberProfiles).mockResolvedValue({ profiles: [], license_required: false });
   vi.mocked(subscriberToken).mockResolvedValue(token);
+  vi.mocked(accountAnnouncements).mockResolvedValue({ announcements: [], license_required: false });
 });
 afterEach(async () => {
   cleanup();
@@ -153,6 +156,25 @@ describe("Chinese subscriber portal", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith(input("订阅地址").value);
     fireEvent.click(screen.getByRole("tab", { name: "安全设置" })); await flush();
     expect(screen.getByText("账户安全工作区")).toBeTruthy();
+  });
+  it("shows active Web announcements as plain text without blocking the account", async () => {
+    subscriberState.session = { ...session };
+    vi.mocked(accountAnnouncements).mockResolvedValue({ announcements: [{
+      id: "11111111-1111-4111-8111-111111111111", type: "maintenance", title: "维护 <b>通知</b>",
+      body: "第一行\n<script>不会执行</script>", created_at: "2026-09-01T00:00:00Z", expires_at: null,
+    }], license_required: false });
+    await mount();
+    expect(screen.getByText("维护 <b>通知</b>")).toBeTruthy();
+    expect(screen.getByText(/<script>不会执行<\/script>/)).toBeTruthy();
+    expect(document.querySelector("script, b")).toBeNull();
+  });
+  it("keeps account data available when the optional announcement read fails", async () => {
+    subscriberState.session = { ...session };
+    vi.mocked(accountAnnouncements).mockRejectedValue(new Error("PRIVATE upstream body"));
+    await mount();
+    expect(screen.getByRole("heading", { name: "Alice Custom Name" })).toBeTruthy();
+    expect(screen.getByText(/暂时无法读取公告/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("PRIVATE");
   });
   it.each([
     [{ has_plan: false }, "尚未分配订阅套餐"],

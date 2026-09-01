@@ -20,6 +20,7 @@ from open_node.api.routes.subscription_profiles import legacy_router
 from open_node.api.routes.system import healthz
 from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
 from open_node.core.config import Settings, get_settings
+from open_node.domain.announcements import ANNOUNCEMENT_MESSAGES, AnnouncementError
 from open_node.domain.appearance import MESSAGES as APPEARANCE_MESSAGES
 from open_node.domain.appearance import AppearanceError
 from open_node.domain.branding import BRANDING_ERROR_MESSAGES, BrandingError
@@ -29,6 +30,7 @@ from open_node.domain.notifications import NotificationError
 from open_node.domain.renewals import RENEWAL_MESSAGES, RenewalError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
+from open_node.services.announcements import AnnouncementStore
 from open_node.services.appearance import AppearanceStore
 from open_node.services.auth import AuthStore
 from open_node.services.backup_authorization import BackupAuthorizationError, BackupAuthorizer
@@ -184,6 +186,8 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                     active_settings.api_prefix + "/system-settings/branding",
                     active_settings.api_prefix + "/system-settings/appearance",
                     active_settings.api_prefix + "/appearance",
+                    active_settings.api_prefix + "/announcements",
+                    active_settings.api_prefix + "/account/announcements",
                     active_settings.api_prefix + "/branding",
                 )
             )
@@ -204,6 +208,15 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
+        if request.url.path.startswith((
+            active_settings.api_prefix + "/announcements",
+            active_settings.api_prefix + "/account/announcements",
+        )):
+            return JSONResponse(status_code=422, content={
+                "code": "announcement_invalid_request",
+                "detail": ANNOUNCEMENT_MESSAGES["announcement_invalid_request"],
+                "license_required": False,
+            })
         if request.url.path.startswith((
             active_settings.api_prefix + "/renewals",
             active_settings.api_prefix + "/account/renewals",
@@ -247,6 +260,21 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         return JSONResponse(status_code=exc.status_code, content={
             "code": exc.code, "detail": APPEARANCE_MESSAGES[exc.code], "license_required": False,
         })
+
+    @app.exception_handler(AnnouncementError)
+    async def announcement_error(_request, exc):
+        headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+        if exc.status_code == 429:
+            headers["Retry-After"] = "60"
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "detail": ANNOUNCEMENT_MESSAGES[exc.code],
+                "license_required": False,
+            },
+            headers=headers,
+        )
 
     @app.exception_handler(InitialSetupError)
     async def initial_setup_error(_request, exc):
@@ -407,6 +435,11 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         ):
             raise ValueError("Notification secrets require a separate, non-overlapping directory")
     app.state.inventory.create_schema()
+    app.state.announcements = AnnouncementStore(app.state.inventory)
+    try:
+        app.state.announcements.create_schema()
+    except AnnouncementError:
+        log.warning("Announcements could not be initialized")
     app.state.branding = BrandingStore(app.state.inventory)
     try:
         app.state.branding.create_schema()
