@@ -30,6 +30,8 @@ from open_node.domain.initial_setup import SETUP_MESSAGES, InitialSetupError
 from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.domain.notifications import NotificationError
 from open_node.domain.renewals import RENEWAL_MESSAGES, RenewalError
+from open_node.domain.server_sharing import MESSAGES as SERVER_SHARING_MESSAGES
+from open_node.domain.server_sharing import ServerSharingError
 from open_node.domain.subscriber_permissions import MESSAGES as SUBSCRIBER_PERMISSION_MESSAGES
 from open_node.domain.subscriber_permissions import SubscriberPermissionsError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
@@ -59,6 +61,7 @@ from open_node.services.restore_state import (
     RestoreStateError,
 )
 from open_node.services.secure_channel import AgentIdentity, decode_public_key
+from open_node.services.server_sharing import ServerSharingStore
 from open_node.services.server_traffic import ServerTrafficWorker
 from open_node.services.subscriber_auth import SubscriberAuthStore
 from open_node.services.subscriber_permissions import SubscriberPermissionsStore
@@ -195,6 +198,9 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                     active_settings.api_prefix + "/announcements",
                     active_settings.api_prefix + "/application-update",
                     active_settings.api_prefix + "/subscriber-permissions",
+                    active_settings.api_prefix + "/server-shares",
+                    active_settings.api_prefix + "/server-federation",
+                    active_settings.api_prefix + "/federation",
                     active_settings.api_prefix + "/account/announcements",
                     active_settings.api_prefix + "/branding",
                 )
@@ -321,6 +327,21 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                 "license_required": False,
             },
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+
+    @app.exception_handler(ServerSharingError)
+    async def server_sharing_error(_request, exc):
+        headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+        if exc.status_code == 429:
+            headers["Retry-After"] = "60"
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "detail": SERVER_SHARING_MESSAGES[exc.code],
+                "license_required": False,
+            },
+            headers=headers,
         )
 
     @app.exception_handler(AgentCommandPayloadError)
@@ -472,6 +493,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.state.inventory.create_schema()
     app.state.subscriber_permissions = SubscriberPermissionsStore(app.state.inventory)
     app.state.subscriber_permissions.create_schema()
+    app.state.server_sharing = ServerSharingStore(app.state.inventory)
     app.state.announcements = AnnouncementStore(app.state.inventory)
     app.state.application_updates = ApplicationUpdateStore(
         active_settings.application_update_dir,

@@ -1,5 +1,20 @@
 # Testing
 
+## 服务器共享与联邦首版 — 2026-09-01
+
+隔离候选位于 VPS `/tmp/open-node-permissions.tYdQQr/repo`，叠加本批服务器共享源码和
+测试；没有修改生产 `/opt/open-node`、生产数据库或容器。
+
+- 后端新增 `backend/tests/test_server_sharing.py` **5 项通过**，覆盖一次显示/摘要保存、
+  有限权限过滤与归属、跨分享命令隔离、失败归属回滚、吊销清理、接入令牌加密、修订号、
+  固定私网解析错误、重复 JSON 键/有界请求及错误不回显秘密。变更文件 Ruff 通过。
+- 前端服务契约 **3 项通过**，中文 Ant Design 页面 **2 项通过**；覆盖严格响应解析、
+  创建/复制后销毁令牌 DOM、吊销、接入失败清空令牌及完整拥有方/接入方流程。
+- 前端类型检查和主应用生产构建通过；构建只有既有的大 chunk 提示。页面测试有 Ant
+  Design Table 在 jsdom 中计算高度的无害 stderr，测试退出码为 0。
+- 本批没有重复历史全套、真实浏览器、Docker 新装和生产升级。接入服务器尚未进入普通
+  inventory/node catalog，官方可选消息加密与反向旧协议互通也不在本次通过范围。
+
 ## 用户功能权限与配额 — 2026-09-01
 
 隔离检出位于 VPS `/tmp/open-node-permissions.tYdQQr/repo`，基于公开

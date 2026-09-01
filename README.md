@@ -117,6 +117,14 @@ to personal templates, external sources, private routes and renewal requests. Th
 enforce disabled features directly, and personal creation quotas are checked inside the same
 SQLite write transaction rather than relying on hidden navigation.
 
+[Server sharing and federation](docs/server-sharing.md) now lets an administrator issue a one-time
+token for one Agent server, choose limited inbound ownership or full supported-Agent access, revoke
+it with optional inbound cleanup, and connect another controller over pinned-address HTTPS. Imported
+tokens are encrypted at rest and the Chinese Ant Design workspace can refresh status and submit or
+poll durable commands. This is a usable first slice: imported servers remain outside the ordinary
+inventory/node catalog, optional official message-layer encryption and reverse official-client
+interop are not yet implemented, and no commercial Reality pool or license gate is included.
+
 The [client-format guide](docs/subscription-clients.md) covers the original
 Clash, Surge, sing-box, Xray, URI and Base64 outputs plus Loon, Quantumult X,
 Shadowrocket, Stash, Surfboard and Egern. Unsupported settings are reported in

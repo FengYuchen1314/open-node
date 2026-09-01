@@ -1606,6 +1606,7 @@ class InventoryStore:
         self._engine = create_inventory_engine(database_url)
         self._session_factory = sessionmaker(self._engine, expire_on_commit=False)
         self.external_subscriptions_state_dir = external_subscriptions_state_dir
+        self.federation_state_dir: Path | None = None
         database_file = self._engine.url.database
         if (
             external_subscriptions_state_dir is None
@@ -1618,10 +1619,17 @@ class InventoryStore:
             self.external_subscriptions_state_dir = (
                 Path(database_file).absolute().parent / "external-subscriptions"
             )
+        if (
+            self._engine.dialect.name == "sqlite"
+            and database_file not in (None, "", ":memory:")
+            and not database_file.startswith("file:")
+        ):
+            self.federation_state_dir = Path(database_file).absolute().parent / "federation"
 
     def create_schema(self) -> None:
         from open_node.services.external_subscriptions import ExternalSourceModel
         from open_node.services.renewals import RenewalRequestModel
+        from open_node.services.server_sharing import FederatedServerModel, ServerShareModel
         from open_node.services.subscriber_auth import SubscriberAccount
         from open_node.services.subscription_templates import TemplateRecord
 
@@ -1629,6 +1637,8 @@ class InventoryStore:
         TemplateRecord.metadata.create_all(self._engine)
         ExternalSourceModel.metadata.create_all(self._engine)
         RenewalRequestModel.metadata.create_all(self._engine)
+        ServerShareModel.metadata.create_all(self._engine)
+        FederatedServerModel.metadata.create_all(self._engine)
         # Historical SQLite deployments ran with FK enforcement disabled. Refuse
         # to mutate such a database until an operator repairs or restores any
         # existing orphaned rows, then verify again after our own migrations.
@@ -7644,6 +7654,11 @@ class InventoryStore:
         from open_node.services.subscriber_permissions import SubscriberPermissionsStore
 
         return SubscriberPermissionsStore(self)
+
+    def server_sharing(self):
+        from open_node.services.server_sharing import ServerSharingStore
+
+        return ServerSharingStore(self)
 
     def external_subscriptions(self):
         from open_node.services.external_subscriptions import ExternalSubscriptions

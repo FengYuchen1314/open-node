@@ -26,6 +26,7 @@ from open_node.api.routes import (
     registration_invitations,
     renewals,
     server_management,
+    server_sharing,
     servers,
     subscriber_auth,
     subscriber_permissions,
@@ -49,6 +50,8 @@ private_router.include_router(agent_bootstrap.router)
 private_router.include_router(branding.router)
 private_router.include_router(appearance.router)
 private_router.include_router(server_management.router)
+private_router.include_router(server_sharing.router)
+private_router.include_router(server_sharing.consumer_router)
 private_router.include_router(certificates.router)
 private_router.include_router(changes.router)
 private_router.include_router(external_subscriptions.router)
@@ -71,6 +74,7 @@ api_router.include_router(auth.router)
 api_router.include_router(initial_setup.router)
 api_router.include_router(subscriber_auth.router)
 api_router.include_router(subscriber_permissions.account_router)
+api_router.include_router(server_sharing.public_router)
 api_router.include_router(announcements.account_router)
 api_router.include_router(external_subscriptions.account_router)
 api_router.include_router(renewals.account_router)
