@@ -93,6 +93,7 @@ def test_limited_share_is_one_time_scoped_and_revocable(tmp_path: Path):
     assert client.get(
         "/api/v1/federation/server-info", headers={"X-Share-Token": "A" * 43}
     ).status_code == 401
+    assert client.get("/api/v1/federation/commands/{command_id}").status_code == 401
     info = client.get(
         "/api/v1/federation/server-info", headers={"X-Share-Token": token}
     )

@@ -182,10 +182,15 @@ async def federation_manage(
 
 @public_router.get("/commands/{command_id}", response_model=FederationCommandRead)
 def federation_command(
-    command_id: UUID,
+    command_id: str,
     request: Request,
     share_token: Annotated[str | None, Header(alias="X-Share-Token")] = None,
 ):
+    token = _token(request, share_token)
+    try:
+        identifier = UUID(command_id)
+    except ValueError:
+        raise ServerSharingError(422, "server_share_invalid_request") from None
     return request.app.state.server_sharing.shared_command(
-        _token(request, share_token), command_id
+        token, identifier
     )
