@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 SPEEDTEST_MESSAGES = {
     "speedtest_node_not_found": "节点不存在。",
@@ -50,6 +50,12 @@ class SpeedTestRunRequest(SpeedTestInput):
         if value is not None and value.scheme != "https":
             raise ValueError("Speed-test URL must use HTTPS")
         return value
+
+    @model_validator(mode="after")
+    def bounded_download_memory(self):
+        if self.threads * self.buf_size > 256 * 1024 * 1024:
+            raise ValueError("Speed-test buffers exceed the aggregate memory limit")
+        return self
 
 
 class SpeedTestResultRead(BaseModel):

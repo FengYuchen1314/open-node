@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -5,7 +6,7 @@ from pathlib import Path
 from conftest import authenticated_client
 from open_node.core.config import Settings
 from open_node.main import create_app
-from open_node.services.mihomo_speedtest import Measurement
+from open_node.services.mihomo_speedtest import Measurement, MihomoSpeedTest
 
 
 def browser(tmp_path: Path):
@@ -156,3 +157,41 @@ def test_speedtest_request_validation_is_secret_free(tmp_path):
     })
     assert response.status_code == 422
     assert "do-not-reflect" not in response.text
+
+
+def test_snell_v6_uses_the_pinned_singbox_path(tmp_path, monkeypatch):
+    core = MihomoSpeedTest(tmp_path / "runtime")
+    selected = {}
+
+    async def singbox():
+        return tmp_path / "sing-box"
+
+    async def mihomo():
+        raise AssertionError("Snell v6 must not be sent to Mihomo")
+
+    async def run(binary, proxy, **options):
+        selected.update(binary=binary, proxy=proxy, options=options)
+        return Measurement(12.0, 34.0, "198.51.100.12", 56)
+
+    monkeypatch.setattr(core, "ensure_singbox", singbox)
+    monkeypatch.setattr(core, "ensure", mihomo)
+    monkeypatch.setattr(core, "_run_core", run)
+    result = asyncio.run(core.run(
+        {"name": "Snell 6", "type": "snell", "server": "edge.example.com",
+         "port": 443, "psk": "secret", "version": 6},
+        requested_bytes=0, url=None, threads=1, buf_size=1_048_576,
+        latency_only=False,
+    ))
+    assert result.down_mbps == 12.0
+    assert selected["binary"] == tmp_path / "sing-box"
+    assert selected["options"]["singbox"] is True
+
+
+def test_speedtest_rejects_excessive_aggregate_buffers(tmp_path):
+    client = browser(tmp_path)
+    response = client.post("/api/v1/speedtest/run", json={
+        "node_id": "11111111-1111-1111-1111-111111111111",
+        "threads": 64, "buf_size": 16_777_216, "latency_only": False,
+    })
+    assert response.status_code == 422
+    assert response.json()["code"] == "speedtest_invalid_request"

@@ -10,6 +10,7 @@ import shutil
 import socket
 import stat
 import subprocess
+import tarfile
 import tempfile
 import time
 import urllib.request
@@ -80,26 +81,55 @@ class MihomoSpeedTest:
     def marker(self) -> Path:
         return self.state_dir / self.version / "installed.json"
 
+    @property
+    def singbox_version(self) -> str:
+        return str(self.manifest["sing_box"]["version"])
+
+    @property
+    def singbox_binary(self) -> Path:
+        return self.state_dir / self.singbox_version / "sing-box"
+
+    @property
+    def singbox_marker(self) -> Path:
+        return self.state_dir / self.singbox_version / "installed.json"
+
     def _asset(self) -> dict[str, Any] | None:
         asset = self.manifest.get("assets", {}).get(_platform_key())
         return asset if isinstance(asset, dict) else None
 
+    def _singbox_asset(self) -> dict[str, Any] | None:
+        asset = self.manifest.get("sing_box", {}).get("assets", {}).get(_platform_key())
+        return asset if isinstance(asset, dict) else None
+
     def _ready(self) -> bool:
+        return self._runtime_ready(self.binary, self.marker, self.version, self._asset())
+
+    @staticmethod
+    def _runtime_ready(
+        binary: Path, marker_path: Path, version: str, asset: dict[str, Any] | None
+    ) -> bool:
         try:
-            marker = json.loads(self.marker.read_text("utf-8"))
-            info = self.binary.stat()
+            marker = json.loads(marker_path.read_text("utf-8"))
+            info = binary.stat()
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return False
-        asset = self._asset()
         return bool(
             asset
             and stat.S_ISREG(info.st_mode)
             and info.st_size > 1024 * 1024
             and marker == {
-                "version": self.version,
+                "version": version,
                 "asset_sha256": asset.get("sha256"),
-                "binary_sha256": _sha256(self.binary),
+                "binary_sha256": _sha256(binary),
             }
+        )
+
+    def _singbox_ready(self) -> bool:
+        return self._runtime_ready(
+            self.singbox_binary,
+            self.singbox_marker,
+            self.singbox_version,
+            self._singbox_asset(),
         )
 
     def status(self) -> MihomoStatusRead:
@@ -133,6 +163,25 @@ class MihomoSpeedTest:
             finally:
                 self._downloading = False
         return self.binary
+
+    async def ensure_singbox(self) -> Path:
+        if self._singbox_ready():
+            return self.singbox_binary
+        if self._singbox_asset() is None:
+            raise SpeedTestError(503, "speedtest_runtime_unavailable")
+        async with self._install_lock:
+            if self._singbox_ready():
+                return self.singbox_binary
+            self._downloading = True
+            try:
+                await asyncio.to_thread(self._install_singbox)
+            except SpeedTestError:
+                raise
+            except Exception:
+                raise SpeedTestError(503, "speedtest_runtime_unavailable") from None
+            finally:
+                self._downloading = False
+        return self.singbox_binary
 
     def _install(self) -> None:
         asset = self._asset()
@@ -186,6 +235,72 @@ class MihomoSpeedTest:
                 with suppress(OSError):
                     path.unlink()
 
+    def _install_singbox(self) -> None:
+        asset = self._singbox_asset()
+        if asset is None:
+            raise SpeedTestError(503, "speedtest_runtime_unavailable")
+        self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        destination = self.singbox_binary.parent
+        destination.mkdir(mode=0o700, parents=True, exist_ok=True)
+        request = urllib.request.Request(
+            str(asset["url"]), headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
+        )
+        archive = destination / f"download-{os.getpid()}.tar.gz"
+        unpacked = destination / f"sing-box-{os.getpid()}.tmp"
+        marker_tmp = destination / f"installed-{os.getpid()}.tmp"
+        try:
+            digest = hashlib.sha256()
+            total = 0
+            with (
+                urllib.request.urlopen(request, timeout=45) as response,
+                archive.open("xb") as out,
+            ):
+                for chunk in iter(lambda: response.read(1024 * 1024), b""):
+                    total += len(chunk)
+                    if total > int(asset["compressed_bytes"]):
+                        raise OSError("oversized runtime asset")
+                    digest.update(chunk)
+                    out.write(chunk)
+            if total != int(asset["compressed_bytes"]) or digest.hexdigest() != asset["sha256"]:
+                raise OSError("runtime checksum mismatch")
+            with tarfile.open(archive, "r:gz") as source:
+                members = source.getmembers()
+                candidates = [
+                    member for member in members
+                    if member.isfile() and Path(member.name).name == "sing-box"
+                ]
+                if len(members) > 256 or len(candidates) != 1:
+                    raise OSError("invalid runtime archive")
+                member = candidates[0]
+                if not 1024 * 1024 < member.size <= MAX_RUNTIME_BYTES:
+                    raise OSError("invalid runtime size")
+                stream = source.extractfile(member)
+                if stream is None:
+                    raise OSError("runtime is missing")
+                written = 0
+                with stream, unpacked.open("xb") as out:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        written += len(chunk)
+                        if written > member.size:
+                            raise OSError("oversized unpacked runtime")
+                        out.write(chunk)
+                if written != member.size:
+                    raise OSError("truncated unpacked runtime")
+            os.chmod(unpacked, 0o700)
+            binary_digest = _sha256(unpacked)
+            os.replace(unpacked, self.singbox_binary)
+            marker_tmp.write_text(json.dumps({
+                "version": self.singbox_version,
+                "asset_sha256": asset["sha256"],
+                "binary_sha256": binary_digest,
+            }, separators=(",", ":")), "utf-8")
+            os.chmod(marker_tmp, 0o600)
+            os.replace(marker_tmp, self.singbox_marker)
+        finally:
+            for path in (archive, unpacked, marker_tmp):
+                with suppress(OSError):
+                    path.unlink()
+
     async def run(
         self,
         proxy: dict[str, Any],
@@ -196,41 +311,90 @@ class MihomoSpeedTest:
         buf_size: int,
         latency_only: bool,
     ) -> Measurement:
-        binary = await self.ensure()
+        singbox = self._is_snell_v6(proxy)
+        binary = await (self.ensure_singbox() if singbox else self.ensure())
         async with self._run_lock:
             return await self._run_core(
                 binary, proxy, requested_bytes=requested_bytes, url=url,
                 threads=threads, buf_size=buf_size, latency_only=latency_only,
+                singbox=singbox,
             )
 
-    async def _run_core(self, binary: Path, proxy: dict[str, Any], **options) -> Measurement:
+    @staticmethod
+    def _is_snell_v6(proxy: dict[str, Any]) -> bool:
+        if str(proxy.get("type") or "").lower() != "snell":
+            return False
+        try:
+            return int(proxy.get("version") or 0) >= 6
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _singbox_outbound(proxy: dict[str, Any]) -> dict[str, Any]:
+        try:
+            port = int(proxy.get("port"))
+            version = int(proxy.get("version") or 6)
+        except (TypeError, ValueError):
+            raise SpeedTestError(409, "speedtest_credential_unavailable") from None
+        server, psk = proxy.get("server"), proxy.get("psk")
+        if (
+            not isinstance(server, str) or not server or len(server) > 255
+            or not isinstance(psk, str) or not psk or len(psk) > 1024
+            or not 1 <= port <= 65535 or version < 6
+        ):
+            raise SpeedTestError(409, "speedtest_credential_unavailable")
+        mode = proxy.get("mode") or "default"
+        if not isinstance(mode, str) or mode not in {"default", "plain", "http"}:
+            raise SpeedTestError(409, "speedtest_credential_unavailable")
+        return {
+            "type": "snell", "tag": "out", "server": server,
+            "server_port": port, "psk": psk, "version": version, "mode": mode,
+        }
+
+    async def _run_core(
+        self, binary: Path, proxy: dict[str, Any], *, singbox: bool = False, **options
+    ) -> Measurement:
         port = self._free_port()
         root = Path(tempfile.mkdtemp(prefix="open-node-speedtest-", dir=self.state_dir))
-        config = root / "config.yaml"
-        proxy = dict(proxy)
-        proxy["name"] = "OPEN_NODE_SPEEDTEST_PROXY"
-        config.write_text(yaml.safe_dump({
-            "mixed-port": port,
-            "allow-lan": False,
-            "mode": "rule",
-            "log-level": "silent",
-            "proxies": [proxy],
-            "proxy-groups": [{
-                "name": "OPEN_NODE_SPEEDTEST_GROUP", "type": "select",
-                "proxies": ["OPEN_NODE_SPEEDTEST_PROXY"],
-            }],
-            "rules": ["MATCH,OPEN_NODE_SPEEDTEST_GROUP"],
-        }, allow_unicode=True, sort_keys=False), "utf-8")
+        if singbox:
+            config = root / "config.json"
+            config.write_text(json.dumps({
+                "log": {"level": "warn"},
+                "inbounds": [{
+                    "type": "mixed", "tag": "in", "listen": "127.0.0.1",
+                    "listen_port": port,
+                }],
+                "outbounds": [self._singbox_outbound(proxy)],
+                "route": {"final": "out"},
+            }, ensure_ascii=False, separators=(",", ":")), "utf-8")
+            arguments = (str(binary), "run", "-D", str(root), "-c", "config.json")
+        else:
+            config = root / "config.yaml"
+            proxy = dict(proxy)
+            proxy["name"] = "OPEN_NODE_SPEEDTEST_PROXY"
+            config.write_text(yaml.safe_dump({
+                "mixed-port": port,
+                "allow-lan": False,
+                "mode": "rule",
+                "log-level": "silent",
+                "proxies": [proxy],
+                "proxy-groups": [{
+                    "name": "OPEN_NODE_SPEEDTEST_GROUP", "type": "select",
+                    "proxies": ["OPEN_NODE_SPEEDTEST_PROXY"],
+                }],
+                "rules": ["MATCH,OPEN_NODE_SPEEDTEST_GROUP"],
+            }, allow_unicode=True, sort_keys=False), "utf-8")
+            arguments = (str(binary), "-d", str(root), "-f", str(config))
         process = await asyncio.create_subprocess_exec(
-            str(binary), "-d", str(root), "-f", str(config),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            *arguments, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         try:
             await self._wait_port(process, port)
             return await asyncio.to_thread(self._measure, port, **options)
         finally:
             if process.returncode is None:
-                process.terminate()
+                with suppress(ProcessLookupError):
+                    process.terminate()
                 with suppress(asyncio.TimeoutError):
                     await asyncio.wait_for(process.wait(), 5)
                 if process.returncode is None:

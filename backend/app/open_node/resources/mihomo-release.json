@@ -12,5 +12,20 @@
       "sha256": "58896873736d28628f66de3677c8654fa0f180662523148e136cff4f6e890069",
       "compressed_bytes": 16965828
     }
+  },
+  "sing_box": {
+    "version": "v1.14.0",
+    "assets": {
+      "linux-amd64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.0/sing-box-1.14.0-linux-amd64.tar.gz",
+        "sha256": "2375de6999f4f56ab46b4fc5ddf26a6aba1d3e61a0f4e7ddec2f4690457d5f63",
+        "compressed_bytes": 31639897
+      },
+      "linux-arm64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.0/sing-box-1.14.0-linux-arm64.tar.gz",
+        "sha256": "04d9b40bc98dc55b6f509ce3292145c65478f65866bea64826ebb2f382385088",
+        "compressed_bytes": 29059388
+      }
+    }
   }
 }
