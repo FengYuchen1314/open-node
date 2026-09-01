@@ -2210,6 +2210,7 @@ require_public_gateway_ports_available() {
     tcp_port_is_listening "$public_port" \
       && die "public HTTPS port $public_port is already in use"
   fi
+  return 0
 }
 
 preflight_fresh_ports() {
@@ -2226,6 +2227,7 @@ preflight_fresh_ports() {
   if [[ "$mode" != "off" ]]; then
     require_public_gateway_ports_available "$mode" "$public_port"
   fi
+  return 0
 }
 
 public_gateway_endpoints_are_healthy() {

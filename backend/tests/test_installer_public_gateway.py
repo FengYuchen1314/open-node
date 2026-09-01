@@ -237,6 +237,35 @@ def test_fresh_default_auto_ip_gateway_sets_consistent_private_runtime(tmp_path)
 
 
 @pytest.mark.parametrize(
+    "overrides",
+    [
+        {},
+        {"OPEN_NODE_PUBLIC_HOSTNAME": "panel.example.com"},
+    ],
+    ids=["ip", "dual"],
+)
+def test_fresh_public_port_preflight_succeeds_when_all_ports_are_free(
+    tmp_path, overrides
+):
+    result, candidate = candidate_environment(tmp_path, overrides=overrides)
+    assert result.returncode == 0, result.stderr
+    definitions = installer_definitions(tmp_path)
+    preflight = run_bash(
+        r'''
+source "$1"
+trap - EXIT INT TERM HUP
+tcp_port_is_listening() { return 1; }
+preflight_fresh_ports "$2"
+printf 'preflight-complete\n'
+''',
+        definitions=definitions,
+        arguments=(candidate,),
+    )
+    assert preflight.returncode == 0, preflight.stderr
+    assert preflight.stdout == "preflight-complete\n"
+
+
+@pytest.mark.parametrize(
     "overrides,expected_ip,expected_hostname,expected_url",
     [
         (
