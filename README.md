@@ -102,9 +102,10 @@ existing output, and never publishes decrypted plaintext. The control plane now
 also provides [consistent snapshots](docs/backup-runtime.md) and an
 [administrator Web backup page](docs/backups.md): fresh password/MFA proof,
 background creation, bounded retention and encrypted download to an age public
-recipient. Native v1 offline restore and isolated first-boot review are available;
-browser upload restore remains unfinished. The existing stopped-volume installer
-backup is unchanged. See the guides for private-key
+recipient. Native v1 browser/offline restore, no-administrator first-run restore
+and isolated first-boot review are available. Browser restore validates into a
+new private tree, switches only during restart and retains the prior tree for
+rollback. The existing stopped-volume installer backup is unchanged. See the guides for private-key
 and temporary-space requirements; a successful envelope check is not sender
 authentication.
 

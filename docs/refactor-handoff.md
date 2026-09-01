@@ -8,6 +8,17 @@
 导入/接管或 Telegram Bot/Mini App，也不把它们列为交付阻塞。保留此前已实现的代码，
 不因范围调整删除用户数据或已有功能。下文旧批次中的 Bot、完整迁移等优先级已失效。
 
+最新候选 `776b36f`（测试夹具注册修正 `ee167cc`）按固定官方
+`internal/handler/backup.go` 补齐浏览器恢复和无管理员初始化恢复。管理员页支持 age/明文
+v1 原始流上传、当前密码/MFA、可信来源及替换确认；初始化页复用本地签发的 30 分钟凭证，
+不先创建空管理员。服务在数据卷私有目录完成解密、全包/SQLite/密钥校验和恢复隔离，准备
+成功前不覆盖当前库；容器重启入口通过持久激活日志切换目录并保留旧树，恢复后仍强制管理员
+复核与再次重启。固定官方 age 下新增 3 项通过，浏览器/备份/初始化/离线恢复邻近
+**67 项通过、1 项既有跳过**；前端相关四文件合计 **54 项通过**，类型检查和生产
+Docker 构建通过。隔离目录 `/tmp/open-node-browser-restore.fhN8A8/repo`，镜像
+`open-node-browser-restore-test:776b36f`；生产 `/opt/open-node`、生产容器和数据库未接触。
+PostgreSQL 新部署/恢复仍是下一项，旧 mmwx 备份转换继续排除。
+
 最新候选按固定官方 `logs_tables.go`、`security_logs.go`、`brute_force.go`、
 `security_settings.go` 和登录处理器补齐安全事件、订阅暴力探测与 IP 封禁。系统设置新增
 中文安全控制台，可查看登录失败/锁定、订阅探测、自动/手工封禁和解封，调整失败次数、
@@ -215,8 +226,9 @@ App/Node 类型检查、主站构建通过；初次 Ruff 的格式问题已修�
 首次启动只放行管理员认证、恢复复核及所需页面，所有后台 worker 和 Agent/订阅访问暂停；
 中文 Ant Design 复核页面要求当前密码/MFA及三项确认，保存后仍需显式重启。
 自动证书/通知开关保持关闭，重新启用后的订阅访问协调可能产生新命令。
-使用方式及独立 Docker Compose 模板见 [backups.md](backups.md)。官方上传恢复、无用户初始化恢复、
-旧 mmwx 包转换、PostgreSQL 迁移仍未实现，不能把本轮称为全部恢复模式完成。
+使用方式及独立 Docker Compose 模板见 [backups.md](backups.md)。该历史批次当时尚未实现
+官方上传恢复、无用户初始化恢复、旧 mmwx 包转换和 PostgreSQL 迁移，不能把当时结果称为
+全部恢复模式完成；前两项现已由本文顶部的最新候选补齐。
 VPS 记录在 `/tmp/open-node-restore.HnltFLbA/evidence`、`evidence-r2`、`evidence-r3`；
 首轮夹具状态码、CLI 帮助/错误兼容问题已修正，恢复链路 12 项在 R2 通过；R3 增补
 SQLite 非普通 schema、复核记录、安装票据撤销与 Compose 模板等，7 项通过。
@@ -349,22 +361,24 @@ test-only 修正 `100d93f` 已完成 7 例定向验证、计时器负控、完�
 外部订阅已有管理员和用户自助手动 YAML/URI/Base64 导入；定时同步和
 规则/provider 生态仍有缺口。用法和密钥恢复见
 [`external-subscriptions.md`](external-subscriptions.md)，官方源码接点与原设计记录见
-[`external-subscriptions-plan.md`](external-subscriptions-plan.md)。通知、完整迁移和
-受控备份恢复也未完成。管理员 Telegram 配置、测试和套餐到期提醒已在 `bf8eaa8`
+[`external-subscriptions-plan.md`](external-subscriptions-plan.md)。完整迁移与 Bot 已按当前范围排除；
+受控浏览器/离线备份恢复已经完成。管理员 Telegram 配置、测试和套餐到期提醒已在 `bf8eaa8`
 发布，用法见 [`notifications.md`](notifications.md)，官方源码接点、安全边界
 和验收设计见 [`notifications-plan.md`](notifications-plan.md)。隔离整体验收、
 精确提交镜像和 CI 已通过。没有向真实 Telegram 聊天发送消息，也没有升级生产。
 站点文字首期的功能和限制见 [`system-settings.md`](system-settings.md)，官方源码
 依据见 [`system-settings-plan.md`](system-settings-plan.md)。它已在 `f0ed515` 独立
 验收并发布，不能借用通知版本的结果。名称公开可见；本期不做 Logo、任意键值
-或安全开关。应用内备份创建/下载现已完成，恢复未完成；[`backup-format.md`](backup-format.md) 说明
+或安全开关。应用内备份创建/下载及 SQLite 浏览器/离线恢复现已完成；
+[`backup-format.md`](backup-format.md) 说明
 格式工具、只读 CLI 及单接收者 age 加密；这些通用格式工具本身不验证数据库、密钥
 配对或快照。开发候选的实际快照与依赖检查见 [`backup-runtime.md`](backup-runtime.md)，
 它仍不证明发送者身份、远端 Agent 信任或恢复就绪。
 [`backup-plan.md`](backup-plan.md) 保留已核对的官方差异、全部写入路径和后续恢复
 边界。续费已加入独立网页申请、人工口令核对、幂等审批和事务内延期，
 不依赖 Bot，不自动收款，也不重置流量；见 [`renewals.md`](renewals.md)。
-接下来补受控恢复、在线 IP 和其余矩阵缺口，不要重做已完成的网页创建/下载或既有冷备。
+接下来补 PostgreSQL 新部署/恢复和其余矩阵缺口，不要重做已完成的网页创建/下载、
+SQLite 恢复或既有冷备。
 这不是首发完成度：受限 Preview 可以明确只支持 Debian 12 amd64、单控制面/
 单 worker、managed Agent/Xray 和新装或受控迁移。历史私有资源发现、部分旧
 Agent 路径和更广外部环境仍未闭环，因此不能宣布完整替代 MMWX，但它们不应

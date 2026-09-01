@@ -80,7 +80,8 @@ docker compose exec -T open-node open-node-admin prepare-setup
 实例不能重新签发凭证；删除管理员记录也不会重新开放初始化。忘记密码使用
 [本地恢复命令](administrator-access.md)，不要删除数据库。
 
-本功能面向新建单机 SQLite 部署。暂不包括首次启动上传备份、PostgreSQL 配置或
-DNS 账户配置。主控 HTTPS 可由根安装器在域名解析就绪后接入；
-现有备份恢复仍按
-[离线恢复及首次启动复核](backups.md)执行，恢复会使初始化凭证失效。
+本功能面向新建单机 SQLite 部署。有效初始化凭证也可在页面选择“从备份恢复现有实例”，
+上传本项目 v1 age/明文备份；准备成功后由容器重启激活，再使用备份中的管理员复核。
+恢复不会先创建空管理员，并使初始化凭证失效。完整边界见
+[浏览器/离线恢复及首次启动复核](backups.md)。PostgreSQL 配置和 DNS 账户配置仍未包含。
+主控 HTTPS 可由根安装器在域名解析就绪后接入。

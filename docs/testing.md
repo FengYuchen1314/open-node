@@ -1,5 +1,29 @@
 # Testing
 
+## 浏览器上传恢复与无管理员初始化恢复 — 2026-09-01
+
+实现依据为固定官方 `miaomiaowuX` 提交 `c12ce653…` 的
+`internal/handler/backup.go` 管理员/首次初始化恢复入口。功能候选为 `776b36f`，测试夹具
+注册修正为 `ee167cc`。VPS 只使用 `/tmp/open-node-browser-restore.fhN8A8/repo` 和独立镜像
+`open-node-browser-restore-test:776b36f`；未读取或修改生产 `/opt/open-node`、生产容器和库。
+
+- 固定官方 age v1.3.2 与校验过摘要的 age-keygen 下，新增后端 **3 项通过**：管理员明文
+  上传/准备/重启激活、无管理员初始化凭证的真实 age 恢复、未完成上传清理与槽位释放。
+  断言准备前当前 SQLite 未被恢复数据覆盖；激活后旧库和上传目录位于回滚树，新库会话清除、
+  恢复记录存在并进入隔离复核。
+- 浏览器恢复、Web 备份 API、首次初始化、离线恢复四个相邻文件合计 **67 项通过、1 项既有
+  跳过**，耗时 58.81 秒。新增测试单独运行为 3/3 通过；最初三项跳过是未设置 opt-in 官方
+  age 路径，设置固定工具后实际执行通过，不把跳过计作成功。
+- 前端备份/初始化服务及两个中文 Ant Design 面板四文件合计 **54 项通过**；随后修正一条
+  更新文案的旧断言并单项通过。类型检查通过；精确候选 Docker 构建执行 `npm run build`
+  成功，仅有既有大 chunk 提示。
+- 上传是带长度的原始二进制流，数据卷内最多两个、30 分钟有效；私钥/TOTP/密码不进 URL。
+  准备发布新的私有树和激活日志，入口脚本在 SQLite 打开前切换，支持按阶段重入。托管
+  Compose 固定启用准备后的容器重启；非 SQLite/非默认同根布局不暴露该入口。
+
+本门不代表 PostgreSQL 恢复、旧 mmwx 包转换、真实公网域名浏览器或远端 Agent 状态已经
+验收。旧包转换已按用户范围排除；PostgreSQL 是后续独立批次。
+
 ## 安全事件、订阅暴力探测与 IP 封禁 — 2026-09-01
 
 实现依据为固定官方 `logs_tables.go`、`security_logs.go`、`brute_force.go`、
@@ -410,8 +434,9 @@ and signature; that exact test passed in R3. The old run remains failed, not
 retroactively green. Official-age and other opt-in tests were actually exercised
 in their VPS gates; CI's skipped tests are not counted as passes.
 
-This implements the documented offline v1 restore workflow, not browser upload,
-initial-setup restore, legacy MMWX backup conversion or PostgreSQL migration.
+That recorded batch implemented the documented offline v1 restore workflow, not browser upload,
+initial-setup restore, legacy MMWX backup conversion or PostgreSQL migration. Browser and
+initial-setup restore are covered by the newer gate at the top of this document.
 
 ## Online users/IP and Agent 0.3.0a1
 
