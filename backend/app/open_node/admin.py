@@ -23,12 +23,21 @@ def main() -> None:
     parser.add_argument(
         "--json", action="store_true", help="Print the local setup credential as JSON",
     )
+    parser.add_argument(
+        "--if-unconfigured",
+        action="store_true",
+        help="Issue a setup credential only when the instance is not initialized",
+    )
     args = parser.parse_args()
     if args.action == "prepare-setup":
         if args.password_stdin:
             parser.error("prepare-setup does not accept a password")
-        prepare_setup(parser, json_output=args.json)
+        prepare_setup(
+            parser, json_output=args.json, if_unconfigured=args.if_unconfigured,
+        )
         return
+    if args.if_unconfigured:
+        parser.error("--if-unconfigured is only supported by prepare-setup")
     if args.json:
         parser.error("--json is only supported by prepare-setup")
     password = sys.stdin.readline().rstrip("\r\n") if args.password_stdin else getpass("Password: ")
@@ -65,7 +74,7 @@ def main() -> None:
         print("Administrator created.")
 
 
-def prepare_setup(parser, *, json_output=False):
+def prepare_setup(parser, *, json_output=False, if_unconfigured=False):
     settings = get_settings()
     restrict_postgres_application_role(settings.database_url)
     barrier = configured_backup_barrier(settings.database_url, settings.control_state_dir)
@@ -77,6 +86,9 @@ def prepare_setup(parser, *, json_output=False):
             finally:
                 auth.engine.dispose()
     except InitialSetupError as exc:
+        if if_unconfigured and exc.code == "setup_already_completed":
+            print("此实例已初始化，无需签发初始化凭证。")
+            return
         message = (
             "此实例已初始化。请登录；忘记密码时使用 reset-password。"
             if exc.code == "setup_already_completed" else "初始化凭证暂不可用，请稍后重试。"

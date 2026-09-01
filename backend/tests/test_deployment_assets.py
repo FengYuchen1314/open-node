@@ -126,6 +126,9 @@ def test_installer_manifest_v2_records_the_fixed_62031_runtime_contract():
             'CANDIDATE_SOURCE="$INSTALL_DIR"', reinstall_start
         )
     ]
+    reinstall = installer[
+        reinstall_start : installer.index("\nupdate_existing() {", reinstall_start)
+    ]
 
     assert 'readonly MANIFEST_VERSION="2"' in installer
     assert 'readonly RUNTIME_CONTAINER_PORT="62031"' in installer
@@ -138,6 +141,13 @@ def test_installer_manifest_v2_records_the_fixed_62031_runtime_contract():
     assert reinstall_running.index("provision_application_update_helper") < reinstall_running.index(
         "reconcile_public_gateway"
     )
+    assert reinstall_running.index("reconcile_public_gateway") < reinstall_running.index(
+        "ensure_administrator_setup"
+    ) < reinstall_running.index("log_success")
+    assert reinstall.count("ensure_administrator_setup") == 2
+    assert reinstall.rindex("reconcile_public_gateway") < reinstall.rindex(
+        "ensure_administrator_setup"
+    ) < reinstall.rindex("log_success")
 
 
 def test_managed_public_gateway_is_pinned_and_keeps_the_app_on_loopback():

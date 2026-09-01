@@ -320,7 +320,7 @@ def test_cli_issue_does_not_read_password_and_rejects_existing_admin(setup_app):
         return subprocess.run([sys.executable, "-m", "open_node.admin", *args],
                               env=environment, input="", text=True, capture_output=True, timeout=15)
 
-    first = run("prepare-setup", "--json")
+    first = run("prepare-setup", "--json", "--if-unconfigured")
     assert first.returncode == 0, first.stderr
     issued = json.loads(first.stdout)
     assert len(issued["setup_token"]) == 43
@@ -330,3 +330,7 @@ def test_cli_issue_does_not_read_password_and_rejects_existing_admin(setup_app):
     assert result.returncode == 1 and result.stdout == ""
     assert issued["setup_token"] not in result.stderr
     assert "已初始化" in result.stderr
+    idempotent = run("prepare-setup", "--if-unconfigured")
+    assert idempotent.returncode == 0 and idempotent.stderr == ""
+    assert "无需签发" in idempotent.stdout
+    assert issued["setup_token"] not in idempotent.stdout

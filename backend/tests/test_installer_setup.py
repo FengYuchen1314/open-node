@@ -21,11 +21,14 @@ ADMIN_PASSWORD_FILE=''
 log() { printf '%s\\n' "$*"; }
 die() { printf '%s\\n' "$*" >&2; exit 1; }
 compose_with() { printf 'COMPOSE %s\\n' "$*"; }
+read_env_value() { return 1; }
 """
 
 
-@pytest.mark.parametrize("mode", ["auto", "web"])
-def test_default_browser_enrollment_does_not_prompt_for_password(mode):
+@pytest.mark.parametrize(
+    ("mode", "idempotent"), [("auto", True), ("web", False)],
+)
+def test_default_browser_enrollment_does_not_prompt_for_password(mode, idempotent):
     script = STUBS + functions("prepare_browser_setup", "create_administrator")
     result = subprocess.run(
         ["bash", "-eu", "-c", script + f"\nCREATE_ADMIN={mode}\ncreate_administrator"],
@@ -33,6 +36,7 @@ def test_default_browser_enrollment_does_not_prompt_for_password(mode):
     )
     assert result.returncode == 0, result.stderr
     assert "exec -T open-node open-node-admin prepare-setup" in result.stdout
+    assert ("--if-unconfigured" in result.stdout) is idempotent
     assert "--password-stdin" not in result.stdout
 
 
@@ -71,6 +75,21 @@ log should-not-reach
     assert result.returncode == 1
     assert "签发失败" in result.stderr
     assert "should-not-reach" not in result.stdout
+
+
+@pytest.mark.parametrize(("mode", "expected"), [("0", ""), ("auto", "prepared")])
+def test_install_setup_respects_disabled_mode(mode, expected):
+    script = STUBS + functions("ensure_administrator_setup") + """
+create_administrator() { log prepared; }
+CREATE_ADMIN=$1
+ensure_administrator_setup
+"""
+    result = subprocess.run(
+        ["bash", "-eu", "-c", script, "test", mode],
+        text=True, capture_output=True, timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
 
 
 def test_terminal_password_file_remains_private_stdin(tmp_path):

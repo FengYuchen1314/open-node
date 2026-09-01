@@ -2947,15 +2947,36 @@ backup_stopped_volume() {
 }
 
 prepare_browser_setup() {
-  compose_with "$INSTALL_DIR" "$ENV_FILE" exec -T open-node open-node-admin prepare-setup \
+  local if_unconfigured="${1:-0}" public_hostname public_ip public_port
+  local -a setup_args=(prepare-setup)
+  [[ "$if_unconfigured" == "0" ]] || setup_args+=(--if-unconfigured)
+  compose_with "$INSTALL_DIR" "$ENV_FILE" exec -T open-node open-node-admin "${setup_args[@]}" \
     || die "初始化凭证签发失败。服务数据已保留，请检查后重新运行 setup。"
-  log "请通过 SSH 隧道或可信 HTTPS 打开面板，填写终端凭证完成初始化。"
+  public_hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
+  public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
+  public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
+  if [[ -n "$public_hostname" ]]; then
+    log "若上方签发了凭证，请打开 https://$public_hostname 完成初始化；若已初始化，请直接登录。"
+  elif [[ -n "$public_ip" ]]; then
+    log "若上方签发了凭证，请打开 $(public_ip_url "$public_ip" "$public_port") 完成初始化；若已初始化，请直接登录。"
+  else
+    log "公网入口已关闭；若上方签发了凭证，请通过 SSH 隧道完成初始化。"
+  fi
   log "凭证过期后，可重新运行此安装脚本的 setup 命令；不会重置已有管理员。"
+}
+
+ensure_administrator_setup() {
+  [[ "$CREATE_ADMIN" != "0" ]] || return 0
+  create_administrator
 }
 
 create_administrator() {
   if [[ "$CREATE_ADMIN" == "web" || ( "$CREATE_ADMIN" == "auto" && -z "$ADMIN_PASSWORD_FILE" ) ]]; then
-    prepare_browser_setup
+    if [[ "$CREATE_ADMIN" == "auto" ]]; then
+      prepare_browser_setup 1
+    else
+      prepare_browser_setup 0
+    fi
     return
   fi
   local password="" confirmation="" password_mode password_owner
@@ -3116,7 +3137,7 @@ install_fresh() {
   TXN_PHASE="idle"
   provision_application_update_helper
   reconcile_public_gateway
-  [[ "$CREATE_ADMIN" == "0" ]] || create_administrator
+  ensure_administrator_setup
   log_success
 }
 
@@ -3135,6 +3156,7 @@ reinstall_existing() {
       || die "deployment is unhealthy"
     provision_application_update_helper
     reconcile_public_gateway
+    ensure_administrator_setup
     log_success
     return
   fi
@@ -3165,6 +3187,7 @@ reinstall_existing() {
   TXN_PHASE="idle"
   provision_application_update_helper
   reconcile_public_gateway
+  ensure_administrator_setup
   log_success
 }
 

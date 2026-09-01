@@ -99,10 +99,11 @@ export default function InitialSetupPanel() {
     <Button type="primary" onClick={() => window.location.reload()}>重新读取实例状态</Button>
   </Space>;
   return <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-    <Alert type="info" showIcon title="尚未配置管理员账户。" description="请通过 SSH 隧道或可信 HTTPS 访问。初始化凭证由安装终端提供，有效期 30 分钟。" />
+    <Alert type="info" showIcon title="尚未配置管理员账户。"
+      description="一键安装默认提供 https://公网IP:58090 可信 HTTPS。安装全部完成后，终端会直接显示有效期 30 分钟的一次性初始化凭证。" />
     {error && <Alert type="error" showIcon title={error} role="alert" />}
     {!status?.available ? <>
-      <Typography.Paragraph>在服务器上运行安装脚本的 <Typography.Text code>setup</Typography.Text> 命令，或在面板容器内运行 <Typography.Text code>open-node-admin prepare-setup</Typography.Text>。重新生成后旧凭证立即失效，请勿分享终端输出。</Typography.Paragraph>
+      <Typography.Paragraph>当前初始化凭证不存在或已过期。请在服务器上重新运行安装脚本的 <Typography.Text code>setup</Typography.Text> 命令，或在面板容器内运行 <Typography.Text code>open-node-admin prepare-setup</Typography.Text>。只有安装时显式关闭了公网入口，才需要通过 SSH 隧道访问；重新生成后旧凭证立即失效，请勿分享终端输出。</Typography.Paragraph>
       <Button loading={busy} onClick={() => void refresh()}>重新读取状态</Button>
     </> : <Form layout="vertical" onFinish={() => void submit()} style={{ width: "100%" }}>
       <Form.Item label="初始化凭证" htmlFor="setup-token" required><Input.Password id="setup-token" value={token} onChange={e => setToken(e.target.value)} autoComplete="off" maxLength={43} disabled={busy} /></Form.Item>
@@ -116,7 +117,7 @@ export default function InitialSetupPanel() {
       <Form.Item label="页面品牌文字" htmlFor="setup-brand" required><Input id="setup-brand" value={brand} onChange={e => setBrand(e.target.value)} disabled={busy} /></Form.Item>
       <Form.Item><Checkbox checked={accepted} onChange={e => setAccepted(e.target.checked)} disabled={busy}>确认这是新安装，创建首个管理员</Checkbox></Form.Item>
       <Button type="primary" htmlType="submit" loading={busy} disabled={!accepted || !token || !username || !password || !confirmation} block>完成初始化</Button>
-      <Typography.Paragraph type="secondary" style={{ marginTop: 12 }}>初始化不会自动配置域名或 HTTPS，也不会自动登录。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary" style={{ marginTop: 12 }}>请使用安装完成时终端显示的凭证，在默认可信 HTTPS 地址完成初始化；初始化成功后再使用管理员账户登录。</Typography.Paragraph>
     </Form>}
     {status?.available && <>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>

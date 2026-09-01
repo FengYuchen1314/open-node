@@ -19,6 +19,13 @@ function fill() {
   fireEvent.click(screen.getByRole("checkbox"));
 }
 describe("Chinese browser first-run setup", () => {
+  it("presents trusted public IP HTTPS as the one-click default", async () => {
+    renderUi(<InitialSetupPanel />); await flush();
+    expect(screen.getByText(/一键安装默认提供 https:\/\/公网IP:58090 可信 HTTPS/)).toBeTruthy();
+    expect(screen.getByText(/安装全部完成后，终端会直接显示有效期 30 分钟的一次性初始化凭证/)).toBeTruthy();
+    expect(screen.getByText(/请使用安装完成时终端显示的凭证，在默认可信 HTTPS 地址完成初始化/)).toBeTruthy();
+    expect(screen.queryByText("初始化不会自动配置域名或 HTTPS，也不会自动登录。")).toBeNull();
+  });
   it("creates the administrator once, clears secrets immediately and requires normal login", async () => {
     const pending = deferred<void>(); vi.mocked(completeInitialSetup).mockReturnValue(pending.promise);
     renderUi(<InitialSetupPanel />); await flush(); fill();
@@ -63,6 +70,8 @@ describe("Chinese browser first-run setup", () => {
     vi.mocked(getInitialSetupStatus).mockResolvedValue({ ...ready, available: false, expires_at: null });
     renderUi(<InitialSetupPanel />); await flush();
     expect(screen.getByText("open-node-admin prepare-setup")).toBeTruthy();
+    expect(screen.getByText(/当前初始化凭证不存在或已过期/)).toBeTruthy();
+    expect(screen.getByText(/只有安装时显式关闭了公网入口，才需要通过 SSH 隧道访问/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "完成初始化" })).toBeNull();
   });
   it("restores with the first-run credential without creating an empty administrator", async () => {
