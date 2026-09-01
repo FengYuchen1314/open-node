@@ -15,8 +15,9 @@ that every MMWX migration gate is complete. See [migration-map.md](migration-map
   Hosts with an existing edge proxy should keep using the manual mode below.
 - Backups on a private filesystem outside the application's volume.
 
-The shipped setup uses one backend process, one host-local SQLite database,
-and one certificate worker. Do not scale the service or add Uvicorn workers:
+The shipped setup uses one backend process, either one host-local SQLite database or one
+installer-managed PostgreSQL 15 service, and one certificate worker. Do not scale the service
+or add Uvicorn workers:
 the active Agent connections and public streams are process-local. Multi-host
 operation is not supported. Linux amd64 is tested; the lego downloader also
 has an arm64 checksum, but an arm64 image has not been validated.
@@ -41,6 +42,33 @@ administrator API login, status, same-revision update, data-preserving uninstall
 and exact fixture cleanup. The separate maintainer smoke covers rollback and
 failure injection as described below.
 
+SQLite is the default. For a fresh PostgreSQL deployment, use the same fully downloaded
+installer and select the backend on its first invocation:
+
+```bash
+sudo env OPEN_NODE_DATABASE_BACKEND=postgresql bash "$installer"
+```
+
+The installer generates a 256-bit alphanumeric PostgreSQL password, writes it only to the
+mode-`0600` environment, starts the pinned official PostgreSQL 15 image on the private Compose
+network, waits for database health, and publishes no database port. An operator-supplied
+`OPEN_NODE_POSTGRES_PASSWORD` is allowed only at first install and must contain 32–128 ASCII
+letters or digits. The selected backend is recorded in the installer manifest and cannot be
+changed by `update` or `reinstall`. This is a fresh-deployment choice, not an SQLite-to-PostgreSQL
+or old-MMWX migration path.
+
+Before application SQL or a browser restore can run, Open Node verifies the dedicated
+`open_node` role and self-demotes the official image's bootstrap role to non-superuser. It retains
+only `CREATEDB`, which is required for the isolated staging-database create/drop/rename workflow;
+`CREATEROLE`, replication, row-security bypass and inherited role memberships are refused. The
+installer checks this role contract again after the application becomes healthy.
+
+The supported PostgreSQL recovery contract is deliberately narrow: restore a backup made by the
+same Open Node source revision with that revision's exact image and configuration. A normal,
+reviewed update may run that release's own schema changes, but this does not make arbitrary older
+or newer PostgreSQL dumps restore-compatible. No legacy MMWX import, cross-backend conversion or
+cross-schema-version recovery is promised.
+
 Downloading to a temporary file first prevents a partial transfer from being
 executed as a shell program and leaves the terminal on standard input. It does
 not authenticate the download. The URL follows mutable `main`, and the script
@@ -60,7 +88,7 @@ The installer performs these bounded actions:
 3. creates mode-`0600` environment and manifest files. The manifest records the
    repository/ref, directory and Compose identities, deployed revision, unique
    image tag, and immutable image ID;
-4. validates the candidate Compose image and data volume, builds a
+4. validates the candidate Compose image and data volume(s), builds a
    transaction-unique `source-<revision>-<transaction>` image, starts it without
    rebuilding, and verifies that the container uses the recorded image ID, has
    the requested published binding, and passes `/healthz`; and
@@ -157,6 +185,7 @@ sudo env OPEN_NODE_CONFIG_DIR=/srv/open-node-config bash /path/to/reviewed/insta
 ```
 
 Useful unattended overrides include `OPEN_NODE_REF`,
+`OPEN_NODE_DATABASE_BACKEND` (fresh install only),
 `OPEN_NODE_HTTP_PORT`, `OPEN_NODE_INSTALL_DIR`, `OPEN_NODE_CONFIG_DIR`,
 `OPEN_NODE_BACKUP_DIR`, `OPEN_NODE_PROJECT_NAME`, and
 `OPEN_NODE_PUBLIC_HOSTNAME`. A public plain-HTTP bind
@@ -167,10 +196,10 @@ topology. For a custom proxy, set
 described below.
 
 This installer deliberately targets a new or already installer-managed,
-single-host Docker/SQLite deployment. It does not adopt an existing manual
+single-host Docker deployment using SQLite or the pinned managed PostgreSQL service. It does not adopt an existing manual
 Compose installation, merge data, manage public DNS or take over an existing proxy,
 restore a backup, prune retained images/backups, install or migrate remote
-Agents, or claim support for the upstream MMWX native binary, PostgreSQL,
+Agents, change database backends, or claim support for the upstream MMWX native binary,
 embedded Nginx, Windows, rootless Docker, multi-host or multi-worker operation.
 
 ### Enable panel-issued Agent commands
@@ -281,6 +310,14 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml exec open-node open
 curl --fail http://127.0.0.1:8080/healthz
 ```
 
+For a manual PostgreSQL deployment, generate and store a private alphanumeric password, set
+`OPEN_NODE_DATABASE_BACKEND=postgresql`, set
+`OPEN_NODE_DATABASE_URL=postgresql+psycopg://open_node:PASSWORD@postgres:5432/open_node`, and
+set the same `OPEN_NODE_POSTGRES_PASSWORD`. Add `-f deploy/compose.postgresql.yaml` to every
+Compose command. The PostgreSQL service has no host port and its `postgres-data` volume is
+separate from the application-state `data` volume. Prefer the installer unless you are prepared
+to own these identities and the two-volume recovery procedure.
+
 The administrator command prompts for a password without echoing it. There
 is no default account, and another `create` cannot overwrite an existing
 administrator. For recovery, use the same command with `reset-password`;
@@ -304,7 +341,9 @@ a GeoIP condition. See [subscription customizations](subscription-customizations
 The port is bound to host loopback only. The service runs as UID/GID 10001,
 with no capabilities, no privilege escalation, a read-only image filesystem,
 a temporary `/tmp`, and a private named volume at `/var/lib/open-node`.
-SQLite, the certificate vault key, and lego account data live in that volume.
+With SQLite, the database, certificate vault key, and lego account data live in that volume.
+With PostgreSQL, application files and keys remain there while database pages live in the
+separate private `postgres-data` volume.
 Do not mount the Docker socket, host configuration directories, or a public
 download directory into the service. For bind mounts, provision the directory
 for UID/GID 10001 with mode 0700 yourself; an arbitrary empty bind mount does
@@ -389,8 +428,9 @@ the bundled same-origin frontend.
 
 ## Back Up And Restore
 
-Back up the entire data volume while the service is stopped, not just the
-SQLite file. The vault key is required to decrypt certificate versions and
+Back up the entire application-state volume while the service is stopped, not just the
+database. The certificate, external-subscription, federation and notification vault keys are
+required to decrypt their database records, and
 DNS credentials; a database-only restore is incomplete. The backup also
 contains administrator state, Agent tokens, subscription secrets, ACME
 accounts, and queued deployment keys. Store it privately and encrypt it for
@@ -408,13 +448,20 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --no-build --
 tar -tzf "$BACKUP"
 ```
 
+That manual example is for SQLite. For PostgreSQL, a filesystem copy of a live `postgres-data`
+volume is not the documented logical backup. Use the administrator v1 backup or the installer
+update transaction, both of which run the image's official `pg_dump` custom format and verify it
+by restoring into a temporary database. The installer recovery bundle contains both
+`volume.tar.gz` for application state and `postgres.dump` for the database, plus the PostgreSQL
+Compose overlay and hashes.
+
 Check every command's exit status. If archive creation fails, restart the
 service, retain the previous backup, and do not proceed with an upgrade.
 Record the deployed image ID/tag, source revision, Compose configuration,
 and proxy configuration alongside the backup. Prefer retaining the exact
 image artifact (`docker image save`) to rebuilding an old source revision.
 
-For restoration, use a fresh, uniquely named Compose project and an unused
+For restoration of that manual **SQLite** archive, use a fresh, uniquely named Compose project and an unused
 loopback port. Create a separate `deploy/.env.restore` with the original
 image tag, a different `OPEN_NODE_HTTP_PORT`, and an initially empty trusted
 proxy value. Do not change the running deployment's environment file.
@@ -457,6 +504,8 @@ stops it if necessary, and creates a new private bundle under
 `OPEN_NODE_BACKUP_DIR`. The bundle contains:
 
 - `volume.tar.gz`, a validated archive of the stopped data volume;
+- for PostgreSQL, `postgres.dump`, validated by `pg_restore --list` and a complete restore into a
+  temporary `template0` database, plus `compose.postgresql.yaml`;
 - `open-node.env`, `installer.manifest`, and the deployed `compose.yaml`; and
 - `deployment.meta`, including the old revision, tag, immutable image ID,
   Compose project/volume identity, creation time and a transaction-specific
@@ -465,6 +514,139 @@ stops it if necessary, and creates a new private bundle under
 The old image is tagged in the local Docker store; its bytes are not embedded
 in the bundle. Export that image separately for off-host or Docker-store-loss
 recovery. Bundles are never silently overwritten or pruned.
+
+#### Restore an installer PostgreSQL recovery bundle
+
+This procedure is for a trusted bundle created by `backup_stopped_volume`, not a Web v1 package.
+It deliberately creates a unique Compose project, two new empty volumes, an unused loopback port
+and an internal-only Docker network. It never edits the installed environment or names the
+production project/volumes. Use the exact image ID and revision recorded in the bundle; if the
+image is no longer in the Docker store, first load the separately retained `docker image save`
+archive and verify that it produces that ID.
+
+Run as root in Bash. Replace only `DR_BUNDLE` and, if necessary, `DR_PORT`. Do not point
+`DR_BUNDLE` at a directory that is writable by untrusted users. `SHA256SUMS` detects damaged or
+changed bundle members but is not a signature, so the bundle source must already be trusted.
+
+```bash
+set -euo pipefail
+umask 077
+
+DR_BUNDLE=/var/backups/open-node/open-node-REPLACE-ME
+DR_PORT=18081
+DR_PROJECT="open-node-dr-$(date -u +%Y%m%d%H%M%S)-$$"
+DR_ROOT="$(mktemp -d /var/tmp/open-node-dr.XXXXXX)"
+DR_ENV="$DR_ROOT/open-node.env"
+DR_ISOLATION="$DR_ROOT/compose.isolation.yaml"
+[[ "$DR_PORT" =~ ^[0-9]{2,5}$ ]]
+(( DR_PORT >= 1024 && DR_PORT <= 65535 ))
+
+test -d "$DR_BUNDLE" && test ! -L "$DR_BUNDLE"
+for artifact in SHA256SUMS compose.yaml compose.postgresql.yaml deployment.meta \
+  installer.manifest open-node.env volume.tar.gz postgres.dump; do
+  test -f "$DR_BUNDLE/$artifact" && test ! -L "$DR_BUNDLE/$artifact"
+done
+(cd "$DR_BUNDLE" && sha256sum --check SHA256SUMS)
+
+read_meta() {
+  local key="$1"
+  awk -F= -v key="$key" '
+    $1 == key { value = substr($0, length(key) + 2); found++ }
+    END { if (found != 1) exit 1; print value }
+  ' "$DR_BUNDLE/deployment.meta"
+}
+
+DR_REVISION="$(read_meta REVISION)"
+DR_IMAGE_ID="$(read_meta IMAGE_ID)"
+test "$(read_meta DATABASE_BACKEND)" = postgresql
+[[ "$DR_REVISION" =~ ^[0-9a-f]{40}$ ]]
+[[ "$DR_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+docker image inspect "$DR_IMAGE_ID" >/dev/null
+test "$(docker image inspect --format \
+  '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$DR_IMAGE_ID")" = "$DR_REVISION"
+
+DR_IMAGE_REPOSITORY=open-node-dr
+DR_IMAGE_TAG="$DR_PROJECT"
+! docker image inspect "$DR_IMAGE_REPOSITORY:$DR_IMAGE_TAG" >/dev/null 2>&1
+docker image tag "$DR_IMAGE_ID" "$DR_IMAGE_REPOSITORY:$DR_IMAGE_TAG"
+
+install -m 0600 "$DR_BUNDLE/open-node.env" "$DR_ENV"
+mkdir -m 0700 "$DR_ROOT/maintenance"
+{
+  printf '\nOPEN_NODE_IMAGE_REPOSITORY=%s\n' "$DR_IMAGE_REPOSITORY"
+  printf 'OPEN_NODE_IMAGE_TAG=%s\n' "$DR_IMAGE_TAG"
+  printf 'OPEN_NODE_REVISION=%s\n' "$DR_REVISION"
+  printf 'OPEN_NODE_BIND_ADDRESS=127.0.0.1\n'
+  printf 'OPEN_NODE_HTTP_PORT=%s\n' "$DR_PORT"
+  printf 'OPEN_NODE_TRUSTED_PROXIES=\n'
+  printf 'OPEN_NODE_PUBLIC_HOSTNAME=\n'
+  printf 'OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL=\n'
+  printf 'OPEN_NODE_APPLICATION_UPDATE_HOST_DIR=%s\n' "$DR_ROOT/maintenance"
+} >> "$DR_ENV"
+printf '%s\n' 'networks:' '  default:' '    internal: true' > "$DR_ISOLATION"
+
+dr_compose() {
+  docker compose --env-file "$DR_ENV" --project-name "$DR_PROJECT" \
+    -f "$DR_BUNDLE/compose.yaml" \
+    -f "$DR_BUNDLE/compose.postgresql.yaml" \
+    -f "$DR_ISOLATION" "$@"
+}
+
+dr_compose config --quiet
+DR_DATA_VOLUME="$(dr_compose config --format json | jq -er '.volumes.data.name')"
+DR_POSTGRES_VOLUME="$(dr_compose config --format json | jq -er '.volumes["postgres-data"].name')"
+test -z "$(docker ps -aq --filter "label=com.docker.compose.project=$DR_PROJECT")"
+! docker volume inspect "$DR_DATA_VOLUME" >/dev/null 2>&1
+! docker volume inspect "$DR_POSTGRES_VOLUME" >/dev/null 2>&1
+
+dr_compose create --no-build postgres open-node
+docker run --rm --network none --read-only --user 10001:10001 \
+  --cap-drop ALL --security-opt no-new-privileges:true \
+  --mount "type=volume,src=$DR_DATA_VOLUME,dst=/var/lib/open-node" \
+  --entrypoint python "$DR_IMAGE_ID" -c \
+  'import pathlib; raise SystemExit(0 if not any(pathlib.Path("/var/lib/open-node").iterdir()) else 1)'
+
+dr_compose up -d --no-build --wait postgres
+dr_compose exec -T postgres sh -ceu '
+  export PGPASSWORD="$POSTGRES_PASSWORD"
+  test "$(psql --username open_node --dbname open_node --tuples-only --no-align \
+    --set ON_ERROR_STOP=1 --command \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()")" = 0
+'
+dr_compose exec -T postgres pg_restore --list < "$DR_BUNDLE/postgres.dump" >/dev/null
+dr_compose exec -T postgres sh -ceu '
+  export PGPASSWORD="$POSTGRES_PASSWORD"
+  exec pg_restore --username open_node --dbname open_node --exit-on-error \
+    --single-transaction --no-owner --no-privileges
+' < "$DR_BUNDLE/postgres.dump"
+dr_compose exec -T postgres sh -ceu '
+  export PGPASSWORD="$POSTGRES_PASSWORD"
+  test "$(psql --username open_node --dbname open_node --tuples-only --no-align \
+    --set ON_ERROR_STOP=1 --command \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()")" -gt 0
+'
+
+docker run --rm -i --network none --read-only --user 10001:10001 \
+  --cap-drop ALL --security-opt no-new-privileges:true \
+  --mount "type=volume,src=$DR_DATA_VOLUME,dst=/var/lib/open-node" \
+  --entrypoint tar "$DR_IMAGE_ID" -C /var/lib/open-node -xzf - \
+  < "$DR_BUNDLE/volume.tar.gz"
+
+dr_compose up -d --no-build --wait open-node
+DR_CONTAINER="$(dr_compose ps -q open-node)"
+test -n "$DR_CONTAINER"
+test "$(docker inspect --format '{{.Image}}' "$DR_CONTAINER")" = "$DR_IMAGE_ID"
+curl --fail --show-error --silent "http://127.0.0.1:$DR_PORT/healthz"
+```
+
+The PostgreSQL password remains only in the private copied environment and the PostgreSQL
+container environment; no command expands it into an argument or terminal output. The internal
+network intentionally blocks Agent, ACME, notification and subscription egress during review.
+Keep the original project stopped and unchanged. Verify the recovered revision, administrator
+login, inventory, certificate-key access and database counts before planning a separate, explicit
+traffic cutover. On failure, `dr_compose down` removes only this recovery project's containers and
+network and preserves both recovery volumes for inspection; do not add `--volumes` until you have
+decided the recovery copy is disposable.
 
 Failure handling depends on how far the transaction progressed:
 

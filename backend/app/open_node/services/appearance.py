@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from hashlib import sha256
 
 from pydantic import ValidationError
-from sqlalchemy import CheckConstraint, Integer, LargeBinary, String, inspect, select, text
+from sqlalchemy import CheckConstraint, Integer, LargeBinary, String, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -19,6 +19,7 @@ from open_node.domain.appearance import (
     AppearanceUpdate,
 )
 from open_node.services.appearance_images import IMAGE_TYPES, validate_image
+from open_node.services.inventory import begin_serialized_write
 
 
 class AppearanceBase(DeclarativeBase):
@@ -28,7 +29,7 @@ class AppearanceBase(DeclarativeBase):
 class AppearanceRow(AppearanceBase):
     __tablename__ = "site_appearance"
     __table_args__ = (CheckConstraint("id=1"), CheckConstraint(
-        f"typeof(revision)='integer' AND revision>=0 AND revision<={MAX_REVISION}"),)
+        f"revision>=0 AND revision<={MAX_REVISION}"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     revision: Mapped[int] = mapped_column(Integer, default=0)
     default_theme: Mapped[str] = mapped_column(String(10), default="light")
@@ -39,7 +40,7 @@ class AppearanceRow(AppearanceBase):
 class AppearanceAsset(AppearanceBase):
     __tablename__ = "site_appearance_assets"
     __table_args__ = (CheckConstraint("slot IN ('logo','wallpaper')"), CheckConstraint(
-        "typeof(content)='blob' AND length(content)>0 AND "
+        "length(content)>0 AND "
         "length(content)<=CASE WHEN slot='logo' THEN 2097152 ELSE 10485760 END"),)
     slot: Mapped[str] = mapped_column(String(16), primary_key=True)
     digest: Mapped[str] = mapped_column(String(64))
@@ -53,7 +54,7 @@ class AppearanceStore:
 
     @contextmanager
     def _session(self, *, write=False):
-        if self.inventory._engine.dialect.name != "sqlite":
+        if self.inventory._engine.dialect.name not in {"sqlite", "postgresql"}:
             raise AppearanceError(503, "appearance_storage_unavailable")
         try:
             with self.inventory._session() as db:
@@ -63,7 +64,9 @@ class AppearanceStore:
                 connection = db.connection()
                 raw = connection.connection.dbapi_connection
                 try:
-                    db.execute(text("BEGIN IMMEDIATE"))
+                    begin_serialized_write(
+                        db, self.inventory._engine, "appearance-write"
+                    )
                     yield db
                     db.commit()
                 except BaseException:
@@ -94,8 +97,6 @@ class AppearanceStore:
         return current
 
     def create_schema(self):
-        if self.inventory._engine.dialect.name != "sqlite":
-            return
         with self._session(write=True) as db:
             exists = inspect(db.connection()).has_table(AppearanceRow.__tablename__)
             AppearanceBase.metadata.create_all(db.connection())

@@ -28,10 +28,12 @@ def _package(
         "agent_identity": (
             "included" if "secrets/agent-identity.seed" in names else "not_configured"
         ),
+        "federation": "included" if "data/federation/vault.key" in names else "not_configured",
     }
     roles = {
         "certificates": "certificate_state",
         "external-subscriptions": "external_state",
+        "federation": "federation_state",
         "notifications": "notification_state",
     }
     entries = []

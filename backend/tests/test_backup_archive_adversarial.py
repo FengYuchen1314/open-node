@@ -124,6 +124,7 @@ def _manifest(payloads: tuple[tuple[str, str, bytes], ...]) -> bytes:
             for key, role in (
                 ("certificates", "certificate_state"),
                 ("external_subscriptions", "external_state"),
+                ("federation", "federation_state"),
                 ("notifications", "notification_state"),
                 ("agent_identity", "agent_identity"),
             )

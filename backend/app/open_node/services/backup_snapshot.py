@@ -17,6 +17,7 @@ from sqlalchemy.engine import make_url
 
 from open_node.core.config import Settings
 from open_node.services.backup_coordination import BackupWriteBarrier
+from open_node.services.backup_postgres import PostgresBackupSnapshot, postgres_backup_snapshot
 from open_node.services.backup_sqlite import SQLiteBackupSnapshot, sqlite_backup_snapshot
 from open_node.services.backup_state import (
     BackupStateLayout,
@@ -36,7 +37,7 @@ class BackupSnapshotError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class CapturedControlPlaneSnapshot:
     created_at: str
-    database: SQLiteBackupSnapshot = field(repr=False)
+    database: SQLiteBackupSnapshot | PostgresBackupSnapshot = field(repr=False)
     state: StagedBackupState = field(repr=False)
     restoration_ready: bool = False
 
@@ -51,16 +52,37 @@ def configured_backup_layout(settings: Settings) -> BackupStateLayout:
         if not isinstance(settings, Settings):
             raise BackupSnapshotError()
         url = make_url(settings.database_url)
-        if (
-            url.drivername not in {"sqlite", "sqlite+pysqlite"}
-            or not url.database
-            or url.database == ":memory:"
-            or url.database.startswith("file:")
-            or "uri" in url.query
-            or any(value is not None for value in (url.username, url.password, url.host, url.port))
-        ):
+        if url.drivername in {"sqlite", "sqlite+pysqlite"}:
+            if (
+                not url.database
+                or url.database == ":memory:"
+                or url.database.startswith("file:")
+                or "uri" in url.query
+                or any(
+                    value is not None for value in (url.username, url.password, url.host, url.port)
+                )
+            ):
+                raise BackupSnapshotError()
+            database = Path(url.database).absolute()
+            state_root = database.parent
+            database_engine = "sqlite"
+            database_url = None
+        elif url.drivername == "postgresql+psycopg":
+            if (
+                settings.control_state_dir is None
+                or not url.username
+                or url.password is None
+                or not url.host
+                or not url.database
+                or set(url.query) - {"sslmode"}
+            ):
+                raise BackupSnapshotError()
+            state_root = settings.control_state_dir.absolute()
+            database = state_root / ".postgresql-database"
+            database_engine = "postgresql"
+            database_url = settings.database_url
+        else:
             raise BackupSnapshotError()
-        database = Path(url.database).absolute()
         return BackupStateLayout(
             database=database,
             certificates=settings.certificate_state_dir.absolute(),
@@ -74,10 +96,18 @@ def configured_backup_layout(settings: Settings) -> BackupStateLayout:
                 if settings.notifications_state_dir is not None
                 else database.parent / "notifications"
             ),
+            federation=(
+                settings.federation_state_dir.absolute()
+                if settings.federation_state_dir is not None
+                else database.parent / "federation"
+            ),
             agent_identity=(
                 settings.agent_identity_file.absolute()
                 if settings.agent_identity_file is not None else None
             ),
+            database_url=database_url,
+            database_engine=database_engine,
+            state_root=state_root,
         )
     except Exception:
         raise BackupSnapshotError() from None
@@ -102,13 +132,22 @@ def capture_control_plane_snapshot(
     with ExitStack() as resources:
         with barrier.snapshot() as permit:
             captured_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            database = resources.enter_context(sqlite_backup_snapshot(
-                layout.database, permit=permit, staging_directory=staging_directory,
-            ))
+            if layout.database_engine == "sqlite":
+                database = resources.enter_context(sqlite_backup_snapshot(
+                    layout.database, permit=permit, staging_directory=staging_directory,
+                ))
+            elif layout.database_engine == "postgresql" and layout.database_url is not None:
+                database = resources.enter_context(postgres_backup_snapshot(
+                    layout.database_url, staging_directory=staging_directory,
+                ))
+            else:
+                raise BackupSnapshotError()
             state = resources.enter_context(staged_backup_state(
                 layout, permit=permit, staging_directory=staging_directory,
                 database_size=database.size,
             ))
-            permit.assert_for_lock(layout.database.parent / ".open-node-backup.lock")
+            permit.assert_for_lock(
+                (layout.state_root or layout.database.parent) / ".open-node-backup.lock"
+            )
             captured = CapturedControlPlaneSnapshot(captured_at, database, state)
         yield captured

@@ -38,6 +38,41 @@ jobs:
       - run: ruff check backend
       - run: pytest backend/tests
 
+  postgresql:
+    name: PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15.18-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf75b99e791767a7a16ce69
+        env:
+          POSTGRES_DB: open_node
+          POSTGRES_USER: open_node
+          POSTGRES_PASSWORD: 0123456789abcdef0123456789abcdef
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U open_node -d open_node"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e "backend[dev]"
+      - run: ruff check backend/tests/test_backup_postgres.py backend/tests/test_postgres_security.py backend/tests/test_postgres_integration.py
+      - run: pytest -q backend/tests/test_backup_postgres.py backend/tests/test_postgres_security.py backend/tests/test_postgres_integration.py
+        env:
+          OPEN_NODE_TEST_POSTGRES_URL: postgresql+psycopg://open_node:0123456789abcdef0123456789abcdef@127.0.0.1:5432/open_node?sslmode=disable
+
   agent:
     name: Agent
     runs-on: ubuntu-24.04

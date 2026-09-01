@@ -1,13 +1,17 @@
 """Browser restore staging, first-run admission, and restart activation."""
 
 import hashlib
+import json
 import sqlite3
+from uuid import uuid4
 
 import pytest
 from conftest import ADMIN_PASSWORD, authenticated_client
 from fastapi.testclient import TestClient
+from open_node.core.config import Settings
 from open_node.domain.restore import BrowserRestoreError
 from open_node.main import create_app
+from open_node.services import browser_restore as browser_restore_module
 from open_node.services.browser_restore import (
     ACTIVATION_MARKER,
     PENDING_PREFIX,
@@ -145,3 +149,143 @@ def test_incomplete_upload_is_removed_and_does_not_consume_a_slot(saved, tmp_pat
         assert receipt.size == len(saved.raw)
     finally:
         close_app(app)
+
+
+def test_postgres_activation_preflight_failure_does_not_switch_database(
+    tmp_path, monkeypatch,
+):
+    root = tmp_path / "state"
+    root.mkdir(mode=0o700)
+    request_id = str(uuid4())
+    pending_name = PENDING_PREFIX + request_id
+    pending = root / pending_name
+    pending.mkdir(mode=0o700)
+    (pending / ".open-node-restore.json").write_text("{}", encoding="utf-8")
+    (pending / ".open-node-restore.json").chmod(0o600)
+    postgres_metadata = pending / ".open-node-postgres-restore.json"
+    postgres_metadata.write_text(
+        json.dumps(
+            {"schema_version": 1, "stage_database": "open_node_restore_deadbeef"}
+        ),
+        encoding="utf-8",
+    )
+    postgres_metadata.chmod(0o600)
+    marker = {
+        "schema_version": 1,
+        "request_id": request_id,
+        "restore_id": str(uuid4()),
+        "pending_dir": pending_name,
+        "phase": "prepared",
+        "old_entries": [],
+        "new_entries": [],
+        "database_engine": "postgresql",
+        "stage_database": "open_node_restore_deadbeef",
+    }
+    marker_path = root / ACTIVATION_MARKER
+    marker_path.write_text(json.dumps(marker), encoding="utf-8")
+    marker_path.chmod(0o600)
+    configuration = Settings(
+        database_url=(
+            "postgresql+psycopg://open_node:"
+            "0123456789abcdef0123456789abcdef@postgres:5432/open_node"
+        ),
+        control_state_dir=root,
+        certificate_state_dir=root / "certificates",
+        external_subscriptions_state_dir=root / "external-subscriptions",
+        federation_state_dir=root / "federation",
+        notifications_state_dir=root / "notifications",
+        _env_file=None,
+    )
+    switched = False
+
+    def fail_if_called(*_args, **_kwargs):
+        nonlocal switched
+        switched = True
+        raise AssertionError("database activation must follow filesystem preflight")
+
+    monkeypatch.setattr(
+        browser_restore_module, "_activate_postgres_database", fail_if_called,
+    )
+    with pytest.raises(BrowserRestoreError):
+        activate_pending_restore(configuration)
+    assert switched is False
+    assert not postgres_metadata.exists()
+
+
+def test_postgres_startup_discards_journaled_orphan_stage(tmp_path, monkeypatch):
+    root = tmp_path / "state"
+    root.mkdir(mode=0o700)
+    orphan = root / (".open-node-restore-" + "a" * 32)
+    orphan.mkdir(mode=0o700)
+    metadata = orphan / ".open-node-postgres-restore.json"
+    metadata.write_text(
+        json.dumps(
+            {"schema_version": 1, "stage_database": "open_node_restore_deadbeef"}
+        ),
+        encoding="utf-8",
+    )
+    metadata.chmod(0o600)
+    configuration = Settings(
+        database_url=(
+            "postgresql+psycopg://open_node:"
+            "0123456789abcdef0123456789abcdef@postgres:5432/open_node"
+        ),
+        control_state_dir=root,
+        certificate_state_dir=root / "certificates",
+        external_subscriptions_state_dir=root / "external-subscriptions",
+        federation_state_dir=root / "federation",
+        notifications_state_dir=root / "notifications",
+        _env_file=None,
+    )
+    dropped = []
+    monkeypatch.setattr(
+        browser_restore_module,
+        "require_drop_postgres_database",
+        lambda database_url, stage: dropped.append((database_url, stage)),
+    )
+
+    assert activate_pending_restore(configuration) == root
+    assert dropped == [
+        (configuration.database_url, "open_node_restore_deadbeef")
+    ]
+    assert not orphan.exists()
+
+
+def test_failed_prepare_keeps_stage_journal_until_database_drop_succeeds(
+    tmp_path, monkeypatch,
+):
+    root = tmp_path / "state"
+    root.mkdir(mode=0o700)
+    request_id = str(uuid4())
+    pending_name = PENDING_PREFIX + request_id
+    pending = root / pending_name
+    pending.mkdir(mode=0o700)
+    metadata = pending / ".open-node-postgres-restore.json"
+    metadata.write_text(
+        json.dumps(
+            {"schema_version": 1, "stage_database": "open_node_restore_deadbeef"}
+        ),
+        encoding="utf-8",
+    )
+    metadata.chmod(0o600)
+    outcomes = iter((False, True))
+    monkeypatch.setattr(
+        browser_restore_module,
+        "drop_postgres_database",
+        lambda *_args: next(outcomes),
+    )
+
+    browser_restore_module._discard_pending_database(
+        "postgresql+psycopg://open_node:secret@postgres/open_node",
+        root,
+        pending_name,
+        "",
+    )
+    assert pending.is_dir()
+    browser_restore_module._discard_pending_database(
+        "postgresql+psycopg://open_node:secret@postgres/open_node",
+        root,
+        pending_name,
+        "",
+    )
+    assert not pending.exists()

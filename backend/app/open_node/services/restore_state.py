@@ -53,7 +53,7 @@ def _read(path: Path) -> RestoreRecord | None:
 
 
 class RestoreState:
-    def __init__(self, database_url: str):
+    def __init__(self, database_url: str, state_root: Path | None = None):
         self.path = None
         self.blocked = False
         self._lock = threading.Lock()
@@ -61,8 +61,10 @@ class RestoreState:
             url = make_url(database_url)
             if url.get_backend_name() == "sqlite" and url.database not in (None, "", ":memory:"):
                 self.path = Path(url.database).absolute().parent / RESTORE_MARKER
-                record = _read(self.path)
-                self.blocked = record is not None and record.status == "review_required"
+            elif url.get_backend_name() == "postgresql" and state_root is not None:
+                self.path = state_root.absolute() / RESTORE_MARKER
+            record = _read(self.path) if self.path is not None else None
+            self.blocked = record is not None and record.status == "review_required"
         except Exception:
             raise RestoreStateError() from None
 

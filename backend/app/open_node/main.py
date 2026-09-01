@@ -62,6 +62,7 @@ from open_node.services.inventory import InventoryStore, ManagedNodeConflict
 from open_node.services.mihomo_speedtest import MihomoSpeedTest
 from open_node.services.notification_worker import NotificationWorker
 from open_node.services.notifications import NotificationStore
+from open_node.services.postgres_security import restrict_postgres_application_role
 from open_node.services.probe_stream import PublicProbeStreamManager
 from open_node.services.renewals import RenewalStore
 from open_node.services.restore_state import (
@@ -95,7 +96,10 @@ log = logging.getLogger(__name__)
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings = settings or get_settings()
-    backup_writes = configured_backup_barrier(active_settings.database_url)
+    restrict_postgres_application_role(active_settings.database_url)
+    backup_writes = configured_backup_barrier(
+        active_settings.database_url, active_settings.control_state_dir
+    )
     try:
         # Constructors and migrations can write before lifespan starts. They
         # participate in the same cross-process lock as HTTP and the admin CLI.
@@ -107,7 +111,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) -> FastAPI:
-    restore_state = RestoreState(active_settings.database_url)
+    restore_state = RestoreState(
+        active_settings.database_url, active_settings.control_state_dir
+    )
     identity = (
         AgentIdentity.load(active_settings.agent_identity_file)
         if active_settings.agent_identity_file
@@ -573,6 +579,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         active_settings.database_url,
         short_links_enabled=active_settings.short_links_enabled,
         external_subscriptions_state_dir=active_settings.external_subscriptions_state_dir,
+        federation_state_dir=active_settings.federation_state_dir,
         geoip_country_lookup=IPInfoCountryLookup(
             active_settings.geoip_ipinfo_token.get_secret_value()
             if active_settings.geoip_ipinfo_token else None

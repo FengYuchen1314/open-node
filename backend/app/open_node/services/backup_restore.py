@@ -2,6 +2,7 @@
 
 import ctypes
 import hashlib
+import json
 import os
 import secrets
 import shutil
@@ -15,9 +16,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
+from sqlalchemy.engine import make_url
 
 from open_node.domain.restore import RestoreRecord
 from open_node.services.backup_dependencies import check_backup_dependencies
+from open_node.services.backup_postgres_restore import (
+    drop_postgres_database,
+    restore_postgres_to_staging,
+)
 from open_node.services.backup_sqlite import _directory
 from open_node.services.backup_validation import validate_backup_archive
 from open_node.services.restore_state import RESTORE_MARKER
@@ -27,6 +33,7 @@ RESTORE_ERROR = (
     "未覆盖原实例；若新目录已出现，请检查其中的恢复记录，不要重复导入。"
 )
 REASON = "备份恢复后暂停，需管理员核对远端状态。"
+POSTGRES_RESTORE_METADATA = ".open-node-postgres-restore.json"
 
 
 class BackupRestoreError(ValueError):
@@ -45,6 +52,8 @@ def _publish(parent: int, temporary: str, target: str) -> None:
 
 
 def _destination(logical: str) -> tuple[str, bool]:
+    if logical == "database/postgres.dump":
+        return "postgres.dump", False
     if logical == "secrets/agent-identity.seed":
         return "agent-identity.seed", False
     if logical.startswith(("data/certificates/jobs/", "data/certificates/http01-webroots/")):
@@ -61,6 +70,22 @@ def _write(path: Path, data: bytes) -> None:
         output.write(data)
         output.flush()
         os.fsync(output.fileno())
+
+
+def _write_postgres_stage_journal(root: Path, stage: str) -> None:
+    _write(
+        root / POSTGRES_RESTORE_METADATA,
+        json.dumps(
+            {"schema_version": 1, "stage_database": stage},
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("ascii"),
+    )
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _database(connection: sqlite3.Connection) -> None:
@@ -190,7 +215,13 @@ def _quiesce(connection: sqlite3.Connection) -> dict[str, int]:
                 cancelled_certificate_jobs=certificates)
 
 
-def restore_backup_archive(source, output: str, *, totp_key: bytes | None = None) -> RestoreRecord:
+def restore_backup_archive(
+    source,
+    output: str,
+    *,
+    totp_key: bytes | None = None,
+    database_url: str | None = None,
+) -> RestoreRecord:
     """Caller owns an immutable, validated/decrypted private copy, never a live file.
 
     Output parent must already exist, owned by the caller with mode 0700.
@@ -198,6 +229,8 @@ def restore_backup_archive(source, output: str, *, totp_key: bytes | None = None
     """
     parent = None
     temporary = None
+    postgres_stage = None
+    postgres_cleanup_failed = False
     try:
         target = Path(output)
         if not output or output.endswith("/") or target.name in {"", ".", ".."}:
@@ -218,8 +251,20 @@ def restore_backup_archive(source, output: str, *, totp_key: bytes | None = None
             raise BackupRestoreError()
         if "subscriber_totp_key" in report.manifest.required_configuration and totp_key is None:
             raise BackupRestoreError()
+        archive_engine = report.manifest.database.engine
+        if database_url is None:
+            if archive_engine != "sqlite":
+                raise BackupRestoreError()
+        else:
+            try:
+                configured_engine = make_url(database_url).get_backend_name()
+            except Exception:
+                raise BackupRestoreError() from None
+            if configured_engine != archive_engine:
+                raise BackupRestoreError()
         temporary = ".open-node-restore-" + secrets.token_hex(16)
         os.mkdir(temporary, 0o700, dir_fd=parent)
+        os.fsync(parent)
         root = Path(f"/proc/self/fd/{parent}") / temporary
         quarantined = 0
         deadline = time.monotonic() + 120
@@ -249,25 +294,47 @@ def restore_backup_archive(source, output: str, *, totp_key: bytes | None = None
                     os.fsync(file.fileno())
                 if entry.role != "database":
                     states[entry.path] = stack.enter_context(archive.open(entry.path))
-            connection = sqlite3.connect(root / "open-node.db")
-            try:
-                _database(connection)
-                dependencies = check_backup_dependencies(connection, states, totp_key=totp_key)
-                if dependencies.totp_status == "not_checked":
-                    raise BackupRestoreError()
-                counts = _quiesce(connection)
-            finally:
-                connection.close()
+            if report.manifest.database.engine == "sqlite":
+                connection = sqlite3.connect(root / "open-node.db")
+                try:
+                    _database(connection)
+                    dependencies = check_backup_dependencies(
+                        connection, states, totp_key=totp_key
+                    )
+                    if dependencies.totp_status == "not_checked":
+                        raise BackupRestoreError()
+                    counts = _quiesce(connection)
+                finally:
+                    connection.close()
+            elif database_url is not None:
+                def journal_stage(stage: str) -> None:
+                    nonlocal postgres_stage
+                    postgres_stage = stage
+                    _write_postgres_stage_journal(root, stage)
+
+                postgres_stage, counts = restore_postgres_to_staging(
+                    root / "postgres.dump",
+                    database_url,
+                    states,
+                    totp_key=totp_key,
+                    stage_journal=journal_stage,
+                )
+                (root / "postgres.dump").unlink()
+            else:
+                raise BackupRestoreError()
         record = RestoreRecord(
             id=uuid4(), created_at=datetime.now(UTC),
             archive_sha256=report.checked_archive_sha256, quarantined_files=quarantined, **counts,
         )
         settings = [
-            "OPEN_NODE_DATABASE_URL=sqlite:////var/lib/open-node/open-node.db",
             "OPEN_NODE_CERTIFICATE_STATE_DIR=/var/lib/open-node/certificates",
             "OPEN_NODE_EXTERNAL_SUBSCRIPTIONS_STATE_DIR=/var/lib/open-node/external-subscriptions",
+            "OPEN_NODE_FEDERATION_STATE_DIR=/var/lib/open-node/federation",
             "OPEN_NODE_NOTIFICATIONS_STATE_DIR=/var/lib/open-node/notifications",
+            "OPEN_NODE_SPEEDTEST_STATE_DIR=/var/lib/open-node/speedtests",
         ]
+        if report.manifest.database.engine == "sqlite":
+            settings.insert(0, "OPEN_NODE_DATABASE_URL=sqlite:////var/lib/open-node/open-node.db")
         if (root / "agent-identity.seed").exists():
             settings.append("OPEN_NODE_AGENT_IDENTITY_FILE=/var/lib/open-node/agent-identity.seed")
         if totp_key:
@@ -275,8 +342,9 @@ def restore_backup_archive(source, output: str, *, totp_key: bytes | None = None
         _write(root / "restore.env", ("\n".join(settings) + "\n").encode())
         _write(root / RESTORE_MARKER, record.model_dump_json().encode())
         # SQLite writes happened after extraction; sync the final database too.
-        with (root / "open-node.db").open("rb") as database:
-            os.fsync(database.fileno())
+        if report.manifest.database.engine == "sqlite":
+            with (root / "open-node.db").open("rb") as database:
+                os.fsync(database.fileno())
         for directory, _, _ in os.walk(root, topdown=False):
             descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try:
@@ -286,13 +354,18 @@ def restore_backup_archive(source, output: str, *, totp_key: bytes | None = None
         _publish(parent, temporary, target.name)
         temporary = None  # Never remove a published destination, even if fsync fails.
         os.fsync(parent)
+        postgres_stage = None
         return record
     except Exception:
         raise BackupRestoreError() from None
     finally:
+        if postgres_stage is not None and database_url is not None:
+            postgres_cleanup_failed = not drop_postgres_database(
+                database_url, postgres_stage
+            )
         if parent is not None:
             try:
-                if temporary is not None:
+                if temporary is not None and not postgres_cleanup_failed:
                     shutil.rmtree(temporary, dir_fd=parent)
             finally:
                 os.close(parent)

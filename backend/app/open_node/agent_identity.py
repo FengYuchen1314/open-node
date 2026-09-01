@@ -7,6 +7,7 @@ from pathlib import Path
 from open_node.core.config import get_settings
 from open_node.services.backup_coordination import BackupCoordinationError
 from open_node.services.backup_runtime import backup_operation, configured_backup_barrier
+from open_node.services.postgres_security import restrict_postgres_application_role
 from open_node.services.secure_channel import AgentIdentity
 
 
@@ -19,7 +20,11 @@ def main():
         parser.exit(1, "Identity path must be absolute\n")
     try:
         if args.action == "create":
-            backup_writes = configured_backup_barrier(get_settings().database_url)
+            settings = get_settings()
+            restrict_postgres_application_role(settings.database_url)
+            backup_writes = configured_backup_barrier(
+                settings.database_url, settings.control_state_dir
+            )
             try:
                 with backup_operation(backup_writes):
                     identity = AgentIdentity.create(args.path)

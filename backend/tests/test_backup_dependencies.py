@@ -33,14 +33,15 @@ SENTINEL = "synthetic-private-sentinel-must-not-appear-in-report"
 APP = Path(__file__).resolve().parents[1] / "app"
 CERT = "data/certificates/"
 EXTERNAL = "data/external-subscriptions/"
+FEDERATION = "data/federation/"
 NOTIFICATIONS = "data/notifications/"
 IDENTITY = "secrets/agent-identity.seed"
 PURPOSE = "open-node.notifications.telegram.v1"
 MARKER = b"Open Node certificate vault\n"
 TOKEN = "123456:" + "A" * 32
 OTP_SECRET = "JBSWY3DPEHPK3PXP"
-PROFILE, PROVIDER, VERSION, JOB, SOURCE, NODE, PREVIEW = (
-    str(UUID(int=index)) for index in range(1, 8)
+PROFILE, PROVIDER, VERSION, JOB, SOURCE, NODE, PREVIEW, FEDERATED = (
+    str(UUID(int=index)) for index in range(1, 9)
 )
 
 # Independently declared from actual model columns, not imported checker internals.
@@ -64,6 +65,8 @@ CREATE TABLE external_subscription_nodes (
  id TEXT PRIMARY KEY, source_id TEXT, secret TEXT, enabled INTEGER DEFAULT 0);
 CREATE TABLE external_subscription_previews (
  id TEXT PRIMARY KEY, source_id TEXT, secret TEXT, expires_at REAL DEFAULT 0);
+CREATE TABLE federated_servers (
+ id TEXT PRIMARY KEY, owner_url TEXT, token_secret TEXT, name TEXT DEFAULT 'remote');
 CREATE TABLE notification_settings (
  id INTEGER PRIMARY KEY, token_ciphertext TEXT, key_fingerprint TEXT, enabled INTEGER DEFAULT 0);
 CREATE TABLE administrator (id INTEGER PRIMARY KEY, username TEXT);
@@ -142,7 +145,7 @@ class Fixture:
         self.connection = sqlite3.connect(self.path)
         self.connection.executescript(DDL)
         self.keys = {name: Fernet.generate_key()
-                     for name in ("certificate", "external", "notification", "totp")}
+                     for name in ("certificate", "external", "federation", "notification", "totp")}
         self.sources = {}
         self.material = certificate_material(expired=True)
         self.seed = ed25519.Ed25519PrivateKey.generate().private_bytes_raw()
@@ -166,7 +169,9 @@ class Fixture:
         db = self.connection
         db.execute("INSERT INTO product_users(username) VALUES (?)", ("用户甲",))
         db.execute("INSERT INTO administrator VALUES (1, ?)", ("管理员",))
-        for prefix, keyname in ((CERT, "certificate"), (EXTERNAL, "external")):
+        for prefix, keyname in (
+            (CERT, "certificate"), (EXTERNAL, "external"), (FEDERATION, "federation"),
+        ):
             self.stream(prefix + "vault.key", self.keys[keyname])
             self.stream(prefix + "vault.initialized", MARKER)
         key = self.keys["notification"]
@@ -198,7 +203,15 @@ class Fixture:
                                                   "password": SENTINEL})))
         db.execute("INSERT INTO external_subscription_previews(id,source_id,secret) VALUES (?,?,?)",
                    (PREVIEW, SOURCE, external(self.keys["external"], purpose="preview:" + PREVIEW,
-                                             value={"nodes": [{"id": NODE}], "metadata": {}})))
+                                              value={"nodes": [{"id": NODE}], "metadata": {}})))
+        owner_url = "https://owner.example.invalid"
+        db.execute(
+            "INSERT INTO federated_servers(id,owner_url,token_secret) VALUES (?,?,?)",
+            (FEDERATED, owner_url, seal(self.keys["federation"], {
+                "version": 1, "server": FEDERATED, "owner_url": owner_url,
+                "purpose": "federation-token", "token": "A" * 43,
+            })),
+        )
         db.execute("INSERT INTO notification_settings(id,token_ciphertext,key_fingerprint) "
                    "VALUES (1,?,?)",
                    (seal(self.keys["notification"], {"purpose": PURPOSE, "token": TOKEN}),
@@ -286,12 +299,12 @@ def test_all_supported_dependencies_and_expired_disabled_rows_are_checked(fixtur
     before = snapshot(fixture.path)
     contents = {path: stream.getvalue() for path, stream in fixture.sources.items()}
     report = fixture.check()
-    assert report.coverage == dependencies.BackupCoverage(*(["included"] * 4))
-    assert report.checked_ciphertexts == 13
+    assert report.coverage == dependencies.BackupCoverage(*(["included"] * 5))
+    assert report.checked_ciphertexts == 14
     assert report.ciphertext_counts == (("certificates", 4), ("external_subscriptions", 3),
-                                        ("notifications", 1), ("totp", 5))
+                                        ("federation", 1), ("notifications", 1), ("totp", 5))
     assert report.database_dependencies == frozenset({
-        "certificates", "external_subscriptions", "notifications", "totp",
+        "certificates", "external_subscriptions", "federation", "notifications", "totp",
     })
     assert report.database_modules_present == report.database_dependencies
     assert report.totp_status == "verified"
@@ -320,7 +333,7 @@ def test_all_supported_dependencies_and_expired_disabled_rows_are_checked(fixtur
 def test_empty_database_inventory_is_conservative_and_creates_no_keys(empty):
     before = set(empty.directory.iterdir())
     report = empty.check(agent_public_key=None)
-    assert report.coverage == dependencies.BackupCoverage(*(["unknown"] * 4))
+    assert report.coverage == dependencies.BackupCoverage(*(["unknown"] * 5))
     assert report.database_dependencies == frozenset()
     assert report.database_modules_present == frozenset()
     assert report.totp_status == "not_configured"
@@ -368,14 +381,18 @@ def test_subscriber_without_totp_ciphertext_is_not_external_configuration_depend
 
 
 def test_unused_but_initialized_keys_are_included_without_inventing_database_dependency(empty):
-    for prefix in (CERT, EXTERNAL):
+    for prefix in (CERT, EXTERNAL, FEDERATION):
         empty.stream(prefix + "vault.key", Fernet.generate_key())
         empty.stream(prefix + "vault.initialized", MARKER)
     report = empty.check(agent_public_key=None)
     assert report.coverage.certificates == "included"
     assert report.coverage.external_subscriptions == "included"
+    assert report.coverage.federation == "included"
     assert report.database_dependencies == frozenset()
-    expected = {"certificate_vault_key_and_marker", "external_vault_key_and_marker"}
+    expected = {
+        "certificate_vault_key_and_marker", "external_vault_key_and_marker",
+        "federation_vault_key_and_marker",
+    }
     assert expected <= set(report.checked)
 
 
@@ -388,7 +405,7 @@ def test_acme_only_state_without_v1_required_key_pair_is_explicitly_unsupported(
 
 def test_totp_key_absence_is_not_checked_not_corruption(fixture):
     report = fixture.check(totp_key=None)
-    assert report.checked_ciphertexts == 8
+    assert report.checked_ciphertexts == 9
     assert dict(report.ciphertext_counts)["totp"] == 5
     assert report.totp_status == "not_checked"
     assert "subscriber_totp_key" in report.required_configuration
@@ -405,6 +422,7 @@ def test_seed_without_running_public_key_does_not_claim_runtime_match(fixture):
 
 @pytest.mark.parametrize("missing", [CERT + "vault.key", CERT + "vault.initialized",
                                     EXTERNAL + "vault.key", EXTERNAL + "vault.initialized",
+                                    FEDERATION + "vault.key", FEDERATION + "vault.initialized",
                                     NOTIFICATIONS + "telegram.key",
                                     NOTIFICATIONS + "telegram.initialized",
                                     IDENTITY])
@@ -417,6 +435,7 @@ def test_missing_required_staged_file_fails_without_recreation(fixture, missing)
 
 
 @pytest.mark.parametrize("path", [CERT + "vault.key", EXTERNAL + "vault.key",
+                                 FEDERATION + "vault.key",
                                  NOTIFICATIONS + "telegram.key"])
 def test_wrong_vault_key_rejects_all_roles(fixture, path):
     fixture.stream(path, Fernet.generate_key())
@@ -424,6 +443,7 @@ def test_wrong_vault_key_rejects_all_roles(fixture, path):
 
 
 @pytest.mark.parametrize("path", [CERT + "vault.initialized", EXTERNAL + "vault.initialized",
+                                 FEDERATION + "vault.initialized",
                                  NOTIFICATIONS + "telegram.initialized"])
 @pytest.mark.parametrize("content", [b"", b"bad marker", b"Open Node certificate vault\r\n"])
 def test_marker_corruption_is_not_repaired(fixture, path, content):
@@ -447,6 +467,7 @@ def test_wrong_totp_key_is_rejected(fixture):
                                         ("external_subscription_sources", "secret"),
                                         ("external_subscription_nodes", "secret"),
                                         ("external_subscription_previews", "secret"),
+                                        ("federated_servers", "token_secret"),
                                         ("notification_settings", "token_ciphertext"),
                                         ("administrator_factors", "totp_secret"),
                                         ("administrator_factors", "pending_secret"),
@@ -522,6 +543,25 @@ def test_external_node_preview_id_and_purpose_are_separate(fixture, table, purpo
 
 def test_external_url_digest_uses_exact_staged_key(fixture):
     fixture.change("UPDATE external_subscription_sources SET url_digest=?", ("0" * 64,))
+    fails(fixture)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("version", True), ("version", 2), ("server", SOURCE),
+    ("owner_url", "https://other.example.invalid"), ("purpose", "other"),
+    ("token", "short"), ("extra", "unexpected"),
+])
+def test_federation_authenticated_envelope_binding(fixture, field, value):
+    body = {
+        "version": 1, "server": FEDERATED,
+        "owner_url": "https://owner.example.invalid",
+        "purpose": "federation-token", "token": "A" * 43,
+    }
+    body[field] = value
+    fixture.change(
+        "UPDATE federated_servers SET token_secret=?",
+        (seal(fixture.keys["federation"], body),),
+    )
     fails(fixture)
 
 
@@ -760,7 +800,7 @@ def test_json_brackets_and_quote_escapes_in_real_secret_are_not_depth(fixture):
     value = {"CF_DNS_API_TOKEN": '[[' * 100 + '\\"' + ']]' * 100}
     fixture.change("UPDATE certificate_dns_providers SET credentials=?",
                    (seal(fixture.keys["certificate"], value),))
-    assert fixture.check().checked_ciphertexts == 13
+    assert fixture.check().checked_ciphertexts == 14
 
 
 class ShortStream(io.BytesIO):
@@ -784,7 +824,7 @@ def test_short_reads_and_nonzero_offsets_are_preserved_without_fileno(fixture, m
                        for path, stream in fixture.sources.items()}
     for stream in fixture.sources.values():
         stream.seek(5)
-    assert fixture.check().checked_ciphertexts == 13
+    assert fixture.check().checked_ciphertexts == 14
     assert all(stream.tell() == 5 and not stream.closed for stream in fixture.sources.values())
 
 
@@ -814,7 +854,7 @@ def test_literal_certificate_path_prefix_conflicts_are_rejected(fixture):
 
 def test_immutable_mapping_supported(fixture):
     fixture.sources = MappingProxyType(fixture.sources)
-    assert fixture.check().checked_ciphertexts == 13
+    assert fixture.check().checked_ciphertexts == 14
 
 
 @pytest.mark.parametrize("fault", ["overread", "short", "none", "text", "grow", "seek", "tell"])
@@ -872,7 +912,7 @@ def test_checker_never_invokes_custom_row_factory(fixture):
     def factory(_cursor, _row):
         raise AssertionError("Caller row factory must not run")
     fixture.connection.row_factory = factory
-    assert fixture.check().checked_ciphertexts == 13
+    assert fixture.check().checked_ciphertexts == 14
     assert fixture.connection.row_factory is factory
     fixture.connection.row_factory = None
 
@@ -883,7 +923,7 @@ def test_caller_opened_completed_connection_remains_usable_after_unlink(fixture)
     fixture.path.unlink()
     assert not fixture.path.exists()
     report = fixture.check()
-    assert report.checked_ciphertexts == 13
+    assert report.checked_ciphertexts == 14
     assert fixture.connection.execute("SELECT 1").fetchone() == (1,)
     assert not fixture.connection.in_transaction
 
@@ -895,7 +935,7 @@ def test_completed_sqlite_integrity_check_empty_builtin_temp_schema_is_allowed(f
     names = fixture.connection.execute("PRAGMA database_list").fetchall()
     assert [(row[0], row[1]) for row in names] == [(0, "main"), (1, "temp")]
     assert names[1][2] == ""
-    assert fixture.check().checked_ciphertexts == 13
+    assert fixture.check().checked_ciphertexts == 14
     assert fixture.connection.execute("PRAGMA database_list").fetchall() == names
 
 
@@ -1016,10 +1056,11 @@ def test_actual_ciphertext_field_ceiling_is_checked_before_decrypt(fixture, monk
     assert calls == []
 
 
-def test_actual_100000_row_ceiling_is_bounded(empty):
+def test_actual_row_ceiling_rejects_one_extra_row(empty):
     with empty.write() as db:
         db.executemany("INSERT INTO product_users(username) VALUES (?)",
-                       ((f"user-{index}",) for index in range(dependencies.MAX_DEPENDENCY_ROWS)))
+                       ((f"user-{index}",)
+                        for index in range(dependencies.MAX_DEPENDENCY_ROWS + 1)))
     fails(empty, agent_public_key=None)
 
 
@@ -1106,6 +1147,7 @@ def test_current_application_model_schema_matches_checker_without_store_construc
     from open_node.services.external_subscriptions import ExternalSourceModel
     from open_node.services.inventory import Base
     from open_node.services.notifications import NotificationBase
+    from open_node.services.server_sharing import FederatedServerModel
     from open_node.services.subscriber_auth import SubscriberAccount
     from open_node.services.subscription_templates import TemplateRecord
     from sqlalchemy import create_engine
@@ -1114,7 +1156,7 @@ def test_current_application_model_schema_matches_checker_without_store_construc
     engine = create_engine("sqlite:///" + str(path))
     try:
         assert all(model.metadata is Base.metadata for model in (
-            ExternalSourceModel, SubscriberAccount, TemplateRecord,
+            ExternalSourceModel, FederatedServerModel, SubscriberAccount, TemplateRecord,
         ))
         for metadata in (Base.metadata, AuthBase.metadata, CertificateBase.metadata,
                          NotificationBase.metadata, BrandingBase.metadata):

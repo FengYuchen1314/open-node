@@ -210,7 +210,10 @@ def test_configured_paths_match_application_defaults_without_initializing_storag
     assert layout.database == tmp_path / "missing" / "data.db"
     assert layout.certificates == tmp_path / "certificates"
     assert layout.external_subscriptions == tmp_path / "missing" / "external-subscriptions"
+    assert layout.federation == tmp_path / "missing" / "federation"
     assert layout.notifications == tmp_path / "missing" / "notifications"
+    assert layout.database_engine == "sqlite" and layout.database_url is None
+    assert layout.state_root == tmp_path / "missing"
     assert layout.agent_identity is None
     assert list(tmp_path.iterdir()) == []
 
@@ -220,14 +223,44 @@ def test_custom_directories_and_identity_are_never_silently_replaced_with_defaul
         database_url=f"sqlite:///{tmp_path / 'db' / 'state.db'}",
         certificate_state_dir=tmp_path / "certs",
         external_subscriptions_state_dir=tmp_path / "external",
+        federation_state_dir=tmp_path / "federation",
         notifications_state_dir=tmp_path / "notifications",
         agent_identity_file=tmp_path / "keys" / "seed", _env_file=None,
     )
     layout = configured_backup_layout(settings)
     assert layout.certificates == settings.certificate_state_dir
     assert layout.external_subscriptions == settings.external_subscriptions_state_dir
+    assert layout.federation == settings.federation_state_dir
     assert layout.notifications == settings.notifications_state_dir
     assert layout.agent_identity == settings.agent_identity_file
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_postgres_layout_uses_explicit_control_state_without_initializing_storage(tmp_path):
+    root = tmp_path / "state"
+    settings = Settings(
+        database_url=(
+            "postgresql+psycopg://open_node:"
+            "0123456789abcdef0123456789abcdef@postgres:5432/open_node"
+        ),
+        control_state_dir=root,
+        certificate_state_dir=root / "certificates",
+        external_subscriptions_state_dir=root / "external-subscriptions",
+        federation_state_dir=root / "federation",
+        notifications_state_dir=root / "notifications",
+        _env_file=None,
+    )
+
+    layout = configured_backup_layout(settings)
+
+    assert layout.database == root / ".postgresql-database"
+    assert layout.database_engine == "postgresql"
+    assert layout.database_url == settings.database_url
+    assert layout.state_root == root
+    assert layout.certificates == root / "certificates"
+    assert layout.external_subscriptions == root / "external-subscriptions"
+    assert layout.federation == root / "federation"
+    assert layout.notifications == root / "notifications"
     assert list(tmp_path.iterdir()) == []
 
 

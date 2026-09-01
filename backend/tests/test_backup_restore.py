@@ -143,6 +143,21 @@ def test_missing_or_wrong_totp_never_publishes(saved, tmp_path, bad_key):
     assert not list(tmp_path.glob(".open-node-restore-*"))
 
 
+def test_sqlite_archive_cannot_be_prepared_for_a_postgres_deployment(saved, tmp_path):
+    with pytest.raises(BackupRestoreError):
+        restore_backup_archive(
+            io.BytesIO(saved.raw),
+            str(tmp_path / "restored"),
+            totp_key=saved.key,
+            database_url=(
+                "postgresql+psycopg://open_node:"
+                "0123456789abcdef0123456789abcdef@postgres:5432/open_node"
+            ),
+        )
+    assert not (tmp_path / "restored").exists()
+    assert not list(tmp_path.glob(".open-node-restore-*"))
+
+
 @pytest.mark.parametrize("kind", ["directory", "file", "symlink", "public_parent"])
 def test_existing_or_unsafe_target_is_untouched(saved, tmp_path, kind):
     output = tmp_path / "restored"

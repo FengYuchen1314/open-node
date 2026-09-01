@@ -64,6 +64,7 @@ def package(body: bytes = DB_BYTES) -> tuple[bytes, bytes]:
         "coverage": {
             "certificates": "unknown", "external_subscriptions": "not_configured",
             "notifications": "unknown", "agent_identity": "not_configured",
+            "federation": "not_configured",
         },
         "required_configuration": ["deployment_settings", "subscriber_totp_key"],
         "files": [{

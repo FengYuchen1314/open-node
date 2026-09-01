@@ -157,7 +157,9 @@ class BackupJobManager:
         self._accepting = False
         self._stopping = False
         self._leader_permit = None
-        self._leader_path = layout.database.parent / ".open-node-backup-jobs.lock"
+        self._leader_path = (
+            layout.state_root or layout.database.parent
+        ) / ".open-node-backup-jobs.lock"
 
     def _check_pid(self) -> None:
         if os.getpid() != self._pid:

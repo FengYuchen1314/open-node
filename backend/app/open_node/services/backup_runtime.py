@@ -47,7 +47,9 @@ _CURRENT_OPERATION: ContextVar[_RuntimeOperation | None] = ContextVar(
 )
 
 
-def configured_backup_barrier(database_url: str) -> BackupWriteBarrier:
+def configured_backup_barrier(
+    database_url: str, state_root: Path | None = None
+) -> BackupWriteBarrier:
     """Use the same private lock for application startup and the local admin CLI.
 
     Only ordinary local SQLite files have a supported snapshot lock layout.
@@ -58,17 +60,23 @@ def configured_backup_barrier(database_url: str) -> BackupWriteBarrier:
     try:
         url = make_url(database_url)
         database = url.database
-        if (
-            url.drivername not in {"sqlite", "sqlite+pysqlite"}
-            or not database
-            or database == ":memory:"
-            or database.startswith("file:")
-            or "uri" in url.query
-        ):
+        if url.drivername in {"sqlite", "sqlite+pysqlite"}:
+            if (
+                not database
+                or database == ":memory:"
+                or database.startswith("file:")
+                or "uri" in url.query
+            ):
+                return BackupWriteBarrier(None)
+            parent = Path(database).absolute().parent
+            if state_root is not None and state_root.absolute() != parent:
+                raise BackupCoordinationError()
+        elif url.drivername == "postgresql+psycopg" and state_root is not None:
+            parent = state_root.absolute()
+            if not parent.is_absolute() or parent == Path(parent.anchor) or ".." in parent.parts:
+                raise BackupCoordinationError()
+        else:
             return BackupWriteBarrier(None)
-        # Match SQLite's ordinary filename semantics; do not interpret a file
-        # URI, expand an environment variable, or import the application.
-        parent = Path(database).absolute().parent
         parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         return BackupWriteBarrier(parent / BACKUP_LOCK_NAME)
     except Exception:

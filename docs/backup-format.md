@@ -6,8 +6,9 @@
 [实际快照与加密创建器](backup-runtime.md)会协调运行中的写入、复制数据库和状态文件并检查密钥依赖；
 这些能力不属于本页通用格式校验器。仅运行 validate 不会执行恢复，仍不代表恢复就绪。
 
-此格式与 MMWX 官方 ZIP、安装器的停服整卷备份均不互通。验证器不会自动转换旧包、
-执行数据库迁移或恢复文件；现有安装器的备份格式和恢复办法保持不变。
+此格式与 MMWX 官方 ZIP、安装器的停服恢复包均不互通。验证器不会自动转换旧包、
+执行数据库迁移或恢复文件；安装器的停服包继续使用自己的恢复流程。SQLite、
+PostgreSQL 也不能借备份入口相互转换，本项目不提供旧 MMWX 迁移。
 
 ## 只读校验命令
 
@@ -108,13 +109,16 @@ open-node-backup validate ./private/backup.zip.age --identity ./private/age-key.
 
 | 角色 | 包内路径 | `included` 声明需要的成员 |
 | --- | --- | --- |
-| `database` | `data/open-node.db` | 恰好一个独立 SQLite 快照；结构校验阶段不读取数据库格式 |
+| `database` | SQLite 为 `data/open-node.db`；PostgreSQL 为 `database/postgres.dump` | 恰好一个与清单数据库类型匹配的制品；结构校验阶段不打开数据库或运行 `pg_restore` |
 | `certificate_state` | `data/certificates/` 下的普通文件 | `vault.key`、`vault.initialized`；其他证书、ACME 账户和任务状态按清单保留 |
 | `external_state` | `data/external-subscriptions/` | 恰好 `vault.key`、`vault.initialized` |
+| `federation_state` | `data/federation/` | 恰好 `vault.key`、`vault.initialized`，与库内共享服务器 Token 密文配套 |
 | `notification_state` | `data/notifications/` | 恰好 `telegram.key`、`telegram.initialized` |
 | `agent_identity` | `secrets/agent-identity.seed` | 恰好这一项 |
 
-数据库 sidecar 不在此布局内，不能把运行中的 `.db` 主文件直接当成独立快照。
+SQLite sidecar 不在此布局内，不能把运行中的 `.db` 主文件直接当成独立快照。
+PostgreSQL 成员必须是创建器生成并经 `pg_restore --list` 验证的 custom dump；裸数据目录、
+SQL 文本和安装器包内单独取出的 `postgres.dump` 都不能冒充完整 v1 包。
 证书树内合法的普通文件名不因恰好以 `.db-wal` 结尾或名为 `manifest.json` 而被删除。
 它们仍受路径、文件数和总量限制。
 
@@ -132,8 +136,8 @@ open-node-backup validate ./private/backup.zip.age --identity ./private/age-key.
 | `version` | 整数 `1` |
 | `created_at` | 真实有效的 UTC 秒级日期，形如 `2026-08-31T09:00:00Z` |
 | `source` | 必须包含 `git_revision`、`image_id`、`image_revision`；各项可为 `null` |
-| `database` | `engine` 为 `sqlite`，`layout` 为 `standalone`，`schema_fingerprint` 为 SHA-256 或 `null` |
-| `coverage` | 必须包含 `certificates`、`external_subscriptions`、`notifications`、`agent_identity` |
+| `database` | 仅接受 `sqlite` + `standalone` 或 `postgresql` + `custom_dump`；`schema_fingerprint` 为 SHA-256 或 `null` |
+| `coverage` | 必须包含 `certificates`、`external_subscriptions`、`federation`、`notifications`、`agent_identity` |
 | `required_configuration` | 不重复的枚举数组，必须含 `deployment_settings`，可另含 `subscriber_totp_key` |
 | `files` | 非空数组；每项恰好包含 `path`、`role`、`size`、`sha256` |
 
@@ -144,6 +148,8 @@ open-node-backup validate ./private/backup.zip.age --identity ./private/age-key.
 `coverage` 各项只能为 `included`、`not_configured` 或 `unknown`。声明 `included`
 需要满足上表的文件集合；另外两个状态不允许携带该角色文件。文件齐全仍不能证明
 密钥正确或配对成功。未声明 `subscriber_totp_key` 也不能证明库内没有 TOTP 密钥依赖。
+恢复入口拒绝任何仍为 `unknown` 的范围。早期内部 v1 草案如果没有 `federation` 字段，
+会被当前严格解析器拒绝；不做就地补字段或旧包迁移。
 
 路径必须是规范的相对 POSIX 路径和 NFC 文本。允许普通中文和其他合法 Unicode 字符，
 拒绝绝对路径、空路径段、`.`、`..`、反斜线、冒号、路径段首尾空白或尾点，以及
@@ -192,8 +198,9 @@ ZIP 配置。清单为 UTF-8、排序键的紧凑 JSON；ZIP 的 DOS 时间固�
 返回同一种结果，不提高数据库、密钥或恢复状态。
 
 失败可能留下部分暂存字节。调用方必须丢弃这些字节，不能发布、重用或解释为完整
-备份；生成器不关闭调用方流。生成与复核各有独立的 30 秒操作间软期限。这里还没有
-应用快照或网页制品发布；命令行的外层加密也不能直接替代受控网页下载流程。
+备份；生成器不关闭调用方流。生成与复核各有独立的 30 秒操作间软期限。这个低层接口
+本身仍不获取应用快照或发布网页制品；当前网页流程由上层快照创建器调用它，再执行
+age 加密、权限检查、限时下载和撤销控制。命令行的外层加密不能替代该流程。
 
 ## 校验结果的含义
 
@@ -208,5 +215,5 @@ ZIP 配置。清单为 UTF-8、排序键的紧凑 JSON；ZIP 的 DOS 时间固�
 SHA-256 不能替代认证，攻击者可以重算整个清单。ZIP 内可能包含私钥、令牌和账户
 状态；内部 ZIP 本身没有加密，不能直接作为公开下载制品。外层加密已通过专项、
 4048 项完整后端、真实 1 GiB 包、工作树与精确 Git 镜像及候选四项 CI，并以
-`a29345b` 发布到主线。跨数据库与文件的一致快照、网页
-权限和隔离恢复也须继续实现和验收。
+`a29345b` 发布到主线。当前源码已在此格式之上接入 SQLite/PostgreSQL 一致快照、
+联邦状态依赖检查、网页权限和隔离恢复；单独运行本页的结构校验仍不会执行这些动作。

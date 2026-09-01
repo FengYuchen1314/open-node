@@ -33,6 +33,7 @@ import sqlite3
 import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import BinaryIO, Literal
 from uuid import UUID
 
@@ -40,6 +41,7 @@ from cryptography import x509
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
+from sqlalchemy.engine import make_url
 
 from open_node.domain.backup import (
     MAX_FILES,
@@ -49,6 +51,7 @@ from open_node.domain.backup import (
 )
 from open_node.domain.certificates import DNS_FIELDS, DNS_REQUIRED, dns_name
 from open_node.domain.notifications import validate_bot_token
+from open_node.domain.server_sharing import TOKEN_PATTERN
 
 MAX_DEPENDENCY_SECONDS = 30.0
 MAX_DEPENDENCY_QUERIES = 128
@@ -67,11 +70,12 @@ READ_CHUNK_BYTES = 64 * 1024
 
 _CERTIFICATES = "data/certificates/"
 _EXTERNAL = "data/external-subscriptions/"
+_FEDERATION = "data/federation/"
 _NOTIFICATIONS = "data/notifications/"
 _IDENTITY = "secrets/agent-identity.seed"
 _VAULT_MARKER = b"Open Node certificate vault\n"
 _NOTIFICATION_PURPOSE = "open-node.notifications.telegram.v1"
-_ROLE_NAMES = ("certificates", "external_subscriptions", "notifications", "totp")
+_ROLE_NAMES = ("certificates", "external_subscriptions", "federation", "notifications", "totp")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _NOT_CHECKED = (
     "certificate_ciphertext_row_or_purpose_binding",
@@ -114,6 +118,9 @@ _TABLES: dict[str, dict[str, int | None]] = {
     "external_subscription_previews": {
         "id": 36, "source_id": 36, "secret": MAX_CIPHERTEXT_BYTES,
     },
+    "federated_servers": {
+        "id": 36, "owner_url": 2048, "token_secret": MAX_CIPHERTEXT_BYTES,
+    },
     "notification_settings": {
         "id": None, "token_ciphertext": MAX_CIPHERTEXT_BYTES, "key_fingerprint": 64,
     },
@@ -152,6 +159,13 @@ class BackupDependencyReport:
     not_checked: tuple[str, ...] = _NOT_CHECKED
     remote_agent_trust: Literal["not_checked"] = "not_checked"
     restoration_ready: Literal[False] = False
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresDependencySnapshot:
+    """Bounded dependency rows captured while cooperating writers are paused."""
+
+    tables: Mapping[str, tuple[tuple, ...]]
 
 
 def _fail() -> None:
@@ -295,6 +309,24 @@ def _schema(connection: sqlite3.Connection, budget: _Budget) -> None:
 
 
 def _rows(connection: sqlite3.Connection, budget: _Budget, table: str) -> Iterator[tuple]:
+    if type(connection) is PostgresDependencySnapshot:
+        rows = connection.tables.get(table)
+        if rows is None:
+            _fail()
+        budget.queries += 1
+        if budget.queries > MAX_DEPENDENCY_QUERIES:
+            _fail()
+        for row in rows:
+            budget.check()
+            budget.rows += 1
+            if budget.rows > MAX_DEPENDENCY_ROWS:
+                _fail()
+            for value in row:
+                if isinstance(value, (str, bytes)):
+                    size = len(value.encode("utf-8")) if isinstance(value, str) else len(value)
+                    budget.add("metadata", size, MAX_TOTAL_METADATA_BYTES)
+            yield row
+        return
     columns = _TABLES[table]
     expressions = []
     for name, limit in columns.items():
@@ -306,6 +338,85 @@ def _rows(connection: sqlite3.Connection, budget: _Budget, table: str) -> Iterat
         expressions.append(f"CASE WHEN {column} IS NULL THEN NULL WHEN {condition} "
                            f"THEN {column} ELSE X'00' END")
     yield from _query(connection, budget, f'SELECT {",".join(expressions)} FROM main."{table}"')
+
+
+def capture_postgres_dependency_snapshot(database_url: str) -> PostgresDependencySnapshot:
+    """Read only the fixed dependency projection from one PostgreSQL snapshot."""
+    try:
+        import psycopg
+
+        url = make_url(database_url)
+        if (
+            url.drivername != "postgresql+psycopg"
+            or not url.username
+            or url.password is None
+            or not url.host
+            or not url.database
+            or set(url.query) - {"sslmode"}
+        ):
+            _fail()
+        connection_url = url.set(drivername="postgresql").render_as_string(
+            hide_password=False
+        )
+        budget = _Budget()
+        captured: dict[str, tuple[tuple, ...]] = {}
+        with psycopg.connect(connection_url, connect_timeout=10) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+                )
+                cursor.execute("SHOW transaction_read_only")
+                if cursor.fetchone() != ("on",):
+                    _fail()
+                cursor.execute(
+                    "SELECT table_name, column_name FROM information_schema.columns "
+                    "WHERE table_schema=current_schema() AND table_name = ANY(%s)",
+                    (list(_TABLES),),
+                )
+                found: dict[str, set[str]] = {}
+                for table, column in cursor:
+                    found.setdefault(table, set()).add(column)
+                if set(found) != set(_TABLES) or any(
+                    not set(columns) <= found.get(table, set())
+                    for table, columns in _TABLES.items()
+                ):
+                    _fail()
+                for table, columns in _TABLES.items():
+                    budget.check()
+                    expressions = []
+                    for column, maximum in columns.items():
+                        quoted = '"' + column + '"'
+                        expressions.append(quoted if maximum is None else quoted + "::text")
+                    cursor.execute(
+                        f'SELECT {",".join(expressions)} FROM "{table}"'  # noqa: S608
+                    )
+                    rows = []
+                    while True:
+                        row = cursor.fetchone()
+                        if row is None:
+                            break
+                        budget.rows += 1
+                        if budget.rows > MAX_DEPENDENCY_ROWS:
+                            _fail()
+                        checked = []
+                        for value, maximum in zip(row, columns.values(), strict=True):
+                            if value is not None and maximum is None and type(value) is not int:
+                                _fail()
+                            if value is not None and maximum is not None:
+                                if type(value) is not str or len(value.encode()) > maximum:
+                                    _fail()
+                                budget.add(
+                                    "metadata", len(value.encode()), MAX_TOTAL_METADATA_BYTES
+                                )
+                            checked.append(value)
+                        rows.append(tuple(checked))
+                    captured[table] = tuple(rows)
+                connection.rollback()
+        return PostgresDependencySnapshot(MappingProxyType(captured))
+    except BackupDependencyError:
+        raise
+    except Exception:
+        raise BackupDependencyError() from None
 
 
 def _json(raw: bytes | str, budget: _Budget) -> object:
@@ -402,6 +513,7 @@ class _State:
             if not (
                 path.startswith(_CERTIFICATES)
                 or path in {_EXTERNAL + "vault.key", _EXTERNAL + "vault.initialized",
+                            _FEDERATION + "vault.key", _FEDERATION + "vault.initialized",
                             _NOTIFICATIONS + "telegram.key",
                             _NOTIFICATIONS + "telegram.initialized", _IDENTITY}
             ):
@@ -480,6 +592,8 @@ class _Check:
             module = "certificates"
         elif table.startswith("external_subscription_"):
             module = "external_subscriptions"
+        elif table == "federated_servers":
+            module = "federation"
         elif table == "notification_settings":
             module = "notifications"
         elif table in {"administrator_factors", "operator_challenges", "subscriber_accounts"}:
@@ -739,6 +853,33 @@ class _Check:
             _fail()
         return value["value"]
 
+    def federation(self, pair) -> None:
+        cipher = pair[0] if pair else None
+        identifiers = set()
+        for identifier, owner_url, secret in self.rows("federated_servers"):
+            identifier = _uuid(identifier)
+            owner_url = _text(owner_url, maximum=2048)
+            if identifier in identifiers:
+                _fail()
+            identifiers.add(identifier)
+            value = _object(
+                self.json_secret(cipher, secret, "federation"),
+                {"version", "server", "owner_url", "purpose", "token"},
+            )
+            if (
+                type(value["version"]) is not int
+                or value["version"] != 1
+                or value["server"] != identifier
+                or value["owner_url"] != owner_url
+                or value["purpose"] != "federation-token"
+                or type(value["token"]) is not str
+                or TOKEN_PATTERN.fullmatch(value["token"]) is None
+            ):
+                _fail()
+        self.checked.add("federation_database_key_dependencies")
+        if self.counts["federation"]:
+            self.checked.add("federation_fernet_and_server_owner_purpose_binding")
+
     def notifications(self) -> bool:
         key_path, marker_path = (_NOTIFICATIONS + "telegram.key",
                                  _NOTIFICATIONS + "telegram.initialized")
@@ -845,6 +986,61 @@ class _Check:
         return True, None
 
 
+def _dependency_report(
+    connection: sqlite3.Connection | PostgresDependencySnapshot,
+    sources: Mapping[str, BinaryIO],
+    *,
+    totp_key: bytes | None = None,
+    agent_public_key: bytes | None = None,
+) -> BackupDependencyReport:
+    budget = _Budget()
+    state = _State(sources, budget)
+    checker = _Check(connection, state, budget)
+    users = set()
+    for (username,) in checker.rows("product_users"):
+        username = _text(username, maximum=1024)
+        if username in users:
+            _fail()
+        users.add(username)
+    certificate_pair = state.vault(_CERTIFICATES)
+    external_pair = state.vault(_EXTERNAL)
+    federation_pair = state.vault(_FEDERATION)
+    if certificate_pair:
+        checker.checked.add("certificate_vault_key_and_marker")
+    if external_pair:
+        checker.checked.add("external_vault_key_and_marker")
+    if federation_pair:
+        checker.checked.add("federation_vault_key_and_marker")
+    checker.certificates(certificate_pair)
+    checker.acme_state()
+    checker.external(external_pair, users)
+    checker.federation(federation_pair)
+    notifications = checker.notifications()
+    totp = checker.totp(totp_key, users)
+    identity, matched = checker.identity(agent_public_key)
+    budget.check()
+    required: tuple[BackupConfiguration, ...] = ("deployment_settings",)
+    if checker.counts["totp"]:
+        required += ("subscriber_totp_key",)
+    return BackupDependencyReport(
+        coverage=BackupCoverage(
+            certificates="included" if certificate_pair else "unknown",
+            external_subscriptions="included" if external_pair else "unknown",
+            notifications="included" if notifications else "unknown",
+            agent_identity="included" if identity else "unknown",
+            federation="included" if federation_pair else "unknown",
+        ),
+        required_configuration=required,
+        checked=tuple(sorted(checker.checked)),
+        checked_ciphertexts=checker.checked_ciphertexts,
+        ciphertext_counts=tuple((name, checker.counts[name]) for name in _ROLE_NAMES),
+        database_dependencies=frozenset(checker.dependencies),
+        database_modules_present=frozenset(checker.modules_present),
+        totp_status=totp,
+        agent_identity_matches_runtime=matched,
+    )
+
+
 def check_backup_dependencies(
     connection: sqlite3.Connection,
     sources: Mapping[str, BinaryIO],
@@ -868,48 +1064,15 @@ def check_backup_dependencies(
         connection.set_progress_handler(budget.progress, 1000)
         installed = True
         _schema(connection, budget)
-        state = _State(sources, budget)
-        checker = _Check(connection, state, budget)
-        users = set()
-        for (username,) in checker.rows("product_users"):
-            username = _text(username, maximum=1024)
-            if username in users:
-                _fail()
-            users.add(username)
-        certificate_pair = state.vault(_CERTIFICATES)
-        external_pair = state.vault(_EXTERNAL)
-        if certificate_pair:
-            checker.checked.add("certificate_vault_key_and_marker")
-        if external_pair:
-            checker.checked.add("external_vault_key_and_marker")
-        checker.certificates(certificate_pair)
-        checker.acme_state()
-        checker.external(external_pair, users)
-        notifications = checker.notifications()
-        totp = checker.totp(totp_key, users)
-        identity, matched = checker.identity(agent_public_key)
-        budget.check()
+        result = _dependency_report(
+            connection,
+            sources,
+            totp_key=totp_key,
+            agent_public_key=agent_public_key,
+        )
         if connection.in_transaction:
             _fail()
-        required: tuple[BackupConfiguration, ...] = ("deployment_settings",)
-        if checker.counts["totp"]:
-            required += ("subscriber_totp_key",)
-        return BackupDependencyReport(
-            coverage=BackupCoverage(
-                "included" if certificate_pair else "unknown",
-                "included" if external_pair else "unknown",
-                "included" if notifications else "unknown",
-                "included" if identity else "unknown",
-            ),
-            required_configuration=required,
-            checked=tuple(sorted(checker.checked)),
-            checked_ciphertexts=checker.checked_ciphertexts,
-            ciphertext_counts=tuple((name, checker.counts[name]) for name in _ROLE_NAMES),
-            database_dependencies=frozenset(checker.dependencies),
-            database_modules_present=frozenset(checker.modules_present),
-            totp_status=totp,
-            agent_identity_matches_runtime=matched,
-        )
+        return result
     except Exception:
         raise BackupDependencyError() from None
     finally:
@@ -918,3 +1081,23 @@ def check_backup_dependencies(
                 connection.set_progress_handler(None, 0)
             except Exception:
                 raise BackupDependencyError() from None
+
+
+def check_postgres_backup_dependencies(
+    snapshot: PostgresDependencySnapshot,
+    sources: Mapping[str, BinaryIO],
+    *,
+    totp_key: bytes | None = None,
+    agent_public_key: bytes | None = None,
+) -> BackupDependencyReport:
+    try:
+        if type(snapshot) is not PostgresDependencySnapshot:
+            _fail()
+        return _dependency_report(
+            snapshot,
+            sources,
+            totp_key=totp_key,
+            agent_public_key=agent_public_key,
+        )
+    except Exception:
+        raise BackupDependencyError() from None

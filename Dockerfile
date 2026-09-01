@@ -39,7 +39,10 @@ ENV PATH="/opt/venv/bin:$PATH" \
     OPEN_NODE_CORS_ORIGINS="[]" \
     FORWARDED_ALLOW_IPS=""
 RUN groupadd --gid 10001 open-node && useradd --uid 10001 --gid 10001 --no-create-home open-node \
-    && install -d -m 0700 -o 10001 -g 10001 /var/lib/open-node
+    && install -d -m 0700 -o 10001 -g 10001 /var/lib/open-node \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-15 \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=backend /opt/venv /opt/venv
 COPY --from=frontend /build/dist /opt/open-node/frontend
 COPY --from=lego /out/lego /usr/local/bin/lego

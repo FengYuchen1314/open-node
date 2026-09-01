@@ -1,4 +1,4 @@
-"""Stage browser uploads and activate a restored SQLite tree only after restart."""
+"""Stage browser uploads and activate restored SQLite/PostgreSQL state after restart."""
 
 from __future__ import annotations
 
@@ -6,9 +6,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from signal import SIGTERM
@@ -25,7 +26,16 @@ from open_node.services.backup_encryption import (
     MAX_ENCRYPTED_ARCHIVE_BYTES,
     decrypted_backup_archive,
 )
-from open_node.services.backup_restore import BackupRestoreError, restore_backup_archive
+from open_node.services.backup_postgres_restore import (
+    drop_postgres_database,
+    postgres_url,
+    require_drop_postgres_database,
+)
+from open_node.services.backup_restore import (
+    POSTGRES_RESTORE_METADATA,
+    BackupRestoreError,
+    restore_backup_archive,
+)
 from open_node.services.backup_snapshot import BackupSnapshotError, configured_backup_layout
 from open_node.services.backup_sqlite import BackupSQLiteError, _directory
 from open_node.services.backup_validation import BackupValidationError
@@ -38,10 +48,11 @@ UPLOAD_TTL_SECONDS = 1800
 MAX_UPLOADS = 2
 MAX_TOP_LEVEL_ENTRIES = 256
 _IDENTIFIER = re.compile(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
+_TEMPORARY_RESTORE = re.compile(r"^\.open-node-restore-[0-9a-f]{32}$")
 _UPLOAD_KEYS = {"schema_version", "id", "owner", "size", "sha256", "expires_at"}
 _MARKER_KEYS = {
     "schema_version", "request_id", "restore_id", "pending_dir", "phase",
-    "old_entries", "new_entries",
+    "old_entries", "new_entries", "database_engine", "stage_database",
 }
 
 
@@ -132,11 +143,17 @@ def _atomic_json(directory: int, name: str, value: dict, *, replace: bool) -> No
 def _root(settings: Settings) -> Path:
     try:
         layout = configured_backup_layout(settings)
-        root = layout.database.parent
+        root = layout.state_root or layout.database.parent
+        expected_database = (
+            root / "open-node.db"
+            if layout.database_engine == "sqlite"
+            else root / ".postgresql-database"
+        )
         if (
-            layout.database != root / "open-node.db"
+            layout.database != expected_database
             or layout.certificates != root / "certificates"
             or layout.external_subscriptions != root / "external-subscriptions"
+            or layout.federation != root / "federation"
             or layout.notifications != root / "notifications"
             or layout.agent_identity not in (None, root / "agent-identity.seed")
         ):
@@ -395,6 +412,8 @@ class BrowserRestoreStore:
         finally:
             os.close(root)
         pending = PENDING_PREFIX + str(identifier)
+        stage = ""
+        marker_published = False
         try:
             with self._upload(identifier, owner) as (source, metadata, uploads):
                 if payload.format == "age":
@@ -410,14 +429,17 @@ class BrowserRestoreStore:
                         record = restore_backup_archive(
                             staged.stream, str(self.root / pending),
                             totp_key=totp.encode("ascii") if totp else None,
+                            database_url=self.settings.database_url,
                         )
                 else:
                     record = restore_backup_archive(
                         source, str(self.root / pending),
                         totp_key=totp.encode("ascii") if totp else None,
+                        database_url=self.settings.database_url,
                     )
                     if record.archive_sha256 != metadata["sha256"]:
                         raise BackupRestoreError()
+                engine, stage = _pending_database(self.root / pending)
                 marker = {
                     "schema_version": 1,
                     "request_id": str(identifier),
@@ -426,21 +448,30 @@ class BrowserRestoreStore:
                     "phase": "prepared",
                     "old_entries": [],
                     "new_entries": [],
+                    "database_engine": engine,
+                    "stage_database": stage,
                 }
                 root = self._root_fd()
                 try:
                     _atomic_json(root, ACTIVATION_MARKER, marker, replace=False)
+                    marker_published = True
                 finally:
                     os.close(root)
                 for suffix in (".json", ".bin"):
-                    os.unlink(str(identifier) + suffix, dir_fd=uploads)
-                os.fsync(uploads)
+                    with suppress(FileNotFoundError):
+                        os.unlink(str(identifier) + suffix, dir_fd=uploads)
+                with suppress(OSError):
+                    os.fsync(uploads)
             return RestorePreparedRead(
                 id=record.id, automatic_restart=self.automatic_restart,
             )
         except BrowserRestoreError:
+            if not marker_published:
+                _discard_pending_database(self.settings.database_url, self.root, pending, stage)
             raise
         except (BackupRestoreError, BackupValidationError, OSError, UnicodeError, ValueError):
+            if not marker_published:
+                _discard_pending_database(self.settings.database_url, self.root, pending, stage)
             raise BrowserRestoreError("restore_prepare_failed", 422) from None
 
     def request_restart(self) -> None:
@@ -458,6 +489,104 @@ def _private_directory(descriptor: int) -> None:
         or stat.S_IMODE(info.st_mode) != 0o700
     ):
         raise BrowserRestoreError("restore_prepare_failed", 503)
+
+
+def _postgres_stage_metadata(directory: int) -> str:
+    value = _json(
+        _read_file(
+            directory,
+            POSTGRES_RESTORE_METADATA,
+            4096,
+            owner=os.geteuid(),
+        ),
+        4096,
+    )
+    stage = value.get("stage_database")
+    if (
+        set(value) != {"schema_version", "stage_database"}
+        or value["schema_version"] != 1
+        or type(stage) is not str
+        or not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", stage)
+    ):
+        raise BrowserRestoreError("restore_prepare_failed", 503)
+    return stage
+
+
+def _pending_database(path: Path) -> tuple[str, str]:
+    directory = _directory(path, private=True)
+    try:
+        sqlite_present = _exists(directory, "open-node.db")
+        postgres_present = _exists(directory, POSTGRES_RESTORE_METADATA)
+        if sqlite_present == postgres_present:
+            raise BrowserRestoreError("restore_prepare_failed", 503)
+        if sqlite_present:
+            return "sqlite", ""
+        return "postgresql", _postgres_stage_metadata(directory)
+    finally:
+        os.close(directory)
+
+
+def _discard_pending_database(
+    database_url: str, root: Path | None, pending: str, stage: str
+) -> None:
+    if (
+        root is None
+        or pending != PENDING_PREFIX + pending.removeprefix(PENDING_PREFIX)
+        or not _IDENTIFIER.fullmatch(pending.removeprefix(PENDING_PREFIX))
+    ):
+        return
+    if not stage:
+        try:
+            directory = _directory(root / pending, private=True)
+        except (BackupSQLiteError, OSError):
+            return
+        try:
+            if _exists(directory, POSTGRES_RESTORE_METADATA):
+                stage = _postgres_stage_metadata(directory)
+        except (BrowserRestoreError, OSError, ValueError):
+            return
+        finally:
+            os.close(directory)
+    if stage and not drop_postgres_database(database_url, stage):
+        return
+    with suppress(OSError):
+        shutil.rmtree(root / pending)
+
+
+def _orphan_restore_name(name: str) -> bool:
+    return bool(
+        _TEMPORARY_RESTORE.fullmatch(name)
+        or (
+            name.startswith(PENDING_PREFIX)
+            and _IDENTIFIER.fullmatch(name.removeprefix(PENDING_PREFIX))
+        )
+    )
+
+
+def _cleanup_orphan_restores(
+    settings: Settings,
+    root_path: Path,
+    root: int,
+    *,
+    preserve: set[str],
+) -> None:
+    for name in sorted(os.listdir(root)):
+        if name in preserve or not _orphan_restore_name(name):
+            continue
+        directory = os.open(
+            name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=root,
+        )
+        try:
+            _private_directory(directory)
+            if _exists(directory, POSTGRES_RESTORE_METADATA):
+                stage = _postgres_stage_metadata(directory)
+                require_drop_postgres_database(settings.database_url, stage)
+        finally:
+            os.close(directory)
+        shutil.rmtree(root_path / name)
+        os.fsync(root)
 
 
 def _entry_name(name: str) -> bool:
@@ -505,7 +634,10 @@ def _marker(root: int) -> dict | None:
         or not _IDENTIFIER.fullmatch(str(value["request_id"]))
         or not _IDENTIFIER.fullmatch(str(value["restore_id"]))
         or value["pending_dir"] != PENDING_PREFIX + value["request_id"]
-        or value["phase"] not in {"prepared", "moving_old", "moving_new", "activated"}
+        or value["phase"] not in {
+            "prepared", "database_old_renamed", "database_activated",
+            "moving_old", "moving_new", "activated",
+        }
         or not isinstance(value["old_entries"], list)
         or not isinstance(value["new_entries"], list)
         or any(type(name) is not str for name in value["old_entries"] + value["new_entries"])
@@ -514,9 +646,99 @@ def _marker(root: int) -> dict | None:
         or len(set(value["old_entries"])) != len(value["old_entries"])
         or len(set(value["new_entries"])) != len(value["new_entries"])
         or any(not _entry_name(name) for name in value["old_entries"] + value["new_entries"])
+        or value["database_engine"] not in {"sqlite", "postgresql"}
+        or type(value["stage_database"]) is not str
+        or (
+            value["database_engine"] == "sqlite"
+            and (value["stage_database"] or value["phase"].startswith("database_"))
+        )
+        or (
+            value["database_engine"] == "postgresql"
+            and not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", value["stage_database"])
+        )
     ):
         raise BrowserRestoreError("restore_prepare_failed", 503)
     return value
+
+
+def _activate_postgres_database(settings: Settings, root: int, value: dict) -> None:
+    try:
+        import psycopg
+        from psycopg import sql
+
+        configured = postgres_url(settings.database_url)
+        current = configured.database
+        stage = value["stage_database"]
+        if current == "postgres" or stage == current:
+            raise ValueError("unsafe database name")
+        suffix = "_rollback_" + value["request_id"].replace("-", "")[:16]
+        rollback = current[: 63 - len(suffix)] + suffix
+        admin = postgres_url(settings.database_url, "postgres")
+        admin_url = admin.set(drivername="postgresql").render_as_string(
+            hide_password=False
+        )
+        with psycopg.connect(admin_url, autocommit=True, connect_timeout=10) as connection:
+            names = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT datname FROM pg_database WHERE datname = ANY(%s)",
+                    ([current, stage, rollback],),
+                )
+            }
+            phase = value["phase"]
+            if phase == "prepared":
+                if names == {stage, rollback}:
+                    phase = "database_old_renamed"
+                elif names == {current, rollback}:
+                    phase = "database_activated"
+                elif names != {current, stage}:
+                    raise ValueError("unexpected restore databases")
+                else:
+                    connection.execute(
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname=%s AND pid<>pg_backend_pid()",
+                        (current,),
+                    )
+                    connection.execute(
+                        sql.SQL("ALTER DATABASE {} RENAME TO {}").format(
+                            sql.Identifier(current), sql.Identifier(rollback)
+                        )
+                    )
+                    phase = "database_old_renamed"
+                value["phase"] = phase
+                _atomic_json(root, ACTIVATION_MARKER, value, replace=True)
+            if phase == "database_old_renamed":
+                names = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT datname FROM pg_database WHERE datname = ANY(%s)",
+                        ([current, stage, rollback],),
+                    )
+                }
+                if names == {current, rollback}:
+                    phase = "database_activated"
+                elif names != {stage, rollback}:
+                    raise ValueError("unexpected staging database")
+                else:
+                    connection.execute(
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname=%s AND pid<>pg_backend_pid()",
+                        (stage,),
+                    )
+                    connection.execute(
+                        sql.SQL("ALTER DATABASE {} RENAME TO {}").format(
+                            sql.Identifier(stage), sql.Identifier(current)
+                        )
+                    )
+                    phase = "database_activated"
+                value["phase"] = phase
+                _atomic_json(root, ACTIVATION_MARKER, value, replace=True)
+            if phase != "database_activated":
+                raise ValueError("database activation incomplete")
+    except BrowserRestoreError:
+        raise
+    except Exception:
+        raise BrowserRestoreError("restore_prepare_failed", 503) from None
 
 
 def activate_pending_restore(settings: Settings) -> Path:
@@ -526,6 +748,12 @@ def activate_pending_restore(settings: Settings) -> Path:
     pending = rollback = -1
     try:
         value = _marker(root)
+        _cleanup_orphan_restores(
+            settings,
+            root_path,
+            root,
+            preserve={value["pending_dir"]} if value is not None else set(),
+        )
         if value is None:
             return root_path
         pending_name = value["pending_dir"]
@@ -539,6 +767,18 @@ def activate_pending_restore(settings: Settings) -> Path:
         except FileNotFoundError:
             if value["phase"] not in {"moving_new", "activated"}:
                 raise BrowserRestoreError("restore_prepare_failed", 503) from None
+        if (
+            pending >= 0
+            and value["database_engine"] == "postgresql"
+            and value["phase"] in {
+                "prepared", "database_old_renamed", "database_activated",
+            }
+            and _exists(pending, POSTGRES_RESTORE_METADATA)
+        ):
+            if _postgres_stage_metadata(pending) != value["stage_database"]:
+                raise BrowserRestoreError("restore_prepare_failed", 503)
+            os.unlink(POSTGRES_RESTORE_METADATA, dir_fd=pending)
+            os.fsync(pending)
         try:
             os.mkdir(rollback_name, 0o700, dir_fd=root)
             os.fsync(root)
@@ -549,7 +789,12 @@ def activate_pending_restore(settings: Settings) -> Path:
             dir_fd=root,
         )
         _private_directory(rollback)
-        if value["phase"] == "prepared":
+        if value["phase"] in {
+            "prepared", "database_old_renamed", "database_activated",
+        }:
+            # Validate the complete filesystem switch before PostgreSQL is renamed.
+            # Persist the exact lists into the same journal so a crash in either
+            # database rename resumes with the already-reviewed state transition.
             value["old_entries"] = _safe_entries(
                 root, {ACTIVATION_MARKER, pending_name, rollback_name},
                 preserve_rollbacks=True,
@@ -557,11 +802,17 @@ def activate_pending_restore(settings: Settings) -> Path:
             if pending < 0:
                 raise BrowserRestoreError("restore_prepare_failed", 503)
             value["new_entries"] = _safe_entries(pending, set())
-            if (
-                "open-node.db" not in value["new_entries"]
-                or ".open-node-restore.json" not in value["new_entries"]
-            ):
+            required = {".open-node-restore.json", "restore.env"}
+            if value["database_engine"] == "sqlite":
+                required.add("open-node.db")
+            if not required <= set(value["new_entries"]):
                 raise BrowserRestoreError("restore_prepare_failed", 503)
+            _atomic_json(root, ACTIVATION_MARKER, value, replace=True)
+        if value["database_engine"] == "postgresql" and value["phase"] in {
+            "prepared", "database_old_renamed", "database_activated",
+        }:
+            _activate_postgres_database(settings, root, value)
+        if value["phase"] in {"prepared", "database_activated"}:
             value["phase"] = "moving_old"
             _atomic_json(root, ACTIVATION_MARKER, value, replace=True)
         if value["phase"] == "moving_old":

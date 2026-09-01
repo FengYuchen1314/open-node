@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:15.18-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf75b99e791767a7a16ce69
+    init: true
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
+    environment:
+      POSTGRES_DB: open_node
+      POSTGRES_USER: open_node
+      POSTGRES_PASSWORD: ${OPEN_NODE_POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    stop_grace_period: 1m
+volumes:
+  postgres-data:

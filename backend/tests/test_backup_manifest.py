@@ -40,6 +40,9 @@ COMPONENTS = (
     ("external_subscriptions", "external_state", (
         "data/external-subscriptions/vault.key", "data/external-subscriptions/vault.initialized",
     )),
+    ("federation", "federation_state", (
+        "data/federation/vault.key", "data/federation/vault.initialized",
+    )),
     ("notifications", "notification_state", (
         "data/notifications/telegram.key", "data/notifications/telegram.initialized",
     )),

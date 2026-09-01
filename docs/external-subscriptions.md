@@ -275,7 +275,8 @@ sessions and cold database/key restoration. Parser coverage of other protocol
 families is not a claim that this new fixture forwards all of them. The existing
 [managed protocol gates](subscriptions.md#verified-protocols) remain separate.
 
-The verified deployment scope remains single-host Docker/SQLite. This feature
+The supported deployment scope remains one control-plane process with SQLite or the pinned
+single-host PostgreSQL service. This feature
 does not establish PostgreSQL concurrency, automatic backups, public DNS/TLS
 or a full MMWX migration.
 

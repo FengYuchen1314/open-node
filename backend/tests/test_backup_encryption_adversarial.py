@@ -62,7 +62,8 @@ def package(payload: bytes = CANARY.encode(), *, declared_sha: str | None = None
         "source": {"git_revision": None, "image_id": None, "image_revision": None},
         "database": {"engine": "sqlite", "layout": "standalone", "schema_fingerprint": None},
         "coverage": dict.fromkeys(
-            ("certificates", "external_subscriptions", "notifications", "agent_identity"),
+            ("certificates", "external_subscriptions", "federation", "notifications",
+             "agent_identity"),
             "unknown",
         ),
         "required_configuration": ["deployment_settings"],

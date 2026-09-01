@@ -38,6 +38,36 @@ def test_compose_bounds_local_container_logs():
     }
 
 
+def test_postgres_overlay_is_digest_pinned_private_and_health_checked():
+    overlay = yaml.safe_load((ROOT / "deploy/compose.postgresql.yaml").read_text())
+    service = overlay["services"]["postgres"]
+    expected_image = (
+        "postgres:15.18-bookworm@sha256:"
+        "e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf75b99e791767a7a16ce69"
+    )
+
+    assert service["image"] == expected_image
+    assert "ports" not in service
+    assert service["init"] is True
+    assert service["restart"] == "unless-stopped"
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert service["volumes"] == ["postgres-data:/var/lib/postgresql/data"]
+    assert service["stop_grace_period"] == "1m"
+    assert service["healthcheck"] == {
+        "test": [
+            "CMD-SHELL",
+            'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"',
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 20,
+        "start_period": "10s",
+    }
+    assert f'POSTGRES_IMAGE="{expected_image}"' in (ROOT / "install.sh").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_application_update_bridge_is_fixed_function_and_has_no_docker_socket_mount():
     compose = yaml.safe_load((ROOT / "deploy/compose.yaml").read_text())
     service = compose["services"]["open-node"]

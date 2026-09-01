@@ -4,7 +4,7 @@ import json
 from contextlib import contextmanager
 
 from pydantic import ValidationError
-from sqlalchemy import CheckConstraint, Integer, Text, func, inspect, select, text, update
+from sqlalchemy import CheckConstraint, Integer, Text, func, inspect, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -19,6 +19,7 @@ from open_node.domain.subscriber_permissions import (
     SubscriberPermissionsUpdate,
     SubscriberQuotaUsage,
 )
+from open_node.services.inventory import begin_serialized_write
 
 
 class SubscriberPermissionsBase(DeclarativeBase):
@@ -29,15 +30,13 @@ class SubscriberPermissionsModel(SubscriberPermissionsBase):
     __tablename__ = "subscriber_permissions_policy"
     __table_args__ = (
         CheckConstraint("id=1"),
+        CheckConstraint(f"revision>=0 AND revision<={MAX_REVISION}"),
         CheckConstraint(
-            f"typeof(revision)='integer' AND revision>=0 AND revision<={MAX_REVISION}"
-        ),
-        CheckConstraint(
-            f"typeof(template_quota)='integer' AND template_quota>=0 "
+            f"template_quota>=0 "
             f"AND template_quota<={MAX_QUOTA}"
         ),
         CheckConstraint(
-            f"typeof(external_source_quota)='integer' AND external_source_quota>=0 "
+            f"external_source_quota>=0 "
             f"AND external_source_quota<={MAX_QUOTA}"
         ),
     )
@@ -54,7 +53,7 @@ class SubscriberPermissionsStore:
         self.inventory = inventory
 
     def _supported(self):
-        if self.inventory._engine.dialect.name != "sqlite":
+        if self.inventory._engine.dialect.name not in {"sqlite", "postgresql"}:
             raise SubscriberPermissionsError(
                 503, "subscriber_permissions_storage_unavailable"
             )
@@ -70,7 +69,9 @@ class SubscriberPermissionsStore:
                 connection = session.connection()
                 raw = connection.connection.dbapi_connection
                 try:
-                    session.execute(text("BEGIN IMMEDIATE"))
+                    begin_serialized_write(
+                        session, self.inventory._engine, "subscriber-permissions-write"
+                    )
                     yield session
                     session.commit()
                 except BaseException:
@@ -117,8 +118,6 @@ class SubscriberPermissionsStore:
             ) from None
 
     def create_schema(self):
-        if self.inventory._engine.dialect.name != "sqlite":
-            return
         with self._session(write=True) as session:
             connection = session.connection()
             existed = inspect(connection).has_table(SubscriberPermissionsModel.__tablename__)

@@ -5,12 +5,14 @@ from pathlib import Path
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
     app_name: str = "Open Node"
     api_prefix: str = "/api/v1"
     database_url: str = "sqlite:///./data/open-node.db"
+    control_state_dir: Path | None = None
     license_required: bool = False
     cors_origins: list[str] = ["http://localhost:5173"]
     session_cookie_secure: bool = True
@@ -20,6 +22,7 @@ class Settings(BaseSettings):
     backup_temporary_directory: Path | None = None
     browser_restore_auto_restart: bool = False
     external_subscriptions_state_dir: Path | None = None
+    federation_state_dir: Path | None = None
     geoip_ipinfo_token: SecretStr | None = None
     notifications_state_dir: Path | None = None
     speedtest_state_dir: Path | None = None
@@ -57,13 +60,13 @@ class Settings(BaseSettings):
 
         return normalize_control_url(value)
 
-    @field_validator("backup_temporary_directory")
+    @field_validator("backup_temporary_directory", "control_state_dir")
     @classmethod
     def backup_temporary_path(cls, value: Path | None) -> Path | None:
         if value is not None and (
             not value.is_absolute() or value == Path(value.anchor) or ".." in value.parts
         ):
-            raise ValueError("Backup temporary directory requires an absolute non-root path")
+            raise ValueError("Configured state directory requires an absolute non-root path")
         return value
 
     @field_validator("certificate_http_address")
@@ -128,7 +131,22 @@ class Settings(BaseSettings):
     def optional_external_state(cls, value):
         return None if value == "" else value
 
-    @field_validator("external_subscriptions_state_dir")
+    @field_validator("database_url")
+    @classmethod
+    def supported_database_url(cls, value: str) -> str:
+        try:
+            url = make_url(value)
+        except Exception:
+            raise ValueError("Database URL is invalid") from None
+        if url.drivername not in {"sqlite", "sqlite+pysqlite", "postgresql+psycopg"}:
+            raise ValueError("Database must use SQLite or PostgreSQL with psycopg")
+        if url.drivername == "postgresql+psycopg" and (
+            not url.username or url.password is None or not url.host or not url.database
+        ):
+            raise ValueError("PostgreSQL requires username, password, host and database")
+        return value
+
+    @field_validator("external_subscriptions_state_dir", "federation_state_dir")
     @classmethod
     def external_state_path(cls, value: Path | None) -> Path | None:
         if value is not None and (
@@ -136,6 +154,11 @@ class Settings(BaseSettings):
         ):
             raise ValueError("External subscription state requires an absolute non-root path")
         return value
+
+    @field_validator("federation_state_dir", mode="before")
+    @classmethod
+    def optional_federation_state(cls, value):
+        return None if value == "" else value
 
     @field_validator("notifications_state_dir", mode="before")
     @classmethod

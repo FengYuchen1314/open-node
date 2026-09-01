@@ -52,10 +52,12 @@ _READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _ROOTS = (
     ("certificates", "certificate_state", "data/certificates"),
     ("external_subscriptions", "external_state", "data/external-subscriptions"),
+    ("federation", "federation_state", "data/federation"),
     ("notifications", "notification_state", "data/notifications"),
 )
 _KEY_NAMES = {
     "external_state": frozenset({"vault.key", "vault.initialized", "vault.lock"}),
+    "federation_state": frozenset({"vault.key", "vault.initialized", "vault.lock"}),
     "notification_state": frozenset({"telegram.key", "telegram.initialized"}),
 }
 
@@ -74,6 +76,10 @@ class BackupStateLayout:
     external_subscriptions: Path | None = field(repr=False)
     notifications: Path | None = field(repr=False)
     agent_identity: Path | None = field(repr=False)
+    database_url: str | None = field(default=None, repr=False)
+    database_engine: str = "sqlite"
+    state_root: Path | None = field(default=None, repr=False)
+    federation: Path | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,8 +204,8 @@ class _Slice(io.RawIOBase):
 
 
 class _Copy:
-    def __init__(self, permit: BackupSnapshotPermit, database: Path, budget: int) -> None:
-        self.permit, self.database, self.budget = permit, database, budget
+    def __init__(self, permit: BackupSnapshotPermit, lock_root: Path, budget: int) -> None:
+        self.permit, self.lock_root, self.budget = permit, lock_root, budget
         self.deadline = time.monotonic() + MAX_STATE_SECONDS
         self.items = self.total = 0
         self.entries: list[BackupFileEntry] = []
@@ -207,7 +213,7 @@ class _Copy:
         self.inodes: set[tuple[int, int]] = set()
 
     def check(self) -> None:
-        self.permit.assert_for_lock(self.database.parent / _LOCK_NAME)
+        self.permit.assert_for_lock(self.lock_root / _LOCK_NAME)
         if time.monotonic() >= self.deadline:
             raise BackupStateError()
 
@@ -344,7 +350,8 @@ def staged_backup_state(
         _layout(layout, staging_directory)
         if type(database_size) is not int or not 0 <= database_size <= MAX_TOTAL_FILE_BYTES:
             raise BackupStateError()
-        copier = _Copy(permit, layout.database, MAX_TOTAL_FILE_BYTES - database_size)
+        lock_root = layout.state_root or layout.database.parent
+        copier = _Copy(permit, lock_root, MAX_TOTAL_FILE_BYTES - database_size)
         copier.check()
         with ExitStack() as stack:
             staging_fd = stack.enter_context(_directory(staging_directory))

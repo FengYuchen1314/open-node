@@ -19,7 +19,8 @@ from open_node.services.backup_validation import validate_backup_archive
 def fixture(payload=b"opaque database bytes", *, full=False):
     payloads = {"data/open-node.db": payload}
     coverage = dict.fromkeys(
-        ("certificates", "external_subscriptions", "notifications", "agent_identity"), "unknown"
+        ("certificates", "external_subscriptions", "federation", "notifications", "agent_identity"),
+        "unknown",
     )
     if full:
         coverage = dict.fromkeys(coverage, "included")
@@ -29,6 +30,8 @@ def fixture(payload=b"opaque database bytes", *, full=False):
             "data/certificates/账户📦/café.pem": b"opaque certificate",
             "data/external-subscriptions/vault.key": b"opaque external key",
             "data/external-subscriptions/vault.initialized": b"opaque external fence",
+            "data/federation/vault.key": b"opaque federation key",
+            "data/federation/vault.initialized": b"opaque federation fence",
             "data/notifications/telegram.key": b"opaque notification key",
             "data/notifications/telegram.initialized": b"opaque notification fence",
             "secrets/agent-identity.seed": b"not an actual identity",
@@ -36,6 +39,7 @@ def fixture(payload=b"opaque database bytes", *, full=False):
     roles = {
         "data/certificates/": "certificate_state",
         "data/external-subscriptions/": "external_state",
+        "data/federation/": "federation_state",
         "data/notifications/": "notification_state", "secrets/": "agent_identity",
     }
     entries = []

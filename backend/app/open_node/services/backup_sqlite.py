@@ -69,6 +69,7 @@ class SQLiteBackupSnapshot:
     size: int
     sha256: str
     schema_fingerprint: str
+    engine: str = field(default="sqlite", init=False)
     sqlite_integrity_check: Literal["passed"] = "passed"
     foreign_key_check: Literal["passed"] = "passed"
     standalone: Literal[True] = True

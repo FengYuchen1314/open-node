@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from cryptography.fernet import Fernet, InvalidToken
 from pydantic import SecretStr
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, select, text, update
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -38,7 +38,12 @@ from open_node.domain.notifications import (
     NotificationTestRequest,
     validate_bot_token,
 )
-from open_node.services.inventory import InventoryStore, ProductUserModel, SubscriptionPlanModel
+from open_node.services.inventory import (
+    InventoryStore,
+    ProductUserModel,
+    SubscriptionPlanModel,
+    begin_serialized_write,
+)
 
 CHAT_INTERVAL = timedelta(seconds=3.1)
 MAX_AUTOMATIC_ATTEMPTS = 3
@@ -322,12 +327,11 @@ class NotificationStore:
         self._vault = _NotificationVault(state_dir)
 
     def _supported(self) -> None:
-        if self.inventory._engine.dialect.name != "sqlite":
+        if self.inventory._engine.dialect.name not in {"sqlite", "postgresql"}:
             raise NotificationError(503, "notification_database_unavailable")
 
     def create_schema(self) -> None:
-        if self.inventory._engine.dialect.name != "sqlite":
-            return
+        self._supported()
         NotificationBase.metadata.create_all(self.inventory._engine)
         with self._write() as session:
             if session.get(NotificationSettingsModel, 1) is None:
@@ -354,7 +358,9 @@ class NotificationStore:
         self._supported()
         try:
             with self.inventory._session() as session:
-                session.execute(text("BEGIN IMMEDIATE"))
+                begin_serialized_write(
+                    session, self.inventory._engine, "notification-write"
+                )
                 yield session
                 session.commit()
         except IntegrityError:
@@ -384,7 +390,7 @@ class NotificationStore:
         )
 
     def get_settings(self) -> NotificationSettingsRead:
-        if self.inventory._engine.dialect.name != "sqlite":
+        if self.inventory._engine.dialect.name not in {"sqlite", "postgresql"}:
             return self._settings_read(
                 self._defaults(), storage_error="notification_database_unavailable"
             )

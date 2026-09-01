@@ -39,8 +39,8 @@ def make_instance(root, *, full=True):
     sample.path.chmod(0o600)
     staging = data / "staging"
     staging.mkdir(mode=0o700)
-    certificates, external, notifications = (data / name for name in (
-        "certificates", "external", "notifications",
+    certificates, external, federation, notifications = (data / name for name in (
+        "certificates", "external", "federation", "notifications",
     ))
     identity = data / "agent" / "identity.seed" if full else None
     for logical, stream in sample.sources.items():
@@ -48,6 +48,8 @@ def make_instance(root, *, full=True):
             destination = certificates / logical.removeprefix("data/certificates/")
         elif logical.startswith("data/external-subscriptions/"):
             destination = external / logical.removeprefix("data/external-subscriptions/")
+        elif logical.startswith("data/federation/"):
+            destination = federation / logical.removeprefix("data/federation/")
         elif logical.startswith("data/notifications/"):
             destination = notifications / logical.removeprefix("data/notifications/")
         else:
@@ -64,7 +66,9 @@ def make_instance(root, *, full=True):
             parent.mkdir(mode=0o700, exist_ok=True)
         destination.write_bytes(stream.getvalue())
         destination.chmod(0o600)
-    layout = BackupStateLayout(sample.path, certificates, external, notifications, identity)
+    layout = BackupStateLayout(
+        sample.path, certificates, external, notifications, identity, federation=federation,
+    )
     return SimpleNamespace(
         sample=sample, layout=layout, staging=staging,
         barrier=BackupWriteBarrier(data / ".open-node-backup.lock"),
@@ -198,6 +202,7 @@ def test_empty_supported_instance_has_explicit_absence_not_unknown(tmp_path, off
             independent_decrypt(created, official_age, instance.staging)
         assert not instance.layout.certificates.exists()
         assert not instance.layout.external_subscriptions.exists()
+        assert not instance.layout.federation.exists()
         assert not instance.layout.notifications.exists()
     finally:
         instance.barrier.close()

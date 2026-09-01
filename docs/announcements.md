@@ -52,8 +52,8 @@ Mini App。
 | `DELETE /api/v1/announcements/{id}` | 删除一条公告 |
 | `GET /api/v1/account/announcements` | 登录用户读取对自己生效的公告 |
 
-公告存放在现有 SQLite 数据库的独立 `web_announcements` 表中，随正常数据库快照和
-备份一起保存，不新增密钥。当前实现只声明 SQLite 支持。
+公告存放在所选 SQLite 或 PostgreSQL 数据库的独立 `web_announcements` 表中，随正常
+数据库快照和备份一起保存，不新增密钥。
 
 ## 与官方实现的边界
 

@@ -1619,6 +1619,7 @@ class InventoryStore:
         *,
         short_links_enabled: bool = False,
         external_subscriptions_state_dir: Path | None = None,
+        federation_state_dir: Path | None = None,
         geoip_country_lookup=None,
     ) -> None:
         self.short_links_enabled = short_links_enabled
@@ -1626,7 +1627,7 @@ class InventoryStore:
         self._session_factory = sessionmaker(self._engine, expire_on_commit=False)
         self.external_subscriptions_state_dir = external_subscriptions_state_dir
         self.geoip_country_lookup = geoip_country_lookup
-        self.federation_state_dir: Path | None = None
+        self.federation_state_dir = federation_state_dir
         database_file = self._engine.url.database
         if (
             external_subscriptions_state_dir is None
@@ -1640,6 +1641,8 @@ class InventoryStore:
                 Path(database_file).absolute().parent / "external-subscriptions"
             )
         if (
+            self.federation_state_dir is None
+            and
             self._engine.dialect.name == "sqlite"
             and database_file not in (None, "", ":memory:")
             and not database_file.startswith("file:")
@@ -8001,12 +8004,7 @@ class InventoryStore:
     def _coordinated_session(self):
         with self._session() as session:
             # Reservations and command leases must observe one serialized state transition.
-            if self._engine.dialect.name == "sqlite":
-                session.execute(text("BEGIN IMMEDIATE"))
-            else:
-                session.execute(
-                    select(ServerModel.id).order_by(ServerModel.id).with_for_update()
-                ).all()
+            begin_serialized_write(session, self._engine, "inventory-write")
             yield session
 
     def _change_sets(self):
@@ -10913,7 +10911,7 @@ def create_inventory_engine(database_url: str) -> Engine:
         connect_args["check_same_thread"] = False
         if url.database and url.database != ":memory:":
             Path(url.database).expanduser().parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(url, connect_args=connect_args, future=True)
+    engine = create_engine(url, connect_args=connect_args, future=True, pool_pre_ping=True)
     if url.drivername.startswith("sqlite"):
 
         @event.listens_for(engine, "connect")
@@ -10925,3 +10923,19 @@ def create_inventory_engine(database_url: str) -> Engine:
                 cursor.close()
 
     return engine
+
+
+def begin_serialized_write(session: Session, engine: Engine, namespace: str) -> None:
+    """Start the dialect's cross-process serialization primitive."""
+    if engine.dialect.name == "sqlite":
+        session.execute(text("BEGIN IMMEDIATE"))
+        return
+    if engine.dialect.name == "postgresql":
+        key = int.from_bytes(
+            hashlib.sha256(("open-node/" + namespace).encode()).digest()[:8],
+            "big",
+            signed=True,
+        )
+        session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+        return
+    raise RuntimeError("Unsupported database dialect")

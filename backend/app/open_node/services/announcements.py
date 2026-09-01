@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import CheckConstraint, DateTime, String, Text, delete, or_, select, text
+from sqlalchemy import CheckConstraint, DateTime, String, Text, delete, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -19,6 +19,7 @@ from open_node.services.inventory import (
     InventoryStore,
     ProductUserModel,
     SubscriptionPlanModel,
+    begin_serialized_write,
 )
 
 
@@ -34,14 +35,8 @@ class AnnouncementModel(AnnouncementBase):
             "type IN ('general','maintenance','sub_update')",
             name="announcement_known_type",
         ),
-        CheckConstraint(
-            "typeof(title) = 'text' AND length(title) BETWEEN 1 AND 100",
-            name="announcement_title_length",
-        ),
-        CheckConstraint(
-            "typeof(body) = 'text' AND length(body) BETWEEN 1 AND 2000",
-            name="announcement_body_length",
-        ),
+        CheckConstraint("length(title) BETWEEN 1 AND 100", name="announcement_title_length"),
+        CheckConstraint("length(body) BETWEEN 1 AND 2000", name="announcement_body_length"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -64,7 +59,7 @@ class AnnouncementStore:
         self.clock = clock or (lambda: datetime.now(UTC))
 
     def _supported(self):
-        if self.inventory._engine.dialect.name != "sqlite":
+        if self.inventory._engine.dialect.name not in {"sqlite", "postgresql"}:
             raise AnnouncementError("announcement_storage_unavailable", 503)
 
     @contextmanager
@@ -84,7 +79,9 @@ class AnnouncementStore:
                 connection = session.connection()
                 dbapi_connection = connection.connection.dbapi_connection
                 try:
-                    session.execute(text("BEGIN IMMEDIATE"))
+                    begin_serialized_write(
+                        session, self.inventory._engine, "announcement-write"
+                    )
                     yield session
                     session.commit()
                 except BaseException:
@@ -100,12 +97,12 @@ class AnnouncementStore:
             raise AnnouncementError("announcement_storage_unavailable", 503) from None
 
     def create_schema(self):
-        if self.inventory._engine.dialect.name == "sqlite":
-            try:
-                with self.inventory._engine.begin() as connection:
-                    AnnouncementBase.metadata.create_all(connection)
-            except SQLAlchemyError:
-                raise AnnouncementError("announcement_storage_unavailable", 503) from None
+        self._supported()
+        try:
+            with self.inventory._engine.begin() as connection:
+                AnnouncementBase.metadata.create_all(connection)
+        except SQLAlchemyError:
+            raise AnnouncementError("announcement_storage_unavailable", 503) from None
 
     @staticmethod
     def _read_row(row: AnnouncementModel) -> AnnouncementRead:

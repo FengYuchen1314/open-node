@@ -18,7 +18,8 @@ MAX_JSON_DEPTH = 12
 MAX_JSON_NODES = 80000
 
 BackupFileRole = Literal[
-    "database", "certificate_state", "external_state", "notification_state", "agent_identity"
+    "database", "certificate_state", "external_state", "federation_state",
+    "notification_state", "agent_identity"
 ]
 BackupCoverageStatus = Literal["included", "not_configured", "unknown"]
 BackupConfiguration = Literal["deployment_settings", "subscriber_totp_key"]
@@ -29,7 +30,8 @@ _HEX64 = re.compile(r"[0-9a-f]{64}")
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 _UTC_SECONDS = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 _ROLES = frozenset(
-    {"database", "certificate_state", "external_state", "notification_state", "agent_identity"}
+    {"database", "certificate_state", "external_state", "federation_state",
+     "notification_state", "agent_identity"}
 )
 _COVERAGE_STATES = frozenset({"included", "not_configured", "unknown"})
 _CONFIGURATION = frozenset({"deployment_settings", "subscriber_totp_key"})
@@ -38,6 +40,9 @@ _CERTIFICATE_KEYS = frozenset(
 )
 _EXTERNAL_KEYS = frozenset(
     {"data/external-subscriptions/vault.key", "data/external-subscriptions/vault.initialized"}
+)
+_FEDERATION_KEYS = frozenset(
+    {"data/federation/vault.key", "data/federation/vault.initialized"}
 )
 _NOTIFICATION_KEYS = frozenset(
     {"data/notifications/telegram.key", "data/notifications/telegram.initialized"}
@@ -70,8 +75,8 @@ class BackupSource:
 
 @dataclass(frozen=True, slots=True)
 class BackupDatabase:
-    engine: Literal["sqlite"]
-    layout: Literal["standalone"]
+    engine: Literal["sqlite", "postgresql"]
+    layout: Literal["standalone", "custom_dump"]
     schema_fingerprint: str | None
 
 
@@ -81,6 +86,7 @@ class BackupCoverage:
     external_subscriptions: BackupCoverageStatus
     notifications: BackupCoverageStatus
     agent_identity: BackupCoverageStatus
+    federation: BackupCoverageStatus = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,18 +224,28 @@ def _source(value: object) -> BackupSource:
 
 def _database(value: object) -> BackupDatabase:
     row = _object(value, {"engine", "layout", "schema_fingerprint"})
-    if row["engine"] != "sqlite" or row["layout"] != "standalone":
+    if (row["engine"], row["layout"]) not in {
+        ("sqlite", "standalone"),
+        ("postgresql", "custom_dump"),
+    }:
         _invalid()
     return BackupDatabase(
-        "sqlite", "standalone", _hex(row["schema_fingerprint"], _HEX64, nullable=True)
+        cast(Literal["sqlite", "postgresql"], row["engine"]),
+        cast(Literal["standalone", "custom_dump"], row["layout"]),
+        _hex(row["schema_fingerprint"], _HEX64, nullable=True),
     )
 
 
 def _coverage(value: object) -> BackupCoverage:
-    names = ("certificates", "external_subscriptions", "notifications", "agent_identity")
+    names = (
+        "certificates", "external_subscriptions", "notifications", "agent_identity", "federation",
+    )
     row = _object(value, set(names))
     states = [cast(BackupCoverageStatus, _choice(row[name], _COVERAGE_STATES)) for name in names]
-    return BackupCoverage(*states)
+    return BackupCoverage(
+        certificates=states[0], external_subscriptions=states[1], notifications=states[2],
+        agent_identity=states[3], federation=states[4],
+    )
 
 
 def _configuration(value: object) -> tuple[BackupConfiguration, ...]:
@@ -241,7 +257,9 @@ def _configuration(value: object) -> tuple[BackupConfiguration, ...]:
     return result
 
 
-def _files(value: object, coverage: BackupCoverage) -> tuple[BackupFileEntry, ...]:
+def _files(
+    value: object, coverage: BackupCoverage, database: BackupDatabase
+) -> tuple[BackupFileEntry, ...]:
     if type(value) is not list or not 1 <= len(value) <= MAX_FILES:
         _invalid()
     result = []
@@ -259,9 +277,14 @@ def _files(value: object, coverage: BackupCoverage) -> tuple[BackupFileEntry, ..
         if total > MAX_TOTAL_FILE_BYTES:
             _invalid()
         if (
-            (role == "database" and path != "data/open-node.db")
+            (role == "database" and path != (
+                "data/open-node.db"
+                if database.engine == "sqlite"
+                else "database/postgres.dump"
+            ))
             or (role == "certificate_state" and not path.startswith("data/certificates/"))
             or (role == "external_state" and path not in _EXTERNAL_KEYS)
+            or (role == "federation_state" and path not in _FEDERATION_KEYS)
             or (role == "notification_state" and path not in _NOTIFICATION_KEYS)
             or (role == "agent_identity" and path not in _IDENTITY_FILES)
         ):
@@ -274,11 +297,17 @@ def _files(value: object, coverage: BackupCoverage) -> tuple[BackupFileEntry, ..
     for previous, current in pairwise(sorted(path.split("/") for path in paths)):
         if current[:len(previous)] == previous:
             _invalid()
-    if by_role["database"] != {"data/open-node.db"}:
+    expected_database = (
+        "data/open-node.db"
+        if database.engine == "sqlite"
+        else "database/postgres.dump"
+    )
+    if by_role["database"] != {expected_database}:
         _invalid()
     for name, role, required in (
         ("certificates", "certificate_state", _CERTIFICATE_KEYS),
         ("external_subscriptions", "external_state", _EXTERNAL_KEYS),
+        ("federation", "federation_state", _FEDERATION_KEYS),
         ("notifications", "notification_state", _NOTIFICATION_KEYS),
         ("agent_identity", "agent_identity", _IDENTITY_FILES),
     ):
@@ -322,9 +351,11 @@ def parse_backup_manifest(raw: bytes) -> BackupManifest:
             int(created[11:13]), int(created[14:16]), int(created[17:19]),
         )
         coverage = _coverage(row["coverage"])
+        database = _database(row["database"])
         return BackupManifest(
-            _FORMAT, 1, created, _source(row["source"]), _database(row["database"]),
-            coverage, _configuration(row["required_configuration"]), _files(row["files"], coverage),
+            _FORMAT, 1, created, _source(row["source"]), database,
+            coverage, _configuration(row["required_configuration"]),
+            _files(row["files"], coverage, database),
         )
     except BackupValidationError:
         raise

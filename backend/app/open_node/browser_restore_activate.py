@@ -3,14 +3,17 @@
 from open_node.core.config import Settings
 from open_node.domain.restore import BrowserRestoreError
 from open_node.services.browser_restore import activate_pending_restore
+from open_node.services.postgres_security import restrict_postgres_application_role
 
 
 def main() -> int:
     try:
-        root = activate_pending_restore(Settings(_env_file=None))
+        settings = Settings(_env_file=None)
+        restrict_postgres_application_role(settings.database_url)
+        root = activate_pending_restore(settings)
     except BrowserRestoreError as exc:
-        # PostgreSQL and nonstandard/manual layouts simply do not expose this
-        # SQLite-only facility. A malformed pending marker still fails closed.
+        # Nonstandard/manual layouts do not expose browser restoration. A
+        # malformed SQLite or PostgreSQL pending marker still fails closed.
         if exc.code != "restore_upload_unavailable":
             raise
     else:

@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 
 from pydantic import ValidationError
-from sqlalchemy import CheckConstraint, Integer, Text, inspect, select, text, update
+from sqlalchemy import CheckConstraint, Integer, Text, inspect, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -16,7 +16,7 @@ from open_node.domain.branding import (
     BrandingSettingsRead,
     BrandingSettingsUpdate,
 )
-from open_node.services.inventory import InventoryStore
+from open_node.services.inventory import InventoryStore, begin_serialized_write
 
 
 class BrandingBase(DeclarativeBase):
@@ -28,12 +28,9 @@ class BrandingSettingsModel(BrandingBase):
     __table_args__ = (
         CheckConstraint("id = 1", name="branding_single_row"),
         CheckConstraint(
-            "typeof(revision) = 'integer' AND revision >= 0 "
-            f"AND revision <= {BRANDING_MAX_REVISION}",
+            f"revision >= 0 AND revision <= {BRANDING_MAX_REVISION}",
             name="branding_safe_revision",
         ),
-        CheckConstraint("typeof(site_title) = 'text'", name="branding_site_text"),
-        CheckConstraint("typeof(brand_title) = 'text'", name="branding_brand_text"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -47,7 +44,7 @@ class BrandingStore:
         self.inventory = inventory
 
     def _supported(self) -> None:
-        if self.inventory._engine.dialect.name != "sqlite":
+        if self.inventory._engine.dialect.name not in {"sqlite", "postgresql"}:
             raise BrandingError(503, "branding_storage_unavailable")
 
     @contextmanager
@@ -67,7 +64,9 @@ class BrandingStore:
                 connection = session.connection()
                 dbapi_connection = connection.connection.dbapi_connection
                 try:
-                    session.execute(text("BEGIN IMMEDIATE"))
+                    begin_serialized_write(
+                        session, self.inventory._engine, "branding-write"
+                    )
                     yield session
                     session.commit()
                 except BaseException:
@@ -107,8 +106,6 @@ class BrandingStore:
         return result
 
     def create_schema(self) -> None:
-        if self.inventory._engine.dialect.name != "sqlite":
-            return
         with self._write() as session:
             connection = session.connection()
             existed = inspect(connection).has_table(BrandingSettingsModel.__tablename__)

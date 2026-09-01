@@ -9,6 +9,9 @@ readonly DEFAULT_CONFIG_DIR="/etc/open-node"
 readonly DEFAULT_BACKUP_DIR="/var/backups/open-node"
 readonly MANIFEST_VERSION="1"
 readonly RUNTIME_DATABASE_URL="sqlite:////var/lib/open-node/open-node.db"
+readonly POSTGRES_DATABASE_URL_PREFIX="postgresql+psycopg://open_node:"
+readonly POSTGRES_DATABASE_URL_SUFFIX="@postgres:5432/open_node"
+readonly POSTGRES_IMAGE="postgres:15.18-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf75b99e791767a7a16ce69"
 readonly RUNTIME_CONTAINER_PORT="8080"
 readonly RUNTIME_UID_GID="10001:10001"
 readonly HEALTH_STABLE_OBSERVATIONS="3"
@@ -28,6 +31,7 @@ ENV_FILE="$CONFIG_DIR/open-node.env"
 MANIFEST_FILE="$CONFIG_DIR/installer.manifest"
 RECOVERY_FILE="$CONFIG_DIR/installer.recovery"
 DATA_VOLUME="${PROJECT_NAME}_data"
+POSTGRES_VOLUME="${PROJECT_NAME}_postgres-data"
 PUBLIC_GATEWAY_CONTAINER="${PROJECT_NAME}-public-gateway"
 PUBLIC_GATEWAY_VOLUME="${PROJECT_NAME}_caddy_data"
 UPDATE_STATE_DIR="/var/lib/open-node-maintenance-${PROJECT_NAME}"
@@ -38,6 +42,7 @@ EXPECTED_REVISION="${OPEN_NODE_EXPECTED_REVISION:-}"
 AUTO_INSTALL="${OPEN_NODE_AUTO_INSTALL_DEPENDENCIES:-1}"
 BUILD_PULL="${OPEN_NODE_BUILD_PULL:-1}"
 CREATE_ADMIN="${OPEN_NODE_CREATE_ADMIN:-auto}"
+DATABASE_BACKEND="${OPEN_NODE_DATABASE_BACKEND:-sqlite}"
 ADMIN_USERNAME="${OPEN_NODE_ADMIN_USERNAME:-admin}"
 ADMIN_PASSWORD_FILE="${OPEN_NODE_ADMIN_PASSWORD_FILE:-}"
 COMPOSE=()
@@ -355,8 +360,9 @@ daemon_identity_is_current() {
   [[ "$current" == "$DOCKER_DAEMON_ID" ]]
 }
 
-volume_fingerprint() {
-  docker volume inspect "$DATA_VOLUME" 2>/dev/null \
+volume_fingerprint_for() {
+  local volume_name="$1"
+  docker volume inspect "$volume_name" 2>/dev/null \
     | jq -cS '.[0] | {
         Name,
         Driver,
@@ -367,6 +373,14 @@ volume_fingerprint() {
       }' \
     | sha256sum \
     | awk '{print $1}'
+}
+
+volume_fingerprint() {
+  volume_fingerprint_for "$DATA_VOLUME"
+}
+
+postgres_volume_fingerprint() {
+  volume_fingerprint_for "$POSTGRES_VOLUME"
 }
 
 set_file_value() {
@@ -421,6 +435,7 @@ load_manifest_defaults() {
   adopt_manifest_value PROJECT_NAME OPEN_NODE_PROJECT_NAME PROJECT_NAME
   adopt_manifest_value IMAGE_REPOSITORY OPEN_NODE_IMAGE_REPOSITORY IMAGE_REPOSITORY
   DATA_VOLUME="${PROJECT_NAME}_data"
+  POSTGRES_VOLUME="${PROJECT_NAME}_postgres-data"
   PUBLIC_GATEWAY_CONTAINER="${PROJECT_NAME}-public-gateway"
   PUBLIC_GATEWAY_VOLUME="${PROJECT_NAME}_caddy_data"
   UPDATE_STATE_DIR="/var/lib/open-node-maintenance-${PROJECT_NAME}"
@@ -461,6 +476,12 @@ validate_inputs() {
     || die "OPEN_NODE_CREATE_ADMIN must be 0, 1, auto, or web"
   [[ "$CREATE_ADMIN" != "web" || -z "$ADMIN_PASSWORD_FILE" ]] \
     || die "OPEN_NODE_CREATE_ADMIN=web cannot be combined with a password file"
+  [[ "$DATABASE_BACKEND" == "sqlite" || "$DATABASE_BACKEND" == "postgresql" ]] \
+    || die "OPEN_NODE_DATABASE_BACKEND must be sqlite or postgresql"
+  if [[ -n "${OPEN_NODE_POSTGRES_PASSWORD:-}" ]]; then
+    [[ "$OPEN_NODE_POSTGRES_PASSWORD" =~ ^[A-Za-z0-9]{32,128}$ ]] \
+      || die "OPEN_NODE_POSTGRES_PASSWORD must contain 32-128 ASCII letters or digits"
+  fi
   if [[ -v OPEN_NODE_PUBLIC_HOSTNAME ]]; then
     validate_public_hostname "$OPEN_NODE_PUBLIC_HOSTNAME" \
       || die "OPEN_NODE_PUBLIC_HOSTNAME must be empty or a lowercase public DNS hostname"
@@ -489,7 +510,7 @@ install_dependencies() {
 ensure_dependencies() {
   local missing=0 compose_version compose_major command_name
   for command_name in awk curl date dirname docker find flock git grep install jq mktemp \
-    mv realpath sed sha256sum stat sync tar; do
+    mv od realpath sed sha256sum stat sync tar tr; do
     command -v "$command_name" >/dev/null 2>&1 || missing=1
   done
   if [[ "$missing" -eq 1 ]] || ! docker compose version >/dev/null 2>&1; then
@@ -516,7 +537,17 @@ ensure_dependencies() {
 
 compose_with() {
   local source_dir="$1" environment_file="$2"
+  local backend
+  local -a files=(--file "$source_dir/deploy/compose.yaml")
   shift 2
+  backend="$(read_key "$environment_file" OPEN_NODE_DATABASE_BACKEND || true)"
+  if [[ "$backend" == "postgresql" ]]; then
+    [[ -f "$source_dir/deploy/compose.postgresql.yaml" \
+      && ! -L "$source_dir/deploy/compose.postgresql.yaml" ]] || return 1
+    files+=(--file "$source_dir/deploy/compose.postgresql.yaml")
+  elif [[ "$backend" != "sqlite" ]]; then
+    return 1
+  fi
   env \
     -u OPEN_NODE_IMAGE_REPOSITORY \
     -u OPEN_NODE_IMAGE_TAG \
@@ -532,9 +563,12 @@ compose_with() {
     -u OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL \
     -u OPEN_NODE_SUBSCRIBER_TOTP_KEY \
     -u OPEN_NODE_GEOIP_IPINFO_TOKEN \
+    -u OPEN_NODE_DATABASE_BACKEND \
+    -u OPEN_NODE_DATABASE_URL \
+    -u OPEN_NODE_POSTGRES_PASSWORD \
     "${COMPOSE[@]}" --env-file "$environment_file" --project-name "$PROJECT_NAME" \
       --project-directory "$source_dir/deploy" \
-      --file "$source_dir/deploy/compose.yaml" "$@"
+      "${files[@]}" "$@"
 }
 
 validate_agent_bootstrap_value() {
@@ -599,9 +633,30 @@ requested_public_gateway_change() {
 
 require_environment_file() {
   validate_safe_file "environment file" "$ENV_FILE" 1
+  validate_database_environment "$ENV_FILE" \
+    || die "database environment is invalid"
+  if [[ -v OPEN_NODE_DATABASE_BACKEND \
+    && "$OPEN_NODE_DATABASE_BACKEND" != "$(read_key "$ENV_FILE" OPEN_NODE_DATABASE_BACKEND || true)" ]]; then
+    die "database backend cannot be changed after installation"
+  fi
+}
+
+validate_database_environment() {
+  local environment_file="$1" backend url password
+  backend="$(read_key "$environment_file" OPEN_NODE_DATABASE_BACKEND || true)"
+  url="$(read_key "$environment_file" OPEN_NODE_DATABASE_URL || true)"
+  password="$(read_key "$environment_file" OPEN_NODE_POSTGRES_PASSWORD || true)"
+  if [[ "$backend" == "sqlite" ]]; then
+    [[ "$url" == "$RUNTIME_DATABASE_URL" && -z "$password" ]]
+    return
+  fi
+  [[ "$backend" == "postgresql" \
+    && "$password" =~ ^[A-Za-z0-9]{32,128}$ \
+    && "$url" == "${POSTGRES_DATABASE_URL_PREFIX}${password}${POSTGRES_DATABASE_URL_SUFFIX}" ]]
 }
 
 require_manifest() {
+  local manifest_backend
   validate_safe_file "installer manifest" "$MANIFEST_FILE" 1
   [[ "$(read_manifest_value MANIFEST_VERSION || true)" == "$MANIFEST_VERSION" ]] \
     || die "unsupported or damaged installer manifest"
@@ -621,6 +676,13 @@ require_manifest() {
     || die "OPEN_NODE_IMAGE_REPOSITORY conflicts with the installed manifest"
   [[ "$(read_manifest_value DATA_VOLUME || true)" == "$DATA_VOLUME" ]] \
     || die "managed data volume identity conflicts with the installed manifest"
+  manifest_backend="$(read_manifest_value DATABASE_BACKEND || printf 'sqlite')"
+  [[ "$manifest_backend" == "sqlite" || "$manifest_backend" == "postgresql" ]] \
+    || die "installer manifest has an invalid database backend"
+  if [[ "$manifest_backend" == "postgresql" ]]; then
+    [[ "$(read_manifest_value POSTGRES_VOLUME || true)" == "$POSTGRES_VOLUME" ]] \
+      || die "managed PostgreSQL volume identity conflicts with the installed manifest"
+  fi
   [[ -n "$DOCKER_DAEMON_ID" \
     && "$(read_manifest_value DOCKER_DAEMON_ID || true)" == "$DOCKER_DAEMON_ID" ]] \
     || die "the installed manifest belongs to a different Docker daemon"
@@ -665,12 +727,23 @@ verify_active_identity() {
 
 write_manifest() {
   local revision="$1" image_tag="$2" image_id="$3" temporary current_volume_fingerprint
+  local database_backend postgres_fingerprint=""
   daemon_identity_is_current || die "Docker daemon identity changed during deployment"
   volume_is_safe || die "managed data volume is outside installer policy"
   current_volume_fingerprint="$(volume_fingerprint)" \
     || die "could not fingerprint the managed data volume"
   [[ "$current_volume_fingerprint" =~ ^[0-9a-f]{64}$ ]] \
     || die "managed data volume fingerprint is invalid"
+  database_backend="$(read_key "$ENV_FILE" OPEN_NODE_DATABASE_BACKEND || true)"
+  if [[ "$database_backend" == "postgresql" ]]; then
+    postgres_volume_is_safe || die "managed PostgreSQL volume is outside installer policy"
+    postgres_fingerprint="$(postgres_volume_fingerprint)" \
+      || die "could not fingerprint the managed PostgreSQL volume"
+    [[ "$postgres_fingerprint" =~ ^[0-9a-f]{64}$ ]] \
+      || die "managed PostgreSQL volume fingerprint is invalid"
+  elif [[ "$database_backend" != "sqlite" ]]; then
+    die "database environment is invalid while committing the manifest"
+  fi
   temporary="$(mktemp "$CONFIG_DIR/.installer.manifest.XXXXXX")" \
     || die "could not create installer manifest"
   if ! {
@@ -685,6 +758,11 @@ write_manifest() {
     printf 'DOCKER_DAEMON_ID=%s\n' "$DOCKER_DAEMON_ID"
     printf 'DATA_VOLUME=%s\n' "$DATA_VOLUME"
     printf 'DATA_VOLUME_FINGERPRINT=%s\n' "$current_volume_fingerprint"
+    printf 'DATABASE_BACKEND=%s\n' "$database_backend"
+    if [[ "$database_backend" == "postgresql" ]]; then
+      printf 'POSTGRES_VOLUME=%s\n' "$POSTGRES_VOLUME"
+      printf 'POSTGRES_VOLUME_FINGERPRINT=%s\n' "$postgres_fingerprint"
+    fi
     printf 'DEPLOYED_REVISION=%s\n' "$revision"
     printf 'DEPLOYED_IMAGE_TAG=%s\n' "$image_tag"
     printf 'DEPLOYED_IMAGE_ID=%s\n' "$image_id"
@@ -809,13 +887,23 @@ verify_checkout() {
 }
 
 verify_volume() {
-  local expected_fingerprint actual_fingerprint
+  local expected_fingerprint actual_fingerprint database_backend
   volume_is_safe || die "managed data volume is missing or outside installer policy: $DATA_VOLUME"
   expected_fingerprint="$(read_manifest_value DATA_VOLUME_FINGERPRINT || true)"
   actual_fingerprint="$(volume_fingerprint || true)"
   [[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ \
     && "$actual_fingerprint" == "$expected_fingerprint" ]] \
     || die "managed data volume does not match the installer manifest"
+  database_backend="$(read_manifest_value DATABASE_BACKEND || printf 'sqlite')"
+  if [[ "$database_backend" == "postgresql" ]]; then
+    postgres_volume_is_safe \
+      || die "managed PostgreSQL volume is missing or outside installer policy: $POSTGRES_VOLUME"
+    expected_fingerprint="$(read_manifest_value POSTGRES_VOLUME_FINGERPRINT || true)"
+    actual_fingerprint="$(postgres_volume_fingerprint || true)"
+    [[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ \
+      && "$actual_fingerprint" == "$expected_fingerprint" ]] \
+      || die "managed PostgreSQL volume does not match the installer manifest"
+  fi
 }
 
 volume_is_safe() {
@@ -830,6 +918,108 @@ volume_is_safe() {
     and .[0].Labels["com.docker.compose.project"] == $project
     and .[0].Labels["com.docker.compose.volume"] == "data"
   ' >/dev/null
+}
+
+postgres_volume_is_safe() {
+  local details
+  details="$(docker volume inspect "$POSTGRES_VOLUME" 2>/dev/null)" || return 1
+  printf '%s\n' "$details" | jq -e \
+    --arg name "$POSTGRES_VOLUME" --arg project "$PROJECT_NAME" '
+    length == 1
+    and .[0].Name == $name
+    and .[0].Driver == "local"
+    and .[0].Scope == "local"
+    and (((.[0].Options // {}) | length) == 0)
+    and .[0].Labels["com.docker.compose.project"] == $project
+    and .[0].Labels["com.docker.compose.volume"] == "postgres-data"
+  ' >/dev/null
+}
+
+postgres_container_is_safe() {
+  local source_dir="$1" environment_file="$2" require_running="${3:-0}"
+  local container_id details password expected_network expected_network_id
+  password="$(read_key "$environment_file" OPEN_NODE_POSTGRES_PASSWORD || true)"
+  [[ "$password" =~ ^[A-Za-z0-9]{32,128}$ ]] || return 1
+  expected_network="${PROJECT_NAME}_default"
+  expected_network_id="$(docker network inspect --format '{{.Id}}' "$expected_network" 2>/dev/null || true)"
+  [[ "$expected_network_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
+  container_id="$(compose_with "$source_dir" "$environment_file" ps -a -q postgres 2>/dev/null || true)"
+  [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
+  details="$(docker inspect "$container_id" 2>/dev/null)" || return 1
+  printf '%s\n' "$details" | jq -e \
+    --arg project "$PROJECT_NAME" \
+    --arg image "$POSTGRES_IMAGE" \
+    --arg password "$password" \
+    --arg volume "$POSTGRES_VOLUME" \
+    --arg network "$expected_network" \
+    --arg network_id "$expected_network_id" \
+    --argjson require_running "$require_running" '
+    length == 1
+    and (.[0] as $container
+      | $container.Config.Image == $image
+      and $container.Config.Labels["com.docker.compose.project"] == $project
+      and $container.Config.Labels["com.docker.compose.service"] == "postgres"
+      and ([ $container.Config.Env[]? | select(startswith("POSTGRES_DB=")) ] == ["POSTGRES_DB=open_node"])
+      and ([ $container.Config.Env[]? | select(startswith("POSTGRES_USER=")) ] == ["POSTGRES_USER=open_node"])
+      and ([ $container.Config.Env[]? | select(startswith("POSTGRES_PASSWORD=")) ] == ["POSTGRES_PASSWORD=" + $password])
+      and $container.Config.Entrypoint == ["docker-entrypoint.sh"]
+      and $container.Config.Cmd == ["postgres"]
+      and $container.Config.Healthcheck.Test == [
+        "CMD-SHELL", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""
+      ]
+      and $container.Config.Healthcheck.Interval == 5000000000
+      and $container.Config.Healthcheck.Timeout == 5000000000
+      and $container.Config.Healthcheck.StartPeriod == 10000000000
+      and $container.Config.Healthcheck.Retries == 20
+      and $container.HostConfig.NetworkMode == $network
+      and any($container.NetworkSettings.Networks[]; .NetworkID == $network_id)
+      and (($container.HostConfig.PortBindings // {}) | length) == 0
+      and $container.HostConfig.PublishAllPorts == false
+      and $container.HostConfig.Privileged == false
+      and $container.HostConfig.ReadonlyRootfs == false
+      and (($container.HostConfig.CapAdd // []) | length) == 0
+      and (($container.HostConfig.CapDrop // []) | length) == 0
+      and $container.HostConfig.SecurityOpt == ["no-new-privileges:true"]
+      and (($container.HostConfig.Devices // []) | length) == 0
+      and (($container.HostConfig.DeviceRequests // []) | length) == 0
+      and (($container.HostConfig.Links // []) | length) == 0
+      and (($container.HostConfig.ExtraHosts // []) | length) == 0
+      and (($container.HostConfig.Dns // []) | length) == 0
+      and (($container.HostConfig.DnsOptions // []) | length) == 0
+      and (($container.HostConfig.DnsSearch // []) | length) == 0
+      and $container.HostConfig.AutoRemove == false
+      and $container.HostConfig.Init == true
+      and ($container.HostConfig.PidMode // "") == ""
+      and ($container.HostConfig.UTSMode // "") == ""
+      and ($container.HostConfig.UsernsMode // "") == ""
+      and (($container.HostConfig.IpcMode // "") == "" or $container.HostConfig.IpcMode == "private")
+      and $container.HostConfig.RestartPolicy.Name == "unless-stopped"
+      and $container.HostConfig.RestartPolicy.MaximumRetryCount == 0
+      and $container.HostConfig.LogConfig.Type == "local"
+      and $container.HostConfig.LogConfig.Config == {"max-file": "5", "max-size": "10m"}
+      and ($container.Mounts | length) == 1
+      and $container.Mounts[0].Type == "volume"
+      and $container.Mounts[0].Name == $volume
+      and $container.Mounts[0].Destination == "/var/lib/postgresql/data"
+      and $container.Mounts[0].RW == true
+      and ($require_running == 0 or (
+        $container.State.Running == true and $container.State.Health.Status == "healthy"
+      ))
+    )
+  ' >/dev/null
+}
+
+postgres_role_is_safe() {
+  local source_dir="$1" environment_file="$2" container_id attributes
+  container_id="$(compose_with "$source_dir" "$environment_file" ps -a -q postgres 2>/dev/null || true)"
+  [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
+  attributes="$(docker exec "$container_id" sh -c '
+    PGPASSWORD="$POSTGRES_PASSWORD" exec psql --host 127.0.0.1 \
+      --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+      --no-align --tuples-only --set ON_ERROR_STOP=1 \
+      --command "SELECT r.rolname,r.rolsuper,r.rolcreatedb,r.rolcreaterole,r.rolreplication,r.rolbypassrls,EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member=r.oid) FROM pg_roles r WHERE r.rolname=current_user"
+  ' 2>/dev/null)" || return 1
+  [[ "$attributes" == "open_node|f|t|f|f|f|f" ]]
 }
 
 network_is_safe() {
@@ -852,11 +1042,12 @@ network_is_safe() {
 
 runtime_container_is_safe() {
   local source_dir="$1" environment_file="$2" expected_image_id="$3" require_running="${4:-0}"
-  local container_id project_containers details expected_image expected_network expected_network_id
+  local container_id postgres_id project_containers expected_containers details expected_image expected_network expected_network_id
   local port bind_address secure_cookie short_links trusted_proxies agent_identity subscriber_totp
   local geoip_token
   local update_state_dir revision update_enabled=0
-  local bootstrap_value bootstrap_environment rendered_compose
+  local bootstrap_value bootstrap_environment rendered_compose database_backend database_url
+  local compose_files
   expected_network="${PROJECT_NAME}_default"
   expected_image="$(read_key "$environment_file" OPEN_NODE_IMAGE_REPOSITORY || true):$(read_key "$environment_file" OPEN_NODE_IMAGE_TAG || true)"
   port="$(read_key "$environment_file" OPEN_NODE_HTTP_PORT || true)"
@@ -870,6 +1061,8 @@ runtime_container_is_safe() {
   bootstrap_value="$(read_key "$environment_file" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
   update_state_dir="$(read_key "$environment_file" OPEN_NODE_APPLICATION_UPDATE_HOST_DIR || true)"
   revision="$(read_key "$environment_file" OPEN_NODE_REVISION || true)"
+  database_backend="$(read_key "$environment_file" OPEN_NODE_DATABASE_BACKEND || true)"
+  database_url="$(read_key "$environment_file" OPEN_NODE_DATABASE_URL || true)"
   if [[ "$update_state_dir" == "$UPDATE_STATE_DIR" ]]; then
     update_enabled=1
     application_update_directory_is_safe || return 1
@@ -886,14 +1079,30 @@ runtime_container_is_safe() {
   container_id="$(compose_with "$source_dir" "$environment_file" ps -a -q open-node 2>/dev/null || true)"
   [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
   project_containers="$(docker ps -a --no-trunc --filter "label=com.docker.compose.project=$PROJECT_NAME" -q 2>/dev/null || true)"
-  [[ "$project_containers" == "$container_id" ]] || return 1
+  expected_containers="$container_id"
+  compose_files="$(realpath -m -- "$source_dir/deploy/compose.yaml")"
+  if [[ "$database_backend" == "postgresql" ]]; then
+    postgres_id="$(compose_with "$source_dir" "$environment_file" ps -a -q postgres 2>/dev/null || true)"
+    [[ "$postgres_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
+    expected_containers="$(printf '%s\n%s\n' "$container_id" "$postgres_id" | sort)"
+    project_containers="$(printf '%s\n' "$project_containers" | sort)"
+    compose_files="$compose_files,$(realpath -m -- "$source_dir/deploy/compose.postgresql.yaml")"
+    postgres_volume_is_safe && postgres_container_is_safe \
+      "$source_dir" "$environment_file" "$require_running" || return 1
+    if [[ "$require_running" == "1" ]]; then
+      postgres_role_is_safe "$source_dir" "$environment_file" || return 1
+    fi
+  elif [[ "$database_backend" != "sqlite" ]]; then
+    return 1
+  fi
+  [[ "$project_containers" == "$expected_containers" ]] || return 1
   volume_is_safe && network_is_safe || return 1
   details="$(docker inspect "$container_id" 2>/dev/null)" || return 1
   runtime_bootstrap_environment_matches "$bootstrap_environment" "$details" || return 1
   printf '%s\n' "$details" | jq -e \
     --arg project "$PROJECT_NAME" \
     --arg source "$(realpath -m -- "$source_dir")" \
-    --arg compose_file "$(realpath -m -- "$source_dir/deploy/compose.yaml")" \
+    --arg compose_file "$compose_files" \
     --arg expected_image "$expected_image" \
     --arg expected_image_id "$expected_image_id" \
     --arg expected_volume "$DATA_VOLUME" \
@@ -910,7 +1119,7 @@ runtime_container_is_safe() {
     --arg update_state_dir "$update_state_dir" \
     --arg revision "$revision" \
     --argjson update_enabled "$update_enabled" \
-    --arg database_url "$RUNTIME_DATABASE_URL" \
+    --arg database_url "$database_url" \
     --arg runtime_user "$RUNTIME_UID_GID" \
     --argjson require_running "$require_running" '
     length == 1
@@ -932,6 +1141,11 @@ runtime_container_is_safe() {
       and $container.Config.Labels["com.docker.compose.project.working_dir"] == ($source + "/deploy")
       and $container.Config.Labels["com.docker.compose.project.config_files"] == $compose_file
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_DATABASE_URL=")) ] == ["OPEN_NODE_DATABASE_URL=" + $database_url])
+      and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_CONTROL_STATE_DIR=")) ] == ["OPEN_NODE_CONTROL_STATE_DIR=/var/lib/open-node"])
+      and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_EXTERNAL_SUBSCRIPTIONS_STATE_DIR=")) ] == ["OPEN_NODE_EXTERNAL_SUBSCRIPTIONS_STATE_DIR=/var/lib/open-node/external-subscriptions"])
+      and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_FEDERATION_STATE_DIR=")) ] == ["OPEN_NODE_FEDERATION_STATE_DIR=/var/lib/open-node/federation"])
+      and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_NOTIFICATIONS_STATE_DIR=")) ] == ["OPEN_NODE_NOTIFICATIONS_STATE_DIR=/var/lib/open-node/notifications"])
+      and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SPEEDTEST_STATE_DIR=")) ] == ["OPEN_NODE_SPEEDTEST_STATE_DIR=/var/lib/open-node/speedtests"])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SESSION_COOKIE_SECURE=")) ] == ["OPEN_NODE_SESSION_COOKIE_SECURE=" + $secure_cookie])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_SHORT_LINKS_ENABLED=")) ] == ["OPEN_NODE_SHORT_LINKS_ENABLED=" + $short_links])
       and ([ $container.Config.Env[]? | select(startswith("OPEN_NODE_AGENT_IDENTITY_FILE=")) ] == ["OPEN_NODE_AGENT_IDENTITY_FILE=" + $agent_identity])
@@ -1049,6 +1263,8 @@ require_fresh_project() {
   [[ -z "$containers" ]] || die "Compose project already has containers: $PROJECT_NAME"
   ! docker volume inspect "$DATA_VOLUME" >/dev/null 2>&1 \
     || die "data volume already exists without an installer manifest: $DATA_VOLUME"
+  ! docker volume inspect "$POSTGRES_VOLUME" >/dev/null 2>&1 \
+    || die "PostgreSQL volume already exists without an installer manifest: $POSTGRES_VOLUME"
   ! docker inspect "$PUBLIC_GATEWAY_CONTAINER" >/dev/null 2>&1 \
     || die "public gateway container already exists without an installer manifest"
   ! docker volume inspect "$PUBLIC_GATEWAY_VOLUME" >/dev/null 2>&1 \
@@ -1061,6 +1277,7 @@ create_candidate_environment() {
   local source_dir="$1" destination="$2" base_file="${3:-}" created=0
   local port bind_address secure_cookie bootstrap_value rendered_compose existing_bind=""
   local geoip_token
+  local database_backend database_url postgres_password
   local public_hostname previous_public public_url trusted_proxies
   if [[ -n "$base_file" ]]; then
     validate_safe_file "active environment file" "$base_file" 1
@@ -1070,6 +1287,33 @@ create_candidate_environment() {
     install -m 0600 -- "$source_dir/deploy/.env.example" "$destination"
     created=1
   fi
+  database_backend="$(read_key "$destination" OPEN_NODE_DATABASE_BACKEND || printf 'sqlite')"
+  if [[ "$created" -eq 1 ]]; then
+    database_backend="$DATABASE_BACKEND"
+  elif [[ -v OPEN_NODE_DATABASE_BACKEND \
+    && "$OPEN_NODE_DATABASE_BACKEND" != "$database_backend" ]]; then
+    die "database backend cannot be changed after installation"
+  fi
+  [[ "$database_backend" == "sqlite" || "$database_backend" == "postgresql" ]] \
+    || die "saved database backend is invalid"
+  postgres_password="$(read_key "$destination" OPEN_NODE_POSTGRES_PASSWORD || true)"
+  if [[ "$database_backend" == "postgresql" ]]; then
+    if [[ "$created" -eq 1 ]]; then
+      postgres_password="${OPEN_NODE_POSTGRES_PASSWORD:-}"
+      if [[ -z "$postgres_password" ]]; then
+        postgres_password="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+      fi
+    fi
+    [[ "$postgres_password" =~ ^[A-Za-z0-9]{32,128}$ ]] \
+      || die "saved PostgreSQL password is invalid"
+    database_url="${POSTGRES_DATABASE_URL_PREFIX}${postgres_password}${POSTGRES_DATABASE_URL_SUFFIX}"
+  else
+    postgres_password=""
+    database_url="$RUNTIME_DATABASE_URL"
+  fi
+  set_file_value "$destination" OPEN_NODE_DATABASE_BACKEND "$database_backend"
+  set_file_value "$destination" OPEN_NODE_DATABASE_URL "$database_url"
+  set_file_value "$destination" OPEN_NODE_POSTGRES_PASSWORD "$postgres_password"
   port="${OPEN_NODE_HTTP_PORT:-$(read_key "$destination" OPEN_NODE_HTTP_PORT || printf '8080')}"
   bind_address="${OPEN_NODE_BIND_ADDRESS:-$(read_key "$destination" OPEN_NODE_BIND_ADDRESS || printf '127.0.0.1')}"
   if [[ -n "${OPEN_NODE_SESSION_COOKIE_SECURE:-}" ]]; then
@@ -1170,9 +1414,9 @@ set_candidate_identity() {
 
 validate_candidate_compose() {
   local source_dir="$1" environment_file="$2" expected_image="$3"
-  local images config_json context revision port bind_address secure_cookie short_links
+  local images expected_images config_json context revision port bind_address secure_cookie short_links
   local trusted_proxies agent_identity subscriber_totp geoip_token update_state_dir update_enabled=0
-  local bootstrap_value bootstrap_environment
+  local bootstrap_value bootstrap_environment database_backend database_url postgres_password
   context="$(realpath -m -- "$source_dir")"
   [[ -d "$context" && ! -L "$context" \
     && -f "$context/Dockerfile" && ! -L "$context/Dockerfile" \
@@ -1189,6 +1433,13 @@ validate_candidate_compose() {
   agent_identity="$(read_key "$environment_file" OPEN_NODE_AGENT_IDENTITY_FILE || true)"
   subscriber_totp="$(read_key "$environment_file" OPEN_NODE_SUBSCRIBER_TOTP_KEY || true)"
   geoip_token="$(read_key "$environment_file" OPEN_NODE_GEOIP_IPINFO_TOKEN || true)"
+  database_backend="$(read_key "$environment_file" OPEN_NODE_DATABASE_BACKEND || true)"
+  database_url="$(read_key "$environment_file" OPEN_NODE_DATABASE_URL || true)"
+  postgres_password="$(read_key "$environment_file" OPEN_NODE_POSTGRES_PASSWORD || true)"
+  validate_database_environment "$environment_file" || {
+    warn "candidate database environment is invalid"
+    return 1
+  }
   bootstrap_value="$(read_key "$environment_file" OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL || true)"
   update_state_dir="$(read_key "$environment_file" OPEN_NODE_APPLICATION_UPDATE_HOST_DIR || true)"
   if [[ "$update_state_dir" == "$UPDATE_STATE_DIR" ]]; then
@@ -1207,7 +1458,12 @@ validate_candidate_compose() {
     warn "candidate Compose configuration is invalid"
     return 1
   fi
-  if [[ "$images" != "$expected_image" ]]; then
+  expected_images="$expected_image"
+  if [[ "$database_backend" == "postgresql" ]]; then
+    expected_images="$(printf '%s\n%s\n' "$expected_image" "$POSTGRES_IMAGE" | sort)"
+    images="$(printf '%s\n' "$images" | sort)"
+  fi
+  if [[ "$images" != "$expected_images" ]]; then
     warn "candidate Compose image does not match $expected_image"
     return 1
   fi
@@ -1234,6 +1490,11 @@ validate_candidate_compose() {
     --arg agent_identity "$agent_identity" \
     --arg subscriber_totp "$subscriber_totp" \
     --arg geoip_token "$geoip_token" \
+    --arg database_backend "$database_backend" \
+    --arg database_url "$database_url" \
+    --arg postgres_password "$postgres_password" \
+    --arg postgres_image "$POSTGRES_IMAGE" \
+    --arg postgres_volume "$POSTGRES_VOLUME" \
     --arg update_state_dir "$update_state_dir" \
     --argjson update_enabled "$update_enabled" \
     --arg bootstrap_value "$bootstrap_value" \
@@ -1241,8 +1502,14 @@ validate_candidate_compose() {
     .services["open-node"] as $service
     | ((keys) == ["name", "networks", "services", "volumes"])
     and (.name == $project)
-    and ((.services | keys) == ["open-node"])
-    and ((.volumes | keys) == ["data"])
+    and ((.services | keys) == (
+      if $database_backend == "postgresql" then ["open-node", "postgres"]
+      else ["open-node"] end
+    ))
+    and ((.volumes | keys) == (
+      if $database_backend == "postgresql" then ["data", "postgres-data"]
+      else ["data"] end
+    ))
     and (((.configs // {}) | length) == 0)
     and (((.secrets // {}) | length) == 0)
     and ((.networks | keys) == ["default"])
@@ -1278,11 +1545,17 @@ validate_candidate_compose() {
     and ($service.environment == ({
       "FORWARDED_ALLOW_IPS": $trusted_proxies,
       "OPEN_NODE_AGENT_IDENTITY_FILE": $agent_identity,
+      "OPEN_NODE_CONTROL_STATE_DIR": "/var/lib/open-node",
+      "OPEN_NODE_DATABASE_URL": $database_url,
+      "OPEN_NODE_EXTERNAL_SUBSCRIPTIONS_STATE_DIR": "/var/lib/open-node/external-subscriptions",
+      "OPEN_NODE_FEDERATION_STATE_DIR": "/var/lib/open-node/federation",
       "OPEN_NODE_SESSION_COOKIE_SECURE": $secure_cookie,
       "OPEN_NODE_SHORT_LINKS_ENABLED": $short_links,
       "OPEN_NODE_SUBSCRIBER_TOTP_KEY": $subscriber_totp,
       "OPEN_NODE_GEOIP_IPINFO_TOKEN": $geoip_token,
-      "OPEN_NODE_BROWSER_RESTORE_AUTO_RESTART": "true"
+      "OPEN_NODE_BROWSER_RESTORE_AUTO_RESTART": "true",
+      "OPEN_NODE_NOTIFICATIONS_STATE_DIR": "/var/lib/open-node/notifications",
+      "OPEN_NODE_SPEEDTEST_STATE_DIR": "/var/lib/open-node/speedtests"
     } + (if ($bootstrap_environment | length) == 1 then {
       "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL": $bootstrap_value
     } else {} end) + (if $update_enabled == 1 then {
@@ -1315,6 +1588,61 @@ validate_candidate_compose() {
     and (((.volumes.data.driver_opts // {}) | length) == 0)
     and (((.volumes.data.labels // {}) | length) == 0)
     and (((.volumes.data | keys) - ["driver", "driver_opts", "external", "labels", "name"]) | length == 0)
+    and (if $database_backend == "postgresql" then
+      .services.postgres as $postgres
+      | ((($postgres | keys) - [
+          "command", "entrypoint", "environment", "healthcheck", "image", "init", "logging", "networks",
+          "restart", "security_opt", "stop_grace_period", "volumes"
+        ]) | length == 0)
+      and (([
+          "command", "entrypoint", "environment", "healthcheck", "image", "init", "logging", "networks",
+          "restart", "security_opt", "stop_grace_period", "volumes"
+        ] - ($postgres | keys)) | length == 0)
+      and $postgres.image == $postgres_image
+      and $postgres.command == null
+      and $postgres.entrypoint == null
+      and $postgres.init == true
+      and $postgres.restart == "unless-stopped"
+      and $postgres.security_opt == ["no-new-privileges:true"]
+      and $postgres.environment == {
+        "POSTGRES_DB": "open_node",
+        "POSTGRES_PASSWORD": $postgres_password,
+        "POSTGRES_USER": "open_node"
+      }
+      and $postgres.logging.driver == "local"
+      and $postgres.logging.options == {"max-file": "5", "max-size": "10m"}
+      and $postgres.stop_grace_period == "1m0s"
+      and (($postgres.networks | keys) == ["default"])
+      and $postgres.healthcheck == {
+        "interval": "5s",
+        "retries": 20,
+        "start_period": "10s",
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""
+        ],
+        "timeout": "5s"
+      }
+      and (($postgres.ports // []) | length == 0)
+      and ($postgres.volumes | length) == 1
+      and ((($postgres.volumes[0] | keys) - [
+        "read_only", "source", "target", "type", "volume"
+      ]) | length == 0)
+      and $postgres.volumes[0].type == "volume"
+      and $postgres.volumes[0].source == "postgres-data"
+      and $postgres.volumes[0].target == "/var/lib/postgresql/data"
+      and (($postgres.volumes[0].read_only // false) == false)
+      and (((($postgres.volumes[0].volume // {}) | keys) - ["nocopy"]) | length == 0)
+      and (($postgres.volumes[0].volume.nocopy // false) == false)
+      and .volumes["postgres-data"].name == $postgres_volume
+      and ((.volumes["postgres-data"].external // false) == false)
+      and ((.volumes["postgres-data"].driver // "local") == "local")
+      and (((.volumes["postgres-data"].driver_opts // {}) | length) == 0)
+      and (((.volumes["postgres-data"].labels // {}) | length) == 0)
+      and (((.volumes["postgres-data"] | keys) - [
+        "driver", "driver_opts", "external", "labels", "name"
+      ]) | length == 0)
+    else true end)
     and (
       [$service.volumes[]?] as $mounts
       | if $update_enabled == 0 then
@@ -1410,6 +1738,26 @@ build_candidate_image() {
     warn "candidate image runtime metadata is outside the installer allowlist"
     return 1
   fi
+}
+
+ensure_database_ready() {
+  local source_dir="$1" environment_file="$2" backend attempt
+  backend="$(read_key "$environment_file" OPEN_NODE_DATABASE_BACKEND || true)"
+  [[ "$backend" == "sqlite" ]] && return 0
+  [[ "$backend" == "postgresql" ]] || return 1
+  log "starting pinned PostgreSQL"
+  compose_with "$source_dir" "$environment_file" up -d --no-build --pull always postgres \
+    || return 1
+  for attempt in $(seq 1 90); do
+    if postgres_volume_is_safe \
+      && network_is_safe \
+      && postgres_container_is_safe "$source_dir" "$environment_file" 1; then
+      return 0
+    fi
+    sleep 1
+  done
+  compose_with "$source_dir" "$environment_file" logs --tail 100 postgres >&2 || true
+  return 1
 }
 
 wait_for_health() {
@@ -1668,7 +2016,8 @@ quarantine_candidate() {
     || return 1
   for id in $ids; do
     identity="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}:{{ index .Config.Labels "com.docker.compose.service" }}' "$id" 2>/dev/null || true)"
-    [[ "$identity" == "$PROJECT_NAME:open-node" ]] || return 1
+    [[ "$identity" == "$PROJECT_NAME:open-node" \
+      || "$identity" == "$PROJECT_NAME:postgres" ]] || return 1
     if ! docker rm -f -- "$id" >/dev/null 2>&1; then
       warn "could not remove quarantined candidate container $id"
       return 1
@@ -1922,36 +2271,116 @@ remove_update_worktree() {
 
 backup_stopped_volume() {
   local source_dir="$1" active_env="$2" old_revision="$3" old_tag="$4" old_image_id="$5" transaction_id="$6"
-  local temporary_bundle archive final_bundle timestamp rollback_tag rollback_image_reference created_volume
-  local original_database_sha restored_database_sha artifact archive_entries
-  local database_probe extraction_failed=0
+  local temporary_bundle archive postgres_dump final_bundle timestamp rollback_tag rollback_image_reference created_volume
+  local original_database_sha="" restored_database_sha="" original_state_sha restored_state_sha artifact archive_entries
+  local database_probe state_probe database_backend postgres_password verification_database postgres_verify
+  local extraction_failed=0 sqlite_archive_invalid=0
+  local -a backup_artifacts
   ( ensure_private_directory "OPEN_NODE_BACKUP_DIR" "$BACKUP_DIR" ) || return 1
   daemon_identity_is_current || return 1
   volume_is_safe || return 1
   docker image inspect "$old_image_id" >/dev/null 2>&1 || return 1
+  database_backend="$(read_key "$active_env" OPEN_NODE_DATABASE_BACKEND || true)"
+  validate_database_environment "$active_env" || return 1
+  if [[ "$database_backend" == "postgresql" ]]; then
+    postgres_volume_is_safe \
+      && postgres_container_is_safe "$source_dir" "$active_env" 1 || return 1
+  fi
   temporary_bundle="$(mktemp -d "$BACKUP_DIR/.open-node-backup.XXXXXX")" || return 1
   TXN_TEMP_BACKUP="$temporary_bundle"
   archive="$temporary_bundle/volume.tar.gz"
+  postgres_dump="$temporary_bundle/postgres.dump"
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
   final_bundle="$BACKUP_DIR/open-node-$timestamp-${old_revision:0:12}-$transaction_id"
   rollback_tag="rollback-$old_revision-$transaction_id"
   TXN_BACKUP_CONTAINER="$PROJECT_NAME-backup-$transaction_id"
   log "creating stopped-volume backup in $final_bundle" >&2
-  database_probe=$'import hashlib\nimport pathlib\nimport sqlite3\np = pathlib.Path("/var/lib/open-node/open-node.db")\nif p.is_symlink() or not p.is_file() or p.stat().st_size <= 0:\n    raise SystemExit("open-node.db is missing, empty, or a symlink")\nconnection = sqlite3.connect("file:/var/lib/open-node/open-node.db?mode=ro", uri=True)\ntry:\n    result = connection.execute("PRAGMA integrity_check").fetchall()\nfinally:\n    connection.close()\nif result != [("ok",)]:\n    raise SystemExit(f"SQLite integrity_check failed: {result!r}")\nwith p.open("rb") as stream:\n    print(hashlib.file_digest(stream, "sha256").hexdigest())'
-  if ! original_database_sha="$(docker run --rm --name "$TXN_BACKUP_CONTAINER" \
+  state_probe=$'import hashlib\nimport pathlib\nimport stat\nroot = pathlib.Path("/var/lib/open-node")\nh = hashlib.sha256()\nfor p in sorted(root.rglob("*"), key=lambda item: item.as_posix()):\n    relative = p.relative_to(root).as_posix()\n    info = p.lstat()\n    if stat.S_ISLNK(info.st_mode):\n        raise SystemExit(f"state contains a symlink: {relative}")\n    if stat.S_ISDIR(info.st_mode):\n        record = f"d\\0{relative}\\0{stat.S_IMODE(info.st_mode):o}\\0".encode()\n    elif stat.S_ISREG(info.st_mode):\n        record = f"f\\0{relative}\\0{stat.S_IMODE(info.st_mode):o}\\0{info.st_size}\\0".encode()\n    else:\n        raise SystemExit(f"state contains an unsupported entry: {relative}")\n    h.update(record)\n    if stat.S_ISREG(info.st_mode):\n        with p.open("rb") as stream:\n            while chunk := stream.read(1024 * 1024):\n                h.update(chunk)\nprint(h.hexdigest())'
+  if ! original_state_sha="$(docker run --rm --name "$TXN_BACKUP_CONTAINER" \
     --network none --read-only --user "$RUNTIME_UID_GID" --cap-drop ALL \
     --security-opt no-new-privileges:true \
     --label "com.open-node.installer.project=$PROJECT_NAME" \
     --label "com.open-node.installer.purpose=backup-helper" \
     --mount "type=volume,src=$DATA_VOLUME,dst=/var/lib/open-node,readonly" \
-    --entrypoint python "$old_image_id" -c "$database_probe")"; then
+    --entrypoint python "$old_image_id" -c "$state_probe")"; then
     cleanup_partial_backup
     return 1
   fi
   TXN_BACKUP_CONTAINER=""
-  if [[ ! "$original_database_sha" =~ ^[0-9a-f]{64}$ ]]; then
+  [[ "$original_state_sha" =~ ^[0-9a-f]{64}$ ]] || {
     cleanup_partial_backup
     return 1
+  }
+  database_probe=$'import hashlib\nimport pathlib\nimport sqlite3\np = pathlib.Path("/var/lib/open-node/open-node.db")\nif p.is_symlink() or not p.is_file() or p.stat().st_size <= 0:\n    raise SystemExit("open-node.db is missing, empty, or a symlink")\nconnection = sqlite3.connect("file:/var/lib/open-node/open-node.db?mode=ro", uri=True)\ntry:\n    result = connection.execute("PRAGMA integrity_check").fetchall()\nfinally:\n    connection.close()\nif result != [("ok",)]:\n    raise SystemExit(f"SQLite integrity_check failed: {result!r}")\nwith p.open("rb") as stream:\n    print(hashlib.file_digest(stream, "sha256").hexdigest())'
+  if [[ "$database_backend" == "sqlite" ]]; then
+    TXN_BACKUP_CONTAINER="$PROJECT_NAME-backup-$transaction_id"
+    if ! original_database_sha="$(docker run --rm --name "$TXN_BACKUP_CONTAINER" \
+      --network none --read-only --user "$RUNTIME_UID_GID" --cap-drop ALL \
+      --security-opt no-new-privileges:true \
+      --label "com.open-node.installer.project=$PROJECT_NAME" \
+      --label "com.open-node.installer.purpose=backup-helper" \
+      --mount "type=volume,src=$DATA_VOLUME,dst=/var/lib/open-node,readonly" \
+      --entrypoint python "$old_image_id" -c "$database_probe")"; then
+      cleanup_partial_backup
+      return 1
+    fi
+    TXN_BACKUP_CONTAINER=""
+    [[ "$original_database_sha" =~ ^[0-9a-f]{64}$ ]] || {
+      cleanup_partial_backup
+      return 1
+    }
+  else
+    postgres_password="$(read_key "$active_env" OPEN_NODE_POSTGRES_PASSWORD || true)"
+    verification_database="open_node_verify_${transaction_id//[^[:alnum:]]/}"
+    verification_database="${verification_database,,}"
+    [[ "$verification_database" =~ ^[a-z][a-z0-9_]{1,62}$ ]] || {
+      cleanup_partial_backup
+      return 1
+    }
+    TXN_BACKUP_CONTAINER="$PROJECT_NAME-backup-$transaction_id"
+    if ! docker run --rm --name "$TXN_BACKUP_CONTAINER" \
+      --network "${PROJECT_NAME}_default" --read-only --user "$RUNTIME_UID_GID" \
+      --cap-drop ALL --security-opt no-new-privileges:true \
+      --label "com.open-node.installer.project=$PROJECT_NAME" \
+      --label "com.open-node.installer.purpose=backup-helper" \
+      --env "PGPASSWORD=$postgres_password" --entrypoint pg_dump "$old_image_id" \
+      --host postgres --username open_node --dbname open_node --format custom --compress 6 \
+      --no-owner --no-privileges > "$postgres_dump"; then
+      cleanup_partial_backup
+      return 1
+    fi
+    TXN_BACKUP_CONTAINER=""
+    [[ -s "$postgres_dump" ]] || {
+      cleanup_partial_backup
+      return 1
+    }
+    postgres_verify=$'set -eu\ncreated=0\ncleanup() {\n  if [ "$created" = 1 ]; then\n    psql --host postgres --username open_node --dbname postgres --set ON_ERROR_STOP=1 --command "DROP DATABASE IF EXISTS \\"$VERIFY_DATABASE\\" WITH (FORCE)" >/dev/null\n  fi\n}\ntrap cleanup EXIT HUP INT TERM\npg_restore --list /tmp/postgres.dump >/dev/null\npsql --host postgres --username open_node --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE \\"$VERIFY_DATABASE\\" TEMPLATE template0" >/dev/null\ncreated=1\npg_restore --host postgres --username open_node --dbname "$VERIFY_DATABASE" --exit-on-error --single-transaction --no-owner --no-privileges /tmp/postgres.dump\ntable_count="$(psql --host postgres --username open_node --dbname "$VERIFY_DATABASE" --tuples-only --no-align --set ON_ERROR_STOP=1 --command "SELECT count(*) FROM information_schema.tables WHERE table_schema = '\''public'\''")"\n[ "$table_count" -gt 0 ]'
+    chmod 0644 -- "$postgres_dump" || {
+      cleanup_partial_backup
+      return 1
+    }
+    TXN_BACKUP_CONTAINER="$PROJECT_NAME-backup-$transaction_id"
+    if ! docker run --rm --name "$TXN_BACKUP_CONTAINER" \
+      --network "${PROJECT_NAME}_default" --read-only --user "$RUNTIME_UID_GID" \
+      --cap-drop ALL --security-opt no-new-privileges:true \
+      --label "com.open-node.installer.project=$PROJECT_NAME" \
+      --label "com.open-node.installer.purpose=backup-helper" \
+      --env "PGPASSWORD=$postgres_password" --env "VERIFY_DATABASE=$verification_database" \
+      --mount "type=bind,src=$postgres_dump,dst=/tmp/postgres.dump,readonly" \
+      --entrypoint sh "$old_image_id" -c "$postgres_verify"; then
+      cleanup_partial_backup
+      return 1
+    fi
+    chmod 0600 -- "$postgres_dump" || {
+      cleanup_partial_backup
+      return 1
+    }
+    TXN_BACKUP_CONTAINER=""
+    original_database_sha="$(sha256sum "$postgres_dump" | awk '{print $1}')"
+    [[ "$original_database_sha" =~ ^[0-9a-f]{64}$ ]] || {
+      cleanup_partial_backup
+      return 1
+    }
   fi
   TXN_BACKUP_CONTAINER="$PROJECT_NAME-backup-$transaction_id"
   if ! docker run --rm --name "$TXN_BACKUP_CONTAINER" --network none --read-only \
@@ -1965,20 +2394,28 @@ backup_stopped_volume() {
   fi
   TXN_BACKUP_CONTAINER=""
   archive_entries="$(tar -tzf "$archive" 2>/dev/null || true)"
+  if [[ "$database_backend" == "sqlite" ]] && ! tar -tvzf "$archive" | awk '
+    substr($0, 1, 1) == "-" && $NF == "./open-node.db" { found = 1 }
+    END { exit(found ? 0 : 1) }
+  '; then
+    sqlite_archive_invalid=1
+  fi
   if [[ ! -s "$archive" || -z "$archive_entries" ]] \
-    || ! printf '%s\n' "$archive_entries" | grep -Fxq './open-node.db' \
     || printf '%s\n' "$archive_entries" | grep -Eq '(^/|(^|/)\.\.(/|$))' \
     || tar -tvzf "$archive" | grep -Eq '^[^-d]' \
-    || ! tar -tvzf "$archive" | awk '
-      substr($0, 1, 1) == "-" && $NF == "./open-node.db" { found = 1 }
-      END { exit(found ? 0 : 1) }
-    '; then
+    || [[ "$sqlite_archive_invalid" == "1" ]]; then
     cleanup_partial_backup
     return 1
   fi
   if ! install -m 0600 -- "$active_env" "$temporary_bundle/open-node.env" \
     || ! install -m 0600 -- "$MANIFEST_FILE" "$temporary_bundle/installer.manifest" \
     || ! install -m 0600 -- "$source_dir/deploy/compose.yaml" "$temporary_bundle/compose.yaml"; then
+    cleanup_partial_backup
+    return 1
+  fi
+  if [[ "$database_backend" == "postgresql" ]] \
+    && ! install -m 0600 -- "$source_dir/deploy/compose.postgresql.yaml" \
+      "$temporary_bundle/compose.postgresql.yaml"; then
     cleanup_partial_backup
     return 1
   fi
@@ -1999,7 +2436,15 @@ backup_stopped_volume() {
     printf 'ROLLBACK_IMAGE=%s:%s\n' "$IMAGE_REPOSITORY" "$rollback_tag"
     printf 'PROJECT_NAME=%s\n' "$PROJECT_NAME"
     printf 'DATA_VOLUME=%s\n' "$DATA_VOLUME"
+    printf 'DATABASE_BACKEND=%s\n' "$database_backend"
+    if [[ "$database_backend" == "postgresql" ]]; then
+      printf 'POSTGRES_VOLUME=%s\n' "$POSTGRES_VOLUME"
+      printf 'DATABASE_ARTIFACT=postgres.dump\n'
+    else
+      printf 'DATABASE_ARTIFACT=volume.tar.gz:open-node.db\n'
+    fi
     printf 'DATABASE_SHA256=%s\n' "$original_database_sha"
+    printf 'STATE_SHA256=%s\n' "$original_state_sha"
     printf 'DOCKER_DAEMON_ID=%s\n' "$DOCKER_DAEMON_ID"
     printf 'CREATED_AT=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$temporary_bundle/deployment.meta"; then
@@ -2044,28 +2489,52 @@ backup_stopped_volume() {
   fi
   TXN_BACKUP_CONTAINER=""
   TXN_BACKUP_CONTAINER="$PROJECT_NAME-backup-$transaction_id"
-  if ! restored_database_sha="$(docker run --rm --name "$TXN_BACKUP_CONTAINER" \
+  if ! restored_state_sha="$(docker run --rm --name "$TXN_BACKUP_CONTAINER" \
     --network none --read-only --user "$RUNTIME_UID_GID" --cap-drop ALL \
     --security-opt no-new-privileges:true \
     --label "com.open-node.installer.project=$PROJECT_NAME" \
     --label "com.open-node.installer.purpose=backup-helper" \
     --mount "type=volume,src=$TXN_VERIFY_VOLUME,dst=/var/lib/open-node,readonly" \
-    --entrypoint python "$old_image_id" -c "$database_probe")"; then
+    --entrypoint python "$old_image_id" -c "$state_probe")"; then
     cleanup_partial_backup
     return 1
   fi
   TXN_BACKUP_CONTAINER=""
-  if [[ "$restored_database_sha" != "$original_database_sha" ]] \
-    || ! backup_verify_volume_is_safe \
+  [[ "$restored_state_sha" == "$original_state_sha" ]] || {
+    cleanup_partial_backup
+    return 1
+  }
+  if [[ "$database_backend" == "sqlite" ]]; then
+    TXN_BACKUP_CONTAINER="$PROJECT_NAME-backup-$transaction_id"
+    if ! restored_database_sha="$(docker run --rm --name "$TXN_BACKUP_CONTAINER" \
+      --network none --read-only --user "$RUNTIME_UID_GID" --cap-drop ALL \
+      --security-opt no-new-privileges:true \
+      --label "com.open-node.installer.project=$PROJECT_NAME" \
+      --label "com.open-node.installer.purpose=backup-helper" \
+      --mount "type=volume,src=$TXN_VERIFY_VOLUME,dst=/var/lib/open-node,readonly" \
+      --entrypoint python "$old_image_id" -c "$database_probe")"; then
+      cleanup_partial_backup
+      return 1
+    fi
+    TXN_BACKUP_CONTAINER=""
+    [[ "$restored_database_sha" == "$original_database_sha" ]] || {
+      cleanup_partial_backup
+      return 1
+    }
+  fi
+  if ! backup_verify_volume_is_safe \
     || ! docker volume rm "$TXN_VERIFY_VOLUME" >/dev/null 2>&1; then
     cleanup_partial_backup
     return 1
   fi
   TXN_VERIFY_VOLUME=""
+  backup_artifacts=(compose.yaml deployment.meta installer.manifest open-node.env volume.tar.gz)
+  if [[ "$database_backend" == "postgresql" ]]; then
+    backup_artifacts+=(compose.postgresql.yaml postgres.dump)
+  fi
   if ! (
     cd -- "$temporary_bundle"
-    sha256sum compose.yaml deployment.meta installer.manifest open-node.env volume.tar.gz \
-      > SHA256SUMS
+    sha256sum "${backup_artifacts[@]}" > SHA256SUMS
   ); then
     cleanup_partial_backup
     return 1
@@ -2074,7 +2543,7 @@ backup_stopped_volume() {
     cleanup_partial_backup
     return 1
   }
-  for artifact in SHA256SUMS compose.yaml deployment.meta installer.manifest open-node.env volume.tar.gz; do
+  for artifact in SHA256SUMS "${backup_artifacts[@]}"; do
     if ! sync -f -- "$temporary_bundle/$artifact"; then
       cleanup_partial_backup
       return 1
@@ -2205,7 +2674,8 @@ install_fresh() {
   TXN_PHASE="candidate-starting"
   TXN_CANDIDATE_ACTIVATED=1
   log "starting Open Node"
-  if ! compose_with "$CANDIDATE_SOURCE" "$candidate_env" up -d --no-build --pull never \
+  if ! ensure_database_ready "$CANDIDATE_SOURCE" "$candidate_env" \
+    || ! compose_with "$CANDIDATE_SOURCE" "$candidate_env" up -d --no-build --pull never \
     --no-deps open-node \
     || ! wait_for_health "$CANDIDATE_SOURCE" "$candidate_env" "$CANDIDATE_IMAGE_ID"; then
     if ! quarantine_candidate; then
@@ -2246,7 +2716,8 @@ install_fresh() {
   TXN_CANDIDATE_ENV="$ENV_FILE"
   TXN_PHASE="environment-committed"
   sync_file_and_parent "$ENV_FILE"
-  if ! compose_with "$INSTALL_DIR" "$ENV_FILE" up -d --no-build --pull never \
+  if ! ensure_database_ready "$INSTALL_DIR" "$ENV_FILE" \
+    || ! compose_with "$INSTALL_DIR" "$ENV_FILE" up -d --no-build --pull never \
     --no-deps --force-recreate open-node \
     || ! wait_for_health "$INSTALL_DIR" "$ENV_FILE" "$CANDIDATE_IMAGE_ID"; then
     if ! quarantine_candidate; then
@@ -2299,7 +2770,8 @@ reinstall_existing() {
   TXN_PHASE="candidate-starting"
   write_recovery_marker "reinstall-starting" "$revision" "$image_tag" "none"
   TXN_CANDIDATE_ACTIVATED=1
-  if ! compose_with "$INSTALL_DIR" "$ENV_FILE" up -d --no-build --pull never \
+  if ! ensure_database_ready "$INSTALL_DIR" "$ENV_FILE" \
+    || ! compose_with "$INSTALL_DIR" "$ENV_FILE" up -d --no-build --pull never \
     --no-deps open-node \
     || ! wait_for_health "$INSTALL_DIR" "$ENV_FILE" "$image_id"; then
     if ! quarantine_candidate; then
@@ -2379,7 +2851,8 @@ update_existing() {
   log "starting candidate Open Node image"
   TXN_PHASE="candidate-starting"
   TXN_CANDIDATE_ACTIVATED=1
-  if ! compose_with "$CANDIDATE_SOURCE" "$candidate_env" up -d --no-build --pull never \
+  if ! ensure_database_ready "$CANDIDATE_SOURCE" "$candidate_env" \
+    || ! compose_with "$CANDIDATE_SOURCE" "$candidate_env" up -d --no-build --pull never \
     --no-deps open-node \
     || ! wait_for_health "$CANDIDATE_SOURCE" "$candidate_env" "$CANDIDATE_IMAGE_ID"; then
     if ! quarantine_candidate; then
@@ -2421,7 +2894,8 @@ update_existing() {
   TXN_CANDIDATE_ENV="$ENV_FILE"
   TXN_PHASE="environment-committed"
   sync_file_and_parent "$ENV_FILE"
-  if ! compose_with "$INSTALL_DIR" "$ENV_FILE" up -d --no-build --pull never \
+  if ! ensure_database_ready "$INSTALL_DIR" "$ENV_FILE" \
+    || ! compose_with "$INSTALL_DIR" "$ENV_FILE" up -d --no-build --pull never \
     --no-deps --force-recreate open-node \
     || ! wait_for_health "$INSTALL_DIR" "$ENV_FILE" "$CANDIDATE_IMAGE_ID"; then
     if ! quarantine_candidate; then

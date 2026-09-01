@@ -33,7 +33,11 @@ from open_node.domain.backup import (
 )
 from open_node.services.backup_archive import _manifest, write_backup_archive
 from open_node.services.backup_coordination import BackupBusyError, BackupWriteBarrier
-from open_node.services.backup_dependencies import BackupDependencyReport, check_backup_dependencies
+from open_node.services.backup_dependencies import (
+    BackupDependencyReport,
+    check_backup_dependencies,
+    check_postgres_backup_dependencies,
+)
 from open_node.services.backup_encryption import (
     BackupEncryptionReport,
     _cipher_size,
@@ -47,9 +51,12 @@ from open_node.services.backup_snapshot import (
 from open_node.services.backup_state import BackupStateLayout, _directory
 from open_node.services.backup_validation import MAX_ARCHIVE_BYTES
 
-_DATABASE_PATH = "data/open-node.db"
+_DATABASE_PATHS = {
+    "sqlite": "data/open-node.db",
+    "postgresql": "database/postgres.dump",
+}
 _ROLES = (
-    "certificates", "external_subscriptions", "notifications", "agent_identity",
+    "certificates", "external_subscriptions", "notifications", "agent_identity", "federation",
 )
 _SPACE_RESERVE = 1024 * 1024
 
@@ -69,8 +76,8 @@ class CreatedControlPlaneBackup:
     snapshot_consistency: Literal["cooperating_writers"] = field(
         default="cooperating_writers", init=False,
     )
-    sqlite_integrity_check: Literal["passed"] = field(default="passed", init=False)
-    foreign_key_check: Literal["passed"] = field(default="passed", init=False)
+    sqlite_integrity_check: Literal["passed", "not_applicable"] = "passed"
+    foreign_key_check: Literal["passed", "not_applicable"] = "passed"
     restoration_ready: Literal[False] = field(default=False, init=False)
 
 
@@ -110,13 +117,20 @@ def _checked_manifest(
             state = "not_configured"
         coverage[role] = state
     database = snapshot.database
+    database_path = _DATABASE_PATHS.get(database.engine)
+    if database_path is None:
+        raise BackupCreationError()
     manifest = BackupManifest(
         format="open-node-control-plane-backup", version=1, created_at=snapshot.created_at,
         source=source,
-        database=BackupDatabase("sqlite", "standalone", database.schema_fingerprint),
+        database=BackupDatabase(
+            database.engine,
+            "standalone" if database.engine == "sqlite" else "custom_dump",
+            database.schema_fingerprint,
+        ),
         coverage=BackupCoverage(**coverage),
         required_configuration=dependencies.required_configuration,
-        files=(BackupFileEntry(_DATABASE_PATH, "database", database.size, database.sha256),
+        files=(BackupFileEntry(database_path, "database", database.size, database.sha256),
                *snapshot.state.entries),
     )
     checked, raw = _manifest(manifest)
@@ -191,16 +205,23 @@ def create_control_plane_backup(
                 snapshot = plaintext.enter_context(capture_control_plane_snapshot(
                     layout, barrier=barrier, staging_directory=staging_directory,
                 ))
-                dependencies = check_backup_dependencies(
-                    snapshot.database.connection, snapshot.state.sources,
-                    totp_key=totp_key, agent_public_key=agent_public_key,
-                )
+                if snapshot.database.engine == "sqlite":
+                    dependencies = check_backup_dependencies(
+                        snapshot.database.connection, snapshot.state.sources,
+                        totp_key=totp_key, agent_public_key=agent_public_key,
+                    )
+                else:
+                    dependencies = check_postgres_backup_dependencies(
+                        snapshot.database.dependencies, snapshot.state.sources,
+                        totp_key=totp_key, agent_public_key=agent_public_key,
+                    )
                 manifest, archive_size = _checked_manifest(snapshot, dependencies, layout, source)
                 _space_preflight(directory, archive_size)
                 archive = plaintext.enter_context(tempfile.TemporaryFile(
                     mode="w+b", buffering=0, dir=f"/proc/self/fd/{directory}",
                 ))
-                inputs = {_DATABASE_PATH: snapshot.database.stream, **snapshot.state.sources}
+                database_path = _DATABASE_PATHS[snapshot.database.engine]
+                inputs = {database_path: snapshot.database.stream, **snapshot.state.sources}
                 written = write_backup_archive(archive, manifest, inputs)
                 if written.archive_size != archive_size:
                     raise BackupCreationError()
@@ -217,7 +238,16 @@ def create_control_plane_backup(
                         stream=_retain_ciphertext(
                             artifact, encrypted.stream, encrypted.report.encrypted_size,
                         ),
-                        encryption=encrypted.report, dependencies=dependencies,
+                        encryption=encrypted.report,
+                        dependencies=dependencies,
+                        sqlite_integrity_check=(
+                            "passed" if snapshot.database.engine == "sqlite"
+                            else "not_applicable"
+                        ),
+                        foreign_key_check=(
+                            "passed" if snapshot.database.engine == "sqlite"
+                            else "not_applicable"
+                        ),
                     )
             # SQLite, every state slice, ZIP, keys and age's staging handles
             # have now closed. Just artifact's anonymous read-only fd remains.

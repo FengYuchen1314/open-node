@@ -46,7 +46,7 @@ class InitialSetupStore:
         )
 
     def _supported(self):
-        if self.auth.engine.dialect.name != "sqlite":
+        if self.auth.engine.dialect.name not in {"sqlite", "postgresql"}:
             raise InitialSetupError(503, "setup_unavailable")
 
     @contextmanager

@@ -20,13 +20,12 @@ from sqlalchemy import (
     String,
     delete,
     select,
-    text,
     update,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-from open_node.services.inventory import create_inventory_engine
+from open_node.services.inventory import begin_serialized_write, create_inventory_engine
 
 password_hash = PasswordHash((Argon2Hasher(), BcryptHasher()))
 dummy_hash = password_hash.hash(token_urlsafe(32))
@@ -191,12 +190,7 @@ class AuthStore:
     @contextmanager
     def _coordinated_session(self):
         with self.session() as db:
-            if self.engine.dialect.name == "sqlite":
-                db.execute(text("BEGIN IMMEDIATE"))
-            else:
-                db.execute(
-                    select(Administrator.id).where(Administrator.id == 1).with_for_update()
-                ).all()
+            begin_serialized_write(db, self.engine, "administrator-write")
             yield db
 
     def configured(self) -> bool:

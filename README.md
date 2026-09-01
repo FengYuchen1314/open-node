@@ -69,7 +69,7 @@ and multi-administrator RBAC remain separate work.
 destination, saved-configuration previews, explicitly confirmed tests, durable
 package-expiry reminders and Chinese delivery history. Reminders default off;
 unknown send results require a risk-confirmed manual retry, not automatic replay.
-Back up the notification key directory together with SQLite. User bot binding,
+Back up the notification key directory together with the selected database. User bot binding,
 daily digests, other alert rules and renewal approval are not part of this slice;
 its current release and verification status is recorded in the linked guide.
 
@@ -82,7 +82,7 @@ integration is required. Existing traffic usage and reset rules are preserved.
 [Site text settings](docs/system-settings.md) provide administrator-controlled
 browser and page titles. [Appearance settings](docs/appearance.md) add a public
 Logo, login background and standard Ant Design light/dark/system themes with
-bounded uploads. Both use versioned atomic saves, persist in SQLite and have no
+bounded uploads. Both use versioned atomic saves, persist in SQLite or PostgreSQL and have no
 license gate. Probe-only titles and security settings remain independent.
 [Web announcements](docs/announcements.md) let administrators publish bounded
 plain-text general, maintenance or subscription-update notices with optional
@@ -104,8 +104,9 @@ also provides [consistent snapshots](docs/backup-runtime.md) and an
 background creation, bounded retention and encrypted download to an age public
 recipient. Native v1 browser/offline restore, no-administrator first-run restore
 and isolated first-boot review are available. Browser restore validates into a
-new private tree, switches only during restart and retains the prior tree for
-rollback. The existing stopped-volume installer backup is unchanged. See the guides for private-key
+new private state, switches only during restart and retains the prior state/database for
+rollback. SQLite uses an independent online snapshot; PostgreSQL follows the pinned official
+custom-dump, staging-database and restart-time switch model. See the guides for private-key
 and temporary-space requirements; a successful envelope check is not sender
 authentication.
 
@@ -214,6 +215,16 @@ The public command downloads the script completely before running it:
   sudo bash "$installer"
 )
 ```
+
+SQLite remains the default. A fresh host can select the pinned official PostgreSQL 15
+service, with a generated private password and no published database port, by running the
+same downloaded installer as
+`sudo env OPEN_NODE_DATABASE_BACKEND=postgresql bash "$installer"`. The backend cannot be
+changed after installation; no SQLite/PostgreSQL or old-MMWX migration is implied. PostgreSQL
+restore is supported only with the exact Open Node source revision/image and the same backend;
+arbitrary cross-schema-version dump recovery is not promised. Before serving or restoring, the
+dedicated database role is verified as non-superuser with only the `CREATEDB` maintenance
+capability needed for isolated staging-database switching.
 
 For a fresh public deployment whose DNS already points to the host, pass the
 hostname to the same command as

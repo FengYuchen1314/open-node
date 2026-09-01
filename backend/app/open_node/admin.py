@@ -12,6 +12,7 @@ from open_node.services.auth import AuthStore
 from open_node.services.backup_coordination import BackupCoordinationError
 from open_node.services.backup_runtime import backup_operation, configured_backup_barrier
 from open_node.services.initial_setup import InitialSetupStore
+from open_node.services.postgres_security import restrict_postgres_application_role
 
 
 def main() -> None:
@@ -39,7 +40,10 @@ def main() -> None:
         parser.exit(1, "Use a 1-64 character username and a 12-1024 character password\n")
     try:
         settings = get_settings()
-        backup_writes = configured_backup_barrier(settings.database_url)
+        restrict_postgres_application_role(settings.database_url)
+        backup_writes = configured_backup_barrier(
+            settings.database_url, settings.control_state_dir
+        )
         try:
             with backup_operation(backup_writes):
                 AuthStore(
@@ -63,7 +67,8 @@ def main() -> None:
 
 def prepare_setup(parser, *, json_output=False):
     settings = get_settings()
-    barrier = configured_backup_barrier(settings.database_url)
+    restrict_postgres_application_role(settings.database_url)
+    barrier = configured_backup_barrier(settings.database_url, settings.control_state_dir)
     try:
         with backup_operation(barrier):
             auth = AuthStore(settings.database_url, settings.subscriber_totp_key, settings.app_name)
