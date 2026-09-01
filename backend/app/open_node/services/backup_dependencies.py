@@ -41,7 +41,6 @@ from cryptography import x509
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
-from sqlalchemy.engine import make_url
 
 from open_node.domain.backup import (
     MAX_FILES,
@@ -344,6 +343,7 @@ def capture_postgres_dependency_snapshot(database_url: str) -> PostgresDependenc
     """Read only the fixed dependency projection from one PostgreSQL snapshot."""
     try:
         import psycopg
+        from sqlalchemy.engine import make_url
 
         url = make_url(database_url)
         if (

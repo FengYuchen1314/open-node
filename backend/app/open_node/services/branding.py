@@ -1,4 +1,4 @@
-"""Atomic SQLite-only branding settings, independent of business data and secrets."""
+"""Atomic SQLite/PostgreSQL branding settings, independent of business data and secrets."""
 
 from contextlib import contextmanager
 
@@ -31,6 +31,18 @@ class BrandingSettingsModel(BrandingBase):
             f"revision >= 0 AND revision <= {BRANDING_MAX_REVISION}",
             name="branding_safe_revision",
         ),
+        CheckConstraint(
+            "typeof(revision) = 'integer'",
+            name="branding_sqlite_revision_type",
+        ).ddl_if(dialect="sqlite"),
+        CheckConstraint(
+            "typeof(site_title) = 'text'",
+            name="branding_sqlite_site_text",
+        ).ddl_if(dialect="sqlite"),
+        CheckConstraint(
+            "typeof(brand_title) = 'text'",
+            name="branding_sqlite_brand_text",
+        ).ddl_if(dialect="sqlite"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

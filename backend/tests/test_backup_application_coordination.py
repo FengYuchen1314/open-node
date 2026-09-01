@@ -132,7 +132,11 @@ def test_every_initialization_store_uses_the_same_real_lock(tmp_path, monkeypatc
 
 def test_failed_startup_closes_the_unused_barrier(tmp_path, monkeypatch):
     barrier = configured_backup_barrier(settings_for(tmp_path).database_url)
-    monkeypatch.setattr(application, "configured_backup_barrier", lambda _url: barrier)
+    monkeypatch.setattr(
+        application,
+        "configured_backup_barrier",
+        lambda _url, _state_root: barrier,
+    )
 
     def broken(*_args, **_kwargs):
         assert current_backup_child_fds()

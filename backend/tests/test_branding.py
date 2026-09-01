@@ -1,4 +1,4 @@
-"""Branding uses only isolated SQLite files; it never contacts external services."""
+"""Branding uses only its configured database; it never contacts external services."""
 
 import json
 import re
@@ -434,16 +434,16 @@ def test_revision_exhaustion_is_storage_failure_without_overflow(store):
 
 
 @pytest.mark.parametrize("operation", ["get_settings", "get_public", "update_settings"])
-def test_non_sqlite_is_not_initialized_or_connected_and_methods_fail_closed(operation):
+def test_unsupported_dialect_is_not_initialized_or_connected_and_methods_fail_closed(operation):
     def no_session():
         raise AssertionError("Unsupported storage must not be contacted")
 
     inventory = SimpleNamespace(
-        _engine=SimpleNamespace(dialect=SimpleNamespace(name="postgresql")),
+        _engine=SimpleNamespace(dialect=SimpleNamespace(name="mysql")),
         _session=no_session,
     )
     value = BrandingStore(inventory)
-    assert value.create_schema() is None
+    error("branding_storage_unavailable", value.create_schema, status=503)
     method = getattr(value, operation)
     error(
         "branding_storage_unavailable",

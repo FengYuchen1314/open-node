@@ -16,6 +16,7 @@ from open_node.services.backup_snapshot import (
     configured_backup_layout,
 )
 from open_node.services.backup_state import BackupStateError, BackupStateLayout
+from pydantic import ValidationError
 
 
 @pytest.fixture
@@ -185,7 +186,6 @@ def test_overlap_is_rejected_before_creating_sqlite_staging_files(instance, monk
 @pytest.mark.parametrize("url", [
     "sqlite://", "sqlite:///:memory:", "sqlite+pysqlite:///:memory:",
     "sqlite:///file:memory?mode=memory&uri=true", "sqlite:///database?uri=false",
-    "postgresql://localhost/instance", "sqlite+aiosqlite:///database", "not-a-url",
 ])
 def test_unsupported_database_layouts_fail_without_creating_any_files(tmp_path, monkeypatch, url):
     monkeypatch.chdir(tmp_path)
@@ -194,6 +194,26 @@ def test_unsupported_database_layouts_fail_without_creating_any_files(tmp_path, 
         BackupSnapshotError, match="^Control-plane backup snapshot is unavailable\\.$",
     ):
         configured_backup_layout(settings)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(("url", "message"), [
+    (
+        "postgresql://localhost/instance",
+        "Database must use SQLite or PostgreSQL with psycopg",
+    ),
+    (
+        "sqlite+aiosqlite:///database",
+        "Database must use SQLite or PostgreSQL with psycopg",
+    ),
+    ("not-a-url", "Database URL is invalid"),
+])
+def test_unsupported_database_drivers_fail_settings_without_creating_any_files(
+    tmp_path, monkeypatch, url, message,
+):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValidationError, match=message):
+        Settings(database_url=url, _env_file=None)
     assert list(tmp_path.iterdir()) == []
 
 
