@@ -1,5 +1,5 @@
 import { App as AntApp, Alert, Button, ConfigProvider, Drawer, Grid, Layout, Menu, Result, Space, Spin, Tag, Typography, theme as antTheme } from "antd";
-import { ApartmentOutlined, BellOutlined, CloudDownloadOutlined, CloudSyncOutlined, ControlOutlined, DashboardOutlined, FileProtectOutlined, FileTextOutlined, FilterOutlined, HistoryOutlined, LineChartOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
+import { ApartmentOutlined, BellOutlined, CloudDownloadOutlined, CloudSyncOutlined, ControlOutlined, DashboardOutlined, FileProtectOutlined, FileTextOutlined, FilterOutlined, FundOutlined, HistoryOutlined, LineChartOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import zhCN from "antd/locale/zh_CN";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -21,6 +21,7 @@ const navigation = [
   { key: "/config", label: "配置管理", icon: <SettingOutlined aria-hidden /> },
   { key: "/server-sharing", label: "服务器共享", icon: <ShareAltOutlined aria-hidden /> },
   { key: "/ddns", label: "动态 DNS", icon: <CloudSyncOutlined aria-hidden /> },
+  { key: "/speedtests", label: "节点测速", icon: <FundOutlined aria-hidden /> },
   { key: "/certificates", label: "证书管理", icon: <FileProtectOutlined aria-hidden /> },
   { key: "/probe", label: "探针", icon: <LineChartOutlined aria-hidden /> },
   { key: "/access", label: "访问管理", icon: <SafetyOutlined aria-hidden /> },

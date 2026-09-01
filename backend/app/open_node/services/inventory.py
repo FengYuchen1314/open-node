@@ -3569,6 +3569,66 @@ class InventoryStore:
             ).all()
             return [self._managed_node_read(node) for node in nodes]
 
+    def speedtest_proxy_config(self, node_id: str) -> tuple[str, dict[str, Any]]:
+        """Build one concrete proxy from an already-issued node credential.
+
+        A synthetic credential would not exist in the remote Xray runtime and
+        would make the speed-test feature appear to work while every job fails.
+        Reusing an issued credential follows the official MMWX contract, where
+        the master sends a complete, usable Clash proxy to the selected source.
+        """
+        from open_node.domain.speedtests import SpeedTestError
+
+        with self._session() as session:
+            node = session.get(ManagedNodeModel, node_id)
+            if node is None:
+                raise SpeedTestError(404, "speedtest_node_not_found")
+            if not node.enabled or node.removal_id or not node.config:
+                raise SpeedTestError(409, "speedtest_node_unavailable")
+            server = session.get(ServerModel, node.server_id)
+            if server is None:
+                raise SpeedTestError(409, "speedtest_node_unavailable")
+
+            credentials = session.scalars(
+                select(SubscriptionCredentialModel)
+                .where(SubscriptionCredentialModel.node_id == node.id)
+                .order_by(SubscriptionCredentialModel.updated_at.desc())
+            ).all()
+            selected = None
+            for credential in credentials:
+                user = session.get(ProductUserModel, credential.username)
+                plan = (
+                    session.get(SubscriptionPlanModel, user.current_plan_id)
+                    if user is not None and user.current_plan_id
+                    else None
+                )
+                if user is not None and user.is_active and plan is not None:
+                    selected = credential, user, plan
+                    break
+            if selected is None:
+                raise SpeedTestError(409, "speedtest_credential_unavailable")
+
+            credential, user, plan = selected
+            context = self._template_context(user, plan, node, server, credential)
+            rendered = self._render_template(node.config, context)
+            if not isinstance(rendered, dict) or not rendered:
+                raise SpeedTestError(409, "speedtest_credential_unavailable")
+            proxy = dict(rendered)
+            proxy.setdefault("name", node.name)
+            proxy.setdefault("type", self._proxy_type_for_protocol(node.protocol))
+            provisioned = self._provisioning_client_from_credential(
+                user, plan, node, server, credential
+            )
+            self._apply_credential_to_proxy(proxy, node.protocol, provisioned)
+            if proxy.pop("server-key-source", None) == "runtime":
+                scan = session.get(AgentScanResultModel, server.id)
+                server_key = self._runtime_shadowsocks_server_key(scan, node)
+                if not server_key:
+                    raise SpeedTestError(409, "speedtest_credential_unavailable")
+                proxy["password"] = server_key
+            proxy["name"] = node.name
+            return node.name, proxy
+
     def create_managed_node(self, payload: ManagedNodeCreate) -> ManagedNodeRead:
         now = datetime.now(tz=UTC)
         with self._coordinated_session() as session:

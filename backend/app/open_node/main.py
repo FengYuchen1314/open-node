@@ -17,6 +17,7 @@ from open_node.api.routes.agents import agent_websocket
 from open_node.api.routes.backups import BACKUP_ERROR_MESSAGES
 from open_node.api.routes.public import router as public_router
 from open_node.api.routes.server_sharing import legacy_router as federation_legacy_router
+from open_node.api.routes.speedtests import speedtester_websocket
 from open_node.api.routes.subscription_profiles import legacy_router
 from open_node.api.routes.system import healthz
 from open_node.api.routes.temporary_subscriptions import public_router as temporary_public_router
@@ -34,6 +35,7 @@ from open_node.domain.notifications import NotificationError
 from open_node.domain.renewals import RENEWAL_MESSAGES, RenewalError
 from open_node.domain.server_sharing import MESSAGES as SERVER_SHARING_MESSAGES
 from open_node.domain.server_sharing import ServerSharingError
+from open_node.domain.speedtests import SPEEDTEST_MESSAGES, SpeedTestError
 from open_node.domain.subscriber_permissions import MESSAGES as SUBSCRIBER_PERMISSION_MESSAGES
 from open_node.domain.subscriber_permissions import SubscriberPermissionsError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
@@ -54,6 +56,7 @@ from open_node.services.ddns import DDNSStore, DDNSWorker
 from open_node.services.external_refresh import ExternalRefreshWorker
 from open_node.services.external_subscriptions import ExternalSubscriptionError
 from open_node.services.inventory import InventoryStore, ManagedNodeConflict
+from open_node.services.mihomo_speedtest import MihomoSpeedTest
 from open_node.services.notification_worker import NotificationWorker
 from open_node.services.notifications import NotificationStore
 from open_node.services.probe_stream import PublicProbeStreamManager
@@ -66,6 +69,11 @@ from open_node.services.restore_state import (
 from open_node.services.secure_channel import AgentIdentity, decode_public_key
 from open_node.services.server_sharing import FederationRefreshWorker, ServerSharingStore
 from open_node.services.server_traffic import ServerTrafficWorker
+from open_node.services.speedtests import (
+    SpeedTestCoordinator,
+    SpeedTesterConnections,
+    SpeedTestStore,
+)
 from open_node.services.subscriber_auth import SubscriberAuthStore
 from open_node.services.subscriber_permissions import SubscriberPermissionsStore
 from open_node.services.subscription_access import SubscriptionAccessWorker
@@ -160,6 +168,8 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             external_refresh_task.cancel()
             ddns_task.cancel()
             federation_refresh_task.cancel()
+            await app.state.speedtests.close()
+            await app.state.speedtester_connections.close()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             with contextlib.suppress(asyncio.CancelledError):
@@ -215,6 +225,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                     active_settings.api_prefix + "/subscriber-permissions",
                     active_settings.api_prefix + "/server-shares",
                     active_settings.api_prefix + "/server-federation",
+                    active_settings.api_prefix + "/speedtest",
                     active_settings.api_prefix + "/federation",
                     active_settings.api_prefix + "/ddns",
                     active_settings.api_prefix + "/account/announcements",
@@ -238,6 +249,16 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
+        if request.url.path.startswith(active_settings.api_prefix + "/speedtest"):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "speedtest_invalid_request",
+                    "detail": SPEEDTEST_MESSAGES["speedtest_invalid_request"],
+                    "license_required": False,
+                },
+                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+            )
         if request.url.path.startswith(active_settings.api_prefix + "/ddns"):
             return JSONResponse(status_code=422, content={
                 "code": "ddns_invalid_request",
@@ -346,6 +367,18 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
             content={
                 "code": exc.code,
                 "detail": SUBSCRIBER_PERMISSION_MESSAGES[exc.code],
+                "license_required": False,
+            },
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+
+    @app.exception_handler(SpeedTestError)
+    async def speedtest_error(_request, exc):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "detail": SPEEDTEST_MESSAGES[exc.code],
                 "license_required": False,
             },
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
@@ -531,6 +564,26 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         ):
             raise ValueError("Notification secrets require a separate, non-overlapping directory")
     app.state.inventory.create_schema()
+    speedtest_state_dir = active_settings.speedtest_state_dir
+    if (
+        speedtest_state_dir is None
+        and app.state.inventory._engine.dialect.name == "sqlite"
+        and database_file not in (None, "", ":memory:")
+        and not database_file.startswith("file:")
+    ):
+        speedtest_state_dir = Path(database_file).absolute().parent / "speedtests"
+    if speedtest_state_dir is None:
+        speedtest_state_dir = Path("./data/speedtests").absolute()
+    app.state.speedtest_store = SpeedTestStore(app.state.inventory, backup_writes)
+    app.state.speedtest_store.create_schema()
+    app.state.mihomo_speedtest = MihomoSpeedTest(speedtest_state_dir)
+    app.state.speedtester_connections = SpeedTesterConnections(app.state.speedtest_store)
+    app.state.speedtests = SpeedTestCoordinator(
+        app.state.speedtest_store,
+        app.state.inventory,
+        app.state.mihomo_speedtest,
+        app.state.speedtester_connections,
+    )
     app.state.subscriber_permissions = SubscriberPermissionsStore(app.state.inventory)
     app.state.subscriber_permissions.create_schema()
     app.state.server_sharing = ServerSharingStore(app.state.inventory)
@@ -571,6 +624,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.state.public_probe_streams = PublicProbeStreamManager()
     app.include_router(api_router, prefix=active_settings.api_prefix)
     app.add_api_websocket_route("/api/remote/ws", agent_websocket)
+    app.add_api_websocket_route("/api/speedtest/ws", speedtester_websocket)
     app.include_router(public_router, prefix="/api")
     app.include_router(federation_legacy_router)
     app.include_router(legacy_router)

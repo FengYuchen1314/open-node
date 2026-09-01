@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "version": "v1.19.30",
+  "assets": {
+    "linux-amd64": {
+      "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.30/mihomo-linux-amd64-compatible-v1.19.30.gz",
+      "sha256": "db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9",
+      "compressed_bytes": 18899951
+    },
+    "linux-arm64": {
+      "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.30/mihomo-linux-arm64-v1.19.30.gz",
+      "sha256": "58896873736d28628f66de3677c8654fa0f180662523148e136cff4f6e890069",
+      "compressed_bytes": 16965828
+    }
+  }
+}

@@ -29,6 +29,7 @@ from open_node.api.routes import (
     server_management,
     server_sharing,
     servers,
+    speedtests,
     subscriber_auth,
     subscriber_permissions,
     subscription_customizations,
@@ -53,6 +54,7 @@ private_router.include_router(agent_bootstrap.router)
 private_router.include_router(branding.router)
 private_router.include_router(appearance.router)
 private_router.include_router(server_management.router)
+private_router.include_router(speedtests.router)
 private_router.include_router(server_sharing.router)
 private_router.include_router(server_sharing.consumer_router)
 private_router.include_router(ddns.router)

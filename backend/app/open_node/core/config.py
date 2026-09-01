@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     external_subscriptions_state_dir: Path | None = None
     geoip_ipinfo_token: SecretStr | None = None
     notifications_state_dir: Path | None = None
+    speedtest_state_dir: Path | None = None
     notifications_poll_seconds: float = Field(default=1, ge=0.25, le=60)
     short_links_enabled: bool = False
     certificate_state_dir: Path = Path("./data/certificates")
@@ -140,6 +141,11 @@ class Settings(BaseSettings):
     def optional_notification_state(cls, value):
         return None if value == "" else value
 
+    @field_validator("speedtest_state_dir", mode="before")
+    @classmethod
+    def optional_speedtest_state(cls, value):
+        return None if value == "" else value
+
     @field_validator("application_update_dir", mode="before")
     @classmethod
     def optional_application_update_dir(cls, value):
@@ -168,6 +174,15 @@ class Settings(BaseSettings):
             not value.is_absolute() or value == Path(value.anchor) or ".." in value.parts
         ):
             raise ValueError("Notification state requires an absolute non-root path")
+        return value
+
+    @field_validator("speedtest_state_dir")
+    @classmethod
+    def speedtest_state_path(cls, value: Path | None) -> Path | None:
+        if value is not None and (
+            not value.is_absolute() or value == Path(value.anchor) or ".." in value.parts
+        ):
+            raise ValueError("Speed-test state requires an absolute non-root path")
         return value
 
     @field_validator("agent_identity_file")

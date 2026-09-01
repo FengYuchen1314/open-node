@@ -14,6 +14,7 @@ export const routes: WorkspaceRoute[] = [
   { path: "/certificates", name: "certificates", component: lazy(() => import("./react/views/CertificatesView")) },
   { path: "/server-sharing", name: "server-sharing", component: lazy(() => import("./react/views/ServerSharingView")) },
   { path: "/ddns", name: "ddns", component: lazy(() => import("./react/views/DDNSView")) },
+  { path: "/speedtests", name: "speedtests", component: lazy(() => import("./react/views/SpeedTestsView")) },
   { path: "/access", name: "access", component: lazy(() => import("./react/views/AccessView")) },
   { path: "/", name: "overview", component: lazy(() => import("./react/views/DashboardView")) },
   { path: "/probe", name: "probe", component: lazy(() => import("./react/views/ProbeView")) },

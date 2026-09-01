@@ -27,6 +27,7 @@ def require_administrator(request: Request, response: Response) -> SessionIdenti
         raise HTTPException(
             401, "Administrator sign-in required", headers={"Cache-Control": "no-store"}
         )
+    request.state.administrator = identity
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         check_request_origin(request)
         if not compare_digest(
