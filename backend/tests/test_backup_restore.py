@@ -328,10 +328,26 @@ def test_restore_compose_template_parses_with_private_environment(tmp_path):
     environment = tmp_path / "restore.env"
     environment.write_text("OPEN_NODE_DATABASE_URL=sqlite:////var/lib/open-node/open-node.db\n")
     environment.chmod(0o600)
+    base_environment = {
+        "PATH": os.environ["PATH"],
+        "OPEN_NODE_RESTORE_IMAGE": "open-node:restore-test",
+        "OPEN_NODE_RESTORE_DATA_DIR": str(tmp_path),
+    }
+    missing_port = subprocess.run(
+        ["docker", "compose", "-f", str(source), "config", "--quiet"],
+        env=base_environment,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        timeout=10,
+        check=False,
+    )
+    assert missing_port.returncode != 0, "Restore Compose accepted an implicit host port"
     result = subprocess.run(
         ["docker", "compose", "-f", str(source), "config", "--quiet"],
-        env={"PATH": os.environ["PATH"], "OPEN_NODE_RESTORE_IMAGE": "open-node:restore-test",
-             "OPEN_NODE_RESTORE_DATA_DIR": str(tmp_path)},
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10, check=False,
+        env={**base_environment, "OPEN_NODE_RESTORE_HTTP_PORT": "62032"},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        timeout=10,
+        check=False,
     )
     assert result.returncode == 0, "Restore Compose configuration rejected"

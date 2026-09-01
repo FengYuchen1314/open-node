@@ -162,10 +162,12 @@ docker run --rm --network none --read-only --user 10001:10001 \
 
 ```sh
 export OPEN_NODE_RESTORE_DATA_DIR=/srv/open-node-restore/output/new-data
+export OPEN_NODE_RESTORE_HTTP_PORT=62032 # 必须显式选择一个未占用的回环端口
 docker compose -f deploy/compose.restore.example.yaml up -d
 ```
 
-模板不会构建/拉取镜像，也不会自动创建源目录，仅监听回环地址。仍须接好原来的 HTTPS
+模板不会继承生产端口，也没有恢复端口默认值；缺少 `OPEN_NODE_RESTORE_HTTP_PORT` 时会
+直接拒绝渲染。它不会构建/拉取镜像，也不会自动创建源目录，仅监听回环地址。仍须接好原来的 HTTPS
 反向代理、可信代理、公开地址等部署配置；如需临时 HTTP 登录，请按部署文档配置 Cookie，
 不要把明文管理接口直接暴露到公网。单 Web 进程是支持的运行方式。
 
