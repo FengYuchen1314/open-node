@@ -30,6 +30,8 @@ from open_node.domain.initial_setup import SETUP_MESSAGES, InitialSetupError
 from open_node.domain.inventory import AgentCommandPayloadError
 from open_node.domain.notifications import NotificationError
 from open_node.domain.renewals import RENEWAL_MESSAGES, RenewalError
+from open_node.domain.subscriber_permissions import MESSAGES as SUBSCRIBER_PERMISSION_MESSAGES
+from open_node.domain.subscriber_permissions import SubscriberPermissionsError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.announcements import AnnouncementStore
@@ -59,6 +61,7 @@ from open_node.services.restore_state import (
 from open_node.services.secure_channel import AgentIdentity, decode_public_key
 from open_node.services.server_traffic import ServerTrafficWorker
 from open_node.services.subscriber_auth import SubscriberAuthStore
+from open_node.services.subscriber_permissions import SubscriberPermissionsStore
 from open_node.services.subscription_access import SubscriptionAccessWorker
 from open_node.services.subscription_templates import (
     TemplateConflict,
@@ -191,6 +194,7 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
                     active_settings.api_prefix + "/appearance",
                     active_settings.api_prefix + "/announcements",
                     active_settings.api_prefix + "/application-update",
+                    active_settings.api_prefix + "/subscriber-permissions",
                     active_settings.api_prefix + "/account/announcements",
                     active_settings.api_prefix + "/branding",
                 )
@@ -306,6 +310,18 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         return JSONResponse(status_code=exc.status_code, content={
             "code": exc.code, "detail": RENEWAL_MESSAGES[exc.code], "license_required": False,
         }, headers={"Retry-After": "60"} if exc.status_code == 429 else None)
+
+    @app.exception_handler(SubscriberPermissionsError)
+    async def subscriber_permissions_error(_request, exc):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "detail": SUBSCRIBER_PERMISSION_MESSAGES[exc.code],
+                "license_required": False,
+            },
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
 
     @app.exception_handler(AgentCommandPayloadError)
     async def invalid_agent_command(_request, exc):
@@ -454,6 +470,8 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
         ):
             raise ValueError("Notification secrets require a separate, non-overlapping directory")
     app.state.inventory.create_schema()
+    app.state.subscriber_permissions = SubscriberPermissionsStore(app.state.inventory)
+    app.state.subscriber_permissions.create_schema()
     app.state.announcements = AnnouncementStore(app.state.inventory)
     app.state.application_updates = ApplicationUpdateStore(
         active_settings.application_update_dir,

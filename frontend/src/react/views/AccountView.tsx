@@ -21,6 +21,8 @@ import { zhMessage } from "../../i18n/zh-CN";
 import { LoginWallpaper, SiteLogo, ThemeSelector } from "../components/AppearanceChrome";
 import type { Announcement, AnnouncementType } from "../../domain/announcements";
 import { accountAnnouncements } from "../../services/announcements";
+import type { SubscriberPermissionsAccount } from "../../domain/subscriber-permissions";
+import { getAccountSubscriberPermissions } from "../../services/subscriber-permissions";
 
 const formats: { label: string; value: SubscriptionClientFormat }[] = [
   { label: "Clash / Mihomo", value: "clash" }, { label: "sing-box", value: "sing-box" }, { label: "Surge", value: "surge" },
@@ -133,6 +135,8 @@ function SubscriberWorkspace({ username }: { username: string }) {
   const [profiles, setProfiles] = useState<SubscriberSubscriptionProfile[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [announcementWarning, setAnnouncementWarning] = useState(false);
+  const [permissions, setPermissions] = useState<SubscriberPermissionsAccount | null>(null);
+  const [permissionWarning, setPermissionWarning] = useState(false);
   const [configuration, setConfiguration] = useState("default");
   const [format, setFormat] = useState<SubscriptionClientFormat>("clash");
   const [linkType, setLinkType] = useState("full");
@@ -153,13 +157,16 @@ function SubscriberWorkspace({ username }: { username: string }) {
   const load = useCallback(async () => {
     const current = scope.begin(); setLoading(true); setError("");
     try {
-      const [account, token, extra, notices] = await Promise.all([
+      const [account, token, extra, notices, allowed] = await Promise.all([
         subscriberProfile(), subscriberToken(), subscriberProfiles(), accountAnnouncements().catch(() => null),
+        getAccountSubscriberPermissions().catch(() => null),
       ]);
       if (!scope.isCurrent(current)) return;
       setProfile(account); setSubscription(token); setProfiles(extra.profiles);
       if (notices) { setAnnouncements(notices.announcements); setAnnouncementWarning(false); }
       else setAnnouncementWarning(true);
+      if (allowed) { setPermissions(allowed); setPermissionWarning(false); }
+      else { setPermissions(null); setPermissionWarning(true); }
       setConfiguration(previous => previous === "default" || extra.profiles.some(item => item.id === previous) ? previous : "default");
     } catch (failure) {
       if (scope.isCurrent(current)) setError(zhMessage(failure, "暂时无法加载账户信息。"));
@@ -167,6 +174,10 @@ function SubscriberWorkspace({ username }: { username: string }) {
   }, [scope]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setCopied(false); }, [url]);
+  useEffect(() => {
+    if ((tab === "routes" && !permissions?.pages.includes("private_routes"))
+      || (tab === "templates" && !permissions?.pages.includes("templates"))) setTab("subscription");
+  }, [permissions, tab]);
   async function logout() {
     if (logoutBusy) return;
     setLogoutBusy(true); setError("");
@@ -204,7 +215,11 @@ function SubscriberWorkspace({ username }: { username: string }) {
       <Alert className="form-alert" type="info" showIcon title={subscriptionFormatHelp(format)} />
       <Form.Item label="订阅地址" htmlFor="account-subscription-url"><Input id="account-subscription-url" value={url} readOnly /></Form.Item>
       <Space wrap><Button icon={copied ? <CheckOutlined aria-hidden /> : <CopyOutlined aria-hidden />} aria-label="复制订阅链接" disabled={!url} onClick={() => void copyLink()}>{copied ? "已复制" : "复制链接"}</Button><Button icon={<DownloadOutlined aria-hidden />} aria-label="下载订阅" href={url || undefined} disabled={!url || !quota.available || selectedProfile?.enabled === false} rel="noreferrer" download>下载</Button></Space>
-      <div className="form-alert"><Space wrap><Link to="/account/external-subscriptions">外部订阅</Link><Link to="/account/renewals">申请续费</Link></Space></div>
+      <div className="form-alert"><Space wrap>
+        {permissions?.pages.includes("external_subscriptions") && <Link to="/account/external-subscriptions">外部订阅（{permissions.external_sources.used}/{permissions.external_sources.maximum || "不限"}）</Link>}
+        {permissions?.pages.includes("renewals") && <Link to="/account/renewals">申请续费</Link>}
+      </Space></div>
+      {permissions?.pages.includes("templates") && <Typography.Paragraph type="secondary">个人模板：{permissions.templates.used} / {permissions.templates.maximum || "不限"}</Typography.Paragraph>}
       {!quota.available && <Alert className="form-alert" type="warning" showIcon title={!quota.has_plan ? "尚未分配订阅套餐" : quota.expired ? "你的套餐已到期" : "你的流量额度已用尽"} />}
     </Form></Card></section>
     {profile.node_limits?.length > 0 && <section aria-label="节点限制"><Card title="节点限制"><Table rowKey="node_id" dataSource={profile.node_limits} pagination={false} scroll={{ x: 420 }} columns={[
@@ -218,13 +233,14 @@ function SubscriberWorkspace({ username }: { username: string }) {
       <Flex gap="middle" justify="space-between" align="center"><Typography.Title level={2}>{profile?.display_name || username}</Typography.Title><Button icon={<ReloadOutlined aria-hidden />} aria-label="刷新账户" loading={loading} onClick={() => void load()} /></Flex>
       {error && <Alert type="error" showIcon title={error} />}
       {announcementWarning && <Alert type="warning" showIcon title="暂时无法读取公告；账户和订阅功能仍可继续使用。" />}
+      {permissionWarning && <Alert type="warning" showIcon title="暂时无法读取可选功能权限；订阅和安全设置仍可继续使用。" />}
       {announcements.map(item => <Alert key={item.id} type={announcementKind[item.type]} showIcon title={item.title}
         description={<Typography.Paragraph style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{item.body}</Typography.Paragraph>} />)}
       {loading && <Spin aria-label="正在刷新账户" />}
       <Tabs activeKey={tab} onChange={setTab} destroyOnHidden items={[
         { key: "subscription", label: "订阅", children: subscriptionContent },
-        { key: "routes", label: "路由", children: <PrivateRoutedNodesPanel /> },
-        { key: "templates", label: "模板", children: <TemplatesWorkspace subscriber /> },
+        ...(permissions?.pages.includes("private_routes") ? [{ key: "routes", label: "路由", children: <PrivateRoutedNodesPanel /> }] : []),
+        ...(permissions?.pages.includes("templates") ? [{ key: "templates", label: "模板", children: <TemplatesWorkspace subscriber /> }] : []),
         { key: "security", label: "安全设置", children: <SubscriberSecurityPanel onChanged={() => void load()} /> },
       ]} />
     </Space></Layout.Content>

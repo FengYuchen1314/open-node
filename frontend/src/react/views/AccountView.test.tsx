@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProductUserSubscriptionToken } from "../../domain/subscriptions";
 import { getPublicBranding } from "../../services/branding";
 import { accountAnnouncements } from "../../services/announcements";
+import { getAccountSubscriberPermissions } from "../../services/subscriber-permissions";
 import { BrandingProvider } from "../hooks/useBranding";
 import {
   loadSubscriberSession, subscriberProfile, subscriberProfiles, subscriberRegister,
@@ -20,6 +21,7 @@ vi.mock("../../services/subscriber-auth", async original => ({
 }));
 vi.mock("../../services/branding", async original => ({ ...await original<typeof import("../../services/branding")>(), getPublicBranding: vi.fn() }));
 vi.mock("../../services/announcements", async original => ({ ...await original<typeof import("../../services/announcements")>(), accountAnnouncements: vi.fn() }));
+vi.mock("../../services/subscriber-permissions", async original => ({ ...await original<typeof import("../../services/subscriber-permissions")>(), getAccountSubscriberPermissions: vi.fn() }));
 vi.mock("../components/PrivateRoutedNodesPanel", () => ({ default: () => <div>用户路由工作区</div> }));
 vi.mock("../components/SubscriberSecurityPanel", () => ({ default: () => <div>账户安全工作区</div> }));
 vi.mock("../components/TemplatesWorkspace", () => ({ default: () => <div>订阅模板工作区</div> }));
@@ -52,6 +54,11 @@ beforeEach(() => {
   vi.mocked(subscriberProfiles).mockResolvedValue({ profiles: [], license_required: false });
   vi.mocked(subscriberToken).mockResolvedValue(token);
   vi.mocked(accountAnnouncements).mockResolvedValue({ announcements: [], license_required: false });
+  vi.mocked(getAccountSubscriberPermissions).mockResolvedValue({
+    pages: ["templates", "external_subscriptions", "private_routes", "renewals"],
+    templates: { used: 0, maximum: 0 }, external_sources: { used: 0, maximum: 0 },
+    license_required: false,
+  });
 });
 afterEach(async () => {
   cleanup();
@@ -174,6 +181,30 @@ describe("Chinese subscriber portal", () => {
     await mount();
     expect(screen.getByRole("heading", { name: "Alice Custom Name" })).toBeTruthy();
     expect(screen.getByText(/暂时无法读取公告/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("PRIVATE");
+  });
+  it("hides disabled optional features while retaining subscription and security", async () => {
+    subscriberState.session = { ...session };
+    vi.mocked(getAccountSubscriberPermissions).mockResolvedValue({
+      pages: ["renewals"], templates: { used: 3, maximum: 3 },
+      external_sources: { used: 1, maximum: 1 }, license_required: false,
+    });
+    await mount();
+    expect(screen.getByRole("tab", { name: "订阅" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "安全设置" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "路由" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "模板" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /外部订阅/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "申请续费" })).toBeTruthy();
+  });
+  it("fails closed for optional features when their permission snapshot is unavailable", async () => {
+    subscriberState.session = { ...session };
+    vi.mocked(getAccountSubscriberPermissions).mockRejectedValue(new Error("PRIVATE policy body"));
+    await mount();
+    expect(screen.getByText(/暂时无法读取可选功能权限/)).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "订阅" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "安全设置" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "模板" })).toBeNull();
     expect(document.body.textContent).not.toContain("PRIVATE");
   });
   it.each([

@@ -28,6 +28,7 @@ from open_node.api.routes import (
     server_management,
     servers,
     subscriber_auth,
+    subscriber_permissions,
     subscription_profiles,
     subscription_templates,
     subscriptions,
@@ -64,10 +65,12 @@ private_router.include_router(user_management.router)
 private_router.include_router(node_management.router)
 private_router.include_router(notifications.router)
 private_router.include_router(subscriber_auth.management_router)
+private_router.include_router(subscriber_permissions.router)
 api_router.include_router(private_router)
 api_router.include_router(auth.router)
 api_router.include_router(initial_setup.router)
 api_router.include_router(subscriber_auth.router)
+api_router.include_router(subscriber_permissions.account_router)
 api_router.include_router(announcements.account_router)
 api_router.include_router(external_subscriptions.account_router)
 api_router.include_router(renewals.account_router)

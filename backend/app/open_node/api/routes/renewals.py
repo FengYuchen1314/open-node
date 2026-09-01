@@ -7,7 +7,8 @@ from pydantic import ValidationError
 
 from open_node.api.auth import require_administrator
 from open_node.api.backup import BackupAPIRoute
-from open_node.api.routes.subscriber_auth import Identity, require_subscriber
+from open_node.api.routes.subscriber_auth import Identity
+from open_node.api.routes.subscriber_permissions import require_feature
 from open_node.domain.renewals import (
     AccountRenewalsResponse,
     RenewalCreate,
@@ -24,7 +25,7 @@ from open_node.services.backup_runtime import run_in_backup_threadpool
 router = APIRouter(route_class=BackupAPIRoute, prefix="/renewals", tags=["renewals"])
 account_router = APIRouter(
     route_class=BackupAPIRoute, prefix="/account/renewals", tags=["subscriber renewals"],
-    dependencies=[Depends(require_subscriber)],
+    dependencies=[Depends(require_feature("renewals"))],
 )
 
 

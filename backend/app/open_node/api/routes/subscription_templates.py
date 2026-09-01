@@ -32,7 +32,9 @@ router = APIRouter(
 def actor(request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
     if request.url.path.startswith(request.app.state.settings.api_prefix + "/account/"):
-        return require_subscriber(request).username
+        identity = require_subscriber(request)
+        request.app.state.subscriber_permissions.require_page(identity.username, "templates")
+        return identity.username
     require_administrator(request, response)
     return None
 

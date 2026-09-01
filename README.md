@@ -112,6 +112,10 @@ assignments and multi-file subscription profiles through explicit plan mappings,
 including compatible legacy `/x` links.
 Both workspaces include free [custom Clash and Surge templates](docs/subscription-templates.md)
 with personal permissions, plan/system defaults, draft preview and catalog portability.
+Administrators can also apply a global [subscriber feature and quota policy](docs/subscriber-permissions.md)
+to personal templates, external sources, private routes and renewal requests. The account APIs
+enforce disabled features directly, and personal creation quotas are checked inside the same
+SQLite write transaction rather than relying on hidden navigation.
 
 The [client-format guide](docs/subscription-clients.md) covers the original
 Clash, Surge, sing-box, Xray, URI and Base64 outputs plus Loon, Quantumult X,

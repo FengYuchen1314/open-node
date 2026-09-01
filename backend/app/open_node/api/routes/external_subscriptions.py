@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from open_node.api.backup import BackupAPIRoute
-from open_node.api.routes.subscriber_auth import Identity, require_subscriber
+from open_node.api.routes.subscriber_auth import Identity
+from open_node.api.routes.subscriber_permissions import require_feature
 from open_node.domain.external_subscriptions import (
     AccountExternalSourceCreate,
     ExternalConfirmationRead,
@@ -32,7 +33,7 @@ account_router = APIRouter(
     route_class=BackupAPIRoute,
     prefix="/account/external-subscriptions",
     tags=["subscriber external subscriptions"],
-    dependencies=[Depends(require_subscriber)],
+    dependencies=[Depends(require_feature("external_subscriptions"))],
 )
 MAX_REQUEST_BYTES = 65536
 

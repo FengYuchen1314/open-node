@@ -10,6 +10,7 @@ import { useAdministratorSession } from "../hooks/useSession";
 import AppearancePanel from "../components/AppearancePanel";
 import AnnouncementsPanel from "../components/AnnouncementsPanel";
 import ApplicationUpdatePanel from "../components/ApplicationUpdatePanel";
+import SubscriberPermissionsPanel from "../components/SubscriberPermissionsPanel";
 
 export default function SystemSettingsView() {
   const auth = useAdministratorSession();
@@ -107,6 +108,7 @@ function BrandingEditor({ operator }: { operator: OperatorSession }) {
       </Space>
     </Card>
     <AppearancePanel operator={operator} />
+    <SubscriberPermissionsPanel operator={operator} />
     <AnnouncementsPanel operator={operator} />
     <ApplicationUpdatePanel operator={operator} />
   </section>;

@@ -7640,6 +7640,11 @@ class InventoryStore:
 
         return TemplateStore(self)
 
+    def subscriber_permissions(self):
+        from open_node.services.subscriber_permissions import SubscriberPermissionsStore
+
+        return SubscriberPermissionsStore(self)
+
     def external_subscriptions(self):
         from open_node.services.external_subscriptions import ExternalSubscriptions
 

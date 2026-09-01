@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
-from open_node.api.routes.subscriber_auth import Identity, require_subscriber
+from open_node.api.routes.subscriber_auth import Identity
+from open_node.api.routes.subscriber_permissions import require_feature
 from open_node.domain.private_routed_nodes import (
     PrivateRoutedNodeCreate,
     PrivateRoutedNodeMutationResponse,
@@ -32,7 +33,7 @@ account_router = APIRouter(
     route_class=BackupAPIRoute,
     prefix="/account/private-routed-nodes",
     tags=["subscriber private routed nodes"],
-    dependencies=[Depends(require_subscriber)],
+    dependencies=[Depends(require_feature("private_routes"))],
 )
 
 

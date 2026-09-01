@@ -414,6 +414,10 @@ class ExternalSubscriptions:
         now = datetime.now(UTC)
         with self._write() as session:
             self._owner(session, payload.owner_username, writable=True)
+            if owner_username is not None:
+                self.store.subscriber_permissions().enforce_create(
+                    session, owner_username, "external_subscriptions"
+                )
             count = session.scalar(
                 select(func.count())
                 .select_from(ExternalSourceModel)

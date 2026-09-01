@@ -201,6 +201,10 @@ class TemplateStore:
                 raise TemplateConflict("An assigned template cannot change format")
             now = datetime.now(UTC)
             if row is None:
+                if actor is not None:
+                    self.inventory.subscriber_permissions().enforce_create(
+                        session, actor, "templates"
+                    )
                 if session.scalar(select(func.count()).select_from(TemplateRecord)) >= 200:
                     raise TemplateConflict("The template library is limited to 200 files")
                 row = TemplateRecord(id=str(uuid4()), created_at=now)
