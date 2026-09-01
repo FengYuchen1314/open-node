@@ -212,7 +212,7 @@ def test_managed_public_gateway_is_pinned_and_keeps_the_app_on_loopback():
         )
     ]
     assert "public_ip_url" in health_check
-    assert '--connect-to "$authority:$public_port:127.0.0.1:$public_port"' in health_check
+    assert "--connect-to" not in health_check
     assert '"$public_url/healthz"' in health_check
     assert "curl -k" not in health_check
     assert "--insecure" not in health_check

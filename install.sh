@@ -2232,7 +2232,7 @@ preflight_fresh_ports() {
 
 public_gateway_endpoints_are_healthy() {
   local deadline="${1:-0}"
-  local hostname public_ip public_port authority public_url remaining probe_timeout
+  local hostname public_ip public_port public_url remaining probe_timeout
   hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
   public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
   public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
@@ -2249,7 +2249,6 @@ public_gateway_endpoints_are_healthy() {
       || return 1
   fi
   if [[ -n "$public_ip" ]]; then
-    authority="$(public_ip_authority "$public_ip")"
     public_url="$(public_ip_url "$public_ip" "$public_port")"
     probe_timeout=5
     if (( deadline > 0 )); then
@@ -2257,8 +2256,10 @@ public_gateway_endpoints_are_healthy() {
       (( remaining > 0 )) || return 1
       if (( remaining < probe_timeout )); then probe_timeout="$remaining"; fi
     fi
+    # IP-literal TLS clients do not send a DNS SNI name.  Connecting this
+    # probe to 127.0.0.1 prevents Caddy from selecting the public IP
+    # certificate by the listener's local address, so probe the real IP.
     curl --noproxy '*' --fail --silent --show-error --max-time "$probe_timeout" \
-      --connect-to "$authority:$public_port:127.0.0.1:$public_port" \
       "$public_url/healthz" >/dev/null 2>&1 \
       || return 1
   fi
