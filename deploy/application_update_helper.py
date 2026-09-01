@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 1
+INSTALLER_MANIFEST_VERSION = "2"
+RUNTIME_CONTAINER_PORT = "62031"
 OFFICIAL_REPOSITORY = "https://github.com/FengYuchen1314/open-node.git"
 OFFICIAL_REF = "main"
 REVISION = re.compile(r"^[0-9a-f]{40}$")
@@ -143,7 +145,7 @@ def manifest(config: dict[str, Any]) -> dict[str, str]:
             raise ValueError("invalid installer manifest")
         values[key] = value
     expected = {
-        "MANIFEST_VERSION": "1",
+        "MANIFEST_VERSION": INSTALLER_MANIFEST_VERSION,
         "REPOSITORY": OFFICIAL_REPOSITORY,
         "REF": OFFICIAL_REF,
         "INSTALL_DIR": str(config["install_dir"]),
@@ -151,6 +153,7 @@ def manifest(config: dict[str, Any]) -> dict[str, str]:
         "BACKUP_DIR": str(config["backup_dir"]),
         "PROJECT_NAME": config["project_name"],
         "IMAGE_REPOSITORY": config["image_repository"],
+        "DEPLOYED_RUNTIME_PORT": RUNTIME_CONTAINER_PORT,
     }
     if any(values.get(key) != value for key, value in expected.items()):
         raise ValueError("helper configuration does not match installer manifest")

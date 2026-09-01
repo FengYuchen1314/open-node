@@ -3132,6 +3132,7 @@ reinstall_existing() {
   if [[ "$state" == "running" ]]; then
     wait_for_health "$INSTALL_DIR" "$ENV_FILE" "$image_id" \
       || die "deployment is unhealthy"
+    provision_application_update_helper
     reconcile_public_gateway
     log_success
     return

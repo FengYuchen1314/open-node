@@ -89,6 +89,10 @@ def test_application_update_bridge_is_fixed_function_and_has_no_docker_socket_mo
     assert '["bash", str(installer), "update"]' in source
     assert "shell=True" not in source
     assert "OFFICIAL_REPOSITORY" in source and 'OFFICIAL_REF = "main"' in source
+    assert 'INSTALLER_MANIFEST_VERSION = "2"' in source
+    assert 'RUNTIME_CONTAINER_PORT = "62031"' in source
+    assert '"MANIFEST_VERSION": INSTALLER_MANIFEST_VERSION' in source
+    assert '"DEPLOYED_RUNTIME_PORT": RUNTIME_CONTAINER_PORT' in source
 
 
 def test_compose_defaults_to_loopback_but_allows_an_explicit_installer_bind():
@@ -116,6 +120,12 @@ def test_installer_manifest_v2_records_the_fixed_62031_runtime_contract():
     manifest_write = installer[
         installer.index("write_manifest() {") : installer.index("\nwrite_recovery_marker() {")
     ]
+    reinstall_start = installer.index("reinstall_existing() {")
+    reinstall_running = installer[
+        installer.index('if [[ "$state" == "running" ]]', reinstall_start) : installer.index(
+            'CANDIDATE_SOURCE="$INSTALL_DIR"', reinstall_start
+        )
+    ]
 
     assert 'readonly MANIFEST_VERSION="2"' in installer
     assert 'readonly RUNTIME_CONTAINER_PORT="62031"' in installer
@@ -124,6 +134,10 @@ def test_installer_manifest_v2_records_the_fixed_62031_runtime_contract():
     assert '== "$RUNTIME_CONTAINER_PORT"' in manifest_check
     assert "unsupported or damaged installer manifest" in manifest_check
     assert "printf 'DEPLOYED_RUNTIME_PORT=%s\\n' \"$RUNTIME_CONTAINER_PORT\"" in manifest_write
+    assert "provision_application_update_helper" in reinstall_running
+    assert reinstall_running.index("provision_application_update_helper") < reinstall_running.index(
+        "reconcile_public_gateway"
+    )
 
 
 def test_managed_public_gateway_is_pinned_and_keeps_the_app_on_loopback():
