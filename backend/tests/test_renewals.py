@@ -17,7 +17,7 @@ from open_node.services.renewals import RenewalRequestModel
 from open_node.services.subscription_access import SubscriptionAccessConflict
 from sqlalchemy import func, select
 from test_subscriber_auth import login, provision
-from test_subscriptions import create_catalog_fixture
+from test_subscriptions import create_catalog_fixture, create_plan_node_fixture
 
 ADMIN = "/api/v1/renewals"
 ACCOUNT = "/api/v1/account/renewals"
@@ -31,8 +31,10 @@ def make(tmp_path, *, catalog=False):
         _token, _server, _node, plan_id = create_catalog_fixture(operator)
     else:
         assert operator.post("/api/v1/users", json={"username": "alice"}).status_code == 201
+        node_id = create_plan_node_fixture(operator, namespace="renewal")
         response = operator.post("/api/v1/plans", json={
             "name": "月付套餐", "cycle_days": 30, "traffic_limit_gb": 10,
+            "node_ids": [node_id],
         })
         assert response.status_code == 201, response.text
         plan_id = response.json()["plan"]["id"]
@@ -141,8 +143,9 @@ def test_approval_uses_later_current_expiry_and_does_not_replace_other_plan(tmp_
     approved = review(operator, row["id"])
     assert aware(approved.json()["request"]["new_end_date"]) == later + timedelta(days=30)
     next_row = submit(subscriber).json()
+    node_ids = operator.get(f"/api/v1/plans/{plan_id}/settings").json()["plan"]["node_ids"]
     other = operator.post("/api/v1/plans", json={
-        "name": "变更后的套餐", "traffic_limit_gb": 20,
+        "name": "变更后的套餐", "traffic_limit_gb": 20, "node_ids": node_ids,
     }).json()["plan"]["id"]
     assert other != plan_id
     assert operator.post("/api/v1/users/alice/plan", json={"plan_id": other}).status_code == 200

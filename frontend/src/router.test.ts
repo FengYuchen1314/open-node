@@ -1,19 +1,40 @@
 import { describe, expect, it } from "vitest";
 
-import { routes } from "./routes";
+import { legacyRouteRedirects, routes } from "./routes";
 
 describe("router", () => {
-  it("registers the config and subscription workspace routes", () => {
-    const paths = routes.map((route) => route.path);
+  it("registers exactly six canonical administrator workspaces in sidebar order", () => {
+    expect(routes.filter(route => !route.meta?.subscriber).map(route => route.path)).toEqual([
+      "/servers", "/nodes", "/templates", "/plans", "/users", "/system-settings",
+    ]);
+  });
 
-    expect(paths).toContain("/config");
-    expect(paths).toContain("/subscriptions");
-    expect(paths).toContain("/templates");
-    expect(paths).toContain("/notifications");
-    expect(paths).toContain("/system-settings");
-    expect(routes.find(route => route.path === "/system-settings")?.meta?.subscriber).toBeUndefined();
-    expect(routes.find(route => route.path === "/notifications")?.meta?.subscriber).toBeUndefined();
-    expect(routes.find(route => route.path === "/account")?.meta?.subscriber).toBe(true);
-    expect(routes.find(route => route.path === "/subscriptions")?.meta?.subscriber).toBeUndefined();
+  it("keeps the three subscriber routes outside the administrator shell", () => {
+    expect(routes.filter(route => route.meta?.subscriber).map(route => route.path)).toEqual([
+      "/account", "/account/external-subscriptions", "/account/renewals",
+    ]);
+  });
+
+  it("moves legacy deep links into query-selected aggregate tabs", () => {
+    expect(Object.fromEntries(legacyRouteRedirects.map(route => [route.path, route.to]))).toMatchObject({
+      "/": "/servers",
+      "/config": "/servers?tab=egress",
+      "/server-sharing": "/servers?tab=sharing",
+      "/ddns": "/servers?tab=ddns",
+      "/speedtests": "/nodes?tab=speed",
+      "/node-topologies": "/nodes?tab=topologies",
+      "/subscription-customizations": "/templates?tab=customizations",
+      "/access": "/system-settings?tab=access",
+      "/notifications": "/system-settings?tab=notifications",
+      "/backups": "/system-settings?tab=backups",
+      "/changes": "/system-settings?tab=changes",
+      "/renewals": "/system-settings?tab=renewals",
+      "/probe": "/system-settings?tab=probe",
+    });
+  });
+
+  it("removes certificate management instead of loading its former page", () => {
+    expect(routes.some(route => route.path === "/certificates")).toBe(false);
+    expect(legacyRouteRedirects.find(route => route.path === "/certificates")?.to).toBe("/servers");
   });
 });

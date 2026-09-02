@@ -143,7 +143,7 @@ export default function ServerSharingView() {
         command = await getFederatedCommand(value, command.id);
       }
       if (command.failed || pending.has(command.status)) throw new Error("server_share_owner_unavailable");
-      if (active.current) setNotice("共享服务器状态与获授权入站已同步，可在配置页运行时清单中创建节点。");
+      if (active.current) setNotice("共享服务器状态与获授权入站已同步，可在“节点管理”中创建或导入节点。");
     } catch (failure) { if (active.current) { report(failure); void load(); } }
     finally { if (active.current) setBusy(""); }
   }

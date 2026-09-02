@@ -15,6 +15,8 @@ import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 export interface ConfigViewProps {
   onCommands?: (serverId: string, commands: AgentCommand[]) => void;
   onUpdated?: () => void;
+  /** Node catalog creation/import belongs to the Nodes workspace, not Server settings. */
+  allowNodeCatalogMutations?: boolean;
 }
 type Revision = { serverId: string; sha256: string };
 type SystemState = { revision: Revision | null; writable: boolean; reason: string; apiMode: string; grpcDisableSupported: boolean; grpcPortWritable: boolean; fixedStatsAddress: string };
@@ -26,7 +28,7 @@ const initialFileState: FileState = { revision: null, writable: false, reason: "
 const logLevels: AgentXraySystemConfigOperationRequest["log_level"][] = ["none", "error", "warning", "info", "debug"];
 const workspaceOperations = new Set<AgentOperationKind>(["xray_system_config_read", "xray_system_config_write", "xray_config_files_list", "xray_config_file_read", "xray_config_file_write"]);
 const runtimeOperations: { label: string; value: AgentOperationKind }[] = [{ label: "管理入站", value: "inbounds_manage" }, { label: "管理出站", value: "outbounds_manage" }, { label: "管理路由", value: "routing_manage" }, { label: "批量应用", value: "batch_apply" }, { label: "限速", value: "limiter" }, { label: "回程路由测试", value: "return_route_test" }];
-const siteOperations: { label: string; value: AgentOperationKind }[] = [{ label: "配置 SSL", value: "nginx_setup_ssl" }, { label: "删除网站", value: "nginx_website_delete" }, { label: "部署证书", value: "cert_deploy" }, { label: "验证网站", value: "validate_site" }];
+const siteOperations: { label: string; value: AgentOperationKind }[] = [{ label: "配置 HTTPS 网站", value: "nginx_setup_ssl" }, { label: "删除网站", value: "nginx_website_delete" }, { label: "验证网站", value: "validate_site" }];
 const tunnelPortFields = [{ key: "listenPort", label: "公网端口" }, { key: "nginxPort", label: "Nginx 端口" }, { key: "forwardPort", label: "回落端口" }, { key: "apiPort", label: "Xray API 端口" }, { key: "metricsPort", label: "指标端口" }] as const;
 const queueAndScan = { queue_agent_commands: true, queue_scan_after_apply: true };
 const asRecord = (value: unknown): Record<string, unknown> | null => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -58,6 +60,7 @@ function useFields<T extends object>(initial: T) {
 }
 
 export default function ConfigView(props: ConfigViewProps) {
+  const allowNodeCatalogMutations = props.allowNodeCatalogMutations ?? true;
   const [servers, setServers] = useState<ServerSummary[]>([]);
   const [agents, setAgents] = useState<Record<string, AgentRead>>({});
   const [selectedId, setSelectedId] = useState("");
@@ -277,6 +280,7 @@ export default function ConfigView(props: ConfigViewProps) {
   }
   function useLatestRaw(kind: "xray" | "nginx" | "nginx-file") {
     const body = latestResult(kind === "xray" ? "/api/child/xray/config" : kind === "nginx" ? "/api/child/nginx/config" : "/api/child/nginx/config-files", kind === "nginx-file");
+    if (kind === "xray" && body?.redacted === true) { setError("当前配置包含面板托管的服务器出口凭据，请在“服务器管理 → 服务器设置 → 出站与路由”中修改。"); return; }
     const content = kind === "nginx-file" ? body?.content : body?.config;
     if (typeof content !== "string") { setError(`暂无已完成的${kind === "xray" ? " Xray 配置" : kind === "nginx" ? " Nginx 配置" : " Nginx 文件"}结果。`); return; }
     if (kind === "xray") patchXray({ configText: content, ...(typeof body?.path === "string" ? { path: body.path } : {}) });
@@ -305,6 +309,7 @@ export default function ConfigView(props: ConfigViewProps) {
   function useLatestFile() {
     const body = latestSuccessfulGetResult(selectedCommands, "/api/child/xray/config-files")?.body;
     if (!body) { invalidateFile("暂无成功的 Xray 文件读取或列表结果。"); setError("暂无已完成的 Xray 文件读取或列表结果。"); return; }
+    if (body.redacted === true) { const message = "当前文件包含面板托管的服务器出口凭据，请在“服务器管理 → 服务器设置 → 出站与路由”中修改。"; invalidateFile(message); setError(message); return; }
     if (typeof body.content !== "string") {
       const main = asRecord(body.files)?.main, entry = Array.isArray(main) ? asRecord(main[0]) : null;
       if (typeof entry?.name === "string") { patchFile({ file: entry.name }); invalidateFile(typeof entry.read_only_reason === "string" && entry.read_only_reason ? entry.read_only_reason : "最新结果为文件列表。请先读取主配置文件，再进行编辑。"); return; }
@@ -324,7 +329,7 @@ export default function ConfigView(props: ConfigViewProps) {
     const serverId = selectedRef.current, generation = epoch.current;
     const loaded = typeof snapshot.config === "string" ? snapshot : (await refreshSnapshots(true)).find((item) => item.id === snapshot.id);
     if (!currentContext(serverId, generation)) return;
-    if (!loaded?.config) { setError("快照配置不可用。"); return; }
+    if (!loaded?.config) { setError("快照包含面板托管的服务器出口凭据，不能在通用编辑器中载入。"); return; }
     patchXray({ configText: loaded.config }); setActiveTab("xray");
   }
   async function waitTakeover(serverId: string, id: string, request: number, generation: number) {
@@ -436,10 +441,10 @@ export default function ConfigView(props: ConfigViewProps) {
     <Button aria-label="创建链式隧道" type="primary" htmlType="submit" disabled={chainDisabled} loading={actionKey === "chain"}>创建链式隧道</Button>
   </Form></Card>;
   const runtimeTab = <Space orientation="vertical" size="large" style={{ width: "100%" }}>
-    {isFederated && <Alert type="info" showIcon title="分享服务器由拥有方控制" description="这里可以查看已同步入站、建立节点并核对用户凭据。新增或修改自己的入站请到“服务器共享”执行“同步状态与入站”；Xray、Nginx、文件、隧道和服务启停仍由拥有方管理。" />}
+    {isFederated && <Alert type="info" showIcon title="分享服务器由拥有方控制" description={allowNodeCatalogMutations ? "这里可以查看已同步入站、建立节点并核对用户凭据。新增或修改自己的入站请到“服务器共享”执行“同步状态与入站”；Xray、Nginx、文件、隧道和服务启停仍由拥有方管理。" : "这里可以查看已同步入站并核对用户凭据；节点创建和导入统一在“节点管理”中完成。"} />}
     <Card title="运行时清单" extra={<Space wrap><Tag color={!runtime.inventory?.has_scan ? "default" : runtime.inventory.xray_running ? "success" : "warning"}>{runtimeStatus}</Tag><Button aria-label="刷新运行时清单" icon={<ReloadOutlined />} loading={runtimeLoading} onClick={() => void refreshRuntime(true)} /></Space>}>
       <Typography.Paragraph type="secondary">{runtimeSummary}</Typography.Paragraph>
-      <Space wrap style={{ marginBottom: 16 }}><Button aria-label="导入缺失节点" disabled={runtimeBusy || !runtime.inventory?.has_scan || !missingNodeCount} loading={actionKey === "import"} onClick={() => void mutate("import", async (serverId) => { const response = await importManagedNodesFromRuntimeInbounds(serverId); return `已导入 ${response.created_count} 个节点，${response.existing_count} 个已受管理，已跳过 ${response.skipped_count} 个。`; })}>导入缺失节点</Button><Button aria-label="补齐客户端" disabled={runtimeBusy || !runtime.inventory?.has_scan || !runtime.credentials?.missing_runtime_client_count} loading={actionKey === "repair"} onClick={() => repairCredentials()}>补齐客户端</Button><Button aria-label="清理多余客户端" disabled={runtimeBusy || !runtime.inventory?.has_scan || !runtime.credentials?.extra_runtime_client_count} loading={actionKey === "cleanup"} onClick={() => repairCredentials(true)}>清理多余客户端</Button></Space>
+      <Space wrap style={{ marginBottom: 16 }}>{allowNodeCatalogMutations && <Button aria-label="导入缺失节点" disabled={runtimeBusy || !runtime.inventory?.has_scan || !missingNodeCount} loading={actionKey === "import"} onClick={() => void mutate("import", async (serverId) => { const response = await importManagedNodesFromRuntimeInbounds(serverId); return `已导入 ${response.created_count} 个节点，${response.existing_count} 个已受管理，已跳过 ${response.skipped_count} 个。`; })}>导入缺失节点</Button>}<Button aria-label="补齐客户端" disabled={runtimeBusy || !runtime.inventory?.has_scan || !runtime.credentials?.missing_runtime_client_count} loading={actionKey === "repair"} onClick={() => repairCredentials()}>补齐客户端</Button><Button aria-label="清理多余客户端" disabled={runtimeBusy || !runtime.inventory?.has_scan || !runtime.credentials?.extra_runtime_client_count} loading={actionKey === "cleanup"} onClick={() => repairCredentials(true)}>清理多余客户端</Button></Space>
       <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 3 }} items={[
         { key: "inbounds", label: "入站", children: runtime.inventory?.inbound_count ?? 0 }, { key: "clients", label: "客户端", children: runtime.inventory?.client_count ?? 0 }, { key: "tunnels", label: "隧道 / 链式隧道", children: `${runtime.tunnels?.tunnel_count ?? 0} / ${runtime.tunnels?.chain_count ?? 0}` },
         { key: "traffic", label: "入站流量", children: formatTraffic(runtime.inventory?.traffic) }, { key: "user-traffic", label: "用户流量", children: formatTraffic(runtime.inventory?.user_traffic) },
@@ -455,13 +460,13 @@ export default function ConfigView(props: ConfigViewProps) {
       { title: "入站", key: "inbound", render: (_, inbound) => <Space orientation="vertical" size={0}><Typography.Text strong>{inbound.display_name}</Typography.Text><Typography.Text>{[inbound.protocol, inbound.network, inbound.security, inbound.client_container].filter(Boolean).join(" / ") || "无元数据"}</Typography.Text><Typography.Text>{[inbound.listen, inbound.port ? String(inbound.port) : ""].filter(Boolean).join(":") || "无端点"}</Typography.Text><Typography.Text>{inbound.client_count} 个客户端</Typography.Text><Typography.Text>{inbound.user_emails.join(", ")}</Typography.Text></Space> },
       { title: "状态 / 嗅探", key: "status", render: (_, inbound) => { const entry = entryByIndex.get(inbound.source_index); return <Space orientation="vertical" size={0}><Tag color={entry?.status === "managed" ? "success" : entry?.status === "unavailable" ? "error" : "warning"}>{entry ? statusLabel(entry.status) : "未知"}</Tag>{entry?.managed_node_name && <Typography.Text>{entry.managed_node_name}</Typography.Text>}<Typography.Text>嗅探：{inbound.sniffing_enabled ? "开启" : "关闭"}</Typography.Text>{inbound.sniffing_dest_override.length > 0 && <Typography.Text>目标覆盖：{inbound.sniffing_dest_override.join(", ")}</Typography.Text>}{inbound.sniffing_exclude_domains.length > 0 && <Typography.Text>排除域名：{inbound.sniffing_exclude_domains.join(", ")}</Typography.Text>}</Space>; } },
       { title: "流量", key: "traffic", render: (_, inbound) => <Space orientation="vertical" size={0}><Typography.Text>{formatTraffic(inbound.traffic)}</Typography.Text><Typography.Text>用户 {formatTraffic(inbound.user_traffic)}</Typography.Text></Space> },
-      { title: "节点目录", key: "catalog", render: (_, inbound) => { const draft = draftByIndex.get(inbound.source_index); return <Space orientation="vertical"><Button disabled={runtimeBusy || !draft?.create_available || Boolean(draft.existing_node_id)} loading={actionKey === `create:${inbound.source_index}`} onClick={() => void mutate(`create:${inbound.source_index}`, async (serverId) => { const response = await createManagedNodeFromRuntimeInbound(serverId, { source_index: inbound.source_index }); return `已创建受管理节点 ${response.node.name}。`; })}>{draft?.existing_node_id ? "节点已存在" : "创建节点"}</Button>{(draft?.warnings ?? inbound.remarks).map((warning) => <Tag key={warning} color="warning">{remarkLabel(warning)}</Tag>)}</Space>; } },
+      { title: allowNodeCatalogMutations ? "节点目录" : "扫描备注", key: "catalog", render: (_, inbound) => { const draft = draftByIndex.get(inbound.source_index); return <Space orientation="vertical">{allowNodeCatalogMutations && <Button disabled={runtimeBusy || !draft?.create_available || Boolean(draft.existing_node_id)} loading={actionKey === `create:${inbound.source_index}`} onClick={() => void mutate(`create:${inbound.source_index}`, async (serverId) => { const response = await createManagedNodeFromRuntimeInbound(serverId, { source_index: inbound.source_index }); return `已创建受管理节点 ${response.node.name}。`; })}>{draft?.existing_node_id ? "节点已存在" : "创建节点"}</Button>}{(draft?.warnings ?? inbound.remarks).map((warning) => <Tag key={warning} color="warning">{remarkLabel(warning)}</Tag>)}</Space>; } },
     ]} /></Card>
     <Card size="small" title="受管理节点核对"><Table<XrayRuntimeNodeReconciliationManagedEntry> rowKey="node_id" dataSource={nodeIssues} pagination={false} locale={{ emptyText: "受管理节点无差异。" }} scroll={{ x: 650 }} columns={[
       { title: "节点", key: "node", render: (_, entry) => <Space orientation="vertical" size={0}><Typography.Text strong>{entry.node_name}</Typography.Text><Typography.Text>{entry.protocol} / {entry.inbound_tag || "无入站标签"}</Typography.Text><Typography.Text>{entry.runtime_display_name || "无运行时入站"}</Typography.Text></Space> },
       { title: "状态", key: "status", render: (_, entry) => <Tag color={entry.status === "missing_runtime" ? "error" : "warning"}>{statusLabel(entry.status)}</Tag> },
       { title: "差异", key: "drifts", render: (_, entry) => <Space orientation="vertical" size={0}>{entry.drifts.map((drift) => <Typography.Text key={drift.field}>{drift.field}: {Array.isArray(drift.managed_value) ? drift.managed_value.join(",") : String(drift.managed_value ?? "-")} → {Array.isArray(drift.runtime_value) ? drift.runtime_value.join(",") : String(drift.runtime_value ?? "-")}</Typography.Text>)}</Space> },
-      { title: "操作", key: "actions", render: (_, entry) => <Button aria-label="同步" disabled={runtimeBusy || entry.status !== "stale" || entry.runtime_source_index == null} loading={actionKey === `sync:${entry.node_id}`} onClick={() => void mutate(`sync:${entry.node_id}`, async (serverId) => { const response = await syncManagedNodeFromRuntime(serverId, entry.node_id, { source_index: entry.runtime_source_index }); return `已同步 ${response.node.name} 的 ${response.updated_fields.length} 个字段。`; })}>同步</Button> },
+      { title: "操作", key: "actions", render: (_, entry) => allowNodeCatalogMutations ? <Button aria-label="同步" disabled={runtimeBusy || entry.status !== "stale" || entry.runtime_source_index == null} loading={actionKey === `sync:${entry.node_id}`} onClick={() => void mutate(`sync:${entry.node_id}`, async (serverId) => { const response = await syncManagedNodeFromRuntime(serverId, entry.node_id, { source_index: entry.runtime_source_index }); return `已同步 ${response.node.name} 的 ${response.updated_fields.length} 个字段。`; })}>同步</Button> : <Typography.Text type="secondary">请到节点管理处理</Typography.Text> },
     ]} /></Card>
     <Card size="small" title="凭据核对"><Table<XrayRuntimeCredentialReconciliationEntry> rowKey="node_id" dataSource={credentialIssues} pagination={false} locale={{ emptyText: "凭据无差异。" }} scroll={{ x: 650 }} columns={[
       { title: "节点", key: "node", render: (_, entry) => <Space orientation="vertical" size={0}><Typography.Text strong>{entry.node_name}</Typography.Text><Typography.Text>{entry.protocol} / {entry.inbound_tag || "无入站标签"}</Typography.Text><Typography.Text>{entry.runtime_display_name || "无运行时入站"}</Typography.Text></Space> },

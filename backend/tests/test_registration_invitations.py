@@ -15,7 +15,7 @@ from open_node.services.inventory import ProductUserModel, RegistrationInvitatio
 from open_node.services.registration_invitations import RegistrationInvitationUnavailable
 from open_node.services.subscriber_auth import SubscriberAccount
 from sqlalchemy import func, select, update
-from test_subscriptions import create_catalog_fixture
+from test_subscriptions import create_catalog_fixture, create_plan_node_fixture
 
 PASSWORD = "subscriber-password-for-invitation-tests"
 BASE = "/api/v1/registration-invitations"
@@ -29,8 +29,15 @@ def make(tmp_path):
 
 
 def plan(operator, name="Invite plan"):
+    node_id = create_plan_node_fixture(operator, namespace="invite")
     response = operator.post(
-        "/api/v1/plans", json={"name": name, "traffic_limit_gb": 10, "cycle_days": 30}
+        "/api/v1/plans",
+        json={
+            "name": name,
+            "traffic_limit_gb": 10,
+            "cycle_days": 30,
+            "node_ids": [node_id],
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()["plan"]

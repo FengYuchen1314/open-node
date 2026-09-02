@@ -351,11 +351,11 @@ def test_ci_uses_parallel_backend_and_frontend_shards():
 
     assert frontend["strategy"] == {
         "fail-fast": False,
-        "matrix": {"shard": [1, 2, 3]},
+        "matrix": {"shard": list(range(1, 11))},
     }
     frontend_steps = frontend["steps"]
     assert any(
-        step.get("run") == "npm test -- --shard=${{ matrix.shard }}/3"
+        step.get("run") == "npm test -- --shard=${{ matrix.shard }}/10"
         for step in frontend_steps
     )
     for command in ("npm run build", "npm run build:probe", "test -f dist-probe/index.html"):

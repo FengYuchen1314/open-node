@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
+from open_node.api.redaction import public_change_set, public_command_read
 from open_node.domain.changes import (
     AgentChangeSetAcceptRequest,
     AgentChangeSetCreate,
@@ -29,7 +30,9 @@ router = APIRouter(route_class=BackupAPIRoute, prefix="/change-sets", tags=["cha
 def list_change_sets(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
 ) -> AgentChangeSetsResponse:
-    return AgentChangeSetsResponse(change_sets=store.list_change_sets())
+    return AgentChangeSetsResponse(
+        change_sets=[public_change_set(change) for change in store.list_change_sets()]
+    )
 
 
 @router.post(
@@ -42,6 +45,7 @@ async def create_change_set(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentChangeSetResponse:
+    _reject_internal_only_steps(payload)
     try:
         change_set = store.create_change_set(payload)
         commands: list[AgentCommandRead] = []
@@ -53,7 +57,10 @@ async def create_change_set(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ChangeSetConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return AgentChangeSetResponse(change_set=change_set, commands=commands)
+    return AgentChangeSetResponse(
+        change_set=public_change_set(change_set),
+        commands=[public_command_read(command) for command in commands],
+    )
 
 
 @router.post(
@@ -83,7 +90,10 @@ async def create_routed_outbound_change_set(
             else status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    return AgentChangeSetResponse(change_set=change_set, commands=commands)
+    return AgentChangeSetResponse(
+        change_set=public_change_set(change_set),
+        commands=[public_command_read(command) for command in commands],
+    )
 
 
 @router.get("/{change_set_id}", response_model=AgentChangeSetResponse)
@@ -95,7 +105,32 @@ def get_change_set(
         change_set = store.get_change_set(change_set_id)
     except ChangeSetNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return AgentChangeSetResponse(change_set=change_set)
+    return AgentChangeSetResponse(change_set=public_change_set(change_set))
+
+
+def _reject_internal_only_steps(payload: AgentChangeSetCreate) -> None:
+    details = {
+        "/api/child/egress/apply": (
+            "Managed egress apply is only available through the previewed "
+            "server egress workflow"
+        ),
+        "/api/child/node-cleanup": (
+            "Node cleanup is only available through the dedicated node management workflow"
+        ),
+        "/api/child/subscription-access": (
+            "Subscription access is only available through the dedicated user and plan workflows"
+        ),
+        "/api/child/outbound-tls-pin/probe": (
+            "TLS certificate probing is only available through the validated outbound workflow"
+        ),
+    }
+    for step in payload.steps:
+        for command in (step.forward, step.rollback):
+            if command is not None and (detail := details.get(command.path)):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=detail,
+                )
 
 
 @router.post("/{change_set_id}/dispatch", response_model=AgentChangeSetResponse)
@@ -114,7 +149,10 @@ async def dispatch_change_set(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ChangeSetConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return AgentChangeSetResponse(change_set=change_set, commands=commands)
+    return AgentChangeSetResponse(
+        change_set=public_change_set(change_set),
+        commands=[public_command_read(command) for command in commands],
+    )
 
 
 @router.post("/{change_set_id}/rollback", response_model=AgentChangeSetResponse)
@@ -138,8 +176,8 @@ async def rollback_change_set(
     except ChangeSetConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AgentChangeSetResponse(
-        change_set=change_set,
-        commands=commands,
+        change_set=public_change_set(change_set),
+        commands=[public_command_read(command) for command in commands],
         warnings=warnings,
     )
 
@@ -158,7 +196,7 @@ async def accept_change_set(
     except ChangeSetConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await connections.dispatch_ready_commands(store)
-    return AgentChangeSetResponse(change_set=change_set)
+    return AgentChangeSetResponse(change_set=public_change_set(change_set))
 
 
 async def _dispatch_commands(

@@ -949,7 +949,9 @@ describe("inventory API client", () => {
 
   it("lists queued commands without sending license headers", async () => {
     let headers: HeadersInit | undefined;
-    const fetcher: typeof fetch = async (_input, init) => {
+    let input = "";
+    const fetcher: typeof fetch = async (request, init) => {
+      input = String(request);
       headers = init?.headers;
       return new Response(
         JSON.stringify({
@@ -965,6 +967,10 @@ describe("inventory API client", () => {
 
     expect(response.commands).toEqual([]);
     expect(headers).toBeUndefined();
+    expect(input).toBe("/api/v1/servers/srv_1/commands");
+
+    await listServerCommands("srv_1", fetcher, ["cmd/a", "cmd-b"]);
+    expect(input).toBe("/api/v1/servers/srv_1/commands?id=cmd%2Fa&id=cmd-b");
   });
 
   it("queues commands without sending license headers", async () => {

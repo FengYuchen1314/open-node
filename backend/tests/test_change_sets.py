@@ -73,8 +73,10 @@ def test_change_set_plans_dispatches_and_rolls_back_commands(tmp_path: Path) -> 
     assert created["change_set"]["status"] == "planned"
     assert [step["sequence"] for step in created["change_set"]["steps"]] == [1, 2]
     assert created["change_set"]["steps"][0]["forward"]["method"] == "POST"
-    assert created["change_set"]["steps"][0]["rollback"]["body"] == {"config": "old-a"}
+    assert created["change_set"]["steps"][0]["rollback"]["body"] == {"redacted": True}
     change_set_id = created["change_set"]["id"]
+    internal = client.app.state.inventory.get_change_set(UUID(change_set_id))
+    assert internal.steps[0].rollback.body == {"config": "old-a"}
 
     dispatched = client.post(f"/api/v1/change-sets/{change_set_id}/dispatch").json()
     assert [command["status"] for command in dispatched["commands"]] == ["pending", "waiting"]
@@ -172,45 +174,56 @@ def test_routed_outbound_change_set_plans_agent_steps(tmp_path: Path) -> None:
     assert created["license_required"] is False
     assert created["commands"] == []
     assert created["change_set"]["status"] == "planned"
-    steps = created["change_set"]["steps"]
-    assert [step["sequence"] for step in steps] == [1, 2, 3, 4]
-    assert [step["forward"]["path"] for step in steps] == [
+    public_steps = created["change_set"]["steps"]
+    assert [step["sequence"] for step in public_steps] == [1, 2, 3, 4]
+    assert [step["forward"]["path"] for step in public_steps] == [
         "/api/child/inbounds",
         "/api/child/inbounds",
         "/api/child/outbounds",
         "/api/child/routing",
     ]
+    assert all(
+        step["forward"]["body"] == {"redacted": True}
+        for step in public_steps[:3]
+    )
+    assert all(
+        step["rollback"] is None or step["rollback"]["body"] == {"redacted": True}
+        for step in public_steps[:3]
+    )
+
+    internal = client.app.state.inventory.get_change_set(UUID(created["change_set"]["id"]))
+    steps = internal.steps
 
     admin_email = "alice__p42__hk-t4"
     outbound_tag = "routed:p42:hk-t4"
-    admin_client = steps[0]["forward"]["body"]["client"]
+    admin_client = steps[0].forward.body["client"]
     assert admin_client == {
         "id": "fixed-routed-admin-id",
         "email": admin_email,
         "flow": "xtls-rprx-vision",
         "level": 0,
     }
-    assert steps[0]["rollback"]["body"] == {
+    assert steps[0].rollback.body == {
         "action": "remove-client",
         "tag": "vless-443",
         "client": {"email": admin_email},
     }
-    assert steps[1]["forward"]["body"] == {
+    assert steps[1].forward.body == {
         "action": "add-sniffing-exclude",
         "tag": "vless-443",
         "domains": ["example.com", "www.microsoft.com"],
     }
-    assert steps[1]["rollback"] is None
-    assert steps[2]["forward"]["body"]["outbound"]["tag"] == outbound_tag
-    assert steps[2]["rollback"]["body"] == {"action": "remove", "tag": outbound_tag}
-    assert steps[3]["forward"]["body"]["rule"] == {
+    assert steps[1].rollback is None
+    assert steps[2].forward.body["outbound"]["tag"] == outbound_tag
+    assert steps[2].rollback.body == {"action": "remove", "tag": outbound_tag}
+    assert steps[3].forward.body["rule"] == {
         "type": "field",
         "marktag": outbound_tag,
         "user": [admin_email],
         "inboundTag": ["vless-443"],
         "outboundTag": outbound_tag,
     }
-    assert steps[3]["rollback"]["body"] == {
+    assert steps[3].rollback.body == {
         "action": "remove_user_from_rule",
         "marktag": outbound_tag,
         "user_email": admin_email,
@@ -244,12 +257,15 @@ def test_routed_outbound_change_set_generates_admin_credential(tmp_path: Path) -
     )
 
     assert response.status_code == 201
-    steps = response.json()["change_set"]["steps"]
-    admin_client = steps[0]["forward"]["body"]["client"]
+    public = response.json()["change_set"]
+    assert public["steps"][0]["forward"]["body"] == {"redacted": True}
+    internal = client.app.state.inventory.get_change_set(UUID(public["id"]))
+    admin_client = internal.steps[0].forward.body["client"]
     assert UUID(admin_client["password"])
     assert admin_client["email"].startswith("admin__s")
     assert admin_client["email"].endswith("__sg")
-    assert steps[2]["forward"]["body"]["rule"]["user"] == [admin_client["email"]]
+    assert internal.steps[2].forward.body["rule"]["user"] == [admin_client["email"]]
+    assert admin_client["password"] not in response.text
 
 
 def test_routed_outbound_change_set_rejects_unknown_server(tmp_path: Path) -> None:

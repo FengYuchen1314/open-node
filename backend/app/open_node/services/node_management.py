@@ -77,6 +77,76 @@ class NodeManagement:
     def require_editable(self, session, node):
         if node.removal_id or self.pending_for_server(session, node.server_id):
             raise ManagedNodeConflict("A node removal is pending on this server")
+        if session.get(ChangeSetServerLockModel, node.server_id):
+            raise ManagedNodeConflict("A coordinated server change is in progress")
+
+    def managed_egress_references(self, session, node) -> list[str]:
+        """Find durable Xray identities before a node can be moved or removed.
+
+        The managed identities are derived from stable server/node UUIDs, so
+        this still finds a client after an inbound tag was changed manually.
+        """
+
+        from open_node.services.server_egress import ServerEgress
+
+        references = []
+        servers = list(session.scalars(select(ServerModel).order_by(ServerModel.id)))
+        identities = [
+            (source, *ServerEgress._identity(source.id, node.id)) for source in servers
+        ]
+        for runtime_server in servers:
+            snapshot = self.store._current_xray_config_snapshot(session, runtime_server.id)
+            if snapshot is None:
+                continue
+            try:
+                config = json.loads(snapshot.config)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(config, dict):
+                continue
+            outbounds = config.get("outbounds", [])
+            if not isinstance(outbounds, list):
+                outbounds = []
+            routing = config.get("routing") or {}
+            rules = routing.get("rules", []) if isinstance(routing, dict) else []
+            if not isinstance(rules, list):
+                rules = []
+            client_locations: dict[str, str] = {}
+            inbounds = config.get("inbounds", [])
+            if not isinstance(inbounds, list):
+                inbounds = []
+            for inbound in inbounds:
+                if not isinstance(inbound, dict):
+                    continue
+                settings = inbound.get("settings") or {}
+                if not isinstance(settings, dict):
+                    continue
+                for container in ("clients", "users", "accounts"):
+                    clients = settings.get(container, [])
+                    if not isinstance(clients, list):
+                        continue
+                    for client in clients:
+                        if isinstance(client, dict) and isinstance(client.get("email"), str):
+                            client_locations[client["email"]] = (
+                                inbound.get("tag") or "unnamed inbound"
+                            )
+            for source, outbound_tag, marktag, email in identities:
+                if any(
+                    isinstance(item, dict) and item.get("tag") == outbound_tag
+                    for item in outbounds
+                ):
+                    references.append(f"{runtime_server.name}: {outbound_tag}")
+                if any(
+                    isinstance(rule, dict) and rule.get("marktag") == marktag
+                    for rule in rules
+                ):
+                    references.append(f"{runtime_server.name}: {marktag}")
+                if email in client_locations:
+                    references.append(
+                        f"{runtime_server.name}: {client_locations[email]} / {email} "
+                        f"(source {source.name})"
+                    )
+        return list(dict.fromkeys(references))
 
     def validate_node(self, session, node):
         with session.no_autoflush:
@@ -380,33 +450,58 @@ class NodeManagement:
         with self.store._session() as session:
             return self._view(session, self.node(session, identifier))
 
-    @staticmethod
-    def check_import_update(session, node, entry):
+    def check_import_update(self, session, node, entry):
+        def imported(field):
+            value = getattr(entry, field)
+            if hasattr(value, "value"):
+                value = value.value
+            if field == "protocol" and isinstance(value, str):
+                value = value.lower()
+            return value
+
+        guarded_fields = (
+            "protocol",
+            "protocol_profile",
+            "node_type",
+            "inbound_tag",
+            "routed_outbound_tag",
+            "routed_rule_marktag",
+            "enabled",
+            "camouflage_pool_id",
+            "camouflage_sni",
+            "domestic_entry_ip",
+            "domestic_entry_port",
+            "mieru_port_mapping_mode",
+            "ix_port",
+            "client_template",
+            "config",
+        )
         if session.scalar(
             select(SubscriptionCredentialModel.id)
             .where(SubscriptionCredentialModel.node_id == node.id)
             .limit(1)
         ) and any(
-            getattr(node, field) != getattr(entry, field)
-            for field in (
-                "protocol",
-                "protocol_profile",
-                "node_type",
-                "inbound_tag",
-                "routed_outbound_tag",
-                "routed_rule_marktag",
-                "enabled",
-                "camouflage_pool_id",
-                "camouflage_sni",
-                "domestic_entry_ip",
-                "domestic_entry_port",
-                "mieru_port_mapping_mode",
-                "ix_port",
-                "client_template",
-                "config",
-            )
+            getattr(node, field) != imported(field) for field in guarded_fields
         ):
             raise ManagedNodeConflict("Use node settings to edit a node with stored credentials")
+        runtime_identity_fields = (
+            "protocol",
+            "protocol_profile",
+            "node_type",
+            "inbound_tag",
+            "enabled",
+            "client_template",
+            "config",
+        )
+        if any(
+            getattr(node, field) != imported(field) for field in runtime_identity_fields
+        ):
+            references = self.managed_egress_references(session, node)
+            if references:
+                raise ManagedNodeConflict(
+                    "Disconnect this node from server egress before importing runtime identity "
+                    f"changes ({'; '.join(references)})"
+                )
 
     def _track(self, session, identifiers, now):
         warnings = []
@@ -443,6 +538,35 @@ class NodeManagement:
                     **values,
                 }
             )
+            identity_fields = {
+                "server_id",
+                "protocol",
+                "protocol_profile",
+                "node_type",
+                "inbound_tag",
+                "client_template",
+                "config",
+                "enabled",
+            }
+
+            def identity_changed(field):
+                value = getattr(validated, field)
+                if field.endswith("_id") and value:
+                    value = str(value)
+                elif hasattr(value, "value"):
+                    value = value.value
+                return getattr(node, field) != value
+
+            if any(
+                field in values and identity_changed(field)
+                for field in identity_fields
+            ):
+                references = self.managed_egress_references(session, node)
+                if references:
+                    raise ManagedNodeConflict(
+                        "Disconnect this node from server egress before changing its runtime "
+                        f"identity ({'; '.join(references)})"
+                    )
             if not validated.enabled:
                 self._track(session, {node.id}, now)
             for field in values:
@@ -529,6 +653,12 @@ class NodeManagement:
                 raise ManagedNodeConflict("Confirm the exact node name")
             if node.removal_id:
                 return self._job_read(self._job(session, node.removal_id))
+            references = self.managed_egress_references(session, node)
+            if references:
+                raise ManagedNodeConflict(
+                    "Disconnect this node from server egress before removal "
+                    f"({'; '.join(references)})"
+                )
             view = self._view(session, node)
             if view.revision != payload.expected_revision:
                 raise ManagedNodeConflict(

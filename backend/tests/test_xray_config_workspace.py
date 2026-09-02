@@ -198,7 +198,7 @@ def test_workspace_command_is_not_leased_after_agent_capability_downgrade(tmp_pa
     )
     assert stored["status"] == "skipped"
     assert stored["result_status"] == 501
-    assert "xray config workspace" in stored["result_error"]
+    assert stored["result_error"] == "Sensitive Agent command failed"
 
 
 def test_expired_workspace_lease_becomes_failed_after_agent_capability_downgrade(tmp_path):
@@ -243,7 +243,7 @@ def test_expired_workspace_lease_becomes_failed_after_agent_capability_downgrade
     assert stored["result_status"] == 501
     assert stored["leased_at"] is None
     assert stored["completed_at"] is not None
-    assert "outcome is unknown" in stored["result_error"]
+    assert stored["result_error"] == "Sensitive Agent command failed"
 
 
 @pytest.mark.asyncio
@@ -427,8 +427,9 @@ def test_automatic_rollback_persists_capability_failure_without_queued_commands(
     rollbacks = [step["rollback_command"] for step in current["steps"]]
     assert all(command["status"] == "skipped" for command in rollbacks)
     assert all(command["result_status"] == 501 for command in rollbacks)
-    assert len({command["result_error"] for command in rollbacks}) == 1
-    assert "xray_config_workspace" in rollbacks[0]["result_error"]
+    errors = {command["result_error"] for command in rollbacks}
+    assert "Sensitive Agent command failed" in errors
+    assert any("xray_config_workspace" in error for error in errors)
     commands = client.get(
         f"/api/v1/servers/{created['server']['id']}/commands"
     ).json()["commands"]

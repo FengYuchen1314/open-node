@@ -1,9 +1,10 @@
 import { EditOutlined, ReloadOutlined, SyncOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Descriptions, Flex, Input, Modal, Select, Space, Switch, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Collapse, Descriptions, Flex, Input, Modal, Select, Space, Switch, Table, Tag, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 
 import type { DDNSProvider, DDNSServer } from "../../domain/ddns";
 import { ddnsError, ddnsStatusMessage, loadDDNS, saveDDNS, syncDDNS } from "../../services/ddns";
+import DNSProvidersPanel from "../components/DNSProvidersPanel";
 
 interface Draft { enabled: boolean; provider_id: string | null; pull_address: string; pull_address_v6: string; }
 const empty: Draft = { enabled: false, provider_id: null, pull_address: "", pull_address_v6: "" };
@@ -24,6 +25,7 @@ export default function DDNSView() {
   const alive = useRef(true), timer = useRef<number | undefined>(undefined), sequence = useRef(0);
   const [servers, setServers] = useState<DDNSServer[]>([]), [providers, setProviders] = useState<DDNSProvider[]>([]);
   const [editing, setEditing] = useState<DDNSServer | null>(null), [draft, setDraft] = useState<Draft>(empty);
+  const [providersOpen, setProvidersOpen] = useState(false);
   const [busy, setBusy] = useState(""), [error, setError] = useState(""), [notice, setNotice] = useState("");
   async function load() {
     const run = ++sequence.current; setBusy(previous => previous || "load"); setError("");
@@ -71,7 +73,8 @@ export default function DDNSView() {
       <div><Typography.Title level={2} style={{ marginBottom: 4 }}>动态 DNS</Typography.Title><Typography.Text type="secondary">Agent 公网 IP 变化时，自动更新服务器域名的 A/AAAA 记录。</Typography.Text></div>
       <Button icon={<ReloadOutlined />} loading={busy === "load"} onClick={() => void load()}>刷新状态</Button>
     </Flex>
-    <Alert type="info" showIcon title="复用证书管理中的 DNS 服务商凭据" description="自动模式会先匹配已签发证书绑定的服务商，再只读探测已有服务商。保存的域名也会成为节点对外地址；关闭 DDNS 不会删除现有 DNS 记录。" />
+    <Alert type="info" showIcon title="DDNS 使用本页保存的 DNS 服务商凭据" description="自动模式会按域名只读探测可用服务商。保存的域名也会成为节点对外地址；关闭 DDNS 不会删除现有 DNS 记录。" />
+    <Collapse activeKey={providersOpen ? ["providers"] : []} onChange={keys => setProvidersOpen(keys.includes("providers"))} destroyOnHidden items={[{ key: "providers", label: "DNS 服务商凭据", children: providersOpen ? <DNSProvidersPanel onUpdated={() => void load()} /> : null }]} />
     {error && <Alert type="error" showIcon title={error} role="alert" />}{notice && <Alert type="success" showIcon title={notice} />}
     <Card><Table<DDNSServer> rowKey="server_id" dataSource={servers} loading={busy === "load"} scroll={{ x: 980 }} locale={{ emptyText: "暂无服务器" }} columns={[
       { title: "服务器", dataIndex: "server_name", width: 150, render: (value, item) => <Space orientation="vertical" size={0}><Space><Typography.Text strong>{value}</Typography.Text>{item.is_federated && <Tag color="purple">分享</Tag>}</Space><Typography.Text type="secondary">{item.is_federated ? item.server_status === "connected" ? "拥有方在线" : "拥有方未连接" : item.server_status === "connected" ? "Agent 在线" : "Agent 未连接"}</Typography.Text></Space> },
@@ -85,10 +88,10 @@ export default function DDNSView() {
       <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
         <Descriptions size="small" column={1} items={[{ key: "ip4", label: "当前 IPv4", children: editing?.ip_address || "未上报" }, { key: "ip6", label: "当前 IPv6", children: editing?.ip_address_v6 || "未上报" }]} />
         <Flex justify="space-between"><Typography.Text>启用动态 DNS</Typography.Text><Switch checked={draft.enabled} onChange={enabled => setDraft(value => ({ ...value, enabled }))} /></Flex>
-        <div><Typography.Text>DNS 服务商</Typography.Text><Select style={{ width: "100%", marginTop: 6 }} value={draft.provider_id ?? "auto"} onChange={value => setDraft(row => ({ ...row, provider_id: value === "auto" ? null : value }))} options={[{ value: "auto", label: "自动选择（证书优先，其次只读探测）" }, ...supported.map(item => ({ value: item.id, label: `${item.name} · ${providerLabels[item.provider] ?? item.provider}` }))]} /></div>
+        <div><Typography.Text>DNS 服务商</Typography.Text><Select style={{ width: "100%", marginTop: 6 }} value={draft.provider_id ?? "auto"} onChange={value => setDraft(row => ({ ...row, provider_id: value === "auto" ? null : value }))} options={[{ value: "auto", label: "自动选择（按域名只读探测）" }, ...supported.map(item => ({ value: item.id, label: `${item.name} · ${providerLabels[item.provider] ?? item.provider}` }))]} /></div>
         <div><Typography.Text>IPv4 域名（A）</Typography.Text><Input value={draft.pull_address} maxLength={255} placeholder="edge.example.com" onChange={event => setDraft(row => ({ ...row, pull_address: event.target.value }))} /></div>
         <div><Typography.Text>IPv6 域名（AAAA，可留空沿用 IPv4 域名）</Typography.Text><Input value={draft.pull_address_v6} maxLength={255} placeholder="edge6.example.com" onChange={event => setDraft(row => ({ ...row, pull_address_v6: event.target.value }))} /></div>
-        {draft.enabled && supported.length === 0 && <Alert type="warning" showIcon title="尚未配置受支持的 DNS 服务商" description="请先到证书管理添加 Cloudflare、阿里云、腾讯云 DNSPod、DNSPod Token、GoDaddy 或 NameSilo。" />}
+        {draft.enabled && supported.length === 0 && <Alert type="warning" showIcon title="尚未配置受支持的 DNS 服务商" description="请关闭此窗口，展开本页的“DNS 服务商凭据”，添加 Cloudflare、阿里云、腾讯云 DNSPod、DNSPod Token、GoDaddy 或 NameSilo。" />}
       </Space>
     </Modal>
   </Space>;

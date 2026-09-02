@@ -7,6 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from open_node.api.backup import BackupAPIRoute
 from open_node.api.dependencies import get_agent_connection_manager, get_inventory_store
+from open_node.api.redaction import (
+    public_command_read,
+    public_scan_result,
+    public_xray_config,
+)
 from open_node.domain.inventory import (
     AgentBatchApplyOperationRequest,
     AgentCertDeployOperationRequest,
@@ -28,6 +33,7 @@ from open_node.domain.inventory import (
     AgentNginxSetupSSLOperationRequest,
     AgentNginxWebsiteDeleteOperationRequest,
     AgentOutboundsManageOperationRequest,
+    AgentOutboundTLSPinProbeOperationRequest,
     AgentProbeMasterURLOperationRequest,
     AgentReturnRouteTestOperationRequest,
     AgentRoutingManageOperationRequest,
@@ -199,7 +205,7 @@ def latest_server_scan(
         scan = store.latest_scan_result(server_id)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return ServerScanResultResponse(server_id=server_id, scan=scan)
+    return ServerScanResultResponse(server_id=server_id, scan=public_scan_result(scan))
 
 
 @router.get("/{server_id}/xray/runtime", response_model=XrayRuntimeInventoryResponse)
@@ -594,7 +600,13 @@ def list_xray_config_snapshots(
         )
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return ServerXrayConfigSnapshotsResponse(server_id=server_id, snapshots=snapshots)
+    return ServerXrayConfigSnapshotsResponse(
+        server_id=server_id,
+        snapshots=[
+            snapshot.model_copy(update={"config": public_xray_config(snapshot.config)})
+            for snapshot in snapshots
+        ],
+    )
 
 
 @router.get(
@@ -607,12 +619,22 @@ def get_xray_config_snapshot_recovery_status(
     with_config: bool = False,
 ) -> XrayConfigSnapshotRecoveryStatusResponse:
     try:
-        return store.get_xray_config_snapshot_recovery_status(
+        recovery = store.get_xray_config_snapshot_recovery_status(
             server_id,
             include_config=with_config,
         )
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    updates = {}
+    if recovery.current is not None:
+        updates["current"] = recovery.current.model_copy(
+            update={"config": public_xray_config(recovery.current.config)}
+        )
+    if recovery.pending is not None:
+        updates["pending"] = recovery.pending.model_copy(
+            update={"config": public_xray_config(recovery.pending.config)}
+        )
+    return recovery.model_copy(update=updates)
 
 
 @router.post(
@@ -749,12 +771,18 @@ async def restore_xray_config_snapshot(
 def list_server_commands(
     server_id: UUID,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    command_ids: Annotated[list[UUID] | None, Query(alias="id")] = None,
 ) -> ServerCommandsResponse:
+    if command_ids is not None and len(command_ids) > 100:
+        raise HTTPException(status_code=422, detail="At most 100 command ids may be requested")
     try:
-        commands = store.list_commands(server_id)
+        commands = store.list_commands(server_id, command_ids)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return ServerCommandsResponse(server_id=server_id, commands=commands)
+    return ServerCommandsResponse(
+        server_id=server_id,
+        commands=[public_command_read(command) for command in commands],
+    )
 
 
 @router.get(
@@ -790,6 +818,7 @@ async def create_server_command(
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentCommandCreateResponse:
+    _reject_internal_only_command(payload)
     return await _queue_server_command(server_id, payload, store, connections)
 
 
@@ -966,6 +995,39 @@ async def queue_outbounds_manage_operation(
                     "tags": payload.tags,
                 }
             ),
+            timeout_ms=payload.command_timeout_ms,
+        ),
+        store,
+        connections,
+    )
+
+
+@router.post(
+    "/{server_id}/operations/outbounds/tls-pin/probe",
+    response_model=AgentCommandCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def queue_outbound_tls_pin_probe_operation(
+    server_id: UUID,
+    payload: AgentOutboundTLSPinProbeOperationRequest,
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
+) -> AgentCommandCreateResponse:
+    """Probe from the selected host; never expose certificates or proxy credentials."""
+
+    return await _queue_server_command(
+        server_id,
+        AgentCommandCreate(
+            method="POST",
+            path="/api/child/outbound-tls-pin/probe",
+            body={
+                "protocol": payload.protocol,
+                "address": payload.address,
+                "port": payload.port,
+                "server_name": payload.server_name,
+                "alpn": payload.alpn,
+                "timeout_ms": payload.timeout_ms,
+            },
             timeout_ms=payload.command_timeout_ms,
         ),
         store,
@@ -2256,7 +2318,8 @@ async def _queue_server_command_sequence(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except AgentCapabilityUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return [await connections.dispatch_command(store, command) for command in commands]
+    dispatched = [await connections.dispatch_command(store, command) for command in commands]
+    return [public_command_read(command) for command in dispatched]
 
 
 async def _queue_server_command(
@@ -2272,7 +2335,30 @@ async def _queue_server_command(
     except AgentCapabilityUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     command = await connections.dispatch_command(store, command)
-    return AgentCommandCreateResponse(command=command)
+    return AgentCommandCreateResponse(command=public_command_read(command))
+
+
+def _reject_internal_only_command(payload: AgentCommandCreate) -> None:
+    details = {
+        "/api/child/egress/apply": (
+            "Managed egress apply is only available through the previewed "
+            "server egress workflow"
+        ),
+        "/api/child/node-cleanup": (
+            "Node cleanup is only available through the dedicated node management workflow"
+        ),
+        "/api/child/subscription-access": (
+            "Subscription access is only available through the dedicated user and plan workflows"
+        ),
+        "/api/child/outbound-tls-pin/probe": (
+            "TLS certificate probing is only available through the validated outbound workflow"
+        ),
+    }
+    if detail := details.get(payload.path):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=detail,
+        )
 
 
 async def _queue_maintenance_command(

@@ -596,8 +596,11 @@ def test_access_disable_rejects_alias_change_for_same_password(tmp_path):
 
 async def test_xray_final_journal_failure_rolls_back_committed_runtime():
     access = SubscriptionAccess.__new__(SubscriptionAccess)
+    original = {"inbounds": []}
+    candidate = {"inbounds": [{"tag": "legacy"}]}
     access.runtime = SimpleNamespace(
         limiter=SimpleNamespace(provision=AsyncMock(return_value=None)),
+        read=Mock(side_effect=[candidate, original]),
         write=AsyncMock(
             side_effect=[
                 {"success": True, "restart_required": False},
@@ -606,8 +609,6 @@ async def test_xray_final_journal_failure_rolls_back_committed_runtime():
         ),
     )
     access.save = Mock(side_effect=[None, OSError("journal fsync failed"), None])
-    original = {"inbounds": []}
-    candidate = {"inbounds": [{"tag": "legacy"}]}
     plan = {
         "original": original,
         "config": candidate,

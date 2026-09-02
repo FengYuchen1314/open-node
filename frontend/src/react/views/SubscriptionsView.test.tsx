@@ -3,7 +3,11 @@ import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-l
 import zhCN from "antd/locale/zh_CN";
 import { ConfigProvider } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import SubscriptionsView from "./SubscriptionsView";
+import NodesView from "./NodesView";
+import PlansView from "./PlansView";
+import UsersView from "./UsersView";
 import * as subscriptions from "../../services/subscriptions";
 import { listServers } from "../../services/inventory";
 import { listSubscriptionTemplates } from "../../services/subscription-templates";
@@ -14,8 +18,9 @@ import { fetchAppMeta } from "../../services/api";
 import { createExternalPreview, listExternalSources } from "../../services/external-subscriptions";
 import { listCamouflagePools } from "../../services/camouflage-pools";
 import type { ManagedNode, ManagedNodeCreationMetadataResponse, ProductUser, ProductUserSubscriptionToken, SubscriptionCredential, SubscriptionPlan, SubscriptionTemplatePreset } from "../../domain/subscriptions";
+import type { SubscriptionTemplate } from "../../domain/subscription-templates";
 
-const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider locale={zhCN}>{children}</ConfigProvider> });
+const render = (ui: Parameters<typeof renderAnt>[0], path = "/") => renderAnt(ui, { wrapper: ({ children }) => <MemoryRouter initialEntries={[path]}><ConfigProvider locale={zhCN}>{children}</ConfigProvider></MemoryRouter> });
 
 vi.mock("../../services/subscriptions", async importOriginal => {
   const original = await importOriginal<typeof import("../../services/subscriptions")>();
@@ -30,9 +35,14 @@ vi.mock("../../services/private-routed-nodes", () => ({ listPrivateRoutes: vi.fn
 vi.mock("../../services/api", () => ({ fetchAppMeta: vi.fn() }));
 vi.mock("../../services/external-subscriptions", async importOriginal => ({ ...await importOriginal<typeof import("../../services/external-subscriptions")>(), listExternalSources: vi.fn(), createExternalPreview: vi.fn() }));
 vi.mock("../components/SubscriptionAccessPanel", () => ({ default: ({ username }: { username: string }) => <span>Access for {username}</span> }));
+vi.mock("./NodeTopologiesView", () => ({ default: () => <div>Topology workspace</div> }));
+vi.mock("./SpeedTestsView", () => ({ default: () => <div>Speed workspace</div> }));
 const user = (username: string): ProductUser => ({ username, display_name: username === "alice" ? "Alice" : "Bob", role: "user", is_active: true, current_plan_id: "p", is_reset: true, reset_day: 1, created_at: "", updated_at: "" });
 const plan: SubscriptionPlan = { id: "p", name: "Basic", description: "", traffic_limit_gb: 30, traffic_limit_bytes: 30 * 1024 ** 3, cycle_days: 30, is_reset: true, reset_day: 1, node_ids: ["a"], node_multipliers: {}, node_name_overrides: {}, node_name_override_enabled: false, auto_speed_rules: [], node_speed_limits: {}, node_device_limits: {}, speed_limit_mbps: 0, device_limit: 0, traffic_mode: "twoway", created_at: "", updated_at: "" };
 const node: ManagedNode = { id: "a", name: "Alpha", server_id: "edge", protocol: "vless", node_type: "physical", tags: [], enabled: true, config: {}, client_template: {}, created_at: "", updated_at: "" };
+const secondNode: ManagedNode = { ...node, id: "b", name: "Beta" };
+const clashTemplate: SubscriptionTemplate = { id: "tpl-clash", name: "main.yaml", format: "clash", owner_username: null, is_public: true, editable: true,
+  revision: "template-r1", content: null, size_bytes: 12, plan_names: [], default_scopes: [], created_at: "", updated_at: "" };
 const creationMetadata: ManagedNodeCreationMetadataResponse = {
   server_kinds: { direct: "公网直连", "leased-line": "专线", residential: "家宽落地" },
   profiles: [
@@ -186,5 +196,177 @@ describe("React subscriptions view", { timeout: 40_000 }, () => {
     fireEvent.change(screen.getByLabelText("服务器映射 JSON"), { target: { value: '{"legacy-edge":"edge"}' } }); fireEvent.click(screen.getByRole("button", { name: "导入" })); expect(subscriptions.importSubscriptionCatalog).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "导入订阅目录" })); await flush();
     expect(subscriptions.importSubscriptionCatalog).toHaveBeenCalledWith({ catalog, server_map: { "legacy-edge": "edge" }, import_credentials: false });
+  });
+});
+
+describe("focused management workspaces", { timeout: 40_000 }, () => {
+  it("keeps node management available when unrelated catalog APIs fail", async () => {
+    vi.mocked(subscriptions.listProductUsers).mockRejectedValue(new Error("users unavailable"));
+    vi.mocked(subscriptions.listSubscriptionPlans).mockRejectedValue(new Error("plans unavailable"));
+    vi.mocked(listSubscriptionTemplates).mockRejectedValue(new Error("templates unavailable"));
+    vi.mocked(listSubscriptionProfiles).mockRejectedValue(new Error("profiles unavailable"));
+    vi.mocked(listTemporarySubscriptions).mockRejectedValue(new Error("temporary links unavailable"));
+    vi.mocked(fetchAppMeta).mockRejectedValue(new Error("app metadata unavailable"));
+
+    render(<NodesView />); await flush();
+
+    expect(screen.getByRole("button", { name: "创建节点" })).toBeTruthy();
+    expect(screen.getByText("Alpha")).toBeTruthy();
+    expect(screen.queryByText(/unavailable/)).toBeNull();
+    expect(listServers).toHaveBeenCalledOnce();
+    expect(subscriptions.listManagedNodes).toHaveBeenCalledOnce();
+    expect(subscriptions.listSubscriptionTemplatePresets).toHaveBeenCalledOnce();
+    expect(subscriptions.getManagedNodeCreationMetadata).toHaveBeenCalledOnce();
+    expect(listCamouflagePools).toHaveBeenCalledOnce();
+    expect(listPrivateRoutes).toHaveBeenCalledOnce();
+    expect(subscriptions.listProductUsers).not.toHaveBeenCalled();
+    expect(subscriptions.listSubscriptionPlans).not.toHaveBeenCalled();
+    expect(listSubscriptionTemplates).not.toHaveBeenCalled();
+    expect(listSubscriptionProfiles).not.toHaveBeenCalled();
+    expect(listTemporarySubscriptions).not.toHaveBeenCalled();
+    expect(fetchAppMeta).not.toHaveBeenCalled();
+  });
+
+  it("loads only nodes, plans, and templates for plan management", async () => {
+    vi.mocked(listServers).mockRejectedValue(new Error("servers unavailable"));
+    vi.mocked(subscriptions.listProductUsers).mockRejectedValue(new Error("users unavailable"));
+    vi.mocked(subscriptions.listSubscriptionTemplatePresets).mockRejectedValue(new Error("presets unavailable"));
+    vi.mocked(subscriptions.getManagedNodeCreationMetadata).mockRejectedValue(new Error("metadata unavailable"));
+    vi.mocked(listCamouflagePools).mockRejectedValue(new Error("pools unavailable"));
+    vi.mocked(listSubscriptionProfiles).mockRejectedValue(new Error("profiles unavailable"));
+    vi.mocked(listTemporarySubscriptions).mockRejectedValue(new Error("temporary links unavailable"));
+    vi.mocked(listPrivateRoutes).mockRejectedValue(new Error("private routes unavailable"));
+    vi.mocked(fetchAppMeta).mockRejectedValue(new Error("app metadata unavailable"));
+
+    render(<PlansView />); await flush();
+
+    expect(screen.getByRole("button", { name: "创建套餐" })).toBeTruthy();
+    expect(screen.getByText("Basic")).toBeTruthy();
+    expect(subscriptions.listManagedNodes).toHaveBeenCalledOnce();
+    expect(subscriptions.listSubscriptionPlans).toHaveBeenCalledOnce();
+    expect(listSubscriptionTemplates).toHaveBeenCalledOnce();
+    expect(listServers).not.toHaveBeenCalled();
+    expect(subscriptions.listProductUsers).not.toHaveBeenCalled();
+    expect(subscriptions.listSubscriptionTemplatePresets).not.toHaveBeenCalled();
+    expect(subscriptions.getManagedNodeCreationMetadata).not.toHaveBeenCalled();
+    expect(listCamouflagePools).not.toHaveBeenCalled();
+    expect(listSubscriptionProfiles).not.toHaveBeenCalled();
+    expect(listTemporarySubscriptions).not.toHaveBeenCalled();
+    expect(listPrivateRoutes).not.toHaveBeenCalled();
+    expect(fetchAppMeta).not.toHaveBeenCalled();
+  });
+
+  it("loads the user subscription dependencies without node-creation or private-route APIs", async () => {
+    vi.mocked(subscriptions.listSubscriptionTemplatePresets).mockRejectedValue(new Error("presets unavailable"));
+    vi.mocked(subscriptions.getManagedNodeCreationMetadata).mockRejectedValue(new Error("metadata unavailable"));
+    vi.mocked(listCamouflagePools).mockRejectedValue(new Error("pools unavailable"));
+    vi.mocked(listPrivateRoutes).mockRejectedValue(new Error("private routes unavailable"));
+
+    render(<UsersView />); await flush();
+
+    expect(screen.getByRole("button", { name: "创建用户" })).toBeTruthy();
+    expect(screen.getAllByText("Alice").length).toBeGreaterThan(0);
+    expect(listServers).toHaveBeenCalledOnce();
+    expect(subscriptions.listProductUsers).toHaveBeenCalledOnce();
+    expect(subscriptions.listManagedNodes).toHaveBeenCalledOnce();
+    expect(subscriptions.listSubscriptionPlans).toHaveBeenCalledOnce();
+    expect(listSubscriptionTemplates).toHaveBeenCalledOnce();
+    expect(listSubscriptionProfiles).toHaveBeenCalledOnce();
+    expect(listTemporarySubscriptions).toHaveBeenCalledOnce();
+    expect(fetchAppMeta).toHaveBeenCalledOnce();
+    expect(subscriptions.listSubscriptionTemplatePresets).not.toHaveBeenCalled();
+    expect(subscriptions.getManagedNodeCreationMetadata).not.toHaveBeenCalled();
+    expect(listCamouflagePools).not.toHaveBeenCalled();
+    expect(listPrivateRoutes).not.toHaveBeenCalled();
+  });
+
+  it("keeps the node page limited to node creation/listing and exposes topology and speed deep-link tabs", async () => {
+    render(<NodesView />); await flush();
+    expect(screen.getByTestId("subscriptions-view").dataset.workspace).toBe("nodes");
+    expect(screen.getByRole("button", { name: "创建节点" })).toBeTruthy();
+    expect(screen.getByText("Alpha")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "节点编排" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "节点测速" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "创建用户" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建套餐" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "用户" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "套餐" })).toBeNull();
+  });
+
+  it.each([
+    ["/nodes?tab=topologies", "节点编排", "Topology workspace"],
+    ["/nodes?tab=speed", "节点测速", "Speed workspace"],
+  ])("honors the canonical node deep link %s", async (path, tab, content) => {
+    render(<NodesView />, path); await flush();
+    expect(screen.getByRole("tab", { name: tab }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText(content)).toBeTruthy();
+    expect(screen.queryByTestId("subscriptions-view")).toBeNull();
+    expect(subscriptions.listManagedNodes).not.toHaveBeenCalled();
+  });
+
+  it("creates a plan with two selected nodes and a template id, while rejecting an empty node selection", async () => {
+    vi.mocked(subscriptions.listManagedNodes).mockResolvedValue({ nodes: [node, secondNode], license_required: false });
+    vi.mocked(listSubscriptionTemplates).mockResolvedValue({ templates: [clashTemplate],
+      settings: { enabled: true, clash_template_id: null, surge_template_id: null, revision: "settings-r1" }, can_manage: true, license_required: false });
+    vi.mocked(subscriptions.createSubscriptionPlan).mockResolvedValue({ plan: { ...plan, id: "new-plan", name: "Dual node" }, license_required: false });
+    render(<PlansView />); await flush();
+    expect(screen.getByTestId("subscriptions-view").dataset.workspace).toBe("plans");
+    expect(screen.queryByRole("button", { name: "创建节点" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建用户" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Dual node" } });
+    expect((screen.getByRole("button", { name: "创建套餐" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(subscriptions.createSubscriptionPlan).not.toHaveBeenCalled();
+    expect(screen.getByText(/至少选择一个节点/)).toBeTruthy();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "节点" })); await flush();
+    fireEvent.click(screen.getByText(/Alpha/, { selector: ".ant-select-item-option-content" })); await flush();
+    fireEvent.click(screen.getByText(/Beta/, { selector: ".ant-select-item-option-content" })); await flush();
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "节点" }), { key: "Escape" });
+    await selectOption("Clash 模板", "main.yaml");
+    fireEvent.click(screen.getByRole("button", { name: "创建套餐" })); await flush();
+    expect(subscriptions.createSubscriptionPlan).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      name: "Dual node", node_ids: ["a", "b"], node_multipliers: { a: 1, b: 1 }, clash_template_id: "tpl-clash",
+    }));
+  });
+
+  it("creates a user and binds a plan without exposing node or plan creation forms", async () => {
+    const carol: ProductUser = { ...user("bob"), username: "carol", display_name: "Carol", current_plan_id: null };
+    vi.mocked(subscriptions.listProductUsers)
+      .mockResolvedValueOnce({ users: [user("alice"), user("bob")], license_required: false })
+      .mockResolvedValue({ users: [user("alice"), user("bob"), carol], license_required: false });
+    vi.mocked(subscriptions.createProductUser).mockResolvedValue({ user: carol, license_required: false });
+    vi.mocked(subscriptions.assignSubscriptionPlan).mockResolvedValue({ user: { ...carol, current_plan_id: "p" }, plan, commands: [], provisioning_batches: [], warnings: [], license_required: false });
+    render(<UsersView />); await flush();
+    expect(screen.getByTestId("subscriptions-view").dataset.workspace).toBe("users");
+    expect(screen.queryByRole("button", { name: "创建节点" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建套餐" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "节点" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "套餐" })).toBeNull();
+    expect(screen.queryByText("订阅目录导入与导出")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "carol" } });
+    fireEvent.change(screen.getByLabelText("电子邮箱"), { target: { value: "carol@example.test" } });
+    fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "Carol" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建用户" })); await flush();
+    expect(subscriptions.createProductUser).toHaveBeenCalledExactlyOnceWith({
+      username: "carol", email: "carol@example.test", display_name: "Carol", role: "user", is_active: true,
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "分配" })); await flush();
+    await selectOption("套餐分配用户", "Carol");
+    fireEvent.click(screen.getByRole("button", { name: "分配套餐" })); await flush();
+    expect(subscriptions.assignSubscriptionPlan).toHaveBeenCalledExactlyOnceWith("carol", {
+      plan_id: "p", start_date: null, expire_date: null, queue_agent_commands: true, no_restart: false, command_timeout_ms: 60_000,
+    });
+  });
+
+  it("isolates cross-resource catalog migration under system settings", async () => {
+    render(<SubscriptionsView workspace="migration" />); await flush();
+    expect(screen.getByTestId("subscriptions-migration")).toBeTruthy();
+    expect(screen.getByText("订阅目录导入与导出")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "创建用户" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建节点" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建套餐" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "分配套餐" })).toBeNull();
   });
 });

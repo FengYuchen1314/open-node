@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Barrier
@@ -6,6 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
+from open_node.domain.inventory import XrayConfigSnapshotSource
 from open_node.domain.server_management import ServerRemovalRequest
 from open_node.domain.subscriptions import ManagedNodeCreate
 from open_node.services.certificates import (
@@ -14,12 +16,15 @@ from open_node.services.certificates import (
     ManagedCertificate,
 )
 from open_node.services.inventory import (
+    AgentChangeSetModel,
     Base,
+    ChangeSetServerLockModel,
     CommandModel,
     ManagedNodeModel,
     ServerModel,
     SubscriptionTrafficLedgerModel,
 )
+from open_node.services.server_egress import ServerEgress
 from sqlalchemy import delete, select, text
 from test_inventory import make_client
 
@@ -94,6 +99,41 @@ def report(env, up=100, down=200, email="user@example.com"):
     assert response.status_code == 200, response.text
 
 
+def xray_snapshot(env, server_id, config):
+    with env[2]._coordinated_session() as session:
+        env[2]._upsert_current_xray_config_snapshot(
+            session,
+            session.get(ServerModel, server_id),
+            json.dumps(config),
+            XrayConfigSnapshotSource.AGENT_REPORT,
+            None,
+            datetime.now(UTC),
+        )
+        session.commit()
+
+
+def settings_for(env, server_id, **changes):
+    read = env[0].get(f"/api/v1/servers/{server_id}/settings").json()
+    fields = ("name", "ip_address", "ip_address_v6", "domain", "domain_v6", "ipv6_enabled")
+    return (
+        {key: read["server"][key] for key in fields}
+        | {"expected_revision": read["revision"]}
+        | changes
+    )
+
+
+def removal_for(env, server_id):
+    path = f"/api/v1/servers/{server_id}"
+    response = env[0].get(path + "/removal")
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    return preview, {
+        "expected_revision": preview["revision"],
+        "confirm_name": preview["server_name"],
+        "acknowledge_remote_runtime": True,
+    }
+
+
 def subscriber(env, nodes):
     env[0].post("/api/v1/users", json={"username": "user"}).raise_for_status()
     plan = (
@@ -150,6 +190,126 @@ def test_edit_opt_out_stale_revision_and_duplicate_names(env):
     assert env[0].put(base(env) + "/settings", json=old).status_code == 409
     env[0].post("/api/v1/servers", json={"name": "taken"}).raise_for_status()
     assert env[0].put(base(env) + "/settings", json=settings(env, name="taken")).status_code == 409
+
+
+def test_source_server_settings_and_removal_scan_remote_managed_client(env):
+    target = env[0].post(
+        "/api/v1/servers", json={"name": "target", "domain": "target.example"}
+    ).json()
+    target_node = node(
+        env,
+        name="target-node",
+        host="target.example",
+        server_id=target["server"]["id"],
+    )
+    _, _, email = ServerEgress._identity(env[1]["server"]["id"], target_node["id"])
+    xray_snapshot(
+        env,
+        target["server"]["id"],
+        {
+            "inbounds": [
+                {
+                    "tag": target_node["inbound_tag"],
+                    "protocol": "vless",
+                    "settings": {"clients": [{"email": email, "id": "secret"}]},
+                }
+            ],
+            "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+        },
+    )
+
+    update = env[0].put(
+        base(env) + "/settings",
+        json=settings(env, domain="new.example", sync_node_hosts=False),
+    )
+    assert update.status_code == 409
+    assert "Disconnect managed server egress" in update.json()["detail"]
+    preview, confirmation = removal(env)
+    assert "Disconnect managed server egress" in " ".join(preview["blockers"])
+    removed = env[0].post(base(env) + "/remove", json=confirmation)
+    assert removed.status_code == 409
+    assert env[0].get(base(env) + "/settings").json()["server"]["domain"] == "old.example"
+
+
+def test_target_server_settings_sync_and_removal_scan_source_managed_records(env):
+    target = env[0].post(
+        "/api/v1/servers", json={"name": "target", "domain": "target.example"}
+    ).json()
+    target_id = target["server"]["id"]
+    target_node = node(env, "target-node", "target.example", target_id)
+    outbound_tag, marktag, _ = ServerEgress._identity(
+        env[1]["server"]["id"], target_node["id"]
+    )
+    xray_snapshot(
+        env,
+        env[1]["server"]["id"],
+        {
+            "inbounds": [],
+            "outbounds": [
+                {"tag": outbound_tag, "protocol": "vless"},
+                {"tag": "direct", "protocol": "freedom"},
+            ],
+            "routing": {
+                "rules": [
+                    {
+                        "type": "field",
+                        "marktag": marktag,
+                        "outboundTag": outbound_tag,
+                    }
+                ]
+            },
+        },
+    )
+
+    update = env[0].put(
+        f"/api/v1/servers/{target_id}/settings",
+        json=settings_for(env, target_id, domain="new-target.example", sync_node_hosts=True),
+    )
+    assert update.status_code == 409
+    assert "Disconnect managed server egress" in update.json()["detail"]
+    persisted = next(
+        item
+        for item in env[0].get("/api/v1/nodes").json()["nodes"]
+        if item["id"] == target_node["id"]
+    )
+    assert persisted["config"]["server"] == "target.example"
+
+    preview, confirmation = removal_for(env, target_id)
+    assert "Disconnect managed server egress" in " ".join(preview["blockers"])
+    removed = env[0].post(f"/api/v1/servers/{target_id}/remove", json=confirmation)
+    assert removed.status_code == 409
+
+
+def test_change_set_lock_blocks_server_settings_update(env):
+    change_id = str(uuid4())
+    now = datetime.now(UTC)
+    with env[2]._coordinated_session() as session:
+        session.add(
+            AgentChangeSetModel(
+                id=change_id,
+                name="in-flight server change",
+                description="",
+                status="dispatched",
+                rollback_on_failure=True,
+                rollback_reason="",
+                resolution_reason="",
+                coordination_version=1,
+                archived_steps=[],
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            ChangeSetServerLockModel(
+                server_id=env[1]["server"]["id"], change_set_id=change_id
+            )
+        )
+        session.commit()
+
+    response = env[0].put(base(env) + "/settings", json=settings(env, name="renamed"))
+    assert response.status_code == 409
+    assert "coordinated server change" in response.json()["detail"]
+    assert env[0].get(base(env) + "/settings").json()["server"]["name"] == "alpha"
 
 
 @pytest.mark.parametrize(

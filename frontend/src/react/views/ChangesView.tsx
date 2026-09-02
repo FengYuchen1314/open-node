@@ -12,6 +12,8 @@ import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 export interface ChangesViewProps {
   onCommands?: (commands: AgentCommand[]) => void;
   onUpdated?: () => void;
+  /** Planning belongs to the server workspace; system settings only shows history/recovery. */
+  allowPlanning?: boolean;
 }
 type Action = "create" | "routed" | "dispatch" | "rollback" | "accept" | "";
 const protocols = ["vless", "vmess", "trojan", "shadowsocks", "anytls", "snell", "mieru", "hysteria", "socks", "http"];
@@ -64,6 +66,7 @@ function CommandSummary({ request, command }: { request?: AgentCommandCreateRequ
 }
 
 export default function ChangesView(props: ChangesViewProps) {
+  const allowPlanning = props.allowPlanning !== false;
   const [servers, setServers] = useState<ServerSummary[]>([]);
   const [changes, setChanges] = useState<AgentChangeSet[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -244,8 +247,8 @@ export default function ChangesView(props: ChangesViewProps) {
     {success && <Alert type="success" title={success} showIcon />}
     {warnings.filter((warning) => !selected?.warnings?.includes(warning)).map((warning) => <Alert key={warning} type="warning" title={zhMessage(warning)} showIcon />)}
     <Row gutter={[24, 24]}>
-      <Col xs={24} xl={10}><Card title="方案"><Typography.Paragraph type="secondary">正向与回滚命令序列</Typography.Paragraph><Tabs activeKey={planMode} onChange={setPlanMode} items={[{ key: "routed", label: "路由出站", children: routedForm }, { key: "raw", label: "原始步骤", children: rawForm }]} /></Card></Col>
-      <Col xs={24} xl={14}><Card title="执行记录" extra={<Tag color="success">免费版</Tag>}>
+      {allowPlanning && <Col xs={24} xl={10}><Card title="方案"><Typography.Paragraph type="secondary">正向与回滚命令序列</Typography.Paragraph><Tabs activeKey={planMode} onChange={setPlanMode} items={[{ key: "routed", label: "路由出站", children: routedForm }, { key: "raw", label: "原始步骤", children: rawForm }]} /></Card></Col>}
+      <Col xs={24} xl={allowPlanning ? 14 : 24}><Card title="执行记录" extra={<Tag color="success">免费版</Tag>}>
         <Typography.Paragraph type="secondary">{changes.length} 个变更集</Typography.Paragraph>
         <Table<AgentChangeSet> rowKey="id" dataSource={changes} loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} locale={{ emptyText: "暂无变更集。" }} scroll={{ x: 440 }} columns={[
           { title: "变更集", key: "name", render: (_, row) => <Button type="link" disabled={Boolean(saving) || Boolean(acceptId)} onClick={() => setSelectedId(row.id)}>{row.name}</Button> },

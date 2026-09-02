@@ -6,8 +6,14 @@ import { routeTargets } from "../../domain/diagnostics";
 import { installDom, renderUi } from "../test-utils";
 import RouteProbeFields from "./RouteProbeFields";
 
-beforeEach(installDom);
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+beforeEach(() => { vi.useFakeTimers(); installDom(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("Return-route target numeric drafts", () => {
   it.each(["79999", "0.4", "", "-"])("does not clamp or restore the default port for %j", draft => {

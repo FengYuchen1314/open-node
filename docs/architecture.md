@@ -488,11 +488,12 @@ Managed subscription access instead removes the final-user inbound from the
 active config and journals its position and private empty template for guarded
 restoration.
 
-The frontend exposes these wrappers in a dedicated `/config` workspace. It can
-queue Xray and nginx read/write operations, load completed read results back
-into editors, manage config-file read/write calls, dispatch high-level runtime
-and site payloads, and inspect each command's request, result body, error, and
-stream frames.
+The frontend exposes these wrappers inside **Server Management → Server
+Settings**. Its default **Outbound & Routing** tab covers Xray outbounds,
+routing, WARP and managed-node egress; the nested **Advanced Configuration**
+tab queues the lower-level Xray and nginx read/write operations. The legacy
+`/config` URL only redirects to `/servers?tab=egress` and is not a separate
+workspace or sidebar entry.
 
 ## Change Sets and Rollback
 

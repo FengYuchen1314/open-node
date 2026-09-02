@@ -25,7 +25,7 @@ function PlanContent({ id, mode, nodes, onOpenChange, onUpdated }: PlanManagemen
   const removed = !!result && mode !== "edit";
   const expectedName = mode === "unassign" ? id : detail?.plan.name ?? "";
   const canSubmit = !busy && !!detail && !!form && acknowledgment && !removed
-    && (mode === "edit" ? !!form.name.trim() && aliasesValid && rulesValid : confirmName === expectedName);
+    && (mode === "edit" ? !!form.name.trim() && form.node_ids.length > 0 && aliasesValid && rulesValid : confirmName === expectedName);
   function stop() { clearTimeout(timer.current); ++pollVersion.current; }
   async function load() {
     const run = ++version.current; stop(); setStates({}); setStateErrors({}); setDetail(null); setForm(null); setResult(null); setAcknowledgment(false); setConfirmName(""); setError("");
@@ -94,7 +94,7 @@ function PlanContent({ id, mode, nodes, onOpenChange, onUpdated }: PlanManagemen
           <Row gutter={16}>{(["clash", "surge"] as const).map(format => <Col xs={24} sm={12} key={format}><Form.Item label={format === "clash" ? "Clash 模板" : "Surge 模板"}>
             <Select aria-label={format === "clash" ? "Clash 模板" : "Surge 模板"} value={form[`${format}_template_id`] ?? undefined} allowClear options={templates.filter(item => item.format === format).map(item => ({ label: item.name, value: item.id }))} onChange={value => patch({ [`${format}_template_id`]: value ?? null })} />
           </Form.Item></Col>)}</Row>
-          <Form.Item label="套餐节点"><Select aria-label="套餐节点" mode="multiple" optionFilterProp="label" value={form.node_ids} options={nodes.filter(node => !node.removal_id).map(node => ({ label: node.name, value: node.id }))} onChange={selectNodes} /></Form.Item>
+          <Form.Item label="套餐节点" required help={!form.node_ids.length ? "套餐至少需要一个节点。" : `已选择 ${form.node_ids.length} 个节点。`}><Select aria-label="套餐节点" mode="multiple" optionFilterProp="label" value={form.node_ids} options={nodes.filter(node => !node.removal_id).map(node => ({ label: node.name, value: node.id }))} onChange={selectNodes} /></Form.Item>
           <PlanNodeAliases nodes={form.node_ids.map(nodeId => ({ id: nodeId, name: nodes.find(node => node.id === nodeId)?.name ?? nodeId }))}
             value={form.node_name_overrides} onChange={node_name_overrides => patch({ node_name_overrides })} enabled={form.node_name_override_enabled} onEnabledChange={node_name_override_enabled => patch({ node_name_override_enabled })} onValid={setAliasesValid} disabled={busy}
             renderNode={node => <Row gutter={16}>{([{ field: "node_multipliers", label: "计费倍率", suffix: "计费倍率", placeholder: "1", min: 0.000001 }, { field: "node_speed_limits", label: "速度（Mbps）", suffix: "速度", placeholder: "继承", min: 0 }, { field: "node_device_limits", label: "连接数", suffix: "连接数", placeholder: "继承", min: 0 }] as const).map(item => <Col xs={24} sm={8} key={item.field}><Form.Item label={item.label}><StrictInputNumber aria-label={`${node.name}：${item.suffix}`} allowEmpty value={form[item.field][node.id] ?? null} aria-valuemin={item.min} placeholder={item.placeholder} style={{ width: "100%" }} disabled={busy} onChange={number => override(item.field, node.id, number)} /></Form.Item></Col>)}</Row>} />

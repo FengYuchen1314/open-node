@@ -60,6 +60,15 @@ describe("React subscription management dialogs", { timeout: 20_000 }, () => {
     expect(savePlan).toHaveBeenCalledWith("p", expect.objectContaining({ node_multipliers: { a: 2 }, node_speed_limits: { a: 10 }, node_device_limits: { a: 2 }, node_name_overrides: { a: "Fast" } }), "plan-r1");
     expect(screen.getByText("待处理")).toBeTruthy(); expect(screen.queryByText("已应用")).toBeNull();
   });
+  it("refuses to save a plan after all nodes are removed", async () => {
+    render(<PlanManagementDialog open id="p" mode="edit" nodes={[node]} onOpenChange={vi.fn()} />); await flush();
+    const remove = document.querySelector(".ant-select-selection-item-remove") as HTMLElement;
+    expect(remove).toBeTruthy(); fireEvent.mouseDown(remove); fireEvent.click(remove); await flush();
+    fireEvent.click(screen.getByRole("checkbox", { name: /我接受/ }));
+    expect(screen.getByText("套餐至少需要一个节点。")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(savePlan).not.toHaveBeenCalled();
+  });
   it("requires username confirmation for unassignment, not the plan name", async () => {
     vi.mocked(removePlan).mockResolvedValue({ plan: null, revision: null, affected_users: [], commands: [], warnings: [] });
     render(<PlanManagementDialog open id="alice" mode="unassign" nodes={[node]} onOpenChange={vi.fn()} />); await flush();

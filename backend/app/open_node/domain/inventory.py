@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     Field,
     ValidationInfo,
@@ -195,6 +196,7 @@ class AgentOperationKind(StrEnum):
     INBOUNDS_MANAGE = "inbounds_manage"
     OUTBOUNDS_LIST = "outbounds_list"
     OUTBOUNDS_MANAGE = "outbounds_manage"
+    OUTBOUND_TLS_PIN_PROBE = "outbound_tls_pin_probe"
     ROUTING_READ = "routing_read"
     ROUTING_MANAGE = "routing_manage"
     BATCH_APPLY = "batch_apply"
@@ -1276,7 +1278,38 @@ class AgentOutboundsManageOperationRequest(BaseModel):
     def validate_outbound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
         if value is None:
             return None
-        return _ensure_json_serializable_config(value, "outbound")
+        outbound = _ensure_json_serializable_config(value, "outbound")
+        stream = outbound.get("streamSettings")
+        if not isinstance(stream, dict):
+            return outbound
+        tls_settings = stream.get("tlsSettings")
+        if isinstance(tls_settings, dict) and "allowInsecure" in tls_settings:
+            raise ValueError(
+                "TLS outbound must not use allowInsecure; use pinnedPeerCertSha256"
+            )
+        if str(stream.get("security") or "").strip().lower() != "tls":
+            return outbound
+        protocol = str(outbound.get("protocol") or "").strip().lower()
+        if protocol not in {
+            "vless",
+            "vmess",
+            "trojan",
+            "shadowsocks",
+            "socks",
+            "http",
+            "anytls",
+        }:
+            raise ValueError("TLS pinning is not supported for this outbound protocol")
+        if not isinstance(tls_settings, dict):
+            raise ValueError("TLS outbound requires tlsSettings")
+        network = str(stream.get("network") or "tcp").strip().lower()
+        pin = tls_settings.get("pinnedPeerCertSha256")
+        if network == "hysteria" or "hysteriaSettings" in stream:
+            if pin not in (None, ""):
+                tls_settings["pinnedPeerCertSha256"] = _normalize_tls_certificate_pins(pin)
+            return outbound
+        tls_settings["pinnedPeerCertSha256"] = _normalize_tls_certificate_pins(pin)
+        return outbound
 
     @field_validator("tag")
     @classmethod
@@ -1287,6 +1320,84 @@ class AgentOutboundsManageOperationRequest(BaseModel):
     @classmethod
     def validate_tags(cls, value: list[str]) -> list[str]:
         return [_strip_required_text(item, "tags") for item in value]
+
+
+def _normalize_tls_certificate_pins(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("TLS outbound requires pinnedPeerCertSha256")
+    raw_pins = [item.strip() for item in value.split(",") if item.strip()]
+    if not raw_pins or len(raw_pins) > 8:
+        raise ValueError("pinnedPeerCertSha256 must contain between 1 and 8 hashes")
+    normalized: list[str] = []
+    for raw in raw_pins:
+        pin = raw.replace(":", "").lower()
+        if len(pin) != 64 or any(character not in "0123456789abcdef" for character in pin):
+            raise ValueError("Each pinnedPeerCertSha256 value must be a 32-byte SHA-256 hash")
+        if pin not in normalized:
+            normalized.append(pin)
+    return ",".join(normalized)
+
+
+class AgentOutboundTLSPinProbeOperationRequest(BaseModel):
+    """Bounded request for a target Agent to fingerprint one public TLS peer."""
+
+    model_config = {"extra": "forbid"}
+
+    protocol: Literal[
+        "vless", "vmess", "trojan", "shadowsocks", "socks", "http", "anytls"
+    ]
+    address: str = Field(min_length=1, max_length=253)
+    port: int = Field(ge=1, le=65_535)
+    server_name: str | None = Field(default=None, max_length=253)
+    alpn: list[str] = Field(default_factory=list, max_length=8)
+    timeout_ms: int = Field(default=8_000, ge=1_000, le=12_000)
+    command_timeout_ms: int = Field(default=20_000, ge=3_000, le=30_000)
+
+    @field_validator("protocol", mode="before")
+    @classmethod
+    def normalize_protocol(cls, value: Any) -> Any:
+        return _strip_lower_value(value)
+
+    @field_validator("address", "server_name")
+    @classmethod
+    def validate_peer_name(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
+        normalized = _strip_required_text(value, info.field_name).rstrip(".").lower()
+        try:
+            ip_address(normalized)
+            return normalized
+        except ValueError:
+            pass
+        try:
+            ascii_name = normalized.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise ValueError(f"{info.field_name} must be a valid DNS name or IP address") from exc
+        labels = ascii_name.split(".")
+        if (
+            len(ascii_name) > 253
+            or len(labels) < 2
+            or any(
+                not label
+                or len(label) > 63
+                or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+                for label in labels
+            )
+        ):
+            raise ValueError(f"{info.field_name} must be a valid DNS name or IP address")
+        return ascii_name
+
+    @field_validator("alpn")
+    @classmethod
+    def validate_alpn(cls, value: list[str]) -> list[str]:
+        result: list[str] = []
+        for item in value:
+            normalized = _strip_required_text(item, "alpn")
+            if len(normalized) > 32 or not re.fullmatch(r"[A-Za-z0-9._/-]+", normalized):
+                raise ValueError("alpn contains unsupported characters")
+            if normalized not in result:
+                result.append(normalized)
+        return result
 
 
 class AgentRoutingManageOperationRequest(BaseModel):
@@ -1301,7 +1412,11 @@ class AgentRoutingManageOperationRequest(BaseModel):
     rule: dict[str, Any] | None = None
     index: int = Field(default=0, ge=0)
     observatory: Any | None = None
-    burst_observatory: Any | None = None
+    burst_observatory: Any | None = Field(
+        default=None,
+        validation_alias=AliasChoices("burstObservatory", "burst_observatory"),
+        serialization_alias="burstObservatory",
+    )
     marktag: str | None = Field(default=None, max_length=255)
     user_email: str | None = Field(default=None, max_length=255)
     no_restart: bool = False

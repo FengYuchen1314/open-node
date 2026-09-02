@@ -1,11 +1,12 @@
 import copy
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 from open_node_agent.client import Agent
 from open_node_agent.node_cleanup import ENDPOINT
+from open_node_agent.operations import assert_managed_egress_preserved
 from open_node_agent.runtime import RuntimeFailure, atomic_write
 from test_subscription_access import entry, setup
 from test_subscription_access import execute as access
@@ -57,6 +58,85 @@ async def test_preview_is_read_only_and_receipt_idempotent(config):
         assert (await execute(agent, changed))["status"] == 400
         state = agent.journal.db.execute("SELECT state FROM node_cleanup_jobs").fetchone()[0]
         assert state == "{}"
+    finally:
+        await agent.close()
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        {"inbound_tags": ["edge"]},
+        {"outbound_tags": ["managed-egress:source:target"]},
+        {"outbound_tags": ["warp-v4"]},
+    ],
+)
+async def test_cleanup_candidate_rejects_managed_egress_and_warp_targets(config, targets):
+    agent, original, _ = setup(config)
+    original["inbounds"][0]["settings"]["clients"].append(
+        {"email": "open_node_egress__source__target", "id": "managed-id"}
+    )
+    original["outbounds"].extend(
+        [
+            {"tag": "managed-egress:source:target", "protocol": "vless"},
+            {"tag": "warp-v4", "protocol": "wireguard", "settings": {"secretKey": "v4"}},
+            {"tag": "warp-v6", "protocol": "wireguard", "settings": {"secretKey": "v6"}},
+        ]
+    )
+    original["routing"]["rules"].append(
+        {
+            "marktag": "managed-egress-rule:source:target",
+            "outboundTag": "managed-egress:source:target",
+        }
+    )
+    config.xray_config.write_text(json.dumps(original))
+    try:
+        result = await execute(agent, {"action": "preview", **targets})
+        assert result["status"] == 400, result
+        assert "dedicated server egress workflow or WARP workflow" in result["error"]
+        assert agent.runtime.read() == original
+        agent.runtime.restart.assert_not_awaited()
+        assert agent.operations.node_cleanup.pending() is None
+    finally:
+        await agent.close()
+
+
+async def test_cleanup_preserves_protected_records_around_a_valid_write(config):
+    agent, original, _ = setup(config)
+    original["outbounds"].extend(
+        [
+            {"tag": "discard", "protocol": "blackhole"},
+            {"tag": "managed-egress:source:target", "protocol": "vless"},
+            {"tag": "warp-v4", "protocol": "wireguard", "settings": {"secretKey": "v4"}},
+            {"tag": "warp-v6", "protocol": "wireguard", "settings": {"secretKey": "v6"}},
+        ]
+    )
+    original["routing"]["rules"].append(
+        {
+            "marktag": "managed-egress-rule:source:target",
+            "outboundTag": "managed-egress:source:target",
+        }
+    )
+    config.xray_config.write_text(json.dumps(original))
+    state = {"config": copy.deepcopy(original)}
+
+    def read():
+        return copy.deepcopy(state["config"])
+
+    async def write(value, *, restart=False, expected=None, **_):
+        if expected is not None and state["config"] != expected:
+            raise RuntimeFailure("Xray configuration changed during the guarded update")
+        state["config"] = copy.deepcopy(value)
+        return {"success": True, "restart_required": not restart}
+
+    agent.runtime.read = Mock(side_effect=read)
+    agent.runtime.write = AsyncMock(side_effect=write)
+    try:
+        payload, _ = await request(agent, outbound_tags=["discard"])
+        result = await execute(agent, payload)
+        assert result["status"] == 200, result
+        final = agent.runtime.read()
+        assert_managed_egress_preserved(original, final)
+        assert all(item.get("tag") != "discard" for item in final["outbounds"])
     finally:
         await agent.close()
 

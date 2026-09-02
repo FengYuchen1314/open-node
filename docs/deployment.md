@@ -561,7 +561,7 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --no-build --
 ```
 
 Keep `OPEN_NODE_SESSION_COOKIE_SECURE=true`. Open your HTTPS hostname and
-sign in. Test a direct page reload at `/config`, and verify the Agent's
+sign in. Test a direct page reload at `/servers?tab=egress`, and verify the Agent's
 `wss://` endpoint if attaching nodes. HTTPS Origin validation requires the
 original scheme and Host. A 400 response indicates that the request Host is
 absent, malformed, or not in `OPEN_NODE_TRUSTED_AUTHORITIES`. A 403 after login

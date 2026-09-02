@@ -40,6 +40,7 @@ export type AgentOperationKind =
   | "inbounds_manage"
   | "outbounds_list"
   | "outbounds_manage"
+  | "outbound_tls_pin_probe"
   | "routing_read"
   | "routing_manage"
   | "batch_apply"
@@ -702,13 +703,24 @@ export interface AgentOutboundsManageOperationRequest {
   command_timeout_ms?: number;
 }
 
+export interface AgentOutboundTLSPinProbeOperationRequest {
+  protocol: "vless" | "vmess" | "trojan" | "shadowsocks" | "socks" | "http" | "anytls";
+  address: string;
+  port: number;
+  server_name?: string | null;
+  alpn?: string[];
+  timeout_ms?: number;
+  command_timeout_ms?: number;
+}
+
 export interface AgentRoutingManageOperationRequest {
   action?: "set" | "add_rule" | "remove_rule" | "add_user_to_rule" | "remove_user_from_rule";
   routing?: Record<string, unknown> | null;
   rule?: Record<string, unknown> | null;
   index?: number;
   observatory?: unknown;
-  burst_observatory?: unknown;
+  /** Official mmw-agent wire spelling; the control plane preserves this exact field. */
+  burstObservatory?: unknown;
   marktag?: string | null;
   user_email?: string | null;
   no_restart?: boolean;
@@ -893,6 +905,7 @@ export type AgentOperationPayload =
   | AgentLogFilesDeleteOperationRequest
   | AgentInboundsManageOperationRequest
   | AgentOutboundsManageOperationRequest
+  | AgentOutboundTLSPinProbeOperationRequest
   | AgentRoutingManageOperationRequest
   | AgentBatchApplyOperationRequest
   | AgentCertDeployOperationRequest

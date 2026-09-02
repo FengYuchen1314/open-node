@@ -107,7 +107,12 @@ def test_rule_validation(change):
 def test_rule_count_order_defaults_and_plan_create(env):
     client = env[0]
     second = RULE | {"type": "burst", "window_seconds": 10, "burst_count": 2}
-    body = {"name": "Automatic", "traffic_limit_gb": 1, "auto_speed_rules": [second, RULE]}
+    body = {
+        "name": "Automatic",
+        "traffic_limit_gb": 1,
+        "node_ids": [env[3]],
+        "auto_speed_rules": [second, RULE],
+    }
     result = client.post("/api/v1/plans", json=body).raise_for_status().json()["plan"]
     assert result["auto_speed_rules"] == [second, RULE]
     assert (

@@ -167,7 +167,7 @@ def test_normalization_duplicates_pruning_and_unicode_limits(env):
         .json()["plan"]
     )
     assert created["node_name_overrides"] == {} and created["node_name_override_enabled"]
-    save(env, node_ids=[], node_multipliers={}, node_name_overrides={node_id: name})
+    save(env, node_ids=[other["id"]], node_multipliers={}, node_name_overrides={node_id: name})
     assert client.get(base(env) + "/settings").json()["plan"]["node_name_overrides"] == {}
 
 

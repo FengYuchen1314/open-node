@@ -29,8 +29,7 @@ const maintenanceOperations: Operation[] = [
   { title: "安装 Xray", kind: "xray_install" }, { title: "移除 Xray", kind: "xray_remove" },
   { title: "Xray 发布版本", kind: "xray_release" }, { title: "回退 Xray", kind: "xray_rollback" },
   { title: "安装 Nginx", kind: "nginx_install" }, { title: "移除 Nginx", kind: "nginx_remove" },
-  { title: "安装 WARP", kind: "warp_install" }, { title: "WARP 状态", kind: "warp_status" },
-  { title: "移除 WARP", kind: "warp_remove" }, { title: "升级 Agent", kind: "agent_upgrade" },
+  { title: "升级 Agent", kind: "agent_upgrade" },
   { title: "回退 Agent", kind: "agent_rollback" }, { title: "卸载 Agent", kind: "agent_uninstall" },
 ];
 const configOperations: Operation[] = [{ title: "Xray 配置", kind: "xray_config_read" },
@@ -109,7 +108,7 @@ export default function DashboardView(_props: DashboardViewProps) {
   const [command, setCommand] = useState({ server_id: "", method: "GET", path: "/api/child/system/info", query: "", bodyText: "", timeout_ms: 30000, stream: false });
   const [domainProbe, setDomainProbe] = useState({ domainsText: "", timeout_ms: 2000, allow_icmp: false });
   const [route, setRoute] = useState({ targets: routeTargets(), ip_version: 4 as 4 | 6, timeout_seconds: 25 });
-  const [settings, setSettings] = useState({ xray_mode: "external" as XrayMode, listen_port: 23889, master_url: "", only_if_recovery: true, warp_license: "" });
+  const [settings, setSettings] = useState({ xray_mode: "external" as XrayMode, listen_port: 23889, master_url: "", only_if_recovery: true });
   const [logs, setLogs] = useState({ name: "", all: false, confirmed: false });
   const [streamPort, setStreamPort] = useState(443);
   const [management, setManagement] = useState({ open: false, serverId: "", mode: "edit" as "edit" | "remove" });
@@ -117,7 +116,6 @@ export default function DashboardView(_props: DashboardViewProps) {
   const [lifecycle, setLifecycle] = useState({ open: false, serverId: "", action: "agent_upgrade" as AgentLifecycleAction });
   const [xrayDialog, setXrayDialog] = useState({ action: "" as "" | "xray_install" | "xray_remove" | "xray_rollback", target: "", confirmed: false });
   const [xrayRelease, setXrayRelease] = useState({ version: "v26.3.27", sha256: "", state: "preserve" as "preserve" | "start" | "stop" });
-  const [warp, setWarp] = useState({ action: "" as "" | "warp_install" | "warp_remove", target: "", confirmed: false });
   const control = useRef({ active: false, epoch: 0, inventorySequence: 0, commandSequence: 0,
     saving: false, savingMetadata: false, savingCommand: false, savingOperation: false, target: "", metadataTarget: "", servers: [] as ServerSummary[] });
   const poll = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -198,7 +196,6 @@ export default function DashboardView(_props: DashboardViewProps) {
   }, [pending, commands]);
   useLayoutEffect(() => {
     control.current.target = command.server_id;
-    setSettings(previous => ({ ...previous, warp_license: "" }));
     setLogs(previous => ({ ...previous, confirmed: false }));
   }, [command.server_id]);
 
@@ -255,9 +252,6 @@ export default function DashboardView(_props: DashboardViewProps) {
     if (kind === "xray_install" || kind === "xray_remove" || kind === "xray_rollback") {
       setError(""); setXrayDialog({ action: kind, target: command.server_id, confirmed: false }); return;
     }
-    if (kind === "warp_install" || kind === "warp_remove") {
-      setError(""); setWarp({ action: kind, target: command.server_id, confirmed: false }); return;
-    }
     if (kind === "agent_upgrade" || kind === "agent_rollback" || kind === "agent_uninstall") {
       setLifecycle({ open: true, serverId: command.server_id, action: kind }); return;
     }
@@ -278,12 +272,6 @@ export default function DashboardView(_props: DashboardViewProps) {
       setXrayDialog(previous => ({ ...previous, action: "", confirmed: false }));
     }
   }
-  async function confirmWarp() {
-    if (!warp.action || !warp.confirmed) return;
-    if (await queue(warp.action, warp.action === "warp_install" ? { accept_terms: true } : { confirm: true }, warp.target)) {
-      setWarp(previous => ({ ...previous, action: "", confirmed: false }));
-    }
-  }
   async function purgeLogs() {
     if (!logs.confirmed) return;
     if (!logs.all && !logs.name.trim()) { setError("请输入日志文件名，或选择全部文件。"); return; }
@@ -301,13 +289,6 @@ export default function DashboardView(_props: DashboardViewProps) {
     }
     if (!settings.master_url.trim()) { setError("请输入控制台地址。"); return; }
     void queue(kind, { master_url: settings.master_url.trim(), ...(kind === "agent_update_master_url" ? { only_if_recovery: settings.only_if_recovery } : {}) });
-  }
-  async function updateWarpCredential() {
-    if (!settings.warp_license.trim()) { setError("请输入 WARP+ 凭据。"); return; }
-    const target = command.server_id;
-    if (await queue("warp_license", { license: settings.warp_license.trim() })) {
-      if (control.current.target === target) setSettings(previous => ({ ...previous, warp_license: "" }));
-    }
   }
   async function submitLatency() {
     const domains = domainProbe.domainsText.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
@@ -382,7 +363,6 @@ export default function DashboardView(_props: DashboardViewProps) {
       danger={item.kind.includes("remove") || item.kind === "agent_uninstall"} onClick={() => quick(item.kind)}>{item.title}</Button>)}</Space>;
   }
   const closeXray = () => { if (!control.current.savingOperation) setXrayDialog(previous => ({ ...previous, action: "", confirmed: false })); };
-  const closeWarp = () => { if (!control.current.savingOperation) setWarp(previous => ({ ...previous, action: "", confirmed: false })); };
 
   return <Space orientation="vertical" size="large" style={{ width: "100%" }}>
     <div className="branding-page-heading"><div className="min-width-zero">
@@ -489,8 +469,6 @@ export default function DashboardView(_props: DashboardViewProps) {
           <Form.Item label="仅限恢复模式"><Switch aria-label="仅限恢复模式" checked={settings.only_if_recovery} onChange={value => setSettings({ ...settings, only_if_recovery: value })} /></Form.Item>
           <Space wrap><Button aria-label="探测" disabled={blocked || !capabilities?.agent_probe_master_url} loading={savingOperation === "agent_probe_master_url"} onClick={() => switchSetting("agent_probe_master_url")}>探测</Button>
             <Button htmlType="submit" aria-label="更新" disabled={blocked || !capabilities?.agent_update_master_url} loading={savingOperation === "agent_update_master_url"}>更新</Button></Space>
-          <Form.Item label="WARP+ 凭据（选填）" style={{ marginTop: 16 }}><Input.Password aria-label="WARP+ 凭据（选填）" autoComplete="off" value={settings.warp_license} onChange={event => setSettings({ ...settings, warp_license: event.target.value })} /></Form.Item>
-          <Button aria-label="更新 WARP+" disabled={blocked} loading={savingOperation === "warp_license"} onClick={() => void updateWarpCredential()}>更新 WARP+</Button>
         </Form>
         <Divider />
         <Form layout="vertical" onFinish={() => void submitLatency()}><Form.Item label="延迟探测目标"><Input.TextArea aria-label="延迟探测目标" value={domainProbe.domainsText} rows={2} onChange={event => setDomainProbe({ ...domainProbe, domainsText: event.target.value })} /></Form.Item>
@@ -523,15 +501,6 @@ export default function DashboardView(_props: DashboardViewProps) {
     <AgentBootstrapDialog {...bootstrap} onOpenChange={open => setBootstrap(previous => ({ ...previous, open }))} onUpdated={() => void refreshServers()} />
     <AgentLifecycleDialog {...lifecycle} serverName={servers.find(server => server.id === lifecycle.serverId)?.name ?? ""}
       onOpenChange={open => setLifecycle(previous => ({ ...previous, open }))} onUpdated={() => void refreshLifecycleCommands()} />
-    <Modal open={Boolean(warp.action)} title={warp.action === "warp_install" ? "安装 WARP 免费版" : "移除 WARP"} destroyOnHidden
-      mask={{ closable: !savingOperation }} keyboard={!savingOperation} closable={!savingOperation} onCancel={closeWarp}
-      footer={<Space><Button aria-label="取消" disabled={Boolean(savingOperation)} onClick={closeWarp}>取消</Button><Button type="primary" aria-label={warp.action === "warp_install" ? "安装" : "移除"} danger={warp.action === "warp_remove"}
-        disabled={!warp.confirmed || Boolean(savingOperation)} loading={Boolean(savingOperation)} onClick={() => void confirmWarp()}>{warp.action === "warp_install" ? "安装" : "移除"}</Button></Space>}>
-      <Space orientation="vertical" style={{ width: "100%" }}><Typography.Text>{servers.find(server => server.id === warp.target)?.name}</Typography.Text>
-        {error && <Alert type="error" title={zhMessage(error)} showIcon />}<Checkbox checked={warp.confirmed} disabled={Boolean(savingOperation)} onChange={event => setWarp({ ...warp, confirmed: event.target.checked })}>
-          {warp.action === "warp_install" ? <>我接受 <a href="https://www.cloudflare.com/application/terms/" target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()}>Cloudflare 应用条款</a></>
-            : "确认移除 WARP 设备和出站"}</Checkbox></Space>
-    </Modal>
     <Modal open={xrayDialog.action === "xray_install"} title="安装 / 升级 Xray" width={560} destroyOnHidden
       mask={{ closable: !savingOperation }} keyboard={!savingOperation} closable={!savingOperation} onCancel={closeXray}
       footer={<Space><Button aria-label="取消" disabled={Boolean(savingOperation)} onClick={closeXray}>取消</Button><Button type="primary" aria-label="安装" htmlType="submit" form="xray-release-form"

@@ -49,6 +49,7 @@ const operationPaths: Record<AgentOperationKind, string> = {
   inbounds_manage: "inbounds/manage",
   outbounds_list: "outbounds/list",
   outbounds_manage: "outbounds/manage",
+  outbound_tls_pin_probe: "outbounds/tls-pin/probe",
   routing_read: "routing/read",
   routing_manage: "routing/manage",
   batch_apply: "batch-apply",
@@ -359,8 +360,10 @@ export async function applyXrayConfigRecovery(
 export async function listServerCommands(
   serverId: string,
   fetcher = authenticatedFetch,
+  commandIds: readonly string[] = [],
 ): Promise<ServerCommandsResponse> {
-  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/commands`);
+  const query = commandIds.length ? `?${commandIds.map((id) => `id=${encodeURIComponent(id)}`).join("&")}` : "";
+  const response = await fetcher(`${apiBaseUrl}/api/v1/servers/${serverId}/commands${query}`);
   if (!response.ok) {
     throw await apiError(response, "获取服务器命令列表失败");
   }

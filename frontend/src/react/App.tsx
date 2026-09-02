@@ -1,9 +1,9 @@
 import { App as AntApp, Alert, Button, ConfigProvider, Drawer, Grid, Layout, Menu, Result, Space, Spin, Tag, Typography, theme as antTheme } from "antd";
-import { ApartmentOutlined, BellOutlined, BranchesOutlined, CloudDownloadOutlined, CloudSyncOutlined, ControlOutlined, DashboardOutlined, FileProtectOutlined, FileTextOutlined, FilterOutlined, FundOutlined, HistoryOutlined, LineChartOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
+import { ApartmentOutlined, BranchesOutlined, ControlOutlined, DashboardOutlined, FileTextOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined } from "@ant-design/icons";
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import zhCN from "antd/locale/zh_CN";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { routes } from "../routes";
+import { legacyRouteRedirects, routes } from "../routes";
 import { loadSession, signOut } from "../services/auth";
 import { useAdministratorSession } from "./hooks/useSession";
 import { BrandingProvider, useBranding } from "./hooks/useBranding";
@@ -13,23 +13,12 @@ import { AppearanceProvider, useAppearance } from "./hooks/useAppearance";
 import { SiteLogo, ThemeSelector } from "./components/AppearanceChrome";
 
 const navigation = [
-  { key: "/", label: "概览", icon: <DashboardOutlined aria-hidden /> },
-  { key: "/subscriptions", label: "订阅管理", icon: <ApartmentOutlined aria-hidden /> },
-  { key: "/templates", label: "订阅模板", icon: <FileTextOutlined aria-hidden /> },
-  { key: "/subscription-customizations", label: "订阅自定义", icon: <FilterOutlined aria-hidden /> },
-  { key: "/changes", label: "变更集", icon: <HistoryOutlined aria-hidden /> },
-  { key: "/config", label: "配置管理", icon: <SettingOutlined aria-hidden /> },
-  { key: "/server-sharing", label: "服务器共享", icon: <ShareAltOutlined aria-hidden /> },
-  { key: "/node-topologies", label: "节点编排", icon: <BranchesOutlined aria-hidden /> },
-  { key: "/ddns", label: "动态 DNS", icon: <CloudSyncOutlined aria-hidden /> },
-  { key: "/speedtests", label: "节点测速", icon: <FundOutlined aria-hidden /> },
-  { key: "/certificates", label: "证书管理", icon: <FileProtectOutlined aria-hidden /> },
-  { key: "/probe", label: "探针", icon: <LineChartOutlined aria-hidden /> },
-  { key: "/access", label: "访问管理", icon: <SafetyOutlined aria-hidden /> },
-  { key: "/notifications", label: "通知设置", icon: <BellOutlined aria-hidden /> },
+  { key: "/servers", label: "服务器管理", icon: <DashboardOutlined aria-hidden /> },
+  { key: "/nodes", label: "节点管理", icon: <BranchesOutlined aria-hidden /> },
+  { key: "/templates", label: "模板管理", icon: <FileTextOutlined aria-hidden /> },
+  { key: "/plans", label: "套餐管理", icon: <ApartmentOutlined aria-hidden /> },
+  { key: "/users", label: "用户管理", icon: <SafetyOutlined aria-hidden /> },
   { key: "/system-settings", label: "系统设置", icon: <ControlOutlined aria-hidden /> },
-  { key: "/backups", label: "备份与恢复", icon: <CloudDownloadOutlined aria-hidden /> },
-  { key: "/renewals", label: "续费审核", icon: <HistoryOutlined aria-hidden /> },
 ];
 class WorkspaceBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -43,7 +32,8 @@ function WorkspaceRoutes() {
   const location = useLocation();
   return <WorkspaceBoundary key={location.pathname}><Suspense fallback={<div className="loading-page" role="status" aria-label="正在加载工作区"><Spin size="large" /></div>}><Routes>
     {routes.map(route => <Route key={route.path} path={route.path} element={<route.component />} />)}
-    <Route path="*" element={<Navigate to="/" replace />} />
+    {legacyRouteRedirects.map(route => <Route key={route.path} path={route.path} element={<Navigate to={route.to} replace />} />)}
+    <Route path="*" element={<Navigate to="/servers" replace />} />
   </Routes></Suspense></WorkspaceBoundary>;
 }
 

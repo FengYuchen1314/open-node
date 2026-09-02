@@ -13,6 +13,14 @@ from open_node_agent.subscription_access import STATE_KEY, revision
 ENDPOINT = "/api/child/node-cleanup"
 
 
+def assert_protected_xray_records_preserved(before, after):
+    # Imported lazily because operations owns the shared protected-record
+    # contract and imports NodeCleanup while constructing the dispatcher.
+    from open_node_agent.operations import assert_managed_egress_preserved
+
+    assert_managed_egress_preserved(before, after)
+
+
 class CleanupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     action: Literal["preview", "apply", "status"]
@@ -134,6 +142,7 @@ def candidate(config, suspended, limits, request):
         "removed_limiter_policies": len(limits["inbounds"]) - len(policies["inbounds"]),
         "default_outbound_changed": bool(outbounds and outbounds[0] in selected_outbounds),
     }
+    assert_protected_xray_records_preserved(config, value)
     return {"config": value, "suspended": saved, "limits": policies}, impact
 
 
@@ -197,6 +206,9 @@ class NodeCleanup:
         await self.runtime.binding()
         current = self.current()
         original, desired = state["original"], state["desired"]
+        assert_protected_xray_records_preserved(
+            original["config"], desired["config"]
+        )
         if any(current[key] not in (original[key], desired[key]) for key in current):
             raise RuntimeFailure(
                 "Interrupted node cleanup conflicts with host edits; review is required"
@@ -204,7 +216,9 @@ class NodeCleanup:
         if current["config"] != desired["config"] and current["limits"] != original["limits"]:
             atomic_write(self.runtime.limiter.path, json.dumps(original["limits"]).encode())
         await self.runtime.write(desired["config"], restart=True, expected=current["config"])
-        if self.runtime.read() != desired["config"]:
+        written = self.runtime.read()
+        assert_protected_xray_records_preserved(original["config"], written)
+        if written != desired["config"]:
             raise RuntimeFailure("Host configuration changed during cleanup; review is required")
         limits = self.runtime.limiter.document()
         if limits not in (original["limits"], desired["limits"]):
@@ -216,6 +230,9 @@ class NodeCleanup:
             if await self.runtime.running():
                 await self.runtime.write(
                     desired["config"], restart=True, expected=desired["config"]
+                )
+                assert_protected_xray_records_preserved(
+                    original["config"], self.runtime.read()
                 )
         if (
             self.runtime.read() != desired["config"]

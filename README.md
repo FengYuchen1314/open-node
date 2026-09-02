@@ -4,7 +4,7 @@
 [![许可证：MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Open Node 是 MMWX 活跃技术线的开源重构项目，用于管理服务器、Agent、Xray 运行时、
-订阅用户、套餐、流量、证书和公开探针。项目不需要激活码，不连接商业许可证服务器，
+节点、订阅用户、套餐、流量和公开探针。项目不需要激活码，不连接商业许可证服务器，
 也没有付费功能开关。管理端、用户中心和 Probe 页面以简体中文为主。
 
 ## 一键安装控制面
@@ -312,6 +312,10 @@ Agent Token 也不会因本机脚本自动删除。
 
 ## 功能概览
 
+管理端侧边栏只保留六个工作区：服务器管理、节点管理、模板管理、套餐管理、
+用户管理和系统设置。节点创建/编排、套餐绑定节点/模板、用户绑定套餐各自在对应
+工作区完成；管理端不再提供独立证书管理页面。
+
 ### 服务器、Agent 与运行时
 
 - 管理服务器资料、在线状态、系统指标、流量、Xray/Nginx 扫描结果和命令历史。
@@ -324,6 +328,12 @@ Agent Token 也不会因本机脚本自动删除。
   HTTP 回退。
 - Agent 命令带持久化日志、租约恢复、依赖关系和结果重放，可处理配置、用户、诊断、日志、
   Nginx、WARP 和运行时生命周期。
+- “服务器管理 → 服务器设置 → 出站与路由”直接管理真实 Xray `outbounds` 和 `routing`：可添加、
+  更新、删除、排序默认出站，编辑完整路由规则和 `observatory` / `burstObservatory`。
+- 同一页可安装 WARP 并将 `warp-v4` 或 `warp-v6` 设为默认出站；也可选择另一台
+  受管服务器的认证节点（包括家宽 SOCKS5）作为上游。可保持、替换或显式删除该出口的
+  定向路由，按域名、IP、入站 Tag、用户、协议、端口和网络匹配；上游凭据只由控制面
+  生成，通过跨服务器变更集原子下发并可回滚，浏览器不会读取或拼接节点凭据。
 - 支持自管 Xray、外部 systemd Xray、显式多文件接管，以及校验和固定的 Xray
   安装、升级、回滚和移除。
 - 可选兼容运行时覆盖 AnyTLS、Snell 和 Mieru，包括 Mieru UDP 目标转发。
@@ -399,18 +409,17 @@ Agent Token 也不会因本机脚本自动删除。
 详见 [公开 Probe 与架构](docs/architecture.md)、[节点测速](docs/node-speedtests.md)、
 [服务器流量](docs/server-traffic.md)和[变更集](docs/change-sets.md)。
 
-### 证书、DDNS 与服务器共享
+### DNS、DDNS 与服务器共享
 
-- 集中管理 ACME 账户、EAB、DNS-01、HTTP-01、证书导入导出、自签名证书、版本历史、
-  自动续期和 Agent 部署。
 - DDNS 支持 Cloudflare、阿里云、腾讯云 DNSPod、DNSPod Token、GoDaddy 和 NameSilo，
-  可跟随服务器 IPv4/IPv6 变化更新 A/AAAA 记录。
+  可跟随服务器 IPv4/IPv6 变化更新 A/AAAA 记录。DNS 凭据在动态 DNS 页面内加密管理，
+  不暴露独立证书管理入口。
 - 服务器共享/联邦使用一次性令牌、权限范围、加密传输和可撤销入站所有权；接入的共享
   服务器可以进入普通清单、流量、DDNS、Probe、节点和订阅流程。
 - Agent 可管理 Nginx HTTP/TLS 站点、证书轮换和 Nginx/Xray 隧道，并保留失败恢复状态。
 
-详见 [证书管理](docs/certificates.md)、[DDNS](docs/ddns.md)、
-[服务器共享](docs/server-sharing.md)和[Nginx 管理](docs/nginx-management.md)。
+详见 [DDNS](docs/ddns.md)、[服务器共享](docs/server-sharing.md)和
+[Nginx 管理](docs/nginx-management.md)。
 
 ### 安全、备份与系统设置
 
@@ -455,7 +464,7 @@ Agent Token 也不会因本机脚本自动删除。
 | 项目 | 状态 |
 | --- | --- |
 | 控制面 | `main` 提供 Preview 源码和一键安装器，常规回归由 GitHub Actions 执行 |
-| Agent | [0.3.0a2 Preview](https://github.com/FengYuchen1314/open-node/releases/tag/agent-v0.3.0a2)，不是稳定版，也不是 latest 发行版 |
+| Agent | [0.3.0a4 Preview](https://github.com/FengYuchen1314/open-node/releases/tag/agent-v0.3.0a4)，不是稳定版，也不是 latest 发行版 |
 | 部署范围 | 全新 Debian/Ubuntu 单机部署；重点验证 Debian 12 `amd64` |
 | 数据库 | 默认 SQLite；首次安装可选择固定的 PostgreSQL 15。自动化集成已通过，PostgreSQL 干净主机一键安装及浏览器恢复的最终实机门仍待完成 |
 | MMWX 对齐 | 当前范围见[源码对齐表](docs/mmwx-source-parity.md)，不使用主观完成百分比 |

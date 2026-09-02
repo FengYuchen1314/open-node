@@ -82,6 +82,6 @@ describe("ServerSharingView", () => {
       { ...imported, revision: 1 },
       { method: "GET", path: "/api/child/inbounds", body: null, timeout_ms: 30000 },
     );
-    expect(screen.getByText(/可在配置页运行时清单中创建节点/)).toBeTruthy();
+    expect(screen.getByText(/可在“节点管理”中创建或导入节点/)).toBeTruthy();
   });
 });

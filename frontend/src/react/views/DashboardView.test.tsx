@@ -164,16 +164,12 @@ describe("React Dashboard workflows", () => {
     fireEvent.click(getButton("Xray 文件")); await flush();
     expect(queueAgentOperation).toHaveBeenLastCalledWith("edge", "xray_config_files_list", undefined);
   }, 30000);
-  it("requires WARP terms and clears WARP+ credentials after success and target changes", async () => {
-    await mount(); fireEvent.click(getButton("安装 WARP"));
-    const dialog = getDialog("安装 WARP 免费版");
-    expect((dialog.getByRole("button", { name: "安装" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(dialog.getByRole("checkbox", { name: /我接受/ })); fireEvent.click(dialog.getByRole("button", { name: "安装" })); await flush();
-    expect(queueAgentOperation).toHaveBeenCalledWith("edge", "warp_install", { accept_terms: true });
-    const input = screen.getByLabelText("WARP+ 凭据（选填）") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "private-warp-credential" } }); fireEvent.click(getButton("更新 WARP+")); await flush();
-    expect(queueAgentOperation).toHaveBeenLastCalledWith("edge", "warp_license", { license: "private-warp-credential" }); expect(input.value).toBe("");
-    fireEvent.change(input, { target: { value: "another-private-credential" } }); await select("目标服务器", "Other"); expect(input.value).toBe("");
+  it("keeps WARP controls out of access and maintenance", async () => {
+    await mount();
+    for (const name of ["安装 WARP", "WARP 状态", "移除 WARP", "更新 WARP+"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(screen.queryByLabelText("WARP+ 凭据（选填）")).toBeNull();
   }, 30000);
   it("retains Xray release checksum/runtime-state controls and explicit removal confirmation", async () => {
     await mount(); fireEvent.click(getButton("安装 Xray"));
@@ -241,7 +237,7 @@ describe("React Dashboard workflows", () => {
     for (const [label, kind] of [["系统信息", "system_info"], ["流量", "traffic"], ["速率", "speed"],
       ["服务", "services_status"], ["网卡", "system_nics"], ["扫描", "scan"], ["日志文件", "log_files_list"],
       ["Xray 发布版本", "xray_release"], ["安装 Nginx", "nginx_install"], ["移除 Nginx", "nginx_remove"],
-      ["WARP 状态", "warp_status"], ["Nginx 配置", "nginx_config_read"], ["Nginx 文件", "nginx_config_files_list"]]) {
+      ["Nginx 配置", "nginx_config_read"], ["Nginx 文件", "nginx_config_files_list"]]) {
       fireEvent.click(getButton(label)); await flush();
       expect(queueAgentOperation).toHaveBeenLastCalledWith("edge", kind, undefined);
     }

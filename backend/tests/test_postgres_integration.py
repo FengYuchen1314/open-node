@@ -21,6 +21,7 @@ def test_fresh_application_custom_dump_and_staging_restore(tmp_path: Path):
         postgres_url,
         restore_postgres_to_staging,
     )
+    from test_subscriptions import create_plan_node_fixture
 
     state = tmp_path / "state"
     scratch = tmp_path / "scratch"
@@ -58,9 +59,15 @@ def test_fresh_application_custom_dump_and_staging_restore(tmp_path: Path):
             assert created.status_code == 201, created.text
             user = client.post("/api/v1/users", json={"username": "postgres-user"})
             assert user.status_code == 201, user.text
+            node_id = create_plan_node_fixture(client, namespace="postgres")
             plan = client.post(
                 "/api/v1/plans",
-                json={"name": "PostgreSQL 套餐", "cycle_days": 30, "traffic_limit_gb": 10},
+                json={
+                    "name": "PostgreSQL 套餐",
+                    "cycle_days": 30,
+                    "traffic_limit_gb": 10,
+                    "node_ids": [node_id],
+                },
             )
             assert plan.status_code == 201, plan.text
             assert client.put(

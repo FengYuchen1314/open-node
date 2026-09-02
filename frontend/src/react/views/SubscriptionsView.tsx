@@ -84,13 +84,19 @@ function quotaLabel(quota: SubscriptionQuotaStatus) { return !quota.is_active ? 
 function quotaColor(quota: SubscriptionQuotaStatus) { return quota.over_quota || quota.expired || !quota.is_active || !quota.has_plan ? "error" : quota.reset_due ? "warning" : "success"; }
 function credentialIdentifier(credential: SubscriptionCredential) { const source = credential.credential, value = source.id ?? source.password ?? source.auth ?? source.psk ?? source.pass; return typeof value === "string" ? value : credential.email; }
 
-export default function SubscriptionsView() {
+export type SubscriptionWorkspace = "all" | "nodes" | "plans" | "users" | "migration";
+
+export interface SubscriptionsViewProps {
+  workspace?: SubscriptionWorkspace;
+}
+
+export default function SubscriptionsView({ workspace = "all" }: SubscriptionsViewProps) {
   const [servers, setServers] = useState<ServerSummary[]>([]), [users, setUsers] = useState<ProductUser[]>([]), [nodes, setNodes] = useState<ManagedNode[]>([]), [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [templates, setTemplates] = useState<SubscriptionTemplate[]>([]), [profiles, setProfiles] = useState<SubscriptionProfile[]>([]), [temporary, setTemporary] = useState<TemporarySubscription[]>([]);
   const [privateRoutes, setPrivateRoutes] = useState<PrivateRoutedNodesResponse | null>(null), [presets, setPresets] = useState<SubscriptionTemplatePreset[]>([]), [shortLinksEnabled, setShortLinksEnabled] = useState(false);
   const [creationMetadata, setCreationMetadata] = useState<ManagedNodeCreationMetadataResponse | null>(null);
   const [camouflageCatalog, setCamouflageCatalog] = useState<CamouflagePoolCatalog | null>(null);
-  const [loading, setLoading] = useState(false), [saving, setSaving] = useState(""), [error, setError] = useState(""), [success, setSuccess] = useState(""), [activeTab, setActiveTab] = useState("users");
+  const [loading, setLoading] = useState(false), [saving, setSaving] = useState(""), [error, setError] = useState(""), [success, setSuccess] = useState(""), [activeTab, setActiveTab] = useState(workspace === "nodes" ? "nodes" : workspace === "plans" ? "plans" : "users");
   const [externalOpen, setExternalOpen] = useState(false);
   const [userForm, setUserForm] = useState(newUserForm), [nodeForm, setNodeForm] = useState(() => newNodeForm()), [planForm, setPlanForm] = useState(newPlanForm);
   const [assignForm, setAssignForm] = useState({ username: "", plan_id: "", start_date: "", expire_date: "", queue_agent_commands: true, no_restart: false, command_timeout_ms: 60_000 });
@@ -109,24 +115,60 @@ export default function SubscriptionsView() {
   async function refresh() {
     const run = ++refreshVersion.current, life = lifecycle.current; setLoading(true); setError("");
     try {
-      const [serverList, userList, nodeList, planList, presetList, nodeCreation, poolCatalog, templateList, profileList, temporaryList, routes, meta] = await Promise.all([listServers(), listProductUsers(), listManagedNodes(), listSubscriptionPlans(), listSubscriptionTemplatePresets(), getManagedNodeCreationMetadata(), listCamouflagePools(), listSubscriptionTemplates(), listSubscriptionProfiles(), listTemporarySubscriptions(), listPrivateRoutes(), fetchAppMeta()]);
+      const fullCatalog = workspace === "all" || workspace === "migration";
+      const needsServers = fullCatalog || workspace === "nodes" || workspace === "users";
+      const needsUsers = fullCatalog || workspace === "users";
+      const needsNodes = fullCatalog || workspace === "nodes" || workspace === "plans" || workspace === "users";
+      const needsPlans = fullCatalog || workspace === "plans" || workspace === "users";
+      const needsNodeCreation = fullCatalog || workspace === "nodes";
+      const needsTemplates = fullCatalog || workspace === "plans" || workspace === "users";
+      const needsUserSubscriptions = fullCatalog || workspace === "users";
+      const [serverList, userList, nodeList, planList, presetList, nodeCreation, poolCatalog, templateList, profileList, temporaryList, routes, meta] = await Promise.all([
+        needsServers ? listServers() : null,
+        needsUsers ? listProductUsers() : null,
+        needsNodes ? listManagedNodes() : null,
+        needsPlans ? listSubscriptionPlans() : null,
+        needsNodeCreation ? listSubscriptionTemplatePresets() : null,
+        needsNodeCreation ? getManagedNodeCreationMetadata() : null,
+        needsNodeCreation ? listCamouflagePools() : null,
+        needsTemplates ? listSubscriptionTemplates() : null,
+        needsUserSubscriptions ? listSubscriptionProfiles() : null,
+        needsUserSubscriptions ? listTemporarySubscriptions() : null,
+        needsNodeCreation ? listPrivateRoutes() : null,
+        needsUserSubscriptions ? fetchAppMeta() : null,
+      ]);
       if (run !== refreshVersion.current || life !== lifecycle.current) return;
-      setServers(serverList); setUsers(userList.users); setNodes(nodeList.nodes); setPlans(planList.plans); setPresets(presetList.presets); setCreationMetadata(nodeCreation); setCamouflageCatalog(poolCatalog); setTemplates(templateList.templates); setProfiles(profileList.profiles); setTemporary(temporaryList.subscriptions); setPrivateRoutes(routes); setShortLinksEnabled(meta.short_links_enabled);
-      setNodeForm(previous => {
-        const server_id = serverList.some(server => server.id === previous.server_id) ? previous.server_id : serverList[0]?.id ?? "";
-        const kind = serverList.find(server => server.id === server_id)?.server_kind ?? "direct";
-        const allowed = nodeCreation.profiles.filter(option => managedProtocolProfiles.includes(option.profile) && option.allowed_server_kinds.includes(kind));
-        const option = allowed.find(item => item.profile === previous.protocol_profile) ?? allowed[0];
-        if (!option) return { ...previous, server_id };
-        if (!nodeFormInitialized.current || option.profile !== previous.protocol_profile) {
-          nodeFormInitialized.current = true;
-          return profileNodeForm({ ...previous, server_id }, option, presetList.presets, nodeFormInitialized.current && !!previous.name.trim());
-        }
-        return { ...previous, server_id };
-      });
-      const availableUsers = userList.users.filter(user => !user.removal_id);
-      if (!availableUsers.some(user => user.username === selectedUsername.current)) selectUser(availableUsers[0]?.username ?? "");
-      setAssignForm(previous => planList.plans.some(plan => plan.id === previous.plan_id) ? previous : { ...previous, plan_id: planList.plans[0]?.id ?? "" });
+      if (serverList) setServers(serverList);
+      if (userList) setUsers(userList.users);
+      if (nodeList) setNodes(nodeList.nodes);
+      if (planList) setPlans(planList.plans);
+      if (presetList) setPresets(presetList.presets);
+      if (nodeCreation) setCreationMetadata(nodeCreation);
+      if (poolCatalog) setCamouflageCatalog(poolCatalog);
+      if (templateList) setTemplates(templateList.templates);
+      if (profileList) setProfiles(profileList.profiles);
+      if (temporaryList) setTemporary(temporaryList.subscriptions);
+      if (routes) setPrivateRoutes(routes);
+      if (meta) setShortLinksEnabled(meta.short_links_enabled);
+      if (serverList && nodeCreation && presetList) {
+        setNodeForm(previous => {
+          const server_id = serverList.some(server => server.id === previous.server_id) ? previous.server_id : serverList[0]?.id ?? "";
+          const kind = serverList.find(server => server.id === server_id)?.server_kind ?? "direct";
+          const allowed = nodeCreation.profiles.filter(option => managedProtocolProfiles.includes(option.profile) && option.allowed_server_kinds.includes(kind));
+          const option = allowed.find(item => item.profile === previous.protocol_profile) ?? allowed[0];
+          if (!option) return { ...previous, server_id };
+          if (!nodeFormInitialized.current || option.profile !== previous.protocol_profile) {
+            nodeFormInitialized.current = true;
+            return profileNodeForm({ ...previous, server_id }, option, presetList.presets, nodeFormInitialized.current && !!previous.name.trim());
+          }
+          return { ...previous, server_id };
+        });
+      }
+      if (userList) {
+        const availableUsers = userList.users.filter(user => !user.removal_id);
+        if (!availableUsers.some(user => user.username === selectedUsername.current)) selectUser(availableUsers[0]?.username ?? "");
+      }
+      if (planList) setAssignForm(previous => planList.plans.some(plan => plan.id === previous.plan_id) ? previous : { ...previous, plan_id: planList.plans[0]?.id ?? "" });
     } catch (failure) { if (run === refreshVersion.current && life === lifecycle.current) setError(readableError(failure)); }
     finally { if (run === refreshVersion.current && life === lifecycle.current) setLoading(false); }
   }
@@ -186,6 +228,7 @@ export default function SubscriptionsView() {
   }
   function submitPlan() {
     if (!aliasesValid || !rulesValid) return; if (!planForm.name.trim()) { setError("请填写套餐名称。"); return; }
+    if (!planForm.node_ids.length) { setError("请至少选择一个节点后再创建套餐。"); return; }
     void perform("plan", async current => {
       const payload: SubscriptionPlanCreateRequest = { ...planForm, name: planForm.name.trim(), description: planForm.description.trim(), reset_day: planForm.is_reset ? planForm.reset_day : 0, node_ids: [...planForm.node_ids], node_name_overrides: { ...planForm.node_name_overrides }, auto_speed_rules: planForm.auto_speed_rules.map(rule => ({ ...rule })), node_multipliers: Object.fromEntries(planForm.node_ids.map(id => [id, 1])) };
       const result = await createSubscriptionPlan(payload); if (!current()) return; setSuccess(`已创建套餐 ${result.plan.name}。`); setPlanForm(newPlanForm()); await refresh(); if (current()) setAssignForm(previous => ({ ...previous, plan_id: result.plan.id }));
@@ -222,6 +265,11 @@ export default function SubscriptionsView() {
   const usedCamouflagePoolIds = new Set(nodes.filter(node => node.server_id === nodeForm.server_id && node.camouflage_pool_id).map(node => node.camouflage_pool_id));
   const selectedCamouflagePool = camouflageCatalog?.pools.find(pool => pool.id === nodeForm.camouflage_pool_id);
   const disabled = !!saving;
+  const showUsers = workspace === "all" || workspace === "users";
+  const showNodes = workspace === "all" || workspace === "nodes";
+  const showPlans = workspace === "all" || workspace === "plans";
+  const workspaceTitle = workspace === "nodes" ? "节点目录" : workspace === "plans" ? "套餐管理" : workspace === "users" ? "用户管理" : workspace === "migration" ? "订阅目录迁移" : "订阅目录与用户绑定";
+  const workspaceDescription = workspace === "nodes" ? "创建、维护节点及其运行时参数" : workspace === "plans" ? "选择一个或多个节点，并为套餐应用订阅模板" : workspace === "users" ? "创建用户、绑定套餐并管理订阅访问" : workspace === "migration" ? "跨实例迁移用户、节点、套餐、模板及可选凭据" : "用户、托管节点、套餐与分配";
   function patchNode(change: Partial<typeof nodeForm>) { setNodeForm(previous => ({ ...previous, ...change })); }
   function selectNodeServer(server_id: string) {
     const kind = servers.find(server => server.id === server_id)?.server_kind ?? "direct";
@@ -243,15 +291,30 @@ export default function SubscriptionsView() {
   }
   function patchPlan(change: Partial<typeof planForm>) { setPlanForm(previous => ({ ...previous, ...change })); }
   function patchAssignment(change: Partial<typeof assignForm>) { setAssignForm(previous => ({ ...previous, ...change })); }
+  const catalogTransfer = <Card title="订阅目录导入与导出"><Flex vertical gap="middle">
+    <Flex gap="large" wrap><Form.Item label="导出凭据"><Switch aria-label="导出凭据" checked={catalogForm.includeCredentials} disabled={disabled} onChange={includeCredentials => setCatalogForm(previous => ({ ...previous, includeCredentials }))} /></Form.Item><Form.Item label="导入凭据"><Switch aria-label="导入凭据" checked={catalogForm.importCredentials} disabled={disabled} onChange={importCredentials => setCatalogForm(previous => ({ ...previous, importCredentials }))} /></Form.Item></Flex>
+    {(catalogForm.includeCredentials || catalogForm.importCredentials) && <Alert type="warning" title="目录凭据属于敏感信息，请妥善保管导出文件。导入凭据可能覆盖现有访问数据。" showIcon />}
+    <Flex gap="small" wrap><Button aria-label="导出" aria-busy={saving === "export"} loading={saving === "export"} disabled={disabled} onClick={exportCatalog}>导出</Button><Button type="primary" aria-label="导入" aria-busy={saving === "import"} loading={saving === "import"} disabled={disabled || !catalogForm.catalogText.trim()} onClick={() => setConfirmImport(true)}>导入</Button><Button disabled={disabled} onClick={() => setLegacyOpen(true)}>MMWX 身份</Button><Button disabled={disabled || !catalogForm.catalogText} onClick={() => setCatalogForm(previous => ({ ...previous, catalogText: "" }))}>清空目录</Button></Flex>
+    <Form.Item label="订阅目录 JSON"><Input.TextArea aria-label="订阅目录 JSON" rows={8} disabled={disabled} value={catalogForm.catalogText} onChange={event => setCatalogForm(previous => ({ ...previous, catalogText: event.target.value }))} /></Form.Item>
+    <Form.Item label="服务器映射 JSON"><Input.TextArea aria-label="服务器映射 JSON" rows={3} disabled={disabled} value={catalogForm.serverMapText} onChange={event => setCatalogForm(previous => ({ ...previous, serverMapText: event.target.value }))} /></Form.Item>
+    {catalogImport && <><Flex gap="small" wrap><Tag>用户 {catalogImport.summary.created_users} / {catalogImport.summary.updated_users}</Tag><Tag>节点 {catalogImport.summary.created_nodes} / {catalogImport.summary.updated_nodes}</Tag><Tag>套餐 {catalogImport.summary.created_plans} / {catalogImport.summary.updated_plans}</Tag><Tag>凭据 {catalogImport.summary.imported_credentials}</Tag></Flex>{catalogImport.summary.warnings.map(warning => <Alert key={warning} type="warning" title={zhMessage(warning)} showIcon />)}</>}
+  </Flex></Card>;
+  const catalogDialogs = <><LegacyMMWXImportDialog open={legacyOpen} plans={plans} onOpenChange={setLegacyOpen} onImported={() => void refresh()} />
+    <Modal open={confirmImport} title="导入订阅目录？" destroyOnHidden mask={{ closable: !disabled }} closable={!disabled} keyboard={!disabled} onCancel={() => !disabled && setConfirmImport(false)} okText="导入订阅目录" okButtonProps={{ "aria-label": "导入订阅目录", "aria-busy": saving === "import" }} confirmLoading={saving === "import"} cancelButtonProps={{ disabled }} onOk={importCatalog}><Typography.Paragraph>导入会按服务器映射创建或更新用户、节点及套餐。{catalogForm.importCredentials ? "凭据也会一并导入。" : "不会导入凭据。"}</Typography.Paragraph></Modal></>;
+  if (workspace === "migration") return <main data-testid="subscriptions-migration"><Flex vertical gap="large">
+    <Flex justify="space-between" align="center" wrap gap="middle"><div><Typography.Text type="secondary">系统设置</Typography.Text><Typography.Title level={2}>{workspaceTitle}</Typography.Title><Typography.Paragraph type="secondary">{workspaceDescription}</Typography.Paragraph></div><Button icon={<ReloadOutlined />} aria-label="刷新订阅目录迁移" loading={loading} disabled={loading || disabled} onClick={() => void refresh()} /></Flex>
+    {error && <Alert type="error" title={zhMessage(error)} showIcon />}{success && <Alert type="success" title={success} showIcon />}
+    {catalogTransfer}{catalogDialogs}
+  </Flex></main>;
   // Each subscriber's token, credentials and request epochs live in a keyed child.
   // Selecting another subscriber destroys those values before any new request starts.
-  return <main data-testid="subscriptions-view"><Flex vertical gap="large">
-    <Flex justify="space-between" align="center" wrap gap="middle"><div><Typography.Text type="secondary">订阅</Typography.Text><Typography.Title level={2}>订阅目录与用户绑定</Typography.Title></div><Button icon={<ReloadOutlined />} aria-label="刷新订阅目录" loading={loading} disabled={loading || disabled} onClick={() => void refresh()} /></Flex>
+  return <main data-testid="subscriptions-view" data-workspace={workspace}><Flex vertical gap="large">
+    <Flex justify="space-between" align="center" wrap gap="middle"><div><Typography.Text type="secondary">{workspace === "all" ? "订阅" : workspaceTitle}</Typography.Text><Typography.Title level={2}>{workspaceTitle}</Typography.Title><Typography.Paragraph type="secondary">{workspaceDescription}</Typography.Paragraph></div><Button icon={<ReloadOutlined />} aria-label={`刷新${workspaceTitle}`} loading={loading} disabled={loading || disabled} onClick={() => void refresh()} /></Flex>
     {error && <Alert type="error" title={zhMessage(error)} showIcon />}{success && <Alert type="success" title={success} showIcon />}
-    <Collapse activeKey={externalOpen ? ["external"] : []} onChange={keys => setExternalOpen(keys.includes("external"))} destroyOnHidden items={[{
+    {showUsers && <Collapse activeKey={externalOpen ? ["external"] : []} onChange={keys => setExternalOpen(keys.includes("external"))} destroyOnHidden items={[{
       key: "external", label: "管理外部订阅",
       children: <ExternalSubscriptionsPanel users={users} active={externalOpen} onUpdated={() => void refresh()} />,
-    }]} />
+    }]} />}
     <Row gutter={[24, 24]}>
       <Col xs={24} xl={11}><Card title="工作流程" extra={loading && <Spin size="small" />}><Typography.Paragraph type="secondary">用户、托管节点、套餐与分配</Typography.Paragraph>
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
@@ -320,10 +383,10 @@ export default function SubscriptionsView() {
             <Form.Item label="按月重置"><Switch aria-label="按月重置" checked={planForm.is_reset} onChange={is_reset => patchPlan({ is_reset })} /></Form.Item>
             <Form.Item label="重置日"><StrictInputNumber aria-label="重置日" aria-valuemin={1} aria-valuemax={31} disabled={disabled || !planForm.is_reset} value={planForm.reset_day} onChange={value => patchPlan({ reset_day: value ?? Number.NaN })} /></Form.Item>
             {(["clash", "surge"] as const).map(format => <Form.Item key={format} label={`${format === "clash" ? "Clash" : "Surge"} 模板`}><Select aria-label={`${format === "clash" ? "Clash" : "Surge"} 模板`} allowClear value={planForm[`${format}_template_id`] ?? undefined} options={templates.filter(template => template.format === format).map(template => ({ label: template.name, value: template.id }))} onChange={value => patchPlan({ [`${format}_template_id`]: value ?? null })} /></Form.Item>)}
-            <Form.Item label="节点"><Select aria-label="节点" mode="multiple" options={nodeOptions} value={planForm.node_ids} onChange={node_ids => patchPlan({ node_ids })} /></Form.Item>
+            <Form.Item label="节点" required help={!planForm.node_ids.length ? "至少选择一个节点；可同时选择多个节点。" : `已选择 ${planForm.node_ids.length} 个节点。`}><Select aria-label="节点" mode="multiple" options={nodeOptions} value={planForm.node_ids} onChange={node_ids => patchPlan({ node_ids })} /></Form.Item>
             <PlanNodeAliases nodes={planForm.node_ids.map(id => ({ id, name: nodes.find(node => node.id === id)?.name ?? id }))} value={planForm.node_name_overrides} onChange={node_name_overrides => patchPlan({ node_name_overrides })} enabled={planForm.node_name_override_enabled} onEnabledChange={node_name_override_enabled => patchPlan({ node_name_override_enabled })} onValid={setAliasesValid} disabled={disabled} />
             <AutoSpeedRuleEditor value={planForm.auto_speed_rules} onChange={auto_speed_rules => patchPlan({ auto_speed_rules })} onValid={setRulesValid} disabled={disabled} />
-            <Button type="primary" htmlType="submit" icon={<PlusOutlined />} aria-label="创建套餐" loading={saving === "plan"} disabled={disabled || !aliasesValid || !rulesValid}>创建套餐</Button>
+            <Button type="primary" htmlType="submit" icon={<PlusOutlined />} aria-label="创建套餐" loading={saving === "plan"} disabled={disabled || !planForm.node_ids.length || !aliasesValid || !rulesValid}>创建套餐</Button>
           </Form> },
           { key: "assign", label: "分配", children: <Form layout="vertical" preserve={false} disabled={disabled} onFinish={submitAssignment}>
             <Form.Item label="用户"><Select aria-label="套餐分配用户" value={assignForm.username || undefined} options={userOptions} onChange={selectUser} disabled={disabled || !userOptions.length} /></Form.Item>
@@ -335,50 +398,43 @@ export default function SubscriptionsView() {
             <Form.Item label="命令超时（毫秒）"><StrictInputNumber aria-label="命令超时（毫秒）" aria-valuemin={1000} aria-valuemax={300000} value={assignForm.command_timeout_ms} onChange={value => patchAssignment({ command_timeout_ms: value ?? Number.NaN })} /></Form.Item>
             <Button type="primary" htmlType="submit" aria-label="分配套餐" aria-busy={saving === "assign"} loading={saving === "assign"} disabled={disabled || !userOptions.length || !planOptions.length}>分配套餐</Button>
           </Form> },
-        ]} />
+        ].filter(item => workspace === "all" || workspace === "nodes" && item.key === "nodes" || workspace === "plans" && item.key === "plans" || workspace === "users" && (item.key === "users" || item.key === "assign"))} />
       </Card></Col>
       <Col xs={24} xl={13}><Flex vertical gap="large">
-        <Card title="目录状态" extra={<Tag color="success">免费版</Tag>}><Typography.Paragraph type="secondary">{users.length} 位用户，{plans.length} 个套餐</Typography.Paragraph>
+        {showUsers && <Card title="用户订阅状态" extra={<Tag color="success">免费版</Tag>}><Typography.Paragraph type="secondary">{users.length} 位用户，{plans.length} 个套餐</Typography.Paragraph>
           <Form.Item label="用户"><Select aria-label="订阅用户" value={assignForm.username || undefined} options={userOptions} disabled={!userOptions.length} onChange={selectUser} /></Form.Item>
           {assignForm.username ? <SubscriptionUserPanel key={assignForm.username} username={assignForm.username} user={selectedUser} servers={servers} assignment={lastAssignment} externalToken={updatedToken} canShare={!!temporaryNodes.length} onShare={() => setShareOpen(true)} onRefresh={() => void refresh()} onUserUpdated={value => setUsers(previous => previous.map(user => user.username === value.username ? value : user))} /> : <Empty description="请先创建用户，再管理订阅访问。" />}
-        </Card>
-        <Card title="订阅目录导入与导出"><Flex vertical gap="middle">
-          <Flex gap="large" wrap><Form.Item label="导出凭据"><Switch aria-label="导出凭据" checked={catalogForm.includeCredentials} disabled={disabled} onChange={includeCredentials => setCatalogForm(previous => ({ ...previous, includeCredentials }))} /></Form.Item><Form.Item label="导入凭据"><Switch aria-label="导入凭据" checked={catalogForm.importCredentials} disabled={disabled} onChange={importCredentials => setCatalogForm(previous => ({ ...previous, importCredentials }))} /></Form.Item></Flex>
-          {(catalogForm.includeCredentials || catalogForm.importCredentials) && <Alert type="warning" title="目录凭据属于敏感信息，请妥善保管导出文件。导入凭据可能覆盖现有访问数据。" showIcon />}
-          <Flex gap="small" wrap><Button aria-label="导出" aria-busy={saving === "export"} loading={saving === "export"} disabled={disabled} onClick={exportCatalog}>导出</Button><Button type="primary" aria-label="导入" aria-busy={saving === "import"} loading={saving === "import"} disabled={disabled || !catalogForm.catalogText.trim()} onClick={() => setConfirmImport(true)}>导入</Button><Button disabled={disabled} onClick={() => setLegacyOpen(true)}>MMWX 身份</Button><Button disabled={disabled || !catalogForm.catalogText} onClick={() => setCatalogForm(previous => ({ ...previous, catalogText: "" }))}>清空目录</Button></Flex>
-          <Form.Item label="订阅目录 JSON"><Input.TextArea aria-label="订阅目录 JSON" rows={8} disabled={disabled} value={catalogForm.catalogText} onChange={event => setCatalogForm(previous => ({ ...previous, catalogText: event.target.value }))} /></Form.Item>
-          <Form.Item label="服务器映射 JSON"><Input.TextArea aria-label="服务器映射 JSON" rows={3} disabled={disabled} value={catalogForm.serverMapText} onChange={event => setCatalogForm(previous => ({ ...previous, serverMapText: event.target.value }))} /></Form.Item>
-          {catalogImport && <><Flex gap="small" wrap><Tag>用户 {catalogImport.summary.created_users} / {catalogImport.summary.updated_users}</Tag><Tag>节点 {catalogImport.summary.created_nodes} / {catalogImport.summary.updated_nodes}</Tag><Tag>套餐 {catalogImport.summary.created_plans} / {catalogImport.summary.updated_plans}</Tag><Tag>凭据 {catalogImport.summary.imported_credentials}</Tag></Flex>{catalogImport.summary.warnings.map(warning => <Alert key={warning} type="warning" title={zhMessage(warning)} showIcon />)}</>}
-        </Flex></Card>
-        <Card title="私有路由" extra={<Flex gap="small"><Tag color={privateRoutes?.policy.enabled ? "success" : "default"}>{privateRoutes?.policy.enabled ? "已启用" : "已停用"}</Tag><Button aria-label="编辑私有路由策略" icon={<SettingOutlined />} disabled={!privateRoutes || loading || disabled} onClick={() => setPrivatePolicyOpen(true)} /></Flex>}><Flex vertical gap="small">
+        </Card>}
+        {workspace === "all" && catalogTransfer}
+        {showNodes && <Card title="私有路由" extra={<Flex gap="small"><Tag color={privateRoutes?.policy.enabled ? "success" : "default"}>{privateRoutes?.policy.enabled ? "已启用" : "已停用"}</Tag><Button aria-label="编辑私有路由策略" icon={<SettingOutlined />} disabled={!privateRoutes || loading || disabled} onClick={() => setPrivatePolicyOpen(true)} /></Flex>}><Flex vertical gap="small">
           {!privateRoutes?.nodes.length && <Empty description="暂无私有路由。" />}{privateRoutes?.nodes.map(item => <Card key={item.id} size="small" title={item.name} extra={<Tag color={item.status === "active" ? "success" : item.status === "failed" ? "error" : "warning"}>{zhStatus(item.status)}</Tag>}><Typography.Text>{item.username} - {item.parent_name} 至 {item.target_name}</Typography.Text>{item.last_error && <Alert type="error" title={zhMessage(item.last_error)} showIcon />}</Card>)}
-        </Flex></Card>
-        <Card title="注册" extra={<Button aria-label="管理注册邀请" icon={<UserAddOutlined />} disabled={!plans.length} onClick={() => setInvitationsOpen(true)} />}><Tag>{plans.length} 个套餐</Tag></Card>
-        <Card title="临时链接"><Flex vertical gap="small">{!temporary.length && <Empty description="暂无临时链接。" />}{temporary.map(item => <Card key={item.id} size="small" title={item.label} extra={<Flex gap="small" wrap><Button icon={<CopyOutlined />} aria-label={`复制临时链接 ${item.label}`} onClick={() => void copyTemporary(item)} /><Button icon={<LinkOutlined />} aria-label={`撤销临时链接 ${item.label}`} disabled={disabled} loading={saving === `temporary:${item.id}`} onClick={() => setConfirmTemporary(item)} /><Tag color={item.status === "active" ? "success" : item.status === "expired" ? "warning" : "error"}>{zhStatus(item.status)}</Tag></Flex>}><Typography.Text>{item.username} - 已下载 {item.access_count}/{item.max_access} 次 - 有效期至 {new Date(item.expires_at).toLocaleString("zh-CN")}</Typography.Text></Card>)}</Flex></Card>
-        <Card title="订阅配置"><Flex vertical gap="small">{!profiles.length && <Empty description="暂无已导入的订阅配置。" />}{profiles.map(item => <Card key={item.id} size="small" title={item.name} extra={<Flex gap="small"><Button icon={<SettingOutlined />} aria-label={`编辑订阅配置 ${item.name}`} onClick={() => setProfileDialog(item)} /><Tag color={item.enabled ? "success" : "warning"}>{item.enabled ? "已启用" : "待设置"}</Tag></Flex>}><Typography.Text>{item.assigned_usernames.length} 位用户 - {profileSourceLabel(item.source_type)}</Typography.Text></Card>)}</Flex></Card>
-        <Card title="用户"><Flex vertical gap="small">{!users.length && <Empty description="暂无用户。" />}{users.map(user => <Card key={user.username} size="small" title={user.display_name || user.username}><Typography.Paragraph type="secondary">{user.username}</Typography.Paragraph><Flex gap="small" wrap>
+        </Flex></Card>}
+        {showUsers && <Card title="注册" extra={<Button aria-label="管理注册邀请" icon={<UserAddOutlined />} disabled={!plans.length} onClick={() => setInvitationsOpen(true)} />}><Tag>{plans.length} 个套餐</Tag></Card>}
+        {showUsers && <Card title="临时链接"><Flex vertical gap="small">{!temporary.length && <Empty description="暂无临时链接。" />}{temporary.map(item => <Card key={item.id} size="small" title={item.label} extra={<Flex gap="small" wrap><Button icon={<CopyOutlined />} aria-label={`复制临时链接 ${item.label}`} onClick={() => void copyTemporary(item)} /><Button icon={<LinkOutlined />} aria-label={`撤销临时链接 ${item.label}`} disabled={disabled} loading={saving === `temporary:${item.id}`} onClick={() => setConfirmTemporary(item)} /><Tag color={item.status === "active" ? "success" : item.status === "expired" ? "warning" : "error"}>{zhStatus(item.status)}</Tag></Flex>}><Typography.Text>{item.username} - 已下载 {item.access_count}/{item.max_access} 次 - 有效期至 {new Date(item.expires_at).toLocaleString("zh-CN")}</Typography.Text></Card>)}</Flex></Card>}
+        {showUsers && <Card title="订阅配置"><Flex vertical gap="small">{!profiles.length && <Empty description="暂无已导入的订阅配置。" />}{profiles.map(item => <Card key={item.id} size="small" title={item.name} extra={<Flex gap="small"><Button icon={<SettingOutlined />} aria-label={`编辑订阅配置 ${item.name}`} onClick={() => setProfileDialog(item)} /><Tag color={item.enabled ? "success" : "warning"}>{item.enabled ? "已启用" : "待设置"}</Tag></Flex>}><Typography.Text>{item.assigned_usernames.length} 位用户 - {profileSourceLabel(item.source_type)}</Typography.Text></Card>)}</Flex></Card>}
+        {showUsers && <Card title="用户"><Flex vertical gap="small">{!users.length && <Empty description="暂无用户。" />}{users.map(user => <Card key={user.username} size="small" title={user.display_name || user.username}><Typography.Paragraph type="secondary">{user.username}</Typography.Paragraph><Flex gap="small" wrap>
           {!user.removal_id ? <>{shortLinksEnabled && <Button icon={<LinkOutlined />} aria-label={`编辑 ${user.username} 的订阅短码`} onClick={() => setShortCode({ username: user.username, open: true })} />}<Button icon={<SettingOutlined />} aria-label={`编辑 ${user.username} 的订阅 IP 访问限制`} onClick={() => setIpPolicy({ username: user.username, open: true })} /><Button icon={<KeyOutlined />} aria-label={`${user.username} 的登录设置`} onClick={() => setLoginDialog({ username: user.username, open: true })} /><Button icon={<EditOutlined />} aria-label={`编辑用户 ${user.username}`} onClick={() => manageUser(user, "edit")} /><Button danger icon={<DeleteOutlined />} aria-label={`移除用户 ${user.username}`} disabled={user.role === "admin"} onClick={() => manageUser(user, "remove")} /></> : <Button icon={<SyncOutlined />} aria-label={`查看 ${user.username} 的移除状态`} onClick={() => manageUser(user, "remove")} />}
           {user.current_plan_id && !user.removal_id && <Button icon={<LinkOutlined />} aria-label={`取消 ${user.username} 的套餐分配`} onClick={() => setPlanDialog({ id: user.username, mode: "unassign", open: true })} />}
           <Tag color={user.current_plan_id ? "processing" : "default"}>{user.removal_id ? "移除中" : !user.is_active ? "已停用" : formatDate(user.plan_expires_at)}</Tag>
-        </Flex></Card>)}</Flex></Card>
-        <Card title="套餐"><Flex vertical gap="small">{!plans.length && <Empty description="暂无套餐。" />}{plans.map(plan => <Card key={plan.id} size="small" title={plan.name} extra={<Flex gap="small"><Button icon={<EditOutlined />} aria-label={`编辑套餐 ${plan.name}`} onClick={() => setPlanDialog({ id: plan.id, mode: "edit", open: true })} /><Button danger icon={<DeleteOutlined />} aria-label={`移除套餐 ${plan.name}`} onClick={() => setPlanDialog({ id: plan.id, mode: "remove", open: true })} /></Flex>}><Typography.Text>{plan.traffic_limit_gb.toFixed(plan.traffic_limit_gb >= 10 ? 0 : 1)} GB / {plan.cycle_days} 天</Typography.Text> <Tag>{plan.node_ids.length} 个节点</Tag></Card>)}</Flex></Card>
-        <Card title="节点"><Flex vertical gap="small">{!nodes.length && <Empty description="暂无节点。" />}{nodes.map(node => <Card key={node.id} size="small" title={node.name}><Typography.Paragraph type="secondary">{serverName(node.server_id)}</Typography.Paragraph><Flex gap="small">{!node.removal_id ? <><Button icon={<EditOutlined />} aria-label={`编辑节点 ${node.name}`} onClick={() => setNodeDialog({ id: node.id, mode: "edit", open: true })} /><Button danger icon={<DeleteOutlined />} aria-label={`移除节点 ${node.name}`} onClick={() => setNodeDialog({ id: node.id, mode: "remove", open: true })} /></> : <Button icon={<SyncOutlined />} aria-label={`节点移除状态 ${node.name}`} onClick={() => setNodeDialog({ id: node.id, mode: "remove", open: true })} />}<Tag color={node.enabled && !node.removal_id ? "success" : "warning"}>{node.removal_id ? "移除中" : zhStatus(node.node_type)}</Tag></Flex></Card>)}</Flex></Card>
-        {lastAssignment && <Card title="上次分配"><Flex vertical gap="small"><Typography.Text>{lastAssignment.user.username} → {lastAssignment.plan.name}</Typography.Text><Flex gap="small"><Tag>{lastAssignment.provisioning_batches.length} 个批次</Tag><Tag>{lastAssignment.commands.length} 条命令</Tag></Flex>{lastAssignment.warnings.map(warning => <Alert key={warning} type="warning" title={zhMessage(warning)} showIcon />)}<Input.TextArea aria-label="配置下发批次" value={JSON.stringify(lastAssignment.provisioning_batches, null, 2)} readOnly rows={8} /><Typography.Text type="secondary">批次中可能包含凭据。命令进入队列并不代表 Agent 已应用。</Typography.Text></Flex></Card>}
+        </Flex></Card>)}</Flex></Card>}
+        {showPlans && <Card title="套餐"><Flex vertical gap="small">{!plans.length && <Empty description="暂无套餐。" />}{plans.map(plan => <Card key={plan.id} size="small" title={plan.name} extra={<Flex gap="small"><Button icon={<EditOutlined />} aria-label={`编辑套餐 ${plan.name}`} onClick={() => setPlanDialog({ id: plan.id, mode: "edit", open: true })} /><Button danger icon={<DeleteOutlined />} aria-label={`移除套餐 ${plan.name}`} onClick={() => setPlanDialog({ id: plan.id, mode: "remove", open: true })} /></Flex>}><Typography.Text>{plan.traffic_limit_gb.toFixed(plan.traffic_limit_gb >= 10 ? 0 : 1)} GB / {plan.cycle_days} 天</Typography.Text> <Tag>{plan.node_ids.length} 个节点</Tag></Card>)}</Flex></Card>}
+        {showNodes && <Card title="节点"><Flex vertical gap="small">{!nodes.length && <Empty description="暂无节点。" />}{nodes.map(node => <Card key={node.id} size="small" title={node.name}><Typography.Paragraph type="secondary">{serverName(node.server_id)}</Typography.Paragraph><Flex gap="small">{!node.removal_id ? <><Button icon={<EditOutlined />} aria-label={`编辑节点 ${node.name}`} onClick={() => setNodeDialog({ id: node.id, mode: "edit", open: true })} /><Button danger icon={<DeleteOutlined />} aria-label={`移除节点 ${node.name}`} onClick={() => setNodeDialog({ id: node.id, mode: "remove", open: true })} /></> : <Button icon={<SyncOutlined />} aria-label={`节点移除状态 ${node.name}`} onClick={() => setNodeDialog({ id: node.id, mode: "remove", open: true })} />}<Tag color={node.enabled && !node.removal_id ? "success" : "warning"}>{node.removal_id ? "移除中" : zhStatus(node.node_type)}</Tag></Flex></Card>)}</Flex></Card>}
+        {showUsers && lastAssignment && <Card title="上次分配"><Flex vertical gap="small"><Typography.Text>{lastAssignment.user.username} → {lastAssignment.plan.name}</Typography.Text><Flex gap="small"><Tag>{lastAssignment.provisioning_batches.length} 个批次</Tag><Tag>{lastAssignment.commands.length} 条命令</Tag></Flex>{lastAssignment.warnings.map(warning => <Alert key={warning} type="warning" title={zhMessage(warning)} showIcon />)}<Input.TextArea aria-label="配置下发批次" value={JSON.stringify(lastAssignment.provisioning_batches, null, 2)} readOnly rows={8} /><Typography.Text type="secondary">批次中可能包含凭据。命令进入队列并不代表 Agent 已应用。</Typography.Text></Flex></Card>}
       </Flex></Col>
     </Row>
-    <PlanManagementDialog {...planDialog} nodes={nodes} onOpenChange={open => setPlanDialog(previous => ({ ...previous, open }))} onUpdated={() => void refresh()} />
-    <UserManagementDialog {...userDialog} nodes={nodes} onOpenChange={open => setUserDialog(previous => ({ ...previous, open }))} onUpdated={() => void refresh()} />
-    <NodeManagementDialog {...nodeDialog} nodes={nodes} onOpenChange={open => setNodeDialog(previous => ({ ...previous, open }))} onUpdated={() => void refresh()} />
-    <UserLoginDialog {...loginDialog} onOpenChange={open => setLoginDialog(previous => ({ ...previous, open }))} />
+    {(showPlans || showUsers) && <PlanManagementDialog {...planDialog} nodes={nodes} onOpenChange={open => setPlanDialog(previous => ({ ...previous, open }))} onUpdated={() => void refresh()} />}
+    {showUsers && <UserManagementDialog {...userDialog} nodes={nodes} onOpenChange={open => setUserDialog(previous => ({ ...previous, open }))} onUpdated={() => void refresh()} />}
+    {showNodes && <NodeManagementDialog {...nodeDialog} nodes={nodes} onOpenChange={open => setNodeDialog(previous => ({ ...previous, open }))} onUpdated={() => void refresh()} />}
+    {showUsers && <><UserLoginDialog {...loginDialog} onOpenChange={open => setLoginDialog(previous => ({ ...previous, open }))} />
     <SubscriptionShortCodeDialog {...shortCode} onOpenChange={open => setShortCode(previous => ({ ...previous, open }))} onSaved={value => { if (selectedUsername.current === value.username) setUpdatedToken(value); }} />
     <SubscriptionIpPolicyDialog {...ipPolicy} onOpenChange={open => setIpPolicy(previous => ({ ...previous, open }))} />
-    <LegacyMMWXImportDialog open={legacyOpen} plans={plans} onOpenChange={setLegacyOpen} onImported={() => void refresh()} />
     <SubscriptionProfileDialog open={!!profileDialog} profile={profileDialog} nodes={nodes} users={users} templates={templates} onOpenChange={open => !open && setProfileDialog(null)} onSaved={() => void refresh()} />
     <RegistrationInvitationsDialog open={invitationsOpen} plans={plans} onOpenChange={setInvitationsOpen} />
     <TemporarySubscriptionDialog open={shareOpen} username={assignForm.username} nodes={temporaryNodes} onOpenChange={setShareOpen} onCreated={value => { setTemporary(previous => [value, ...previous.filter(item => item.id !== value.id)]); setSuccess(`已为 ${value.username} 创建临时链接。`); }} />
-    <PrivateRoutedPolicyDialog open={privatePolicyOpen} policy={privateRoutes?.policy ?? null} onOpenChange={setPrivatePolicyOpen} onSaved={() => void refresh()} />
     <Modal open={!!confirmTemporary} title="撤销临时链接？" destroyOnHidden mask={{ closable: !disabled }} closable={!disabled} keyboard={!disabled} onCancel={() => !disabled && setConfirmTemporary(null)} okText="撤销" okButtonProps={{ "aria-label": "撤销", "aria-busy": !!confirmTemporary && saving === `temporary:${confirmTemporary.id}`, danger: true }} confirmLoading={!!confirmTemporary && saving === `temporary:${confirmTemporary.id}`} cancelButtonProps={{ disabled }} onOk={() => confirmTemporary && revokeTemporary(confirmTemporary)}><Typography.Paragraph>{confirmTemporary?.label}：将停止后续订阅下载。此操作不会撤回已下载的凭据。</Typography.Paragraph></Modal>
-    <Modal open={confirmImport} title="导入订阅目录？" destroyOnHidden mask={{ closable: !disabled }} closable={!disabled} keyboard={!disabled} onCancel={() => !disabled && setConfirmImport(false)} okText="导入订阅目录" okButtonProps={{ "aria-label": "导入订阅目录", "aria-busy": saving === "import" }} confirmLoading={saving === "import"} cancelButtonProps={{ disabled }} onOk={importCatalog}><Typography.Paragraph>导入会按服务器映射创建或更新用户、节点及套餐。{catalogForm.importCredentials ? "凭据也会一并导入。" : "不会导入凭据。"}</Typography.Paragraph></Modal>
+    </>}
+    {workspace === "all" && catalogDialogs}
+    {showNodes && <PrivateRoutedPolicyDialog open={privatePolicyOpen} policy={privateRoutes?.policy ?? null} onOpenChange={setPrivatePolicyOpen} onSaved={() => void refresh()} />}
   </Flex></main>;
 }
 

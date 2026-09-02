@@ -189,7 +189,10 @@ def test_plan_edits_reject_stale_settings_membership_and_duplicate_name(env):
     env[0].post("/api/v1/users", json={"username": "bob"}).raise_for_status()
     env[0].post("/api/v1/users/bob/plan", json={"plan_id": env[4]}).raise_for_status()
     assert env[0].put(base(env) + "/settings", json=payload).status_code == 409
-    env[0].post("/api/v1/plans", json={"name": "Taken", "traffic_limit_gb": 1}).raise_for_status()
+    env[0].post(
+        "/api/v1/plans",
+        json={"name": "Taken", "traffic_limit_gb": 1, "node_ids": [env[3]]},
+    ).raise_for_status()
     assert (
         env[0].put(base(env) + "/settings", json=update_payload(env, name="Taken")).status_code
         == 409
@@ -307,9 +310,10 @@ def test_delete_plan_unbinds_all_users_but_not_other_plan(env):
     client = env[0]
     client.post("/api/v1/users", json={"username": "bob"}).raise_for_status()
     client.post("/api/v1/users/bob/plan", json={"plan_id": env[4]}).raise_for_status()
-    other = client.post("/api/v1/plans", json={"name": "Other", "traffic_limit_gb": 1}).json()[
-        "plan"
-    ]
+    other = client.post(
+        "/api/v1/plans",
+        json={"name": "Other", "traffic_limit_gb": 1, "node_ids": [env[3]]},
+    ).json()["plan"]
     response = client.post(base(env) + "/remove", json=removal(env))
     assert response.status_code == 200, response.text
     assert response.json()["affected_users"] == ["alice", "bob"]
@@ -340,7 +344,12 @@ def test_unassign_stale_assignment_and_missing_confirmation(env):
         == 422
     )
     other = (
-        env[0].post("/api/v1/plans", json={"name": "Other", "traffic_limit_gb": 1}).json()["plan"]
+        env[0]
+        .post(
+            "/api/v1/plans",
+            json={"name": "Other", "traffic_limit_gb": 1, "node_ids": [env[3]]},
+        )
+        .json()["plan"]
     )
     env[0].post("/api/v1/users/alice/plan", json={"plan_id": other["id"]}).raise_for_status()
     assert env[0].post("/api/v1/users/alice/plan/remove", json=payload).status_code == 409

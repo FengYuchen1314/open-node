@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackupJob, BackupsOverview } from "../../domain/backups";
-import { routes } from "../../routes";
+import { legacyRouteRedirects, routes } from "../../routes";
 import { authState } from "../../services/auth";
 import { BackupRequestError, createBackup, deleteBackup, getBackupJob, getBackups, newBackupRequestId, prepareRestoreArchive, uploadRestoreArchive } from "../../services/backups";
 import { deferred, flush, installDom, renderUi } from "../test-utils";
@@ -47,8 +47,8 @@ describe("administrator backup workspace", () => {
     authState.session = { configured: true, authenticated: false, username: null, csrf_token: null };
     await mount(); expect(screen.getByText("请登录管理员账户后管理备份。")).toBeTruthy();
     expect(getBackups).not.toHaveBeenCalled(); expect(createBackup).not.toHaveBeenCalled();
-    expect(routes.find(route => route.path === "/backups")?.meta?.subscriber).toBeUndefined();
-    expect(routes.some(route => route.path === "/backups")).toBe(true);
+    expect(routes.find(route => route.path === "/system-settings")?.meta?.subscriber).toBeUndefined();
+    expect(legacyRouteRedirects.find(route => route.path === "/backups")?.to).toBe("/system-settings?tab=backups");
   });
   it("survives StrictMode replay and explains the public-key-only and not-yet-restored boundaries", async () => {
     renderUi(<StrictMode><BackupsView /></StrictMode>); await flush();

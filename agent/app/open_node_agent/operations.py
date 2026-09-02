@@ -24,6 +24,14 @@ from open_node_agent.managed_protocols import ManagedProtocols
 from open_node_agent.nginx import NginxRuntime
 from open_node_agent.node_cleanup import ENDPOINT as CLEANUP_ENDPOINT
 from open_node_agent.node_cleanup import NodeCleanup
+from open_node_agent.outbound_tls import (
+    ENDPOINT as OUTBOUND_TLS_PIN_ENDPOINT,
+)
+from open_node_agent.outbound_tls import (
+    probe_tls_certificate,
+    validate_changed_managed_outbound_tls,
+    validate_manual_outbound_tls,
+)
 from open_node_agent.runtime import (
     RuntimeFailure,
     XrayRuntime,
@@ -34,6 +42,7 @@ from open_node_agent.runtime import (
 )
 from open_node_agent.subscription_access import ENDPOINT as ACCESS_ENDPOINT
 from open_node_agent.subscription_access import SubscriptionAccess
+from open_node_agent.warp import TAGS as WARP_OUTBOUND_TAGS
 from open_node_agent.warp import Warp
 from open_node_agent.xray_releases import XrayReleases
 from open_node_agent.xray_takeover import ENDPOINT as TAKEOVER_ENDPOINT
@@ -57,6 +66,338 @@ SYSTEM_STATS_COUNTERS = (
     "statsOutboundUplink",
     "statsOutboundDownlink",
 )
+MANAGED_EGRESS_OUTBOUND_PREFIX = "managed-egress:"
+MANAGED_EGRESS_RULE_PREFIX = "managed-egress-rule:"
+MANAGED_EGRESS_CLIENT_PREFIX = "open_node_egress__"
+MANAGED_EGRESS_SNI_STATE_KEY = "_openNodeManagedEgressSniffing"
+
+
+def _canonical_records(values: list[dict]) -> list[str]:
+    return sorted(json.dumps(value, sort_keys=True, separators=(",", ":")) for value in values)
+
+
+def _managed_balancer_records(config: dict, managed_tags: set[str]) -> list[dict]:
+    routing = config.get("routing") or {}
+    entries = routing.get("balancers", []) if isinstance(routing, dict) else []
+    if not isinstance(entries, list):
+        entries = []
+    result = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        raw_selectors = item.get("selector", [])
+        selectors = [raw_selectors] if isinstance(raw_selectors, str) else raw_selectors
+        selected = (
+            isinstance(selectors, list)
+            and any(
+                isinstance(selector, str)
+                and selector
+                and any(tag.startswith(selector) for tag in managed_tags)
+                for selector in selectors
+            )
+        )
+        fallback = item.get("fallbackTag")
+        if selected or (
+            isinstance(fallback, str)
+            and fallback.startswith(MANAGED_EGRESS_OUTBOUND_PREFIX)
+        ):
+            result.append(copy.deepcopy(item))
+    return result
+
+
+def _managed_sniffing_records(config: dict) -> tuple[list[dict], list[dict]]:
+    """Project sidecar ownership and required sniffing domains.
+
+    The full sidecar is immutable outside the dedicated egress endpoint.  The
+    sniffing projection intentionally records only required-domain presence,
+    so an operator may still add or remove unrelated manual exclusions.
+    """
+
+    present = MANAGED_EGRESS_SNI_STATE_KEY in config
+    raw = copy.deepcopy(config.get(MANAGED_EGRESS_SNI_STATE_KEY))
+    sidecar = [{"value": raw}] if present else []
+    required_records: list[dict] = []
+    if (
+        not isinstance(raw, dict)
+        or raw.get("version") != 1
+        or not isinstance(raw.get("inbounds"), dict)
+    ):
+        return sidecar, required_records
+
+    inbounds = config.get("inbounds", [])
+    if not isinstance(inbounds, list):
+        inbounds = []
+    for inbound_tag, entry in raw["inbounds"].items():
+        if not isinstance(inbound_tag, str) or not isinstance(entry, dict):
+            continue
+        domains: set[str] = set()
+        owned = entry.get("ownedDomains", [])
+        if isinstance(owned, list):
+            domains.update(
+                value.strip().lower()
+                for value in owned
+                if isinstance(value, str) and value.strip()
+            )
+        references = entry.get("references", {})
+        if isinstance(references, dict):
+            for values in references.values():
+                if isinstance(values, list):
+                    domains.update(
+                        value.strip().lower()
+                        for value in values
+                        if isinstance(value, str) and value.strip()
+                    )
+        matches = [
+            inbound
+            for inbound in inbounds
+            if isinstance(inbound, dict) and inbound.get("tag") == inbound_tag
+        ]
+        excluded: set[str] = set()
+        if len(matches) == 1:
+            sniffing = matches[0].get("sniffing") or {}
+            values = sniffing.get("domainsExcluded", []) if isinstance(sniffing, dict) else []
+            if isinstance(values, list):
+                excluded.update(
+                    value.strip().lower()
+                    for value in values
+                    if isinstance(value, str) and value.strip()
+                )
+        required_records.append(
+            {
+                "inbound_tag": inbound_tag,
+                "match_count": len(matches),
+                "required_domains": sorted(domains),
+                "present_domains": sorted(domains & excluded),
+            }
+        )
+    return sidecar, required_records
+
+
+def managed_egress_records(config: dict) -> tuple[list[str], ...]:
+    outbound_entries = config.get("outbounds", [])
+    if not isinstance(outbound_entries, list):
+        outbound_entries = []
+    outbounds = [
+        copy.deepcopy(item)
+        for item in outbound_entries
+        if isinstance(item, dict)
+        and (
+            str(item.get("tag") or "").startswith(MANAGED_EGRESS_OUTBOUND_PREFIX)
+            or item.get("tag") in WARP_OUTBOUND_TAGS
+        )
+    ]
+    managed_tags = {
+        str(item.get("tag"))
+        for item in outbound_entries
+        if isinstance(item, dict)
+        and str(item.get("tag") or "").startswith(MANAGED_EGRESS_OUTBOUND_PREFIX)
+    }
+    routing = config.get("routing") or {}
+    routing_entries = routing.get("rules", []) if isinstance(routing, dict) else []
+    if not isinstance(routing_entries, list):
+        routing_entries = []
+    rules = [
+        copy.deepcopy(item)
+        for item in routing_entries
+        if isinstance(item, dict)
+        and (
+            str(item.get("marktag") or "").startswith(MANAGED_EGRESS_RULE_PREFIX)
+            or str(item.get("outboundTag") or "").startswith(
+                MANAGED_EGRESS_OUTBOUND_PREFIX
+            )
+        )
+    ]
+    clients = []
+    inbound_entries = config.get("inbounds", [])
+    if not isinstance(inbound_entries, list):
+        inbound_entries = []
+    for inbound in inbound_entries:
+        if not isinstance(inbound, dict):
+            continue
+        settings = inbound.get("settings") or {}
+        if not isinstance(settings, dict):
+            continue
+        for container in ("clients", "users", "accounts"):
+            for client in settings.get(container, []):
+                if (
+                    isinstance(client, dict)
+                    and str(client.get("email") or "").startswith(
+                        MANAGED_EGRESS_CLIENT_PREFIX
+                    )
+                ):
+                    clients.append(
+                        {
+                            "inbound_tag": inbound.get("tag"),
+                            "container": container,
+                            "client": copy.deepcopy(client),
+                        }
+                    )
+    balancers = _managed_balancer_records(config, managed_tags)
+    sidecar, sniffing = _managed_sniffing_records(config)
+    return tuple(
+        map(_canonical_records, (outbounds, rules, clients, balancers, sidecar, sniffing))
+    )
+
+
+def assert_managed_egress_preserved(before: dict, after: dict) -> None:
+    if managed_egress_records(before) != managed_egress_records(after):
+        raise RuntimeFailure(
+            "Managed egress entries and WARP outbounds must be changed through the "
+            "dedicated server egress workflow or WARP workflow"
+        )
+
+
+def has_managed_egress(config: dict) -> bool:
+    return any(managed_egress_records(config))
+
+
+def _selected_record(records, key: str, value: str):
+    matches = [
+        {"index": index, "record": copy.deepcopy(item)}
+        for index, item in enumerate(records)
+        if isinstance(item, dict) and item.get(key) == value
+    ]
+    if len(matches) > 1:
+        return False, None
+    return True, matches[0] if matches else None
+
+
+def _selected_client(config: dict, inbound_tag: str, email: str):
+    matches = []
+    inbounds = config.get("inbounds", [])
+    if not isinstance(inbounds, list):
+        inbounds = []
+    for inbound_index, inbound in enumerate(inbounds):
+        if not isinstance(inbound, dict) or inbound.get("tag") != inbound_tag:
+            continue
+        settings = inbound.get("settings") or {}
+        if not isinstance(settings, dict):
+            continue
+        for container in ("clients", "users", "accounts"):
+            clients = settings.get(container, [])
+            if not isinstance(clients, list):
+                continue
+            matches.extend(
+                {
+                    "inbound_index": inbound_index,
+                    "container": container,
+                    "client_index": client_index,
+                    "client": copy.deepcopy(client),
+                }
+                for client_index, client in enumerate(clients)
+                if isinstance(client, dict) and client.get("email") == email
+            )
+    if len(matches) > 1:
+        return False, None
+    return True, matches[0] if matches else None
+
+
+def managed_state_matches(config: dict, desired: dict, selector: dict) -> bool:
+    allowed = {"outbound_tag", "routing_marktag", "inbound_tag", "client_email"}
+    if not selector or any(key not in allowed for key in selector):
+        raise RuntimeFailure("Invalid managed egress rollback state selector")
+    checks: list[bool] = []
+    source_state_selected = False
+    if "outbound_tag" in selector:
+        tag = selector.get("outbound_tag")
+        if not isinstance(tag, str) or not tag.startswith(MANAGED_EGRESS_OUTBOUND_PREFIX):
+            raise RuntimeFailure("Invalid managed egress outbound rollback selector")
+        actual_entries = config.get("outbounds", [])
+        desired_entries = desired.get("outbounds", [])
+        actual_valid, actual = _selected_record(
+            actual_entries if isinstance(actual_entries, list) else [], "tag", tag
+        )
+        desired_valid, wanted = _selected_record(
+            desired_entries if isinstance(desired_entries, list) else [], "tag", tag
+        )
+        checks.append(actual_valid and desired_valid and actual == wanted)
+        source_state_selected = True
+    if "routing_marktag" in selector:
+        marktag = selector.get("routing_marktag")
+        if not isinstance(marktag, str) or not marktag.startswith(MANAGED_EGRESS_RULE_PREFIX):
+            raise RuntimeFailure("Invalid managed egress routing rollback selector")
+        routing = config.get("routing") or {}
+        desired_routing = desired.get("routing") or {}
+        rules = routing.get("rules", []) if isinstance(routing, dict) else []
+        desired_rules = (
+            desired_routing.get("rules", []) if isinstance(desired_routing, dict) else []
+        )
+        actual_valid, actual = _selected_record(
+            rules if isinstance(rules, list) else [], "marktag", marktag
+        )
+        desired_valid, wanted = _selected_record(
+            desired_rules if isinstance(desired_rules, list) else [], "marktag", marktag
+        )
+        checks.append(actual_valid and desired_valid and actual == wanted)
+        source_state_selected = True
+    client_keys = {"inbound_tag", "client_email"}
+    if client_keys & selector.keys():
+        if not client_keys <= selector.keys():
+            raise RuntimeFailure("Incomplete managed egress client rollback selector")
+        inbound_tag = selector.get("inbound_tag")
+        email = selector.get("client_email")
+        if not isinstance(inbound_tag, str) or not inbound_tag:
+            raise RuntimeFailure("Invalid managed egress inbound rollback selector")
+        if not isinstance(email, str) or not email.startswith(MANAGED_EGRESS_CLIENT_PREFIX):
+            raise RuntimeFailure("Invalid managed egress client rollback selector")
+        actual_valid, actual = _selected_client(config, inbound_tag, email)
+        desired_valid, wanted = _selected_client(desired, inbound_tag, email)
+        checks.append(actual_valid and desired_valid and actual == wanted)
+    if source_state_selected:
+        for key in ("observatory", "burstObservatory"):
+            checks.append(
+                (key in config, copy.deepcopy(config.get(key)))
+                == (key in desired, copy.deepcopy(desired.get(key)))
+            )
+        checks.append(
+            _managed_sniffing_records(config) == _managed_sniffing_records(desired)
+        )
+    if not checks:
+        raise RuntimeFailure("Managed egress rollback state selector is empty")
+    return all(checks)
+
+
+def promote_outbound_tags(config: dict) -> bool:
+    outbounds = config.get("outbounds", [])
+    if not isinstance(outbounds, list):
+        return False
+    used = {
+        item.get("tag")
+        for item in outbounds
+        if isinstance(item, dict) and isinstance(item.get("tag"), str) and item["tag"]
+    }
+    changed = False
+    for index, outbound in enumerate(outbounds):
+        if not isinstance(outbound, dict) or outbound.get("tag"):
+            continue
+        protocol = outbound.get("protocol")
+        if not isinstance(protocol, str) or not protocol:
+            continue
+        candidate = f"{protocol}-{index}"
+        suffix = 2
+        while candidate in used:
+            candidate = f"{protocol}-{index}-{suffix}"
+            suffix += 1
+        outbound["tag"] = candidate
+        used.add(candidate)
+        changed = True
+    return changed
+
+
+def routing_rule_priority(rule: dict) -> int:
+    outbound_tag = str(rule.get("outboundTag") or "")
+    if outbound_tag == "nginx":
+        return -1
+    if outbound_tag.startswith("tunnel-"):
+        return 0
+    marktag = str(rule.get("marktag") or "")
+    if marktag.startswith("routed:"):
+        return 1 if len(marktag.split(":")) == 4 else 2
+    if marktag.startswith(MANAGED_EGRESS_RULE_PREFIX):
+        return 2
+    if marktag in {"home_broadband_warp", "speedtest_warp"}:
+        return 3
+    return 4
 
 
 def telemetry() -> dict:
@@ -136,6 +477,8 @@ def edit_client(inbound: dict, client: dict, *, remove: bool = False) -> None:
         "anytls": "users",
         "snell": "users",
         "mieru": "users",
+        "socks": "accounts",
+        "socks5": "accounts",
     }.get(protocol)
     if container is None:
         raise RuntimeFailure("Client editing for this protocol is not implemented")
@@ -151,8 +494,10 @@ def edit_client(inbound: dict, client: dict, *, remove: bool = False) -> None:
     clients = settings.get(container, [])
     if not isinstance(clients, list) or any(not isinstance(item, dict) for item in clients):
         raise RuntimeFailure(f"settings.{container} must be an array of user objects")
-    if container == "users" and settings.get("clients"):
-        raise RuntimeFailure("This protocol uses settings.users, not settings.clients")
+    if container != "clients" and settings.get("clients"):
+        raise RuntimeFailure(
+            f"This protocol uses settings.{container}, not settings.clients"
+        )
     remaining = [item for item in clients if item.get("email") != client["email"]]
     options = snell_options(settings) if protocol == "snell" else None
     if options and any(snell_options({"users": [item]}) != options for item in clients):
@@ -185,14 +530,35 @@ def edit_entries(config: dict, key: str, payload: dict) -> None:
     item_key = "inbound" if key == "inbounds" else "outbound"
     if action == "reorder":
         tags = payload.get("tags", [])
-        if len(tags) != len(entries) or len(set(tags)) != len(tags):
-            raise RuntimeFailure("Reordering requires every existing tag exactly once")
-        config[key] = [find_tag(entries, tag) for tag in tags]
+        if (
+            not isinstance(tags, list)
+            or not tags
+            or any(not isinstance(tag, str) or not tag for tag in tags)
+        ):
+            raise RuntimeFailure("Reordering requires at least one valid tag")
+        indices: dict[str, list[int]] = {}
+        for index, entry in enumerate(entries):
+            if isinstance(entry, dict) and isinstance(entry.get("tag"), str):
+                indices.setdefault(entry["tag"], []).append(index)
+        used: set[int] = set()
+        reordered = []
+        for tag in tags:
+            candidates = indices.get(tag, [])
+            while candidates and candidates[0] in used:
+                candidates.pop(0)
+            if candidates:
+                index = candidates.pop(0)
+                used.add(index)
+                reordered.append(entries[index])
+        reordered.extend(entry for index, entry in enumerate(entries) if index not in used)
+        config[key] = reordered
         return
     if action == "add":
         item = payload.get(item_key)
         if not isinstance(item, dict) or not item.get("tag"):
             raise RuntimeFailure("A tagged entry is required")
+        if key == "outbounds":
+            validate_manual_outbound_tls(item)
         existing = [entry for entry in entries if entry.get("tag") == item["tag"]]
         if existing and payload.get("allow_existing") is True and existing == [item]:
             return
@@ -204,13 +570,26 @@ def edit_entries(config: dict, key: str, payload: dict) -> None:
         matches = [entry for entry in entries if entry.get("tag") == payload.get("tag")]
         if not matches:
             return
-    current = find_tag(entries, payload.get("tag"))
+    lookup_tag = payload.get("tag")
+    if action in {"replace", "update"} and key == "outbounds" and not lookup_tag:
+        replacement = payload.get(item_key)
+        if isinstance(replacement, dict):
+            lookup_tag = replacement.get("tag")
+    current = find_tag(entries, lookup_tag)
     if action == "remove":
         entries.remove(current)
     elif action in {"replace", "update"}:
         item = payload.get(item_key)
-        if not isinstance(item, dict) or item.get("tag") != current.get("tag"):
-            raise RuntimeFailure("Replacement must retain its tag")
+        if not isinstance(item, dict) or not item.get("tag"):
+            raise RuntimeFailure("A tagged replacement is required")
+        if key == "outbounds":
+            validate_manual_outbound_tls(item)
+        if key == "inbounds" and item.get("tag") != current.get("tag"):
+            raise RuntimeFailure("Inbound replacement must retain its tag")
+        if item.get("tag") != current.get("tag") and any(
+            entry is not current and entry.get("tag") == item.get("tag") for entry in entries
+        ):
+            raise RuntimeFailure("Replacement tag already exists")
         entries[entries.index(current)] = copy.deepcopy(item)
     elif action in {"add-client", "remove-client"} and key == "inbounds":
         edit_client(current, payload.get("client"), remove=action == "remove-client")
@@ -243,12 +622,23 @@ def edit_routing(config: dict, payload: dict) -> None:
         if not isinstance(payload.get("routing"), dict):
             raise RuntimeFailure("Routing must be an object")
         config["routing"] = copy.deepcopy(payload["routing"])
-        for source, target in [
-            ("observatory", "observatory"),
-            ("burst_observatory", "burstObservatory"),
+        for sources, target in [
+            (("observatory",), "observatory"),
+            # The official mmw-agent wire field is camelCase.  Retain the
+            # former internal spelling as an input alias for journal replay,
+            # but never let two conflicting values be applied ambiguously.
+            (("burstObservatory", "burst_observatory"), "burstObservatory"),
         ]:
-            if source in payload:
-                config[target] = copy.deepcopy(payload[source])
+            supplied = [source for source in sources if source in payload]
+            if not supplied:
+                continue
+            if len(supplied) > 1 and payload[supplied[0]] != payload[supplied[1]]:
+                raise RuntimeFailure("Conflicting burst observatory values")
+            value = payload[supplied[0]]
+            if value is None:
+                config.pop(target, None)
+            else:
+                config[target] = copy.deepcopy(value)
     elif action == "add_rule":
         rule = payload.get("rule")
         if not isinstance(rule, dict):
@@ -258,9 +648,16 @@ def edit_routing(config: dict, payload: dict) -> None:
             return
         if rule.get("marktag") and existing:
             raise RuntimeFailure("Rule marktag already exists")
-        index = payload.get("index", len(rules))
-        if not isinstance(index, int) or not 0 <= index <= len(rules):
-            raise RuntimeFailure("Rule insertion index is out of bounds")
+        priority = routing_rule_priority(rule)
+        index = next(
+            (
+                current
+                for current, existing_rule in enumerate(rules)
+                if isinstance(existing_rule, dict)
+                and routing_rule_priority(existing_rule) >= priority
+            ),
+            len(rules),
+        )
         rules.insert(index, copy.deepcopy(rule))
     elif action == "remove_rule":
         if payload.get("marktag"):
@@ -708,6 +1105,8 @@ class Operations:
             return await self.agent_management.probe_master_url(body)
         if path == "/api/child/agent/update-master-url" and method == "POST":
             return self.agent_management.update_master_url(body)
+        if path == OUTBOUND_TLS_PIN_ENDPOINT and method == "POST":
+            return await probe_tls_certificate(body)
         if path == "/api/child/agent/switch-xray-mode" and method == "POST":
             raise RuntimeFailure(
                 "Open Node runtime mode is selected during host deployment; remote switching "
@@ -854,6 +1253,7 @@ class Operations:
                         raise RuntimeFailure("Xray configuration changed since it was read")
                     expected = decode_config(decode_xray_primary(current))
                     candidate = decode_config(body.get("content"))
+                    assert_managed_egress_preserved(expected, candidate)
                     self.managed_protocols.assert_xray_compatible(candidate)
                     result = await self.runtime.write(
                         candidate,
@@ -881,9 +1281,11 @@ class Operations:
                         "path": str(self.runtime.config.xray_config),
                     }
                 if method == "POST":
+                    current = self.runtime.read()
                     candidate = decode_config(body.get("config"))
+                    assert_managed_egress_preserved(current, candidate)
                     self.managed_protocols.assert_xray_compatible(candidate)
-                    return await self.runtime.write(candidate)
+                    return await self.runtime.write(candidate, expected=current)
             if path == "/api/child/xray/test-config" and method == "POST":
                 ok, output = await self.runtime.validate(body.get("config"))
                 return {"ok": ok, "output": output}
@@ -938,29 +1340,88 @@ class Operations:
                 key = path.rsplit("/", 1)[-1]
                 config = self.runtime.read()
                 if method == "GET":
-                    return {"success": True, key: config.get(key, {} if key == "routing" else [])}
+                    if key == "outbounds":
+                        expected = copy.deepcopy(config)
+                        if promote_outbound_tags(config):
+                            await self.runtime.write(config, expected=expected)
+                    result = {
+                        "success": True,
+                        key: config.get(key, {} if key == "routing" else []),
+                    }
+                    if key == "routing":
+                        for field in ("observatory", "burstObservatory"):
+                            if field in config:
+                                result[field] = copy.deepcopy(config[field])
+                    return result
                 if method == "POST":
+                    expected = copy.deepcopy(config)
                     if key == "routing":
                         edit_routing(config, body)
                     else:
                         edit_entries(config, key, body)
+                    assert_managed_egress_preserved(expected, config)
                     self.managed_protocols.assert_xray_compatible(config)
                     return await self.runtime.write(
-                        config, restart=not body.get("no_restart", False)
+                        config,
+                        restart=not body.get("no_restart", False),
+                        expected=expected,
                     )
+            if path == "/api/child/egress/apply" and method == "POST":
+                expected = decode_config(body.get("expected_config"))
+                candidate = decode_config(body.get("config"))
+                validate_changed_managed_outbound_tls(expected, candidate)
+                self.managed_protocols.assert_xray_compatible(candidate)
+                # A guarded egress command may be retried, and an automatic
+                # rollback is also queued for a forward command that failed
+                # before it changed the file.  Treat the desired state as an
+                # idempotent success so that this harmless rollback cannot
+                # block the following target-client cleanup command.
+                current = self.runtime.read()
+                if current == candidate:
+                    return {
+                        "success": True,
+                        "restart_required": False,
+                        "changed": False,
+                    }
+                rollback_state = body.get("allow_diverged_managed_state")
+                if rollback_state is not None:
+                    if not isinstance(rollback_state, dict) or not managed_state_matches(
+                        candidate, candidate, rollback_state
+                    ):
+                        raise RuntimeFailure(
+                            "Managed egress rollback selector does not describe its desired state"
+                        )
+                    if current != expected and managed_state_matches(
+                        current, candidate, rollback_state
+                    ):
+                        return {
+                            "success": True,
+                            "restart_required": False,
+                            "changed": False,
+                            "diverged": True,
+                        }
+                return await self.runtime.write(
+                    candidate,
+                    restart=not body.get("no_restart", False),
+                    expected=expected,
+                )
             if path == "/api/child/batch-apply" and method == "POST":
                 config = self.runtime.read()
+                expected = copy.deepcopy(config)
                 for item in body.get("inbound_clients", []):
                     edit_client(
                         find_tag(config.get("inbounds", []), item.get("tag")), item.get("client")
                     )
                 for item in body.get("routing_user_additions", []):
                     edit_routing(config, {**item, "action": "add_user_to_rule"})
+                assert_managed_egress_preserved(expected, config)
                 self.managed_protocols.assert_xray_compatible(config)
                 limits = await self.runtime.limiter.provision(body.get("limiter_users", []), config)
                 try:
                     result = await self.runtime.write(
-                        config, restart=not body.get("no_restart", False)
+                        config,
+                        restart=not body.get("no_restart", False),
+                        expected=expected,
                     )
                 except (OSError, ValueError) as exc:
                     if limits is not None:

@@ -146,7 +146,7 @@ describe("React certificate workflows", () => {
     fireEvent.click(screen.getByRole("button", { name: "创建证书" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("", "POST", expect.objectContaining({ challenge_type: challenge, validation_server_id: "remote", provider_id: null, webroot_id: challenge === "webroot" ? "remote-public" : null }));
   });
-  it("rotates DNS credentials without echoing existing values and clears them on provider changes/close", async () => {
+  it("rotates DNS credentials without echoing existing values", async () => {
     render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("tab", { name: "DNS 服务商" }));
     fireEvent.click(screen.getByRole("button", { name: "更换 DNS 凭据" }));
     expect((screen.getByLabelText("CF_API_TOKEN") as HTMLInputElement).value).toBe("");
@@ -154,6 +154,9 @@ describe("React certificate workflows", () => {
     fireEvent.change(screen.getByLabelText("CF_API_TOKEN"), { target: { value: "new-secret" } });
     fireEvent.click(screen.getByRole("button", { name: "保存服务商" })); await flush();
     expect(certificateRequest).toHaveBeenCalledWith("/providers/provider", "PUT", { name: "Cloud DNS", provider: "cloudflare", credentials: { CF_API_TOKEN: "new-secret" } });
+  });
+  it("clears new DNS credentials on provider changes and close", async () => {
+    render(<CertificatesView />); await flush(); fireEvent.click(screen.getByRole("tab", { name: "DNS 服务商" }));
     fireEvent.click(screen.getByRole("button", { name: "添加 DNS 服务商" }));
     fireEvent.change(screen.getByLabelText("CF_API_TOKEN"), { target: { value: "must-clear" } });
     await selectOption("DNS 服务商类型", "other");

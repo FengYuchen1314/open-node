@@ -7,7 +7,7 @@ import type { CustomRule, OverrideScript, ProxyProvider } from "../../domain/sub
 import * as external from "../../services/external-subscriptions";
 import * as customizations from "../../services/subscription-customizations";
 import * as subscriptions from "../../services/subscriptions";
-import { routes } from "../../routes";
+import { legacyRouteRedirects, routes } from "../../routes";
 import SubscriptionCustomizationsView from "./SubscriptionCustomizationsView";
 
 vi.mock("../../services/external-subscriptions");
@@ -53,7 +53,8 @@ describe("SubscriptionCustomizationsView", () => {
   });
 
   it("is routed, loads both official resource types and creates a YAML rule", async () => {
-    expect(routes.some(route => route.path === "/subscription-customizations")).toBe(true);
+    expect(routes.some(route => route.path === "/templates")).toBe(true);
+    expect(legacyRouteRedirects.find(route => route.path === "/subscription-customizations")?.to).toBe("/templates?tab=customizations");
     render(<SubscriptionCustomizationsView />); await flush();
     expect(screen.getByText("中国直连")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Proxy Provider（1）" }));

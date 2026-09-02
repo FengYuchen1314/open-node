@@ -29,6 +29,7 @@ from open_node.api.routes import (
     registration_invitations,
     renewals,
     security,
+    server_egress,
     server_management,
     server_sharing,
     servers,
@@ -60,6 +61,7 @@ private_router.include_router(branding.router)
 private_router.include_router(appearance.router)
 private_router.include_router(camouflage_pools.router)
 private_router.include_router(server_management.router)
+private_router.include_router(server_egress.router)
 private_router.include_router(speedtests.router)
 private_router.include_router(server_sharing.router)
 private_router.include_router(server_sharing.consumer_router)

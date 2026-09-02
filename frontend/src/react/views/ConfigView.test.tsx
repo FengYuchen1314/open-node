@@ -245,6 +245,13 @@ describe("React configuration workspace", () => {
     fireEvent.click(card("运行时清单").getByRole("button", { name: "导入缺失节点" })); await flush(); expect(subscriptions.importManagedNodesFromRuntimeInbounds).toHaveBeenCalledWith("edge");
     fireEvent.click(card("运行时入站").getByRole("button", { name: "创建节点" })); await flush(); expect(subscriptions.createManagedNodeFromRuntimeInbound).toHaveBeenCalledWith("edge", { source_index: 0 });
   });
+  it("keeps node-catalog mutations out of the server-settings embedding", async () => {
+    render(<ConfigView allowNodeCatalogMutations={false} />); await flush(); await tab("运行时");
+    expect(card("运行时清单").queryByRole("button", { name: "导入缺失节点" })).toBeNull();
+    expect(card("运行时入站").queryByRole("button", { name: "创建节点" })).toBeNull();
+    expect(card("受管理节点核对").queryByRole("button", { name: "同步" })).toBeNull();
+    expect(screen.getAllByText("扫描备注").length).toBeGreaterThan(0);
+  });
   it("allows stale-node sync while keeping missing-runtime nodes locked", async () => {
     render(<ConfigView />); await flush(); await tab("运行时"); const panel = card("受管理节点核对");
     const sync = panel.getAllByRole("button", { name: "同步" }); expect((sync[1] as HTMLButtonElement).disabled).toBe(true);

@@ -1,15 +1,24 @@
 import json
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from open_node.domain.inventory import AgentCommandCreate
+from open_node.domain.inventory import (
+    AgentCommandCreate,
+    ServerCreate,
+    XrayConfigSnapshotSource,
+)
 from open_node.services.inventory import (
+    AgentChangeSetModel,
+    ChangeSetServerLockModel,
     CommandModel,
     ManagedNodeModel,
     ManagedNodeRemovalModel,
     ServerModel,
+    SubscriptionCredentialModel,
 )
 from open_node.services.node_cleanup import ENDPOINT
+from open_node.services.server_egress import ServerEgress
 from open_node.services.subscription_access import ENDPOINT as ACCESS
 from sqlalchemy import Column, ForeignKey, MetaData, Table, select, text
 from test_subscription_access import complete, current, lease, reconcile, setup
@@ -162,6 +171,110 @@ def test_edit_preserves_identity_usage_links_and_plan_dates(env):
     assert client.post("/api/v1/users/alice/subscription-token").json() == link
     assert client.get("/api/v1/users/alice/settings").json()["user"] == user
     assert client.get("/api/v1/users/alice/traffic").json()["total"] == 300
+
+
+def test_managed_egress_must_be_disconnected_before_node_identity_change_or_removal(env):
+    client, _, _, identifier, *_ = env
+    store = client.app.state.inventory
+    node_view = detail(client, identifier)["node"]
+    target_server_id = node_view["server_id"]
+    source_server_id = str(
+        store.create_server(ServerCreate(name="egress source", ip_address="198.51.100.88")).id
+    )
+    _, _, email = ServerEgress._identity(source_server_id, str(identifier))
+    now = datetime.now(UTC)
+    source_config = {
+        "inbounds": [],
+        # Exercise the orphan case: the source records were removed manually,
+        # but the dedicated credential still exists on the target server.
+        "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+        "routing": {"rules": []},
+    }
+    target_config = {
+        "inbounds": [
+            {
+                "tag": node_view["inbound_tag"],
+                "protocol": node_view["protocol"],
+                "settings": {"clients": [{"email": email, "id": "secret"}]},
+            }
+        ],
+        "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+    }
+    with store._session() as session:
+        for server_id, config in (
+            (source_server_id, source_config),
+            (target_server_id, target_config),
+        ):
+            store._upsert_current_xray_config_snapshot(
+                session,
+                session.get(ServerModel, server_id),
+                json.dumps(config),
+                XrayConfigSnapshotSource.AGENT_REPORT,
+                None,
+                now,
+            )
+        session.commit()
+
+    update = client.put(
+        f"/api/v1/nodes/{identifier}/settings",
+        json=settings(client, identifier, config={**node_view["config"], "port": 8443}),
+    )
+    assert update.status_code == 409
+    assert "Disconnect this node from server egress" in update.json()["detail"]
+    removal = remove(client, identifier)
+    assert removal.status_code == 409
+    assert "Disconnect this node from server egress" in removal.json()["detail"]
+
+    # Catalog import must apply the same protection even when this node has no
+    # ordinary subscriber credential and only the dedicated egress client remains.
+    with store._session() as session:
+        for credential in session.scalars(
+            select(SubscriptionCredentialModel).where(
+                SubscriptionCredentialModel.node_id == str(identifier)
+            )
+        ):
+            session.delete(credential)
+        session.commit()
+    catalog = client.get("/api/v1/catalog/export").raise_for_status().json()["catalog"]
+    imported_node = next(item for item in catalog["nodes"] if item["name"] == node_view["name"])
+    imported_node["config"] = {**imported_node["config"], "port": 9443}
+    imported = client.post("/api/v1/catalog/import", json={"catalog": catalog})
+    assert imported.status_code == 409
+    assert "Disconnect this node from server egress" in imported.json()["detail"]
+
+
+def test_coordinated_server_lock_blocks_node_identity_changes(env):
+    client, _, server_id, identifier, *_ = env
+    store = client.app.state.inventory
+    now = datetime.now(UTC)
+    change_id = str(uuid4())
+    with store._session() as session:
+        session.add(
+            AgentChangeSetModel(
+                id=change_id,
+                name="in-flight egress",
+                description="",
+                status="dispatched",
+                rollback_on_failure=True,
+                rollback_reason="",
+                resolution_reason="",
+                coordination_version=1,
+                archived_steps=[],
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            ChangeSetServerLockModel(server_id=str(server_id), change_set_id=change_id)
+        )
+        session.commit()
+
+    response = client.put(
+        f"/api/v1/nodes/{identifier}/settings",
+        json=settings(client, identifier, enabled=False),
+    )
+    assert response.status_code == 409
+    assert "coordinated server change" in response.json()["detail"]
 
 
 @pytest.mark.parametrize(

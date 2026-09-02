@@ -6,7 +6,7 @@ const messages: Record<string, string> = {
   ddns_server_not_found: "服务器不存在，请刷新列表。",
   ddns_invalid_request: "DDNS 设置不正确，请检查域名和服务商。",
   ddns_revision_conflict: "设置已被其他页面修改，请刷新后重试。",
-  ddns_provider_not_found: "DNS 服务商不存在，请先到证书管理页检查。",
+  ddns_provider_not_found: "DNS 服务商不存在，请在服务器管理的 DDNS 页面检查。",
   ddns_provider_unsupported: "该 DNS 服务商不支持动态 A/AAAA 更新。",
   ddns_provider_credentials_invalid: "DNS 服务商凭据不完整或无法解密。",
   ddns_domain_invalid: "请输入完整域名，不能使用 IP、通配符或单段名称。",

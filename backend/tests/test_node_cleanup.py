@@ -1,6 +1,7 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from open_node.domain.inventory import AgentCommandCreate
 from sqlalchemy import text
 from test_inventory import make_client
 
@@ -35,11 +36,11 @@ def queue(client, base, action="apply"):
         "inbound_tags": ["edge"],
         "acknowledge_runtime_restart": True,
     }
-    response = client.post(
-        base + "/commands", json={"method": "POST", "path": ENDPOINT, "body": payload}
+    command = client.app.state.inventory.create_command(
+        UUID(base.rsplit("/", 1)[-1]),
+        AgentCommandCreate(method="POST", path=ENDPOINT, body=payload),
     )
-    assert response.status_code == 201, response.text
-    return response.json()["command"]
+    return command.model_dump(mode="json")
 
 
 def lease(client, token):

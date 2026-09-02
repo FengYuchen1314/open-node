@@ -52,7 +52,7 @@ release、最新本机健康状态、与控制面的认证连接以及受管运�
 /api/v1/agents/bootstrap/redeem
 ```
 
-当前 manifest schema 2 包含 Agent `0.3.0a2` wheel、bootstrap 包、`BUILD.json`、官方
+当前 manifest schema 2 包含 Agent `0.3.0a4` wheel、bootstrap 包、`BUILD.json`、官方
 Xray `v26.3.27` 归档和固定的 Mihomo `v1.19.30` 制品。面板生成命令时会把 installer
 SHA-256 固定下来；installer 再逐项校验 manifest 中的精确路径、文件大小、SHA-256、
 Agent 版本和源码身份。Agent 主机拒绝制品重定向，不使用 `latest`，也不执行

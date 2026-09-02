@@ -520,6 +520,10 @@ _XRAY_MUTATING_PATH_PREFIXES = (
     "/api/child/inbounds",
     "/api/child/outbounds",
     "/api/child/routing",
+    "/api/child/egress/apply",
+    "/api/child/warp/install",
+    "/api/child/warp/license",
+    "/api/child/warp/remove",
     "/api/child/batch-apply",
     "/api/child/subscription-access",
     "/api/child/xray/config",
@@ -3065,6 +3069,13 @@ class InventoryStore:
                     f"runtime inbound already maps to managed node: {draft.existing_node_id}"
                 )
             drifts_before = self._runtime_managed_node_drifts(draft.draft, node)
+            if drifts_before:
+                references = self._node_management().managed_egress_references(session, node)
+                if references:
+                    raise ManagedNodeConflict(
+                        "Disconnect this node from server egress before synchronizing its "
+                        f"runtime identity ({'; '.join(references)})"
+                    )
             updated_fields = self._sync_managed_node_public_runtime_fields(node, draft.draft)
             if updated_fields:
                 node.updated_at = now
@@ -5445,16 +5456,21 @@ class InventoryStore:
             session.commit()
             return [self._command_read(command) for command in commands]
 
-    def list_commands(self, server_id: UUID) -> list[AgentCommandRead]:
+    def list_commands(
+        self,
+        server_id: UUID,
+        command_ids: list[UUID] | None = None,
+    ) -> list[AgentCommandRead]:
         with self._session() as session:
             server = session.get(ServerModel, str(server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {server_id}")
-            commands = session.scalars(
-                select(CommandModel)
-                .where(CommandModel.server_id == str(server_id))
-                .order_by(CommandModel.created_at.desc())
-            ).all()
+            statement = select(CommandModel).where(CommandModel.server_id == str(server_id))
+            if command_ids is not None:
+                statement = statement.where(
+                    CommandModel.id.in_([str(identifier) for identifier in command_ids])
+                )
+            commands = session.scalars(statement.order_by(CommandModel.created_at.desc())).all()
             return [self._command_read(command) for command in commands]
 
     def list_command_stream_frames(
@@ -11505,7 +11521,16 @@ class InventoryStore:
         payload: AgentCommandResultRequest,
         created_at: datetime,
     ) -> None:
-        if command.path != "/api/child/xray/config" or payload.error or payload.status >= 400:
+        if command.path not in {
+            "/api/child/xray/config",
+            "/api/child/egress/apply",
+        } or payload.error or payload.status >= 400:
+            return
+        if (
+            command.path == "/api/child/egress/apply"
+            and isinstance(payload.body, dict)
+            and payload.body.get("diverged") is True
+        ):
             return
         config, source = self._xray_config_snapshot_source(command, payload)
         if not config or not config.strip():

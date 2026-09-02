@@ -1110,7 +1110,7 @@ class SubscriptionPlanCreate(BaseModel):
     cycle_days: int = Field(default=30, gt=0)
     is_reset: bool = False
     reset_day: int = Field(default=0, ge=0, le=31)
-    node_ids: list[UUID] = Field(default_factory=list, max_length=1000)
+    node_ids: list[UUID] = Field(min_length=1, max_length=1000)
     node_multipliers: dict[UUID, float] = Field(default_factory=dict)
     node_name_overrides: dict[UUID, str] = Field(default_factory=dict, max_length=1000)
     node_name_override_enabled: bool = False
@@ -1123,6 +1123,8 @@ class SubscriptionPlanCreate(BaseModel):
 
     @model_validator(mode="after")
     def normalize_node_names(self):
+        if len(set(self.node_ids)) != len(self.node_ids):
+            raise ValueError("Plan nodes must be distinct")
         object.__setattr__(
             self,
             "node_name_overrides",
@@ -1157,6 +1159,9 @@ class SubscriptionPlanCreate(BaseModel):
 
 
 class SubscriptionPlanRead(SubscriptionPlanCreate):
+    # Imported historical catalogs may still contain an empty plan.  Writes are
+    # fail-closed above, while reads remain able to surface that state for repair.
+    node_ids: list[UUID] = Field(default_factory=list, max_length=1000)
     id: UUID
     traffic_limit_bytes: int
     created_at: datetime

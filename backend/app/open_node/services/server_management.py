@@ -77,12 +77,109 @@ class ServerManagement:
         with self.store._session() as session:
             return self._settings(self._server(session, identifier))
 
+    def _managed_egress_references(self, session, server) -> list[str]:
+        """Find managed egress identities owned by or targeting ``server``.
+
+        A source server owns all identities carrying its stable UUID fragment.
+        A target server owns identities carrying one of its managed-node UUID
+        fragments, and any dedicated managed client installed in its runtime.
+        Search every runtime's current snapshot because a partially applied or
+        manually edited egress may leave only the remote half behind.
+        """
+
+        servers = list(session.scalars(select(ServerModel).order_by(ServerModel.id)))
+        target_fragments = {
+            node.id.replace("-", "")[:12]
+            for node in session.scalars(
+                select(ManagedNodeModel).where(ManagedNodeModel.server_id == server.id)
+            )
+        }
+        source_fragment = server.id.replace("-", "")[:12]
+        source_outbound_prefix = f"managed-egress:{source_fragment}:"
+        source_rule_prefix = f"managed-egress-rule:{source_fragment}:"
+        source_client_prefix = f"open_node_egress__{source_fragment}__"
+
+        def target_identity(value, prefix, separator):
+            return isinstance(value, str) and value.startswith(prefix) and any(
+                value.endswith(f"{separator}{fragment}") for fragment in target_fragments
+            )
+
+        references = []
+        for runtime_server in servers:
+            snapshot = self.store._current_xray_config_snapshot(session, runtime_server.id)
+            if snapshot is None:
+                continue
+            try:
+                config = json.loads(snapshot.config)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(config, dict):
+                continue
+
+            outbounds = config.get("outbounds", [])
+            if not isinstance(outbounds, list):
+                outbounds = []
+            for outbound in outbounds:
+                tag = outbound.get("tag") if isinstance(outbound, dict) else None
+                if (
+                    isinstance(tag, str)
+                    and tag.startswith(source_outbound_prefix)
+                    or target_identity(tag, "managed-egress:", ":")
+                ):
+                    references.append(f"{runtime_server.name}: {tag}")
+
+            routing = config.get("routing") or {}
+            rules = routing.get("rules", []) if isinstance(routing, dict) else []
+            if not isinstance(rules, list):
+                rules = []
+            for rule in rules:
+                marktag = rule.get("marktag") if isinstance(rule, dict) else None
+                if (
+                    isinstance(marktag, str)
+                    and marktag.startswith(source_rule_prefix)
+                    or target_identity(marktag, "managed-egress-rule:", ":")
+                ):
+                    references.append(f"{runtime_server.name}: {marktag}")
+
+            inbounds = config.get("inbounds", [])
+            if not isinstance(inbounds, list):
+                inbounds = []
+            for inbound in inbounds:
+                if not isinstance(inbound, dict):
+                    continue
+                settings = inbound.get("settings") or {}
+                if not isinstance(settings, dict):
+                    continue
+                for container in ("clients", "users", "accounts"):
+                    clients = settings.get(container, [])
+                    if not isinstance(clients, list):
+                        continue
+                    for client in clients:
+                        email = client.get("email") if isinstance(client, dict) else None
+                        if not isinstance(email, str):
+                            continue
+                        if (
+                            email.startswith(source_client_prefix)
+                            or target_identity(email, "open_node_egress__", "__")
+                            or (
+                                runtime_server.id == server.id
+                                and email.startswith("open_node_egress__")
+                            )
+                        ):
+                            inbound_tag = inbound.get("tag") or "unnamed inbound"
+                            references.append(
+                                f"{runtime_server.name}: {inbound_tag} / {email}"
+                            )
+        return list(dict.fromkeys(references))
+
     def update(self, identifier, payload):
         with self.store._coordinated_session() as session:
             server = self._server(session, identifier)
             self._require_local(session, server)
             if self._settings(server).revision != payload.expected_revision:
                 raise ServerManagementConflict("Server settings changed; refresh before saving")
+            if session.get(ChangeSetServerLockModel, server.id):
+                raise ServerManagementConflict("A coordinated server change is in progress")
             if session.scalar(
                 select(ServerModel.id).where(
                     ServerModel.name == payload.name,
@@ -90,6 +187,13 @@ class ServerManagement:
                 )
             ):
                 raise DuplicateServerNameError(f"server name already exists: {payload.name}")
+            profile_changed = any(
+                getattr(server, key) != getattr(payload, key) for key in PROFILE_FIELDS
+            )
+            if profile_changed and self._managed_egress_references(session, server):
+                raise ServerManagementConflict(
+                    "Disconnect managed server egress before changing server settings"
+                )
             old_host = self.store._server_subscription_host(server)
             for key in PROFILE_FIELDS:
                 setattr(server, key, getattr(payload, key))
@@ -215,6 +319,8 @@ class ServerManagement:
             blockers.append("Complete pending node removals before removing this server")
         if session.get(ChangeSetServerLockModel, server.id):
             blockers.append("A change set still holds this server")
+        if self._managed_egress_references(session, server):
+            blockers.append("Disconnect managed server egress before removing this server")
         blockers += [
             f"Certificate validation is active: {row.name}"
             for row in validations

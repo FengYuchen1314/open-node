@@ -8,7 +8,8 @@ No activation, entitlement lookup or paid feature gate is involved.
 
 ## Provisioning
 
-Create the product user and assign a plan from Subscriptions. The key icon
+Create the product user and assign a plan from the administrator **用户管理** workspace.
+Plans and their node/template membership are maintained in **套餐管理**. The key icon
 beside that user opens **User login**. Set a password of 12-1024 characters
 and confirm session revocation. Existing catalog users have no login password
 until one is explicitly provisioned. Alternatively, an administrator can issue

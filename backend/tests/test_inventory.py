@@ -13,9 +13,19 @@ from conftest import authenticated_client
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from open_node.core.config import Settings
-from open_node.domain.inventory import AgentCapabilities, AgentCommandResultRequest
+from open_node.domain.inventory import (
+    AgentCapabilities,
+    AgentCommandCreate,
+    AgentCommandResultRequest,
+)
 from open_node.main import create_app
-from open_node.services.inventory import AgentScanResultModel, CommandModel, create_inventory_engine
+from open_node.services.inventory import (
+    AgentScanResultModel,
+    CommandModel,
+    InventoryStore,
+    ServerModel,
+    create_inventory_engine,
+)
 from sqlalchemy import Column, MetaData, Table, select, text, update
 
 
@@ -1421,7 +1431,7 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
         assert len(queued_payload["commands"]) == 1
         assert queued_payload["commands"][0]["status"] == "leased"
         assert queued_payload["commands"][0]["path"] == "/api/child/batch-apply"
-        assert queued_payload["commands"][0]["body"]["no_restart"] is False
+        assert queued_payload["commands"][0]["body"] == {"redacted": True}
         assert queued_payload["scan_command"]["status"] == "waiting"
         assert queued_payload["scan_command"]["path"] == "/api/child/scan"
         rpc_call = websocket.receive_json()
@@ -1454,11 +1464,7 @@ def test_xray_runtime_credential_reconciliation_reports_client_email_drift(
         assert len(cleanup_queued_payload["commands"]) == 1
         assert cleanup_queued_payload["commands"][0]["status"] == "leased"
         assert cleanup_queued_payload["commands"][0]["path"] == "/api/child/inbounds"
-        assert cleanup_queued_payload["commands"][0]["body"] == {
-            "action": "remove-client",
-            "tag": "vless-443",
-            "client": {"email": "orphan@example.com"},
-        }
+        assert cleanup_queued_payload["commands"][0]["body"] == {"redacted": True}
         assert cleanup_queued_payload["scan_command"]["status"] == "waiting"
         assert cleanup_queued_payload["scan_command"]["path"] == "/api/child/scan"
         cleanup_rpc = websocket.receive_json()
@@ -2457,7 +2463,13 @@ def test_xray_test_config_operation_serializes_structured_config(tmp_path: Path)
     assert command["method"] == "POST"
     assert command["path"] == "/api/child/xray/test-config"
     assert command["timeout_ms"] == 15_000
-    assert json.loads(command["body"]["config"]) == {"log": {"loglevel": "warning"}}
+    assert command["body"] == {"redacted": True}
+    internal = next(
+        item
+        for item in client.app.state.inventory.list_commands(UUID(created["server"]["id"]))
+        if str(item.id) == command["id"]
+    )
+    assert json.loads(internal.body["config"]) == {"log": {"loglevel": "warning"}}
 
 
 def test_config_read_operations_queue_mmwx_child_commands(tmp_path: Path) -> None:
@@ -2516,7 +2528,7 @@ def test_xray_runtime_manage_operations_queue_agent_schemas(tmp_path: Path) -> N
             "action": "set",
             "routing": {"rules": []},
             "observatory": None,
-            "burst_observatory": {"subjectSelector": ["proxy"]},
+            "burstObservatory": {"subjectSelector": ["proxy"]},
             "no_restart": True,
             "command_timeout_ms": 45_000,
         },
@@ -2526,15 +2538,21 @@ def test_xray_runtime_manage_operations_queue_agent_schemas(tmp_path: Path) -> N
     assert outbound.status_code == 201
     assert routing.status_code == 201
     assert inbound.json()["command"]["path"] == "/api/child/inbounds"
-    assert inbound.json()["command"]["body"] == {
+    assert inbound.json()["command"]["body"] == {"redacted": True}
+    assert outbound.json()["command"]["path"] == "/api/child/outbounds"
+    assert outbound.json()["command"]["body"] == {"redacted": True}
+    internal = {
+        str(command.id): command
+        for command in client.app.state.inventory.list_commands(UUID(server_id))
+    }
+    assert internal[inbound.json()["command"]["id"]].body == {
         "action": "add-client",
         "tag": "vless-443",
         "client": {"id": "uuid-1", "email": "user@example.com"},
         "domains": ["example.com"],
     }
     assert inbound.json()["command"]["timeout_ms"] == 40_000
-    assert outbound.json()["command"]["path"] == "/api/child/outbounds"
-    assert outbound.json()["command"]["body"] == {
+    assert internal[outbound.json()["command"]["id"]].body == {
         "action": "reorder",
         "tags": ["direct", "proxy"],
     }
@@ -2626,7 +2644,13 @@ def test_batch_cert_site_route_limiter_operations_queue_agent_schemas(
     assert validate_site.status_code == 201
     assert limiter.status_code == 201
     assert batch.json()["command"]["path"] == "/api/child/batch-apply"
-    assert batch.json()["command"]["body"]["no_restart"] is True
+    assert batch.json()["command"]["body"] == {"redacted": True}
+    stored_batch = next(
+        command
+        for command in client.app.state.inventory.list_commands(UUID(server_id))
+        if str(command.id) == batch.json()["command"]["id"]
+    )
+    assert stored_batch.body["no_restart"] is True
     assert cert.json()["command"]["path"] == "/api/child/cert/deploy"
     assert cert.json()["command"]["body"]["reload"] == "nginx"
     assert cert.json()["command"]["timeout_ms"] == 70_000
@@ -2667,9 +2691,15 @@ def test_xray_config_write_operation_serializes_structured_config(tmp_path: Path
     command = response.json()["command"]
     assert command["method"] == "POST"
     assert command["path"] == "/api/child/xray/config"
-    assert command["body"]["path"] == "/usr/local/etc/xray/config.json"
-    assert command["body"]["force"] is True
-    assert json.loads(command["body"]["config"]) == {"inbounds": [], "outbounds": []}
+    assert command["body"] == {"redacted": True}
+    internal = next(
+        item
+        for item in client.app.state.inventory.list_commands(UUID(created["server"]["id"]))
+        if str(item.id) == command["id"]
+    )
+    assert internal.body["path"] == "/usr/local/etc/xray/config.json"
+    assert internal.body["force"] is True
+    assert json.loads(internal.body["config"]) == {"inbounds": [], "outbounds": []}
     assert command["timeout_ms"] == 20_000
 
 
@@ -2747,7 +2777,13 @@ def test_xray_config_command_results_record_snapshots_and_restore(
     restore_command = restore_payload["command"]
     assert restore_command["method"] == "POST"
     assert restore_command["path"] == "/api/child/xray/config"
-    assert restore_command["body"] == {"config": config_text}
+    assert restore_command["body"] == {"redacted": True}
+    internal_restore = next(
+        item
+        for item in client.app.state.inventory.list_commands(UUID(server_id))
+        if str(item.id) == restore_command["id"]
+    )
+    assert internal_restore.body == {"config": config_text}
     assert restore_command["timeout_ms"] == 60_000
 
 
@@ -2900,7 +2936,18 @@ def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_succe
         "/api/child/services/control",
     ]
     assert all(command["timeout_ms"] == 45_000 for command in applied_payload["commands"])
-    merged_config = json.loads(applied_payload["commands"][0]["body"]["config"])
+    assert [command["body"] for command in applied_payload["commands"][:2]] == [
+        {"redacted": True},
+        {"redacted": True},
+    ]
+    internal_commands = {
+        str(command.id): command
+        for command in client.app.state.inventory.list_commands(UUID(server_id))
+    }
+    merged_config_text = internal_commands[
+        applied_payload["commands"][0]["id"]
+    ].body["config"]
+    merged_config = json.loads(merged_config_text)
     assert [inbound["tag"] for inbound in merged_config["inbounds"]] == [
         "vless-443",
         "agent-only-inbound",
@@ -2910,8 +2957,8 @@ def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_succe
         "agent-only-outbound",
     ]
     assert merged_config["routing"]["rules"] == [{"outboundTag": "direct"}]
-    assert applied_payload["commands"][1]["body"] == {
-        "config": applied_payload["commands"][0]["body"]["config"],
+    assert internal_commands[applied_payload["commands"][1]["id"]].body == {
+        "config": merged_config_text,
         "force": True,
     }
     assert applied_payload["commands"][2]["body"] == {
@@ -2940,7 +2987,7 @@ def test_xray_config_recovery_apply_queues_current_and_discards_pending_on_succe
     ).json()
     assert recovery_after_apply["has_pending"] is False
     assert recovery_after_apply["current"]["config_hash"] == hashlib.sha256(
-        applied_payload["commands"][0]["body"]["config"].encode()
+        merged_config_text.encode()
     ).hexdigest()
 
 
@@ -2986,7 +3033,10 @@ def test_recovery_validation_failure_skips_writes_and_rejects_early_results(
             assert command["status"] == "skipped"
             assert command["attempts"] == 0
             assert command["completed_at"]
-            assert "prerequisite" in command["result_error"]
+            if command["path"] == "/api/child/xray/config":
+                assert command["result_error"] == "Sensitive Agent command failed"
+            else:
+                assert "prerequisite" in command["result_error"]
     assert client.post(
         "/api/v1/agents/commands/lease", json={"token": token, "max_commands": 10},
     ).json()["commands"] == []
@@ -3277,7 +3327,6 @@ def test_xray_mutating_commands_queue_deduped_master_snapshot_refresh(
         },
     )
     assert refresh_result.status_code == 200
-
     recovery_after_refresh = client.get(
         f"/api/v1/servers/{server_id}/xray/config-snapshots/recovery",
     ).json()
@@ -3287,6 +3336,74 @@ def test_xray_mutating_commands_queue_deduped_master_snapshot_refresh(
         refreshed_config.encode()
     ).hexdigest()
 
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/child/warp/install",
+        "/api/child/warp/license",
+        "/api/child/warp/remove",
+    ),
+)
+def test_warp_mutations_refresh_the_master_xray_snapshot(path: str) -> None:
+    assert InventoryStore._should_refresh_xray_snapshot_after("POST", path) is True
+
+
+def test_warp_status_does_not_refresh_the_master_xray_snapshot() -> None:
+    assert (
+        InventoryStore._should_refresh_xray_snapshot_after(
+            "GET", "/api/child/warp/status"
+        )
+        is False
+    )
+
+
+def test_successful_internal_egress_apply_updates_snapshot_before_refresh(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    created = client.post("/api/v1/servers", json={"name": "edge-egress-snapshot"}).json()
+    server_id = created["server"]["id"]
+    candidate = {
+        "inbounds": [],
+        "outbounds": [
+            {"tag": "direct", "protocol": "freedom"},
+            {
+                "tag": "managed-egress:source:target",
+                "protocol": "vless",
+                "settings": {"vnext": [{"address": "target.example", "users": [{"id": "s"}]}]},
+            },
+        ],
+        "routing": {"rules": []},
+    }
+    store = client.app.state.inventory
+    with store._session() as session:
+        server = session.get(ServerModel, server_id)
+        command = store._create_command_model(
+            session,
+            server,
+            AgentCommandCreate(
+                method="POST",
+                path="/api/child/egress/apply",
+                body={"expected_config": {}, "config": candidate},
+            ),
+        )
+        session.commit()
+        command_id = command.id
+
+    result = client.post(
+        f"/api/v1/agents/commands/{command_id}/result",
+        json={
+            "token": created["agent_token"],
+            "status": 200,
+            "body": {"success": True},
+        },
+    )
+    assert result.status_code == 200, result.text
+    with store._session() as session:
+        snapshot = store._current_xray_config_snapshot(session, server_id)
+        assert json.loads(snapshot.config) == candidate
+        assert snapshot.source_command_id == command_id
 
 def test_xray_runtime_tunnel_inventory_reads_current_config_snapshot(
     tmp_path: Path,
@@ -3458,10 +3575,10 @@ def test_xray_runtime_tunnel_inventory_reads_current_config_snapshot(
         "/api/child/inbounds",
         "/api/child/inbounds",
     ]
-    assert [command["body"]["tag"] for command in queued_payload["commands"]] == [
-        "tunnel-relay-h0",
-        "tunnel-relay-h1",
-    ]
+    assert all(
+        command["body"] == {"redacted": True}
+        for command in queued_payload["commands"]
+    )
     assert all(command["timeout_ms"] == 45_000 for command in queued_payload["commands"])
     assert queued_payload["scan_command"]["path"] == "/api/child/scan"
     assert queued_payload["scan_command"]["timeout_ms"] == 45_000
@@ -3590,11 +3707,10 @@ def test_xray_runtime_tunnel_chain_create_plans_and_queues_hops(
         "/api/child/inbounds",
         "/api/child/inbounds",
     ]
-    assert [command["body"]["inbound"]["tag"] for command in queued_payload["commands"]] == [
-        "tunnel-relay-1-h0",
-        "tunnel-relay-1-h1",
-        "tunnel-relay-1-h2",
-    ]
+    assert all(
+        command["body"] == {"redacted": True}
+        for command in queued_payload["commands"]
+    )
     assert all(command["timeout_ms"] == 45_000 for command in queued_payload["commands"])
     assert [command["server_id"] for command in queued_payload["scan_commands"]] == [
         entry["server"]["id"],
@@ -3962,9 +4078,15 @@ def test_config_file_operations_build_queries_and_bodies(tmp_path: Path) -> None
     assert nginx_write.status_code == 201
     assert invalid_xray_file.status_code == 422
     assert xray_read.json()["command"]["query"] == "file=routing.json"
-    assert xray_write.json()["command"]["body"]["file"] == "routing.json"
-    assert xray_write.json()["command"]["body"]["expected_sha256"] == "b" * 64
-    assert json.loads(xray_write.json()["command"]["body"]["content"]) == {
+    assert xray_write.json()["command"]["body"] == {"redacted": True}
+    internal_xray_write = next(
+        command
+        for command in client.app.state.inventory.list_commands(UUID(server_id))
+        if str(command.id) == xray_write.json()["command"]["id"]
+    )
+    assert internal_xray_write.body["file"] == "routing.json"
+    assert internal_xray_write.body["expected_sha256"] == "b" * 64
+    assert json.loads(internal_xray_write.body["content"]) == {
         "routing": {"rules": []}
     }
     assert (
@@ -4080,7 +4202,13 @@ def test_warp_license_and_agent_settings_operations_queue_agent_commands(
     assert invalid_port.status_code == 422
     assert invalid_master.status_code == 422
     assert warp.json()["command"]["path"] == "/api/child/warp/license"
-    assert warp.json()["command"]["body"] == {"license": "warp-plus-key"}
+    assert warp.json()["command"]["body"] == {"redacted": True}
+    internal_warp = next(
+        command
+        for command in client.app.state.inventory.list_commands(UUID(server_id))
+        if str(command.id) == warp.json()["command"]["id"]
+    )
+    assert internal_warp.body == {"license": "warp-plus-key"}
     assert warp.json()["command"]["timeout_ms"] == 45_000
     assert xray_mode.json()["command"]["body"] == {"xray_mode": "embedded"}
     assert listen_port.json()["command"]["body"] == {"listen_port": 24889}

@@ -39,15 +39,19 @@ built-in confirmation/cancellation controls use the official Chinese defaults.
 
 | Route | Workspace |
 | --- | --- |
-| `/` | Servers, traffic, Agent bootstrap, commands, diagnostics and lifecycle |
-| `/subscriptions` | Users, nodes, plans, limits, profiles, invitations and legacy imports |
-| `/templates` | Administrator Clash/Surge template workspace |
-| `/changes` | Change planning, dispatch, compensation, rollback and acceptance |
-| `/config` | Agent configuration, runtime inventory, takeover, snapshots and deployments |
-| `/certificates` | Issuance, DNS providers, ACME accounts, jobs, versions and deployment |
-| `/probe` | Node status, history, comparisons and private probe administration |
-| `/access` | Administrator password, MFA policy and public Agent identity |
+| `/servers` | Server Management: access and maintenance, Server Settings (Outbound & Routing plus advanced configuration), reverse proxy, sharing and DDNS |
+| `/nodes` | Node Management: managed nodes, topology and speed tests |
+| `/templates` | Template Management: Clash/Surge templates and subscription customization |
+| `/plans` | Plan Management: plans composed from one or more nodes and templates |
+| `/users` | User Management: users, plan assignment, subscriptions, invitations and migration |
+| `/system-settings` | System Settings: access security, notifications, backups, change history, renewals and Probe administration |
 | `/account` | Separate subscriber sign-in, subscription links, routes, templates and security |
+
+The administrator sidebar contains exactly those six management workspaces.
+Legacy administrator URLs such as `/config`, `/subscriptions`, `/changes` and
+`/certificates` are redirects into the relevant consolidated workspace; they do
+not create additional sidebar entries. Certificate management is not exposed as
+an administrator frontend workspace.
 
 `src/main.tsx` mounts the application. `src/react/App.tsx` gates management
 routes on the administrator session and lazy-loads workspaces from `src/routes.ts`.

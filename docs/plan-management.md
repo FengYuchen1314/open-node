@@ -1,6 +1,8 @@
 # Plan Editing, Unassignment And Removal
 
-The subscription catalog exposes plan editing/removal and per-user unassignment.
+The administrator **套餐管理** workspace exposes plan creation, editing/removal and
+per-user unassignment. Every created or updated plan must select at least one managed node;
+the selected subscription template is then applied to that node set.
 All operations require the local administrator session and CSRF protection.
 There is no activation service, license key, paid tier or third-party account.
 

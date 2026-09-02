@@ -154,7 +154,13 @@ def test_legacy_oversized_work_is_not_claimed_or_falsely_completed(setup, transp
     indexed = {row["id"]: row for row in rows}
     first, second = [indexed[str(command.id)] for command in commands]
     assert first["status"] == ("failed" if inflight else "skipped")
-    assert first["attempts"] == int(inflight) and "wire limit" in first["result_error"]
+    assert first["attempts"] == int(inflight)
+    assert first["result_error"] == "Sensitive Agent command failed"
+    internal = next(
+        item for item in store.list_commands(UUID(edge["server"]["id"]))
+        if item.id == commands[0].id
+    )
+    assert "wire limit" in internal.result_error
     assert second["status"] == "skipped"
 
 

@@ -52,7 +52,7 @@ TLS 证书等 Xray 外部路径必须能被专用服务账号读取；硬化服�
 
 ```bash
 sudo python3 agent/app/open_node_agent/service.py install \
-  --wheel agent/dist/open_node_agent-0.3.0a3-py3-none-any.whl \
+  --wheel agent/dist/open_node_agent-0.3.0a4-py3-none-any.whl \
   --config /root/open-node-agent.yaml \
   --xray-config /root/xray.json \
   --xray /usr/local/bin/xray \
@@ -69,7 +69,7 @@ sudo python3 agent/app/open_node_agent/service.py \
   --root /opt/open-node-agent-edge \
   --unit open-node-agent-edge.service \
   install \
-  --wheel /path/to/open_node_agent-0.3.0a3-py3-none-any.whl \
+  --wheel /path/to/open_node_agent-0.3.0a4-py3-none-any.whl \
   --config /root/edge.yaml \
   --xray-config /root/edge-xray.json \
   --xray /usr/local/bin/xray \

@@ -27,6 +27,14 @@ SECRET_FIELDS = {
 }
 
 
+def assert_protected_xray_records_preserved(before, after):
+    # Imported lazily because operations owns the shared protected-record
+    # contract and imports SubscriptionAccess while constructing the dispatcher.
+    from open_node_agent.operations import assert_managed_egress_preserved
+
+    assert_managed_egress_preserved(before, after)
+
+
 def client_value(client, field):
     aliases = {"username": "user", "password": "pass"}
     return client.get(field) or client.get(aliases.get(field, ""))
@@ -99,6 +107,8 @@ class AccessRequest(BaseModel):
 
 
 def container(protocol):
+    if protocol in {"socks", "socks5"}:
+        return "accounts"
     return "users" if protocol in {"anytls", "snell", "mieru"} else "clients"
 
 
@@ -272,6 +282,7 @@ class SubscriptionAccess:
         for tag in suspended:
             staged[tag]["config_revision"] = revision(config)
 
+        assert_protected_xray_records_preserved(original, config)
         ok, output = await self.runtime.validate(config)
         if not ok:
             raise RuntimeFailure(f"Xray validation failed before access changes: {output}")
@@ -289,6 +300,7 @@ class SubscriptionAccess:
         staged = plan["staged"]
         suspended = plan["suspended"]
         saved = plan["saved"]
+        assert_protected_xray_records_preserved(plan["original"], config)
         await self.runtime.limiter.provision(plan["limits"], config)
         self.save({**saved, **staged})
         try:
@@ -296,6 +308,9 @@ class SubscriptionAccess:
             # write may have persisted credentials without activating that configuration.
             result = await self.runtime.write(
                 config, restart=True, expected=plan["original"]
+            )
+            assert_protected_xray_records_preserved(
+                plan["original"], self.runtime.read()
             )
         except BaseException:
             self.save(saved)
@@ -306,10 +321,14 @@ class SubscriptionAccess:
             self.save(staged)
         except BaseException:
             try:
+                assert_protected_xray_records_preserved(config, plan["original"])
                 await asyncio.shield(
                     self.runtime.write(
                         plan["original"], restart=True, expected=config
                     )
+                )
+                assert_protected_xray_records_preserved(
+                    config, self.runtime.read()
                 )
                 self.save(saved)
             except Exception as rollback_error:

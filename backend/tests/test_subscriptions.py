@@ -28,6 +28,39 @@ def make_client(tmp_path: Path) -> TestClient:
     return authenticated_client(create_app(settings))
 
 
+def create_plan_node_fixture(client: TestClient, *, namespace: str) -> str:
+    server = client.post("/api/v1/servers", json={"name": f"{namespace}-edge"})
+    assert server.status_code == 201, server.text
+    server_id = server.json()["server"]["id"]
+    node = client.post(
+        "/api/v1/nodes",
+        json={
+            "name": f"{namespace} vless",
+            "server_id": server_id,
+            "protocol": "vless",
+            "node_type": "routed",
+            "inbound_tag": f"{namespace}-inbound",
+            "routed_outbound_tag": f"{namespace}-outbound",
+            "routed_rule_marktag": f"route-{namespace}",
+            "client_template": {
+                "id": "client-{username}",
+                "email": f"{{username}}__{namespace}",
+                "flow": "xtls-rprx-vision",
+            },
+            "config": {
+                "name": f"{namespace} base",
+                "type": "vless",
+                "server": "edge.example.com",
+                "port": 443,
+                "uuid": "template-id",
+                "tls": True,
+            },
+        },
+    )
+    assert node.status_code == 201, node.text
+    return node.json()["node"]["id"]
+
+
 def create_catalog_fixture(client: TestClient) -> tuple[str, str, str, str]:
     server = client.post("/api/v1/servers", json={"name": "edge-sub"}).json()
     server_id = server["server"]["id"]

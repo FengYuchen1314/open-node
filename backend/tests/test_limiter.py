@@ -1,6 +1,6 @@
 import hashlib
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from open_node.domain.subscriptions import SubscriptionCatalogPlanEntry, SubscriptionPlanCreate
@@ -10,22 +10,44 @@ from test_subscriptions import create_catalog_fixture, make_client
 @pytest.mark.parametrize("model", [SubscriptionPlanCreate, SubscriptionCatalogPlanEntry])
 @pytest.mark.parametrize("value", [-1, 0.0000001, float("inf"), float("nan"), 1e15])
 def test_plan_limits_reject_unrepresentable_rates(model, value):
+    required = {"node_ids": [uuid4()]} if model is SubscriptionPlanCreate else {}
     with pytest.raises(ValueError):
-        model(name="limited", traffic_limit_gb=10, speed_limit_mbps=value)
+        model(name="limited", traffic_limit_gb=10, speed_limit_mbps=value, **required)
     with pytest.raises(ValueError):
-        model(name="limited", traffic_limit_gb=10, node_speed_limits={str(uuid4()): value})
+        model(
+            name="limited",
+            traffic_limit_gb=10,
+            node_speed_limits={str(uuid4()): value},
+            **required,
+        )
 
 
 @pytest.mark.parametrize("model", [SubscriptionPlanCreate, SubscriptionCatalogPlanEntry])
 def test_plan_allows_zero_and_smallest_native_rate(model):
-    assert model(name="unlimited", traffic_limit_gb=10, speed_limit_mbps=0).speed_limit_mbps == 0
+    required = {"node_ids": [uuid4()]} if model is SubscriptionPlanCreate else {}
     assert (
-        model(name="limited", traffic_limit_gb=10, speed_limit_mbps=0.000008).speed_limit_mbps
+        model(
+            name="unlimited", traffic_limit_gb=10, speed_limit_mbps=0, **required
+        ).speed_limit_mbps
+        == 0
+    )
+    assert (
+        model(
+            name="limited",
+            traffic_limit_gb=10,
+            speed_limit_mbps=0.000008,
+            **required,
+        ).speed_limit_mbps
         * 125000
         == 1
     )
     with pytest.raises(ValueError):
-        model(name="invalid", traffic_limit_gb=10, node_device_limits={str(uuid4()): -1})
+        model(
+            name="invalid",
+            traffic_limit_gb=10,
+            node_device_limits={str(uuid4()): -1},
+            **required,
+        )
 
 
 def register(client, token, native):
@@ -71,7 +93,13 @@ def test_limited_credentials_are_never_leased_to_legacy_agents(tmp_path):
     )
     assert result["status"] == "skipped"
     assert result["attempts"] == 0
-    assert "native limiter" in result["result_error"]
+    assert result["result_error"] == "Sensitive Agent command failed"
+    internal = next(
+        item
+        for item in client.app.state.inventory.list_commands(UUID(server["server"]["id"]))
+        if str(item.id) == command["id"]
+    )
+    assert "native limiter" in internal.result_error
 
 
 @pytest.mark.parametrize(

@@ -11,6 +11,7 @@ from open_node.services.announcements import AnnouncementModel
 from open_node.services.inventory import ProductUserModel
 from sqlalchemy import func, select
 from test_subscriber_auth import login, provision
+from test_subscriptions import create_plan_node_fixture
 
 ADMIN = "/api/v1/announcements"
 ACCOUNT = "/api/v1/account/announcements"
@@ -24,8 +25,9 @@ def make(tmp_path):
     ))
     operator = authenticated_client(app)
     assert operator.post("/api/v1/users", json={"username": "alice"}).status_code == 201
+    node_id = create_plan_node_fixture(operator, namespace="announcement")
     plan = operator.post("/api/v1/plans", json={
-        "name": "公告套餐", "cycle_days": 30, "traffic_limit_gb": 10,
+        "name": "公告套餐", "cycle_days": 30, "traffic_limit_gb": 10, "node_ids": [node_id],
     })
     assert plan.status_code == 201, plan.text
     assigned = operator.post(

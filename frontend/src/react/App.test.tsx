@@ -13,13 +13,19 @@ import App from "./App";
 
 const { routeState } = vi.hoisted(() => ({ routeState: { broken: false } }));
 vi.mock("../routes", () => ({ routes: [
-  { path: "/", component: () => { if (routeState.broken) throw new Error("PRIVATE-TEST-FAILURE"); return <div>Inventory workspace</div>; } },
-  { path: "/subscriptions", component: () => <div>Subscriptions workspace</div> },
-  { path: "/notifications", component: () => <div>Notifications workspace</div> },
+  { path: "/servers", component: () => { if (routeState.broken) throw new Error("PRIVATE-TEST-FAILURE"); return <div>Servers workspace</div>; } },
+  { path: "/nodes", component: () => <div>Nodes workspace</div> },
+  { path: "/templates", component: () => <div>Templates workspace</div> },
+  { path: "/plans", component: () => <div>Plans workspace</div> },
+  { path: "/users", component: () => <div>Users workspace</div> },
   { path: "/system-settings", component: () => <div>System settings workspace</div> },
   { path: "/account", component: () => <div>Separate subscriber portal</div>, meta: { subscriber: true } },
   { path: "/account/external-subscriptions", component: () => <div>Subscriber external sources</div>, meta: { subscriber: true } },
   { path: "/account/renewals", component: () => <div>Subscriber renewals</div>, meta: { subscriber: true } },
+], legacyRouteRedirects: [
+  { path: "/", to: "/servers" },
+  { path: "/notifications", to: "/system-settings?tab=notifications" },
+  { path: "/certificates", to: "/servers" },
 ] }));
 vi.mock("../services/auth", async importOriginal => ({ ...await importOriginal<typeof import("../services/auth")>(), loadSession: vi.fn(), signOut: vi.fn() }));
 vi.mock("../services/branding", async original => ({ ...await original<typeof import("../services/branding")>(), getPublicBranding: vi.fn() }));
@@ -68,7 +74,7 @@ describe("React application shell", () => {
     expect(document.documentElement.lang).toBe("zh-CN");
     expect(document.title).toBe("管理员登录 - Open Node");
     expect(screen.getByRole("link", { name: "用户登录" })).toBeTruthy();
-    expect(screen.queryByText("Inventory workspace")).toBeNull();
+    expect(screen.queryByText("Servers workspace")).toBeNull();
     expect(screen.queryByRole("button", { name: "退出登录" })).toBeNull();
   });
   it("deduplicates the pending session check during StrictMode replay", async () => {
@@ -107,24 +113,23 @@ describe("React application shell", () => {
     mount(); await flush();
     expect(screen.getByRole("heading", { name: brand }).classList.contains("branding-header-text")).toBe(true);
     expect(screen.getByRole("button", { name: "切换导航菜单" })).toBeTruthy(); expect(screen.getByRole("button", { name: "退出登录" })).toBeTruthy();
-    expect(document.title).toBe("概览 - <script>not-executed</script>"); expect(document.querySelector("script")).toBeNull();
+    expect(document.title).toBe("服务器管理 - <script>not-executed</script>"); expect(document.querySelector("script")).toBeNull();
   });
   it("uses the public title for the subscriber route without checking the administrator session", async () => {
     vi.mocked(getPublicBranding).mockResolvedValue({ site_title: "用户站点", brand_title: "用户品牌", license_required: false });
     authState.ready = false; authState.session = null; mount("/account"); await flush();
     expect(document.title).toBe("用户中心 - 用户站点"); expect(loadSession).not.toHaveBeenCalled(); expect(getPublicBranding).toHaveBeenCalledOnce();
   });
-  it("keeps notification settings private and uses Chinese navigation and title", async () => {
+  it("keeps a removed notification deep link private and redirects it into system settings", async () => {
     const first = mount("/notifications"); await flush();
-    expect(screen.queryByText("Notifications workspace")).toBeNull();
+    expect(screen.queryByText("System settings workspace")).toBeNull();
     expect(screen.getByRole("heading", { name: "管理员登录" })).toBeTruthy();
     first.unmount();
     authState.session = { configured: true, authenticated: true, username: "admin", csrf_token: "test-csrf" };
-    mount(); await flush();
-    fireEvent.click(screen.getByRole("button", { name: "切换导航菜单" })); await flush();
-    fireEvent.click(screen.getByRole("menuitem", { name: "通知设置" })); await flush();
-    expect(screen.getByText("Notifications workspace")).toBeTruthy();
-    expect(document.title).toBe("通知设置 - Open Node");
+    mount("/notifications"); await flush();
+    expect(screen.getByText("System settings workspace")).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "通知设置" })).toBeNull();
+    expect(document.title).toBe("系统设置 - Open Node");
   });
   it.each([
     ["/account", "Separate subscriber portal"],
@@ -138,12 +143,14 @@ describe("React application shell", () => {
   });
   it("keeps standard mobile navigation wired to the authenticated routes", async () => {
     authState.session = { configured: true, authenticated: true, username: "admin", csrf_token: "test-csrf" };
-    mount(); await flush(); expect(screen.getByText("Inventory workspace")).toBeTruthy();
+    mount(); await flush(); expect(screen.getByText("Servers workspace")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "切换导航菜单" })); await flush();
-    fireEvent.click(screen.getByRole("menuitem", { name: "订阅管理" })); await flush();
-    expect(screen.getByText("Subscriptions workspace")).toBeTruthy();
-    expect(document.title).toBe("订阅管理 - Open Node");
-    expect(screen.queryByText("Inventory workspace")).toBeNull();
+    expect(screen.getAllByRole("menuitem").map(item => item.textContent)).toEqual(["服务器管理", "节点管理", "模板管理", "套餐管理", "用户管理", "系统设置"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "节点管理" })); await flush();
+    expect(screen.getByText("Nodes workspace")).toBeTruthy();
+    expect(document.title).toBe("节点管理 - Open Node");
+    expect(screen.queryByText("Servers workspace")).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "证书管理" })).toBeNull();
   });
   it("contains a broken workspace without exposing raw errors or disabling navigation", async () => {
     routeState.broken = true;
@@ -154,8 +161,8 @@ describe("React application shell", () => {
     expect(screen.getByRole("button", { name: "重新加载应用" })).toBeTruthy();
     expect(document.body.textContent).not.toContain("PRIVATE-TEST-FAILURE");
     fireEvent.click(screen.getByRole("button", { name: "切换导航菜单" })); await flush();
-    fireEvent.click(screen.getByRole("menuitem", { name: "订阅管理" })); await flush();
-    expect(screen.getByText("Subscriptions workspace")).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "节点管理" })); await flush();
+    expect(screen.getByText("Nodes workspace")).toBeTruthy();
     expect(screen.queryByText("无法加载此工作区")).toBeNull();
   });
 });

@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import sys
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import open_node_agent.runtime as runtime_module
@@ -14,10 +14,14 @@ from open_node_agent.client import Agent
 from open_node_agent.config import AgentConfig, load_config
 from open_node_agent.journal import CommandJournal
 from open_node_agent.operations import (
+    Operations,
     apply_xray_system_config,
+    assert_managed_egress_preserved,
     edit_client,
     edit_entries,
     edit_routing,
+    managed_state_matches,
+    promote_outbound_tags,
     telemetry,
     xray_system_config,
 )
@@ -1334,6 +1338,156 @@ async def test_batch_failure_does_not_partially_write(config):
         await agent.close()
 
 
+async def test_managed_egress_apply_uses_guarded_whole_config_write(config):
+    expected = json.loads(config.xray_config.read_text())
+    candidate = copy.deepcopy(expected)
+    candidate["outbounds"].append({"tag": "managed-egress:test", "protocol": "blackhole"})
+    operations = object.__new__(Operations)
+    operations.runtime = Mock()
+    operations.runtime.lock = asyncio.Lock()
+    operations.runtime.read = Mock(return_value=expected)
+    operations.runtime.write = AsyncMock(return_value={"success": True, "restart_required": False})
+    operations.managed_protocols = Mock()
+    operations.managed_protocols.assert_xray_compatible = Mock()
+    operations.node_cleanup = Mock()
+    operations.node_cleanup.recover = AsyncMock()
+    result = await operations.handle(
+        {
+            "method": "POST",
+            "path": "/api/child/egress/apply",
+            "body": {"expected_config": expected, "config": candidate},
+        }
+    )
+    assert result["success"] is True
+    operations.managed_protocols.assert_xray_compatible.assert_called_once_with(candidate)
+    operations.runtime.write.assert_awaited_once_with(
+        candidate,
+        restart=True,
+        expected=expected,
+    )
+
+
+async def test_managed_egress_apply_is_idempotent_when_desired_state_is_current(config):
+    expected = json.loads(config.xray_config.read_text())
+    candidate = copy.deepcopy(expected)
+    candidate["outbounds"].append(
+        {"tag": "managed-egress:test", "protocol": "blackhole"}
+    )
+    operations = object.__new__(Operations)
+    operations.runtime = Mock()
+    operations.runtime.lock = asyncio.Lock()
+    operations.runtime.read = Mock(return_value=candidate)
+    operations.runtime.write = AsyncMock()
+    operations.managed_protocols = Mock()
+    operations.managed_protocols.assert_xray_compatible = Mock()
+    operations.node_cleanup = Mock()
+    operations.node_cleanup.recover = AsyncMock()
+
+    result = await operations.handle(
+        {
+            "method": "POST",
+            "path": "/api/child/egress/apply",
+            "body": {"expected_config": expected, "config": candidate},
+        }
+    )
+
+    assert result == {
+        "success": True,
+        "restart_required": False,
+        "changed": False,
+    }
+    operations.runtime.write.assert_not_awaited()
+
+
+async def test_managed_egress_rollback_accepts_safe_external_drift(config):
+    desired = json.loads(config.xray_config.read_text())
+    expected = copy.deepcopy(desired)
+    expected["outbounds"].append(
+        {"tag": "managed-egress:source:target", "protocol": "blackhole"}
+    )
+    current = copy.deepcopy(desired)
+    current["log"] = {"loglevel": "warning"}
+    operations = object.__new__(Operations)
+    operations.runtime = Mock()
+    operations.runtime.lock = asyncio.Lock()
+    operations.runtime.read = Mock(return_value=current)
+    operations.runtime.write = AsyncMock()
+    operations.managed_protocols = Mock()
+    operations.managed_protocols.assert_xray_compatible = Mock()
+    operations.node_cleanup = Mock()
+    operations.node_cleanup.recover = AsyncMock()
+
+    result = await operations.handle(
+        {
+            "method": "POST",
+            "path": "/api/child/egress/apply",
+            "body": {
+                "expected_config": expected,
+                "config": desired,
+                "allow_diverged_managed_state": {
+                    "outbound_tag": "managed-egress:source:target",
+                },
+            },
+        }
+    )
+
+    assert result["success"] is True
+    assert result["changed"] is False
+    assert result["diverged"] is True
+    operations.runtime.write.assert_not_awaited()
+
+
+async def test_managed_egress_rollback_rejects_diverged_managed_record(config):
+    desired = json.loads(config.xray_config.read_text())
+    desired["outbounds"].append(
+        {
+            "tag": "managed-egress:source:target",
+            "protocol": "vless",
+            "settings": {"vnext": [{"address": "old.example"}]},
+        }
+    )
+    expected = copy.deepcopy(desired)
+    expected["outbounds"][-1]["settings"]["vnext"][0]["address"] = "new.example"
+    current = copy.deepcopy(expected)
+    current["log"] = {"loglevel": "warning"}
+    selector = {"outbound_tag": "managed-egress:source:target"}
+    assert managed_state_matches(current, desired, selector) is False
+    observatory_current = copy.deepcopy(desired)
+    observatory_current["observatory"] = {"subjectSelector": ["forward-value"]}
+    assert managed_state_matches(observatory_current, desired, selector) is False
+    reordered_current = copy.deepcopy(desired)
+    reordered_current["outbounds"].insert(0, reordered_current["outbounds"].pop())
+    assert managed_state_matches(reordered_current, desired, selector) is False
+    operations = object.__new__(Operations)
+    operations.runtime = Mock()
+    operations.runtime.lock = asyncio.Lock()
+    operations.runtime.read = Mock(return_value=current)
+    operations.runtime.write = AsyncMock(side_effect=RuntimeFailure("Xray config changed"))
+    operations.managed_protocols = Mock()
+    operations.managed_protocols.assert_xray_compatible = Mock()
+    operations.node_cleanup = Mock()
+    operations.node_cleanup.recover = AsyncMock()
+
+    with pytest.raises(RuntimeFailure, match="Xray config changed"):
+        await operations.handle(
+            {
+                "method": "POST",
+                "path": "/api/child/egress/apply",
+                "body": {
+                    "expected_config": expected,
+                    "config": desired,
+                    "allow_diverged_managed_state": selector,
+                },
+            }
+        )
+
+    operations.runtime.write.assert_awaited_once_with(
+        desired,
+        restart=True,
+        expected=expected,
+    )
+
+
 async def test_service_stop_intent_survives_agent_restart(config):
     agent = Agent(config)
     agent.runtime.stop = AsyncMock()
@@ -1374,12 +1528,440 @@ def test_client_and_routing_changes_preserve_other_entries():
     assert config["routing"]["rules"] == []
 
 
-def test_reordering_requires_complete_unique_tags():
-    config = {"outbounds": [{"tag": "direct"}, {"tag": "proxy"}]}
-    with pytest.raises(RuntimeFailure):
-        edit_entries(config, "outbounds", {"action": "reorder", "tags": ["direct", "direct"]})
-    edit_entries(config, "outbounds", {"action": "reorder", "tags": ["proxy", "direct"]})
-    assert config["outbounds"][0]["tag"] == "proxy"
+def test_routing_set_uses_official_observatory_wire_fields_and_null_clears():
+    config = {
+        "routing": {"rules": [{"outboundTag": "old"}]},
+        "observatory": {"subjectSelector": ["old"]},
+        "burstObservatory": {"subjectSelector": ["old-burst"]},
+    }
+    burst = {"subjectSelector": ["proxy"], "pingConfig": {"interval": "5s"}}
+
+    edit_routing(
+        config,
+        {
+            "action": "set",
+            "routing": {"rules": []},
+            "observatory": None,
+            "burstObservatory": burst,
+        },
+    )
+
+    assert config["routing"] == {"rules": []}
+    assert "observatory" not in config
+    assert config["burstObservatory"] == burst
+    assert config["burstObservatory"] is not burst
+
+    edit_routing(
+        config,
+        {
+            "action": "set",
+            "routing": {"rules": []},
+            "burstObservatory": None,
+        },
+    )
+    assert "burstObservatory" not in config
+
+
+def test_routing_set_rejects_conflicting_burst_observatory_aliases():
+    with pytest.raises(RuntimeFailure, match="Conflicting burst observatory"):
+        edit_routing(
+            {"routing": {"rules": []}},
+            {
+                "action": "set",
+                "routing": {"rules": []},
+                "burstObservatory": {"subjectSelector": ["proxy"]},
+                "burst_observatory": {"subjectSelector": ["other"]},
+            },
+        )
+
+
+async def test_routing_read_includes_top_level_observatories():
+    config = {
+        "routing": {"rules": []},
+        "observatory": {"subjectSelector": ["proxy"]},
+        "burstObservatory": {
+            "subjectSelector": ["proxy"],
+            "pingConfig": {"interval": "5s"},
+        },
+    }
+    operations = object.__new__(Operations)
+    operations.runtime = Mock()
+    operations.runtime.lock = asyncio.Lock()
+    operations.runtime.read = Mock(return_value=config)
+    operations.node_cleanup = Mock()
+    operations.node_cleanup.recover = AsyncMock()
+
+    result = await operations.handle({"method": "GET", "path": "/api/child/routing"})
+
+    assert result == {"success": True, **config}
+    assert result["observatory"] is not config["observatory"]
+    assert result["burstObservatory"] is not config["burstObservatory"]
+
+
+def test_reordering_matches_official_subset_and_duplicate_tag_contract():
+    config = {
+        "outbounds": [
+            {"tag": "direct", "index": 1},
+            {"tag": "proxy", "index": 2},
+            {"tag": "direct", "index": 3},
+        ]
+    }
+    edit_entries(
+        config,
+        "outbounds",
+        {"action": "reorder", "tags": ["unknown", "direct", "direct"]},
+    )
+    assert [item["index"] for item in config["outbounds"]] == [1, 3, 2]
+    with pytest.raises(RuntimeFailure, match="at least one valid tag"):
+        edit_entries(config, "outbounds", {"action": "reorder", "tags": []})
+
+
+def test_missing_outbound_tags_are_promoted_and_managed_and_warp_records_are_protected():
+    config = {
+        "inbounds": [
+            {
+                "tag": "target",
+                "settings": {
+                    "clients": [
+                        {"email": "open_node_egress__source__target", "id": "private"}
+                    ]
+                },
+            }
+        ],
+        "outbounds": [
+            {"protocol": "freedom"},
+            {
+                "tag": "managed-egress:source:target",
+                "protocol": "vless",
+                "settings": {"id": "private"},
+            },
+            {"tag": "warp-v4", "protocol": "wireguard", "settings": {"secretKey": "v4"}},
+            {"tag": "warp-v6", "protocol": "wireguard", "settings": {"secretKey": "v6"}},
+        ],
+        "routing": {
+            "rules": [
+                {
+                    "marktag": "managed-egress-rule:source:target",
+                    "outboundTag": "managed-egress:source:target",
+                }
+            ]
+        },
+    }
+    assert promote_outbound_tags(config) is True
+    assert config["outbounds"][0]["tag"] == "freedom-0"
+    changed = copy.deepcopy(config)
+    changed["outbounds"][1]["settings"]["id"] = "replaced"
+    with pytest.raises(RuntimeFailure, match="dedicated server egress workflow"):
+        assert_managed_egress_preserved(config, changed)
+    changed = copy.deepcopy(config)
+    changed["outbounds"][2]["settings"]["secretKey"] = "replaced"
+    with pytest.raises(RuntimeFailure, match="WARP workflow"):
+        assert_managed_egress_preserved(config, changed)
+
+
+def managed_reality_config() -> dict:
+    outbound_tag = "managed-egress:source:target"
+    return {
+        "inbounds": [
+            {
+                "tag": "source-in",
+                "settings": {"clients": []},
+                "sniffing": {
+                    "enabled": True,
+                    "domainsExcluded": ["manual.example", "reality.example"],
+                },
+            }
+        ],
+        "outbounds": [
+            {"tag": "direct", "protocol": "freedom"},
+            {"tag": outbound_tag, "protocol": "vless"},
+        ],
+        "routing": {
+            "rules": [
+                {
+                    "marktag": "managed-egress-rule:source:target",
+                    "inboundTag": ["source-in"],
+                    "outboundTag": outbound_tag,
+                }
+            ]
+        },
+        "_openNodeManagedEgressSniffing": {
+            "version": 1,
+            "inbounds": {
+                "source-in": {
+                    "ownedDomains": ["reality.example"],
+                    "references": {outbound_tag: ["reality.example"]},
+                }
+            },
+        },
+    }
+
+
+def test_raw_xray_edits_preserve_sidecar_and_required_sniffing_but_allow_manual_excludes():
+    original = managed_reality_config()
+    manual = copy.deepcopy(original)
+    manual["inbounds"][0]["sniffing"]["domainsExcluded"].append("operator.example")
+    assert_managed_egress_preserved(original, manual)
+
+    mutations = []
+    without_sidecar = copy.deepcopy(original)
+    without_sidecar.pop("_openNodeManagedEgressSniffing")
+    mutations.append(without_sidecar)
+    forged_sidecar = copy.deepcopy(original)
+    forged_sidecar["_openNodeManagedEgressSniffing"]["inbounds"]["source-in"][
+        "ownedDomains"
+    ] = ["manual.example"]
+    mutations.append(forged_sidecar)
+    missing_required_domain = copy.deepcopy(original)
+    missing_required_domain["inbounds"][0]["sniffing"]["domainsExcluded"] = [
+        "manual.example"
+    ]
+    mutations.append(missing_required_domain)
+
+    for changed in mutations:
+        with pytest.raises(RuntimeFailure, match="dedicated server egress workflow"):
+            assert_managed_egress_preserved(original, changed)
+
+
+def test_raw_routing_cannot_attach_managed_egress_to_unowned_rule_or_balancer():
+    original = managed_reality_config()
+    unowned_rule = copy.deepcopy(original)
+    unowned_rule["routing"]["rules"].append(
+        {
+            "marktag": "operator-rule",
+            "inboundTag": ["source-in"],
+            "outboundTag": "managed-egress:source:target",
+        }
+    )
+    balancer = copy.deepcopy(original)
+    balancer["routing"]["balancers"] = [
+        {"tag": "pool", "selector": ["managed-egress:"]}
+    ]
+    fallback = copy.deepcopy(original)
+    fallback["routing"]["balancers"] = [
+        {
+            "tag": "pool",
+            "selector": ["direct"],
+            "fallbackTag": "managed-egress:source:target",
+        }
+    ]
+
+    for changed in (unowned_rule, balancer, fallback):
+        with pytest.raises(RuntimeFailure, match="dedicated server egress workflow"):
+            assert_managed_egress_preserved(original, changed)
+
+
+def test_managed_rollback_does_not_ignore_stale_sidecar_or_sniffing_state():
+    desired = {
+        "inbounds": [
+            {
+                "tag": "source-in",
+                "settings": {"clients": []},
+                "sniffing": {"domainsExcluded": ["manual.example"]},
+            }
+        ],
+        "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+        "routing": {"rules": []},
+    }
+    current = copy.deepcopy(desired)
+    current["inbounds"][0]["sniffing"]["domainsExcluded"].append("reality.example")
+    current["_openNodeManagedEgressSniffing"] = {
+        "version": 1,
+        "inbounds": {
+            "source-in": {
+                "ownedDomains": ["reality.example"],
+                "references": {},
+            }
+        },
+    }
+
+    assert (
+        managed_state_matches(
+            current,
+            desired,
+            {
+                "outbound_tag": "managed-egress:source:target",
+                "routing_marktag": "managed-egress-rule:source:target",
+            },
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["inbounds", "outbounds", "routing", "config", "config-files", "batch"],
+)
+async def test_generic_xray_mutations_cannot_change_managed_egress_or_warp_records(
+    config, operation
+):
+    protected_email = "open_node_egress__source__target"
+    original = {
+        "inbounds": [
+            {
+                "tag": "edge",
+                "protocol": "vless",
+                "settings": {
+                    "clients": [
+                        {"email": "alice", "id": "alice-id"},
+                        {"email": protected_email, "id": "managed-id"},
+                    ]
+                },
+            }
+        ],
+        "outbounds": [
+            {"tag": "direct", "protocol": "freedom"},
+            {"tag": "managed-egress:source:target", "protocol": "vless"},
+            {"tag": "warp-v4", "protocol": "wireguard", "settings": {"secretKey": "v4"}},
+            {"tag": "warp-v6", "protocol": "wireguard", "settings": {"secretKey": "v6"}},
+        ],
+        "routing": {
+            "rules": [
+                {
+                    "marktag": "managed-egress-rule:source:target",
+                    "outboundTag": "managed-egress:source:target",
+                }
+            ]
+        },
+    }
+    config.xray_config.write_text(json.dumps(original))
+    candidate = copy.deepcopy(original)
+    candidate["outbounds"] = candidate["outbounds"][:1]
+    cases = {
+        "inbounds": (
+            "/api/child/inbounds",
+            {
+                "action": "remove-client",
+                "tag": "edge",
+                "client": {"email": protected_email},
+            },
+        ),
+        "outbounds": (
+            "/api/child/outbounds",
+            {"action": "remove", "tag": "warp-v4"},
+        ),
+        "routing": (
+            "/api/child/routing",
+            {
+                "action": "remove_rule",
+                "marktag": "managed-egress-rule:source:target",
+            },
+        ),
+        "config": ("/api/child/xray/config", {"config": candidate}),
+        "config-files": (
+            "/api/child/xray/config-files",
+            {
+                "file": config.xray_config.name,
+                "content": json.dumps(candidate),
+                "expected_sha256": config_sha256(config),
+            },
+        ),
+        "batch": (
+            "/api/child/batch-apply",
+            {
+                "inbound_clients": [
+                    {
+                        "tag": "edge",
+                        "client": {"email": protected_email, "id": "replacement"},
+                    }
+                ]
+            },
+        ),
+    }
+    path, body = cases[operation]
+    operations = object.__new__(Operations)
+    operations.runtime = Mock()
+    operations.runtime.lock = asyncio.Lock()
+    operations.runtime.config.xray_config = config.xray_config
+    operations.runtime.systemd = Mock()
+    operations.runtime.systemd.read_private = Mock(
+        return_value=config.xray_config.read_bytes()
+    )
+    operations.runtime.binding = AsyncMock()
+    operations.runtime.read = Mock(return_value=copy.deepcopy(original))
+    operations.runtime.write = AsyncMock()
+    operations.runtime.limiter.provision = AsyncMock()
+    operations.node_cleanup = Mock()
+    operations.node_cleanup.recover = AsyncMock()
+    operations.managed_protocols = Mock()
+
+    with pytest.raises(
+        RuntimeFailure,
+        match="dedicated server egress workflow or WARP workflow",
+    ):
+        await operations.handle({"method": "POST", "path": path, "body": body})
+
+    assert json.loads(config.xray_config.read_text()) == original
+    operations.runtime.write.assert_not_awaited()
+
+
+def test_routing_add_rule_uses_official_priority_before_catch_all():
+    config = {
+        "routing": {
+            "rules": [
+                {"marktag": "tunnel", "outboundTag": "tunnel-one"},
+                {"marktag": "catch-all", "outboundTag": "direct"},
+            ]
+        }
+    }
+    rule = {
+        "marktag": "managed-egress-rule:source:target",
+        "domain": ["geosite:cn"],
+        "outboundTag": "managed-egress:source:target",
+    }
+    edit_routing(config, {"action": "add_rule", "rule": rule})
+    assert [item["marktag"] for item in config["routing"]["rules"]] == [
+        "tunnel",
+        "managed-egress-rule:source:target",
+        "catch-all",
+    ]
+
+
+def test_outbound_update_matches_official_old_tag_to_new_tag_contract():
+    config = {
+        "outbounds": [
+            {"tag": "direct", "protocol": "freedom"},
+            {"tag": "blocked", "protocol": "blackhole"},
+        ]
+    }
+
+    edit_entries(
+        config,
+        "outbounds",
+        {
+            "action": "update",
+            "tag": "direct",
+            "outbound": {"tag": "direct-new", "protocol": "freedom"},
+        },
+    )
+
+    assert config["outbounds"] == [
+        {"tag": "direct-new", "protocol": "freedom"},
+        {"tag": "blocked", "protocol": "blackhole"},
+    ]
+    edit_entries(
+        config,
+        "outbounds",
+        {
+            "action": "update",
+            "outbound": {
+                "tag": "direct-new",
+                "protocol": "freedom",
+                "settings": {"domainStrategy": "UseIP"},
+            },
+        },
+    )
+    assert config["outbounds"][0]["settings"] == {"domainStrategy": "UseIP"}
+    with pytest.raises(RuntimeFailure, match="tag already exists"):
+        edit_entries(
+            config,
+            "outbounds",
+            {
+                "action": "update",
+                "tag": "direct-new",
+                "outbound": {"tag": "blocked", "protocol": "freedom"},
+            },
+        )
 
 
 def test_private_route_cleanup_retries_are_strictly_idempotent():

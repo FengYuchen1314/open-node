@@ -1,10 +1,11 @@
 import copy
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 from open_node_agent.client import Agent
+from open_node_agent.operations import assert_managed_egress_preserved
 from open_node_agent.runtime import RuntimeFailure
 from open_node_agent.subscription_access import ENDPOINT, revision
 
@@ -21,12 +22,20 @@ def client(protocol, email="alice"):
         "anytls": {"password": "password-" + email},
         "snell": {"psk": "key-" + email, "version": 6, "v6Mode": "unshaped"},
         "mieru": {"username": email, "password": "password-" + email},
+        "socks": {"user": email, "pass": "password-" + email},
+        "socks5": {"user": email, "pass": "password-" + email},
     }
     return {"email": email, **values[protocol]}
 
 
 def inbound(protocol, users):
-    key = "users" if protocol in {"anytls", "snell", "mieru"} else "clients"
+    key = (
+        "accounts"
+        if protocol in {"socks", "socks5"}
+        else "users"
+        if protocol in {"anytls", "snell", "mieru"}
+        else "clients"
+    )
     return {
         "tag": "edge",
         "protocol": protocol,
@@ -80,6 +89,92 @@ async def test_revocation_preserves_other_users_and_restores_same_credential(con
         assert result["status"] == 200, result
         assert agent.runtime.read()["inbounds"][0]["settings"][key] == [users[1], users[0]]
         assert agent.runtime.restart.await_count == 2
+    finally:
+        await agent.close()
+
+
+async def test_access_rejects_direct_managed_egress_client_mutation_before_write(config):
+    agent, original, _ = setup(config)
+    managed = {
+        "email": "open_node_egress__source__target",
+        "id": "managed-id",
+    }
+    original["inbounds"][0]["settings"]["clients"].append(managed)
+    config.xray_config.write_text(json.dumps(original))
+    try:
+        result = await execute(agent, [entry("vless", managed, False)])
+        assert result["status"] == 400, result
+        assert "dedicated server egress workflow" in result["error"]
+        assert agent.runtime.read() == original
+        agent.runtime.restart.assert_not_awaited()
+    finally:
+        await agent.close()
+
+
+async def test_access_preserves_managed_egress_and_warp_records_around_write(config):
+    agent, original, users = setup(config)
+    original["inbounds"][0]["settings"]["clients"].append(
+        {"email": "open_node_egress__source__target", "id": "managed-id"}
+    )
+    original["outbounds"].extend(
+        [
+            {"tag": "managed-egress:source:target", "protocol": "vless"},
+            {"tag": "warp-v4", "protocol": "wireguard", "settings": {"secretKey": "v4"}},
+            {"tag": "warp-v6", "protocol": "wireguard", "settings": {"secretKey": "v6"}},
+        ]
+    )
+    original["routing"]["rules"].append(
+        {
+            "marktag": "managed-egress-rule:source:target",
+            "outboundTag": "managed-egress:source:target",
+        }
+    )
+    config.xray_config.write_text(json.dumps(original))
+    state = {"config": copy.deepcopy(original)}
+
+    def read():
+        return copy.deepcopy(state["config"])
+
+    async def write(value, *, restart=False, expected=None, **_):
+        if expected is not None and state["config"] != expected:
+            raise RuntimeFailure("Xray configuration changed during the guarded update")
+        state["config"] = copy.deepcopy(value)
+        return {"success": True, "restart_required": not restart}
+
+    agent.runtime.read = Mock(side_effect=read)
+    agent.runtime.write = AsyncMock(side_effect=write)
+    try:
+        result = await execute(agent, [entry("vless", users[0], False)])
+        assert result["status"] == 200, result
+        assert_managed_egress_preserved(original, agent.runtime.read())
+    finally:
+        await agent.close()
+
+
+@pytest.mark.parametrize("protocol", ["socks", "socks5"])
+async def test_xray_socks_access_uses_official_accounts_container(config, protocol):
+    agent, original, users = setup(config, protocol)
+    state = {"config": copy.deepcopy(original)}
+
+    def read():
+        return copy.deepcopy(state["config"])
+
+    async def write(value, *, restart=False, expected=None, **_):
+        if expected is not None and state["config"] != expected:
+            raise RuntimeFailure("Xray configuration changed during the guarded update")
+        state["config"] = copy.deepcopy(value)
+        return {"success": True, "restart_required": not restart}
+
+    agent.runtime.read = Mock(side_effect=read)
+    agent.runtime.write = AsyncMock(side_effect=write)
+    try:
+        assert "accounts" in original["inbounds"][0]["settings"]
+        assert "clients" not in original["inbounds"][0]["settings"]
+        result = await execute(agent, [entry(protocol, users[0], False)])
+        assert result["status"] == 200, result
+        settings = agent.runtime.read()["inbounds"][0]["settings"]
+        assert settings["accounts"] == [users[1]]
+        assert "clients" not in settings
     finally:
         await agent.close()
 
