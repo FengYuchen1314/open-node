@@ -32,7 +32,7 @@ describe("React native limiter", () => {
   it("reads status and preserves byte rates, connection groups, rejection keys and user rules", async () => {
     const onCommands = vi.fn(); render(<LimiterPanel serverId="edge" inbounds={[inbound]} onCommands={onCommands} />); await flush();
     expect(queueAgentOperation).toHaveBeenCalledWith("edge", "limiter_status", undefined);
-    expect(screen.getByText("3 个活跃连接", { selector: ".ant-tag" })).toBeTruthy(); expect(screen.getByText("4 次拒绝")).toBeTruthy();
+    expect(screen.getByText("3 个活跃连接", { selector: ".ui-tag" })).toBeTruthy(); expect(screen.getByText("4 次拒绝")).toBeTruthy();
     expect(screen.getByText(/5.00 Mbps，截止/)).toBeTruthy();
     expect((screen.getByLabelText("每用户限速（Mbps）") as HTMLInputElement).value).toBe("10");
     fireEvent.change(screen.getByLabelText("每用户限速（Mbps）"), { target: { value: "8" } });
@@ -49,7 +49,7 @@ describe("React native limiter", () => {
     render(<LimiterPanel serverId="edge" inbounds={[inbound]} />); await flush();
     fireEvent.click(screen.getByRole("button", { name: "移除限制" })); expect(queueAgentOperation).toHaveBeenCalledTimes(1);
     // rc-util uses the same test-only ID for Select and Modal; locate its actual title.
-    const dialog = within(screen.getByText("移除限制？", { selector: ".ant-modal-title" }).closest('[role="dialog"]')!);
+    const dialog = within(screen.getByText("移除限制？", { selector: ".ui-dialog-title" }).closest('[role="dialog"]')!);
     fireEvent.click(dialog.getByRole("button", { name: "移除" })); await flush();
     expect(queueAgentOperation).toHaveBeenLastCalledWith("edge", "limiter", { action: "remove", inbound_tag: "vless-443", expected_revision: revision });
     expect(screen.getByText("限制已移除。")).toBeTruthy();
@@ -116,7 +116,7 @@ describe("React native limiter", () => {
     render(<LimiterPanel serverId="edge" inbounds={[inbound]} />); await flush(); expect(listServerCommands).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(499); }); expect(listServerCommands).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); }); await flush(); expect(listServerCommands).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("3 个活跃连接", { selector: ".ant-tag" })).toBeTruthy();
+    expect(screen.getByText("3 个活跃连接", { selector: ".ui-tag" })).toBeTruthy();
   });
   it.each([{ available: false, message: "Native limiter unavailable." }, { available: true, revision: "invalid", inbounds: [] }])("locks writes for unavailable or malformed snapshots: %j", async (snapshot) => {
     vi.mocked(listServerCommands).mockResolvedValue({ server_id: "edge", commands: [command(snapshot)], license_required: false });

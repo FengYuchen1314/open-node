@@ -53,19 +53,19 @@ beforeEach(() => {
 });
 afterEach(async () => {
   cleanup();
-  // Ant's short loading-state grace period belongs to the real DOM lifetime.
+  // The short loading-state grace period belongs to the real DOM lifetime.
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
   vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
 function modal(title: string) {
-  const heading = screen.getByText(title, { selector: ".ant-modal-title" });
-  return within(heading.closest(".ant-modal") as HTMLElement);
+  const heading = screen.getByText(title, { selector: ".ui-dialog-title" });
+  return within(heading.closest(".ui-modal") as HTMLElement);
 }
 function input(scope: ReturnType<typeof within>, label: string) { return scope.getByLabelText(label) as HTMLInputElement; }
 async function select(label: string, option: string, scope: ReturnType<typeof within> = within(document.body)) {
   fireEvent.mouseDown(scope.getByRole("combobox", { name: label })); await flush();
-  const options = screen.getAllByText(option, { selector: ".ant-select-item-option-content" });
+  const options = screen.getAllByText(option, { selector: ".ui-option" });
   fireEvent.click(options[options.length - 1]!); await flush();
 }
 async function openSource(name = source.name) {
@@ -154,7 +154,7 @@ describe("external sources: explicit administration and secret handling", () => 
     expect(createExternalSource).toHaveBeenCalledExactlyOnceWith({ owner_username: "alice", name: "New provider", url: secretUrl, user_agent: secretAgent, enabled: true });
     expect(input(dialog, "外部订阅链接").value).toBe(""); expect(input(dialog, "外部订阅自定义 User-Agent").value).toBe("");
     await act(async () => pending.resolve(source)); await flush();
-    expect(screen.queryByText("添加外部订阅来源", { selector: ".ant-modal-title" })).toBeNull();
+    expect(screen.queryByText("添加外部订阅来源", { selector: ".ui-dialog-title" })).toBeNull();
     expect(updated).toHaveBeenCalledTimes(1); expect(createExternalPreview).not.toHaveBeenCalled(); expect(document.body.innerHTML).not.toContain(secretAgent);
   });
 
@@ -227,7 +227,7 @@ describe("external sources: explicit administration and secret handling", () => 
     const save = dialog.getByRole("button", { name: "保存外部节点" }); fireEvent.click(save); fireEvent.click(save); await flush();
     expect(updateExternalNode).toHaveBeenCalledExactlyOnceWith(source.id, "existing-1", { expected_revision: 4, name: "Office Tokyo", enabled: false });
     await act(async () => pending.resolve({ ...detail, source: { ...source, revision: 5 } }));
-    expect(screen.queryByText("编辑外部节点", { selector: ".ant-modal-title" })).toBeNull(); expect(createExternalPreview).not.toHaveBeenCalled();
+    expect(screen.queryByText("编辑外部节点", { selector: ".ui-dialog-title" })).toBeNull(); expect(createExternalPreview).not.toHaveBeenCalled();
   });
 
   it("keeps node choices on conflict and blocks a retry if a refreshed node has disappeared", async () => {
@@ -367,7 +367,7 @@ describe("external previews: explicit choice, atomic confirmation and receipts",
     const cancel = dialog.getByRole("button", { name: "取消外部订阅预览" }); fireEvent.click(cancel); fireEvent.click(cancel); await flush();
     expect(cancelExternalPreview).toHaveBeenCalledExactlyOnceWith(source.id, preview.id);
     await act(async () => pending.resolve({ cancelled: true, license_required: false }));
-    expect(screen.queryByText("外部订阅来源预览", { selector: ".ant-modal-title" })).toBeNull();
+    expect(screen.queryByText("外部订阅来源预览", { selector: ".ui-dialog-title" })).toBeNull();
     expect(updated).not.toHaveBeenCalled(); expect(updateExternalSource).not.toHaveBeenCalled(); expect(confirmExternalPreview).not.toHaveBeenCalled();
   });
 

@@ -49,9 +49,9 @@ describe("server management aggregate workspace", () => {
     mount("/servers?tab=reverse-proxy"); await flush();
     expect(screen.getByTestId("shared-ingress-dialog").textContent).toBe("closed");
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "反向代理服务器" }));
-    fireEvent.click(screen.getByText("Local server", { selector: ".ant-select-item-option-content" }));
+    fireEvent.click(screen.getByText("Local server", { selector: ".ui-option" }));
     fireEvent.click(screen.getByRole("button", { name: "打开反向代理配置" })); await flush();
     expect(screen.getByTestId("shared-ingress-dialog").textContent).toBe("open:local");
-    expect(screen.queryByText("Shared server", { selector: ".ant-select-item-option-content" })).toBeNull();
+    expect(screen.queryByText("Shared server", { selector: ".ui-option" })).toBeNull();
   });
 });

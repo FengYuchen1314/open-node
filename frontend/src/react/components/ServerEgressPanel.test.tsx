@@ -15,7 +15,7 @@ import {
 import { deferred, flush, installDom, renderUi } from "../test-utils";
 import ServerEgressPanel from "./ServerEgressPanel";
 
-// WARP lifecycle drives several real Ant Design confirmation flows and durable polls.
+// WARP lifecycle drives several real interface confirmation flows and durable polls.
 vi.setConfig({ testTimeout: 60_000 });
 
 vi.mock("../../services/inventory", () => ({
@@ -124,7 +124,7 @@ describe("ServerEgressPanel", () => {
     fireEvent.click(screen.getByRole("tab", { name: "出站与路由" })); await settle();
     expect(screen.getByText("china-direct")).toBeTruthy();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "出站与路由服务器" }));
-    expect(screen.queryByText("Shared server", { selector: ".ant-select-item-option-content" })).toBeNull();
+    expect(screen.queryByText("Shared server", { selector: ".ui-option" })).toBeNull();
   });
 
   it("sets an arbitrary outbound and refreshed WARP tags as the default using a complete order", async () => {
@@ -172,7 +172,7 @@ describe("ServerEgressPanel", () => {
   it("keeps an existing managed route by omitting routing and only removes it explicitly", async () => {
     renderUi(<ServerEgressPanel />); await settle();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "受管出口节点" }));
-    fireEvent.click(screen.getByText("Configured node · Configured server · vless", { selector: ".ant-select-item-option-content" }));
+    fireEvent.click(screen.getByText("Configured node · Configured server · vless", { selector: ".ui-option" }));
     expect(screen.getByRole("radio", { name: "保持现有规则" })).toHaveProperty("checked", true);
 
     fireEvent.click(screen.getByRole("button", { name: "生成安全预览" })); await settle();
@@ -338,7 +338,7 @@ describe("ServerEgressPanel", () => {
     });
     renderUi(<ServerEgressPanel />); await flush();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "出站与路由服务器" }));
-    fireEvent.click(screen.getByText("Other server", { selector: ".ant-select-item-option-content" })); await settle();
+    fireEvent.click(screen.getByText("Other server", { selector: ".ui-option" })); await settle();
     expect(screen.getByText("other-default")).toBeTruthy();
     await act(async () => firstList.resolve({ server_id: "edge", commands: commands.filter(command => command.server_id === "edge"), license_required: false })); await settle();
     expect(screen.getByText("other-default")).toBeTruthy();

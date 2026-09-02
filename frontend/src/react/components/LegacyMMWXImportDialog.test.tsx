@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderUi, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigProvider, Upload } from "../../ui";
 import LegacyMMWXImportDialog from "./LegacyMMWXImportDialog";
@@ -7,7 +7,7 @@ import { importLegacyMMWXIdentities, previewLegacyMMWXIdentities } from "../../s
 import type { LegacyMMWXIdentityBundle, LegacyMMWXImportPreview } from "../../domain/legacy-mmwx";
 import type { SubscriptionPlan } from "../../domain/subscriptions";
 
-const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
+const render = (ui: Parameters<typeof renderUi>[0]) => renderUi(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
 
 vi.mock("../../services/legacy-mmwx", () => ({ importLegacyMMWXIdentities: vi.fn(), previewLegacyMMWXIdentities: vi.fn() }));
 const bundle: LegacyMMWXIdentityBundle = { version: 1, users: [], packages: [{ source_id: 17, name: "Legacy package", short_code: null }] };
@@ -28,7 +28,7 @@ describe("React MMWX identity import", { timeout: 20_000 }, () => {
   it("requires a fresh preview and exact user-count confirmation for mapped packages", async () => {
     const { props } = mount(); const identityFile = file(JSON.stringify(bundle)); selectFile(identityFile); await flush();
     expect(Object.getOwnPropertyDescriptor(identityFile, Upload.LIST_IGNORE)?.value).toBe(true);
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Legacy package" })); fireEvent.click(screen.getByText("Basic", { selector: ".ant-select-item-option-content" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Legacy package" })); fireEvent.click(screen.getByText("Basic", { selector: ".ui-option" }));
     fireEvent.click(screen.getByRole("button", { name: "预览" })); await flush();
     expect(previewLegacyMMWXIdentities).toHaveBeenCalledWith(bundle, false, undefined, { 17: "p" });
     expect((screen.getByRole("button", { name: "导入" }) as HTMLButtonElement).disabled).toBe(true);
@@ -38,7 +38,7 @@ describe("React MMWX identity import", { timeout: 20_000 }, () => {
   it("invalidates a previous preview when replacement or package mapping changes", async () => {
     mount(); selectFile(file(JSON.stringify(bundle))); await flush(); fireEvent.click(screen.getByRole("button", { name: "预览" })); await flush();
     fireEvent.change(screen.getByLabelText("确认用户数（1）"), { target: { value: "1" } });
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Legacy package" })); fireEvent.click(screen.getByText("Basic", { selector: ".ant-select-item-option-content" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Legacy package" })); fireEvent.click(screen.getByText("Basic", { selector: ".ui-option" }));
     expect(screen.queryByLabelText("确认用户数（1）")).toBeNull(); expect((screen.getByRole("button", { name: "导入" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "预览" })); await flush(); fireEvent.click(screen.getByRole("switch", { name: "替换已有登录信息和链接" }));
     expect(screen.queryByLabelText("确认用户数（1）")).toBeNull(); expect(screen.getByText("已有用户会话将被撤销。")).toBeTruthy();

@@ -159,7 +159,7 @@ describe("Chinese subscriber portal", () => {
     fireEvent.click(screen.getByRole("radio", { name: "短链接" })); await flush();
     expect(new URL(input("订阅地址").value).pathname).toBe("/s/fixture-code");
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "客户端格式" }));
-    fireEvent.click(screen.getByText("URI 列表", { selector: ".ant-select-item-option-content" })); await flush();
+    fireEvent.click(screen.getByText("URI 列表", { selector: ".ui-option" })); await flush();
     expect(new URL(input("订阅地址").value).searchParams.get("format")).toBe("uri-list");
     fireEvent.click(screen.getByRole("button", { name: "复制订阅链接" })); await flush();
     expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith(input("订阅地址").value);
@@ -220,7 +220,7 @@ describe("Chinese subscriber portal", () => {
     await mount();
     expect(screen.getByText(message).closest('[role="alert"]')).toBeTruthy();
     const download = document.querySelector('[aria-label="下载订阅"]')!;
-    expect(download.classList.contains("ant-btn-disabled") || download.hasAttribute("disabled")).toBe(true);
+    expect(download.classList.contains("is-disabled") || download.hasAttribute("disabled")).toBe(true);
   });
   it("does not turn a malformed subscription URL into an executable link", async () => {
     subscriberState.session = { ...session };

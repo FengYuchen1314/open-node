@@ -8,7 +8,7 @@ import * as subscriptions from "../../services/subscriptions";
 import ConfigView from "./ConfigView";
 import { installDom, renderUi as render } from "../test-utils";
 
-// These suites render real Ant Design tables/forms; allow bounded DOM work on the VPS.
+// These suites render real interface tables/forms; allow bounded DOM work on the VPS.
 vi.setConfig({ testTimeout: 30000 });
 
 vi.mock("../../services/inventory", () => ({ acceptXrayConfigPendingRecovery: vi.fn(), applyXrayConfigRecovery: vi.fn(), createXrayRuntimeTunnelChain: vi.fn(), deleteXrayRuntimeTunnel: vi.fn(), deployXrayRuntimeTunnel: vi.fn(), getXrayRuntimeInventory: vi.fn(), getXrayRuntimeTunnelInventory: vi.fn(), listCommandStreamFrames: vi.fn(), listAgents: vi.fn(), listServerCommands: vi.fn(), listServers: vi.fn(), listXrayConfigSnapshots: vi.fn(), queueAgentOperation: vi.fn(), restoreXrayConfigSnapshot: vi.fn() }));
@@ -28,10 +28,10 @@ function systemResult(patch: Record<string, unknown> = {}) {
 const snapshot = (status: XrayConfigSnapshot["status"]): XrayConfigSnapshot => ({ id: status, server_id: "edge", config_hash: status === "current" ? sha : otherSha, source: "agent_report", status, size_bytes: 100, created_at: now });
 async function flush() { await act(async () => { for (let i = 0; i < 24; i += 1) await Promise.resolve(); }); }
 async function tab(name: string) { fireEvent.click(screen.getByRole("tab", { name })); await flush(); return within(screen.getByRole("tabpanel", { name })); }
-function card(title: string) { return within(screen.getByText(title, { selector: ".ant-card-head-title" }).closest(".ant-card")!); }
+function card(title: string) { return within(screen.getByText(title, { selector: ".ui-card-title" }).closest(".ui-card")!); }
 async function selectOption(label: string, option: string) {
   fireEvent.mouseDown(screen.getByLabelText(label)); await flush();
-  const node = screen.getAllByText(option).find((item) => item.closest(".ant-select-item-option"));
+  const node = screen.getAllByText(option).find((item) => item.closest(".ui-option"));
   if (!node) throw new Error(`Missing option ${option}`);
   fireEvent.click(node); await flush();
 }
@@ -83,8 +83,8 @@ describe("React configuration workspace", () => {
     expect(screen.getByRole("tab", { name: "运行时" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Xray" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Nginx" })).toBeNull();
-    expect(screen.queryByText("部署隧道", { selector: ".ant-card-head-title" })).toBeNull();
-    expect(screen.queryByText("运行时操作", { selector: ".ant-card-head-title" })).toBeNull();
+    expect(screen.queryByText("部署隧道", { selector: ".ui-card-title" })).toBeNull();
+    expect(screen.queryByText("运行时操作", { selector: ".ui-card-title" })).toBeNull();
     expect(screen.getByRole("button", { name: "导入缺失节点" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "补齐客户端" })).toBeTruthy();
   });
@@ -92,7 +92,7 @@ describe("React configuration workspace", () => {
   it("loads in StrictMode and keeps all seven workflow tabs", async () => {
     render(<StrictMode><ConfigView /></StrictMode>); await flush();
     for (const name of ["Xray", "系统", "运行时", "限制", "Nginx", "网站", "文件"]) expect(screen.getByRole("tab", { name })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "目标服务器" }).closest(".ant-select")?.textContent).toContain("Edge");
+    expect(screen.getByRole("combobox", { name: "目标服务器" }).closest(".ui-select")?.textContent).toContain("Edge");
     expect(screen.queryByTestId("limiter-server")).toBeNull(); await tab("限制"); expect(screen.getByTestId("limiter-server").textContent).toBe("edge");
   });
   it("queues raw Xray test/write without changing payload semantics", async () => {
@@ -137,7 +137,7 @@ describe("React configuration workspace", () => {
   });
   it.each(["config.jsonc", "CONFIG.JSONC"])("never unlocks %s, even when an Agent claims writable", async (filename) => {
     history.edge = [command("/api/child/xray/config-files", { content: "// comment\n{}", path: `/etc/xray/${filename}`, sha256: sha, writable: true })];
-    render(<ConfigView />); await flush(); await tab("文件"); const file = within(screen.getByText("Xray 文件").closest(".ant-card")!);
+    render(<ConfigView />); await flush(); await tab("文件"); const file = within(screen.getByText("Xray 文件").closest(".ui-card")!);
     fireEvent.click(file.getByRole("button", { name: "使用最新结果" }));
     expect((file.getByLabelText("文件") as HTMLInputElement).value).toBe(filename);
     expect((file.getByLabelText("内容") as HTMLTextAreaElement).disabled).toBe(true);
@@ -145,7 +145,7 @@ describe("React configuration workspace", () => {
   });
   it("binds a writable file to its exact name/revision and requires another read after writes", async () => {
     history.edge = [command("/api/child/xray/config-files", { content: "{}", path: "/etc/xray/xray.json", sha256: sha, writable: true })];
-    render(<ConfigView />); await flush(); await tab("文件"); const file = within(screen.getByText("Xray 文件").closest(".ant-card")!);
+    render(<ConfigView />); await flush(); await tab("文件"); const file = within(screen.getByText("Xray 文件").closest(".ui-card")!);
     fireEvent.click(file.getByRole("button", { name: "使用最新结果" }));
     fireEvent.change(file.getByLabelText("内容"), { target: { value: '{"log":{}}' } }); fireEvent.click(file.getByRole("button", { name: "写入" })); await flush();
     expect(inventory.queueAgentOperation).toHaveBeenCalledWith("edge", "xray_config_file_write", { file: "xray.json", content: '{"log":{}}', expected_sha256: sha });
@@ -158,14 +158,14 @@ describe("React configuration workspace", () => {
   });
   it("uses file lists only to select the primary file, not to unlock editing", async () => {
     history.edge = [command("/api/child/xray/config-files", { files: { main: [{ name: "primary.json" }] } })];
-    render(<ConfigView />); await flush(); await tab("文件"); const file = within(screen.getByText("Xray 文件").closest(".ant-card")!);
+    render(<ConfigView />); await flush(); await tab("文件"); const file = within(screen.getByText("Xray 文件").closest(".ui-card")!);
     fireEvent.click(file.getByRole("button", { name: "使用最新结果" }));
     expect((file.getByLabelText("文件") as HTMLInputElement).value).toBe("primary.json"); expect((file.getByRole("button", { name: "写入" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(file.getByRole("button", { name: "读取" })); await flush(); expect(inventory.queueAgentOperation).toHaveBeenCalledWith("edge", "xray_config_file_read", { file: "primary.json" });
   });
   it("loads snapshots, blocks direct pending restore and applies current with the recovery contract", async () => {
     render(<ConfigView />); await flush();
-    const pending = screen.getByText("待恢复", { selector: ".ant-tag" }).closest("tr")!; expect((within(pending).getByRole("button", { name: "恢复" }) as HTMLButtonElement).disabled).toBe(true);
+    const pending = screen.getByText("待恢复", { selector: ".ui-tag" }).closest("tr")!; expect((within(pending).getByRole("button", { name: "恢复" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(within(pending).getByRole("button", { name: "载入" })); await flush();
     expect(inventory.listXrayConfigSnapshots).toHaveBeenCalledWith("edge", { limit: 8, withConfig: true });
     expect((screen.getByLabelText("Xray 配置") as HTMLTextAreaElement).value).toBe('{"snapshot":true}');
@@ -271,7 +271,7 @@ describe("React configuration workspace", () => {
   it("preserves site operations and literal Nginx file paths", async () => {
     render(<ConfigView />); await flush(); const panel = await tab("网站"); fireEvent.click(panel.getByRole("button", { name: "服务器" })); await flush(); expect(inventory.queueAgentOperation).toHaveBeenCalledWith("edge", "nginx_servers_list", undefined);
     fireEvent.click(panel.getByRole("button", { name: "排队执行" })); await flush(); expect(inventory.queueAgentOperation).toHaveBeenCalledWith("edge", "nginx_setup_ssl", { domain: "example.com" });
-    await tab("文件"); const nginx = within(screen.getByText("Nginx 文件").closest(".ant-card")!);
+    await tab("文件"); const nginx = within(screen.getByText("Nginx 文件").closest(".ui-card")!);
     fireEvent.change(nginx.getByLabelText("写入路径"), { target: { value: " servers/custom.conf " } }); fireEvent.click(nginx.getByRole("button", { name: "写入" })); await flush(); expect(inventory.queueAgentOperation).toHaveBeenCalledWith("edge", "nginx_config_file_write", { path: "servers/custom.conf", content: "server {\n    listen 80;\n}\n" });
   });
   it("requires a supported takeover preview plus confirmation and sends its source checksum", async () => {
@@ -281,7 +281,7 @@ describe("React configuration workspace", () => {
       const queued = command("/takeover", result, { id: "takeover", server_id: id }); history[id] = [queued]; return { command: queued, license_required: false };
     });
     render(<ConfigView />); await flush(); fireEvent.click(screen.getByRole("button", { name: "接管外部 Xray" })); await flush();
-    const modal = within(screen.getByText("Xray 接管", { selector: ".ant-modal-title" }).closest('[role="dialog"]')!);
+    const modal = within(screen.getByText("Xray 接管", { selector: ".ui-dialog-title" }).closest('[role="dialog"]')!);
     expect(modal.getByText("2 个源文件")).toBeTruthy(); expect((modal.getByRole("button", { name: "接管" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(modal.getByRole("checkbox", { name: "替换源配置片段，并在 Xray 正在运行时重启" }));
     fireEvent.click(modal.getByRole("button", { name: "接管" })); await flush();

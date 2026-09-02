@@ -32,7 +32,7 @@ function leaveAndEnter(input: HTMLInputElement) {
   fireEvent.keyUp(input, { key: "Enter" });
 }
 
-describe("Strict Ant Design numeric input", () => {
+describe("Strict numeric input", () => {
   it("preserves the negative sign during sequential typing without reusing the old value", () => {
     const { input, changed } = mount();
     draft(input, ""); draft(input, "-");

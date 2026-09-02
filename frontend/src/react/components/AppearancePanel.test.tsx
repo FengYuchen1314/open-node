@@ -34,7 +34,7 @@ describe("appearance administration", () => {
     expect(screen.getByText(/图片和外部地址会公开给访客/)).toBeTruthy();
     expect(updateAppearance).not.toHaveBeenCalled(); expect(uploadAppearanceImage).not.toHaveBeenCalled();
   });
-  it("saves normalized public URLs and the standard Ant Design theme", async () => {
+  it("saves normalized public URLs and the standard interface theme", async () => {
     await mount(); fireEvent.click(screen.getByText("深色"));
     fireEvent.change(screen.getByLabelText("Logo 地址"), { target: { value: "  https://cdn.example.test/logo.png  " } });
     fireEvent.click(screen.getByRole("button", { name: "保存外观设置" })); await flush();

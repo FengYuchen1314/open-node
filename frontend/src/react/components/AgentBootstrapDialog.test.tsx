@@ -58,7 +58,7 @@ describe("React Agent bootstrap dialog", () => {
   it("removes command DOM on close and does not recover it on reopen", async () => {
     const { props, rerender } = await showCommand();
     expect((screen.getByLabelText("root shell 安装命令") as HTMLTextAreaElement).value).toBe(issued.command);
-    expect(screen.getByLabelText("root shell 安装命令").closest(".ant-form-item")?.classList.contains("ant-form-item-vertical")).toBe(true);
+    expect(screen.getByLabelText("root shell 安装命令").closest(".ui-form-item")?.classList.contains("ui-form-item-vertical")).toBe(true);
     expect(screen.getByText(/有效期为 10 分钟的私密票据/)).toBeTruthy();
     rerender(<AgentBootstrapDialog {...props} open={false} />);
     expect(screen.queryByTestId("bootstrap-command")).toBeNull(); expect(document.body.textContent).not.toContain(issued.command);

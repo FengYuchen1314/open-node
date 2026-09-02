@@ -41,7 +41,7 @@ function getButton(name: string) {
 function getDialog(title: string) {
   // rc-util intentionally reuses "test-id" in NODE_ENV=test. The visible title
   // identifies its own dialog without following another control's duplicate ID.
-  const dialog = screen.getByText(title, { selector: ".ant-modal-title" }).closest('[role="dialog"]');
+  const dialog = screen.getByText(title, { selector: ".ui-dialog-title" }).closest('[role="dialog"]');
   if (!dialog) throw new Error(`Dialog is missing: ${title}`);
   return within(dialog as HTMLElement);
 }
@@ -61,7 +61,7 @@ function editNumber(input: HTMLElement, value: string, finish: "blur" | "Enter")
 }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks();
-  // Ant's full Dashboard has many controls. Visibility/layout belongs to the
+  // The full Dashboard has many controls. Visibility/layout belongs to the
   // browser gate; skip jsdom's expensive CSS cascade for semantic queries here.
   configure({ defaultHidden: true });
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
@@ -272,7 +272,7 @@ describe("React Dashboard workflows", () => {
     { label: "延迟探测超时", button: "下发延迟探测", minimum: 200, maximum: 10000 },
     { label: "路由探测超时（秒）", button: "追踪回程路由", minimum: 10, maximum: 45 },
     { label: "命令超时", button: "下发命令", minimum: 1000, maximum: 300000 },
-  ])("rejects blank, negative, fractional and over-bound $label after real Ant blur and Enter", async ({ label, button, minimum, maximum }) => {
+  ])("rejects blank, negative, fractional and over-bound $label after blur and Enter", async ({ label, button, minimum, maximum }) => {
     vi.mocked(listAgents).mockResolvedValue([agent]); await mount();
     fireEvent.change(screen.getByLabelText("服务器名称"), { target: { value: "New edge" } });
     fireEvent.change(screen.getByLabelText("延迟探测目标"), { target: { value: "example.com" } });

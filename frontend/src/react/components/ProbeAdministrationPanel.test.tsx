@@ -34,7 +34,7 @@ function draft(label: string, value: string) {
 }
 async function selectKind(label: string) {
   fireEvent.mouseDown(screen.getByRole("combobox", { name: "探针类型" }));
-  fireEvent.click(screen.getByText(label, { selector: ".ant-select-item-option-content" }));
+  fireEvent.click(screen.getByText(label, { selector: ".ui-option" }));
   await flush();
 }
 
@@ -79,7 +79,7 @@ describe("React probe administration", () => {
   it("does not create or dispatch with unknown inventory/task state and permits an explicit retry", async () => {
     vi.mocked(probe.listProbeTasks).mockRejectedValueOnce(new Error("Task list unavailable"));
     mount(); await flush();
-    const header = screen.getByText("定时探针").closest<HTMLElement>(".ant-card-head-title")!;
+    const header = screen.getByText("定时探针").closest<HTMLElement>(".ui-card-title")!;
     expect(header.style.whiteSpace).toBe("normal");
     expect(header.contains(button("下发到期任务"))).toBe(true);
     expect(header.contains(button("刷新探针任务"))).toBe(true);

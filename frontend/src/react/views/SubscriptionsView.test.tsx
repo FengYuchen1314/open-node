@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderUi, screen } from "@testing-library/react";
 import { ConfigProvider } from "../../ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -19,7 +19,7 @@ import { listCamouflagePools } from "../../services/camouflage-pools";
 import type { ManagedNode, ManagedNodeCreationMetadataResponse, ProductUser, ProductUserSubscriptionToken, SubscriptionCredential, SubscriptionPlan, SubscriptionTemplatePreset } from "../../domain/subscriptions";
 import type { SubscriptionTemplate } from "../../domain/subscription-templates";
 
-const render = (ui: Parameters<typeof renderAnt>[0], path = "/") => renderAnt(ui, { wrapper: ({ children }) => <MemoryRouter initialEntries={[path]}><ConfigProvider>{children}</ConfigProvider></MemoryRouter> });
+const render = (ui: Parameters<typeof renderUi>[0], path = "/") => renderUi(ui, { wrapper: ({ children }) => <MemoryRouter initialEntries={[path]}><ConfigProvider>{children}</ConfigProvider></MemoryRouter> });
 
 vi.mock("../../services/subscriptions", async importOriginal => {
   const original = await importOriginal<typeof import("../../services/subscriptions")>();

@@ -42,11 +42,11 @@ function detail(row = delivery()): NotificationDeliveryDetail {
     started_at: now, deadline_at: now, finished_at: now, code: row.code, message_id: row.message_id, retry_after: null, retryable: false, late_receipt_at: null }] : [], license_required: false };
 }
 function button(name: string) { return screen.getByRole("button", { name }) as HTMLButtonElement; }
-function dialog(title: string) { return within(screen.getByText(title, { selector: ".ant-modal-title" }).closest('[role="dialog"]')!); }
+function dialog(title: string) { return within(screen.getByText(title, { selector: ".ui-dialog-title" }).closest('[role="dialog"]')!); }
 async function click(name: string) { fireEvent.click(button(name)); await flush(); }
 async function selectToken(option: string) {
   fireEvent.mouseDown(screen.getByLabelText("Bot Token 操作")); await flush();
-  const node = screen.getAllByText(option).find(item => item.closest(".ant-select-item-option"));
+  const node = screen.getAllByText(option).find(item => item.closest(".ui-option"));
   if (!node) throw new Error("Missing token action");
   fireEvent.click(node); await flush();
 }
@@ -159,8 +159,8 @@ describe("administrator notification workflows", () => {
     expect(document.body.textContent).toContain("恢复原通知密钥"); expect(button("发送 Telegram 测试").disabled).toBe(true);
     fireEvent.mouseDown(screen.getByLabelText("Bot Token 操作")); await flush();
     for (const text of ["替换 Bot Token", "清除已保存的 Token"]) {
-      const node = screen.getAllByText(text).find(item => item.closest(".ant-select-item-option"))!;
-      expect(node.closest(".ant-select-item-option")?.getAttribute("aria-disabled")).toBe("true");
+      const node = screen.getAllByText(text).find(item => item.closest(".ui-option"))!;
+      expect(node.closest(".ui-option")?.getAttribute("aria-disabled")).toBe("true");
     }
     fireEvent.keyDown(screen.getByLabelText("Bot Token 操作"), { key: "Escape", code: "Escape" });
     fireEvent.click(screen.getByRole("switch", { name: "启用套餐临期提醒" })); await click("保存通知配置");
@@ -279,7 +279,7 @@ describe("administrator notification workflows", () => {
     vi.mocked(testNotification).mockRejectedValueOnce(new NotificationRequestError(null));
     render(<NotificationsView />); await flush(); await submitTest(); saved.revision = 5; saved.chat_id = "1234";
     await click("使用原通知请求 ID 再次提交");
-    expect(screen.queryByText("再次提交原通知请求", { selector: ".ant-modal-title" })).toBeNull();
+    expect(screen.queryByText("再次提交原通知请求", { selector: ".ui-dialog-title" })).toBeNull();
     expect(document.body.textContent).toContain("旧请求只能先查询对账");
     expect(button("使用原通知请求 ID 再次提交").disabled).toBe(true);
     expect(testNotification).toHaveBeenCalledOnce(); expect(crypto.randomUUID).toHaveBeenCalledOnce();
@@ -320,7 +320,7 @@ describe("administrator notification workflows", () => {
   it("rechecks retry eligibility immediately before confirmation and refuses an already accepted attempt", async () => {
     rows = [delivery()]; details.set(deliveryId, detail(delivery({ state: "accepted", code: "telegram_accepted", message_id: 42, manual_retry_allowed: false })));
     render(<NotificationsView />); await flush(); await click(`人工重试通知 ${deliveryId}`);
-    expect(screen.queryByText("确认人工重试通知", { selector: ".ant-modal-title" })).toBeNull();
+    expect(screen.queryByText("确认人工重试通知", { selector: ".ui-dialog-title" })).toBeNull();
     expect(document.body.textContent).toContain("当前投递还不允许人工重试"); expect(button(`人工重试通知 ${deliveryId}`).disabled).toBe(true); noSending();
   });
 

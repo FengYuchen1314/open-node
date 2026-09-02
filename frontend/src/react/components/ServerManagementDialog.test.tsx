@@ -32,8 +32,8 @@ describe("React server management", () => {
   it.each(["edit", "remove"] as const)("keeps the %s dialog centered with a viewport-bounded scrollable body", async mode => {
     mount(mode); await flush();
     const dialog = screen.getByRole("dialog");
-    expect(dialog.closest(".ant-modal-wrap")?.classList.contains("ant-modal-centered")).toBe(true);
-    expect((dialog.querySelector(".ant-modal-body") as HTMLElement).style.maxHeight).toBe("calc(100dvh - 200px)");
+    expect(dialog.closest(".ui-modal-mask")?.classList.contains("is-centered")).toBe(true);
+    expect((dialog.querySelector(".ui-modal-body") as HTMLElement).style.maxHeight).toBe("calc(100dvh - 200px)");
   });
   it("edits all addresses with the loaded revision and explicit node synchronization choice", async () => {
     const { props } = mount(); await flush();

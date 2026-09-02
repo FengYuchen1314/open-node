@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderUi, screen } from "@testing-library/react";
 import { ConfigProvider } from "../../ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SubscriptionShortCodeDialog from "./SubscriptionShortCodeDialog";
@@ -15,7 +15,7 @@ import type { ProductUserSubscriptionToken, SubscriptionPlan } from "../../domai
 import type { TemporarySubscription } from "../../domain/temporary-subscriptions";
 import type { RegistrationInvitation } from "../../domain/registration-invitations";
 
-const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
+const render = (ui: Parameters<typeof renderUi>[0]) => renderUi(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
 
 vi.mock("../../services/subscriptions", () => ({ getProductUserIpPolicy: vi.fn(), getProductUserSubscriptionToken: vi.fn(), updateProductUserIpPolicy: vi.fn(), updateProductUserShortCode: vi.fn() }));
 vi.mock("../../services/subscriber-auth", () => ({ subscriberAccount: vi.fn(), subscriberSecurity: vi.fn(), subscriberShortCode: vi.fn(), subscriberToken: vi.fn(), subscriberIpPolicy: vi.fn(), updateSubscriberIpPolicy: vi.fn() }));

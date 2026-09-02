@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderUi, screen } from "@testing-library/react";
 import { ConfigProvider } from "../../ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PlanManagementDialog from "./PlanManagementDialog";
@@ -19,7 +19,7 @@ import { updatePrivateRoutePolicy } from "../../services/private-routed-nodes";
 import type { ManagedNode, ProductUser, SubscriptionAccessResponse, SubscriptionPlan } from "../../domain/subscriptions";
 import type { SubscriptionProfile } from "../../domain/subscription-profiles";
 
-const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
+const render = (ui: Parameters<typeof renderUi>[0]) => renderUi(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
 
 vi.mock("../../services/plan-management", async importOriginal => ({ ...await importOriginal<typeof import("../../services/plan-management")>(), getPlanManagement: vi.fn(), removePlan: vi.fn(), savePlan: vi.fn() }));
 vi.mock("../../services/user-management", async importOriginal => ({ ...await importOriginal<typeof import("../../services/user-management")>(), getUserManagement: vi.fn(), getUserRemoval: vi.fn(), retryUserRemoval: vi.fn(), removeUser: vi.fn(), saveUser: vi.fn() }));

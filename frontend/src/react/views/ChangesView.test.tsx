@@ -112,7 +112,7 @@ describe("React dependent change sets", () => {
   it("requires both acceptance reason and explicit acknowledgement", async () => {
     vi.mocked(listChangeSets).mockResolvedValue({ change_sets: [change({ status: "needs_review", held_server_ids: ["edge"] })], license_required: false });
     render(<ChangesView />); await flush(); fireEvent.click(screen.getByRole("button", { name: "接受当前状态" }));
-    const dialog = within(screen.getByText("接受当前状态", { selector: ".ant-modal-title" }).closest('[role="dialog"]')!);
+    const dialog = within(screen.getByText("接受当前状态", { selector: ".ui-dialog-title" }).closest('[role="dialog"]')!);
     expect((dialog.getByRole("button", { name: "接受状态" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(dialog.getByLabelText("处理原因"), { target: { value: "  Verified nodes  " } });
     expect((dialog.getByRole("button", { name: "接受状态" }) as HTMLButtonElement).disabled).toBe(true);

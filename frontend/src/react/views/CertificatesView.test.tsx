@@ -17,11 +17,11 @@ let caps: CertificateCapabilities, providers: DNSProvider[], row: ManagedCertifi
 async function flush() { await act(async () => { for (let i = 0; i < 20; i += 1) await Promise.resolve(); }); }
 function modal(title: string) {
   // Select/Modal share rc-util's hard-coded test ID, unlike production React IDs.
-  return within(screen.getByText(title, { selector: ".ant-modal-title" }).closest('[role="dialog"]')!);
+  return within(screen.getByText(title, { selector: ".ui-dialog-title" }).closest('[role="dialog"]')!);
 }
 async function selectOption(label: string, option: string) {
   fireEvent.mouseDown(screen.getByLabelText(label)); await flush();
-  const node = screen.getAllByText(option).find((item) => item.closest(".ant-select-item-option"));
+  const node = screen.getAllByText(option).find((item) => item.closest(".ui-option"));
   if (!node) throw new Error(`Missing option ${option} for ${label}`);
   fireEvent.click(node); await flush();
 }
@@ -80,7 +80,7 @@ describe("React certificate workflows", () => {
     detail.versions[0].details.self_signed = true;
     render(<CertificatesView />); await flush(); await inspect();
     expect(screen.getByText(/不支持 ACME 自动续签或 CA 吊销/)).toBeTruthy();
-    expect(screen.getByText("自签名", { selector: ".ant-tag" })).toBeTruthy();
+    expect(screen.getByText("自签名", { selector: ".ui-tag" })).toBeTruthy();
     expect((screen.getByRole("button", { name: "吊销版本" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "立即续签" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "下载证书" }) as HTMLButtonElement).disabled).toBe(false);
@@ -163,7 +163,7 @@ describe("React certificate workflows", () => {
     await selectOption("DNS 服务商类型", "cloudflare");
     expect((screen.getByLabelText("CF_API_TOKEN") as HTMLInputElement).value).toBe("");
     fireEvent.change(screen.getByLabelText("CF_API_TOKEN"), { target: { value: "must-clear-again" } });
-    fireEvent.click(screen.getByRole("button", { name: "取 消" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByLabelText("CF_API_TOKEN")).toBeNull();
   });
   it("clears imported PEM on cancel and submits private material only through the import endpoint", async () => {
@@ -171,7 +171,7 @@ describe("React certificate workflows", () => {
     fireEvent.change(screen.getByLabelText("证书名称"), { target: { value: "Imported" } });
     fireEvent.change(screen.getByLabelText("证书 PEM"), { target: { value: "public-pem" } });
     fireEvent.change(screen.getByLabelText("私钥 PEM"), { target: { value: "private-pem" } });
-    fireEvent.click(screen.getByRole("button", { name: "取 消" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
     fireEvent.click(screen.getByRole("button", { name: "导入 PEM" }));
     expect((screen.getByLabelText("私钥 PEM") as HTMLTextAreaElement).value).toBe("");
     fireEvent.change(screen.getByLabelText("证书 PEM"), { target: { value: "public-pem" } });
@@ -254,7 +254,7 @@ describe("React certificate workflows", () => {
   });
   it("retains deployment target controls and guards target removal with confirmation", async () => {
     render(<CertificatesView />); await flush(); await inspect();
-    const targets = within(screen.getByText("部署目标", { selector: ".ant-card-head-title" }).closest(".ant-card")!);
+    const targets = within(screen.getByText("部署目标", { selector: ".ui-card-title" }).closest(".ui-card")!);
     const targetForm = within(targets.getByLabelText("目标服务器").closest("form")!);
     const autoDeploy = targetForm.getByRole("checkbox", { name: "自动部署" });
     const addTarget = targetForm.getByRole("button", { name: "添加目标" });
@@ -289,7 +289,7 @@ describe("React certificate workflows", () => {
     expect(catalogCalls()).toBe(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); await flush(); expect(catalogCalls()).toBe(2);
     fireEvent.click(screen.getByRole("button", { name: "导入 PEM" })); await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); expect(catalogCalls()).toBe(2);
-    fireEvent.click(screen.getByRole("button", { name: "取 消" })); vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "取消" })); vi.spyOn(document, "hidden", "get").mockReturnValue(true);
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); expect(catalogCalls()).toBe(2);
     view.unmount(); await act(async () => { await vi.advanceTimersByTimeAsync(10000); }); expect(catalogCalls()).toBe(2);
   });

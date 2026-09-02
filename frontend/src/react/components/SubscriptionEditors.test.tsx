@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderUi, screen } from "@testing-library/react";
 import { ConfigProvider } from "../../ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AutoSpeedRuleEditor from "./AutoSpeedRuleEditor";
@@ -11,7 +11,7 @@ import { newAutoSpeedRule, type AutoSpeedRule } from "../../domain/auto-speed";
 import type { UserLimitOverrides, UserLimitsRead } from "../../domain/user-limits";
 import type { ManagedNode } from "../../domain/subscriptions";
 
-const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
+const render = (ui: Parameters<typeof renderUi>[0]) => renderUi(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -22,7 +22,7 @@ beforeEach(() => {
 afterEach(async () => {
   try {
     cleanup();
-    // Ant Design form feedback can still have delayed state updates after unmount.
+    // Form feedback can still have delayed state updates after unmount.
     // Execute them while jsdom exists instead of discarding pending callbacks.
     await act(async () => { await vi.runOnlyPendingTimersAsync(); });
     expect(vi.getTimerCount(), "UI timers must finish before jsdom teardown").toBe(0);
@@ -77,11 +77,11 @@ describe("React subscription field editors", { timeout: 20_000 }, () => {
     const changed = vi.fn();
     function Harness() { const [value, setValue] = useState<number | null>(null); return <LimitOverrideField label="速度" unit="Mbps" maximum={1000} minimum={0.01} value={value} onChange={number => { changed(number); setValue(number); }} suggested={25} />; }
     render(<Harness />);
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "速度模式" })); fireEvent.click(screen.getByText("不限", { selector: ".ant-select-item-option-content" })); await flush();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "速度模式" })); fireEvent.click(screen.getByText("不限", { selector: ".ui-option" })); await flush();
     expect(changed).toHaveBeenLastCalledWith(0);
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "速度模式" })); fireEvent.click(screen.getByText("自定义", { selector: ".ant-select-item-option-content" })); await flush();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "速度模式" })); fireEvent.click(screen.getByText("自定义", { selector: ".ui-option" })); await flush();
     expect(changed).toHaveBeenLastCalledWith(25); expect((screen.getByLabelText("速度（Mbps）") as HTMLInputElement).value).toBe("25");
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "速度模式" })); fireEvent.click(screen.getByText("继承", { selector: ".ant-select-item-option-content" })); await flush();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "速度模式" })); fireEvent.click(screen.getByText("继承", { selector: ".ui-option" })); await flush();
     expect(changed).toHaveBeenLastCalledWith(null);
   });
   it("removes both per-node override maps without changing account limits", () => {

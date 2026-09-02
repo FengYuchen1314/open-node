@@ -103,7 +103,7 @@ describe("shared TCP 443 ingress dialog", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "确认禁用" })); await flush();
-    const confirmation = within(screen.getByText("确认禁用受管 443 分流", { selector: ".ant-modal-title" }).closest('[role="dialog"]')!);
+    const confirmation = within(screen.getByText("确认禁用受管 443 分流", { selector: ".ui-dialog-title" }).closest('[role="dialog"]')!);
     expect((confirmation.getByRole("button", { name: "禁用并下发" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(confirmation.getByRole("checkbox", { name: "我确认禁用此服务器的全部受管 443 入口" }));
     fireEvent.click(confirmation.getByRole("button", { name: "禁用并下发" })); await flush();

@@ -43,7 +43,7 @@ it("all-node scope warns and resets prior consent", async () => {
   render({ ...source, refresh: { ...refresh, enabled: true } }); await edit();
   fireEvent.click(screen.getByRole("checkbox", { name: "确认外部订阅自动变更" }));
   fireEvent.mouseDown(screen.getByRole("combobox", { name: "外部订阅自动同步范围" })); await flush();
-  fireEvent.click(screen.getAllByText("更新已保存节点，并自动加入新节点", { selector: ".ant-select-item-option-content" }).at(-1)!); await flush();
+  fireEvent.click(screen.getAllByText("更新已保存节点，并自动加入新节点", { selector: ".ui-option" }).at(-1)!); await flush();
   expect(screen.getByText(/新发现的可用节点会自动加入/)).toBeTruthy();
   expect(save().disabled).toBe(true);
   fireEvent.click(screen.getByRole("checkbox", { name: "确认外部订阅自动变更" }));

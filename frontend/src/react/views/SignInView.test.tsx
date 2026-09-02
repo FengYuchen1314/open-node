@@ -26,7 +26,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   cleanup();
-  // Ant Design Form debounces help state for up to 10 ms. Let those
+  // Form feedback used to debounce help state for up to 10 ms. Let those
   // presentation timers finish before Vitest disposes the jsdom window.
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
   vi.restoreAllMocks(); vi.unstubAllGlobals();

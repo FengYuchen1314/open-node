@@ -34,7 +34,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); subscriberState.session = null; vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.clearAllTimers(); vi.useRealTimers(); });
 async function click(name: string) { fireEvent.click(screen.getByRole("button", { name })); await flush(); }
-function dialog(title: string) { return within(screen.getByText(title, { selector: ".ant-modal-title" }).closest(".ant-modal") as HTMLElement); }
+function dialog(title: string) { return within(screen.getByText(title, { selector: ".ui-dialog-title" }).closest(".ui-modal") as HTMLElement); }
 function fill(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
 
 describe("account external source workspace", () => {

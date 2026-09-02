@@ -55,7 +55,7 @@ const FormDisabledContext = createContext(false);
 
 export function Button({ children, icon, loading, type, danger, block, htmlType, className, ...props }: AnyProps) {
   const formDisabled = useContext(FormDisabledContext), disabled = props.disabled || formDisabled;
-  if (props.href) return <a {...omit(props, ["disabled", "download"])} download={props.download} href={props.href} className={cx("ui-button", type && `ui-button-${type}`, danger && "ui-button-danger", block && "ui-block", disabled && "ant-btn-disabled", className)} aria-disabled={disabled || undefined}>{icon}{children && <span>{children}</span>}</a>;
+  if (props.href) return <a {...omit(props, ["disabled", "download"])} download={props.download} href={props.href} className={cx("ui-button", type && `ui-button-${type}`, danger && "ui-button-danger", block && "ui-block", disabled && "is-disabled", className)} aria-disabled={disabled || undefined}>{icon}{children && <span>{children}</span>}</a>;
   return <button {...omit(props, ["shape", "size", "disabled"])} type={htmlType ?? "button"} disabled={disabled || loading}
     className={cx("ui-button", type && `ui-button-${type}`, danger && "ui-button-danger", block && "ui-block", className)}>
     {loading ? <span className="ui-spinner" aria-label="处理中" /> : icon}{children && <span>{children}</span>}
@@ -72,9 +72,9 @@ export function Alert({ message, title, description, type = "info", showIcon, ac
 }
 
 export function Card({ title, extra, children, className, size, styles, loading, ...props }: AnyProps) {
-  return <section {...props} className={cx("ui-card", "ant-card", size && `ui-card-${size}`, className)}>
-    {(title || extra) && <header className="ui-card-head"><div className="ui-card-title ant-card-head-title" style={styles?.title}>{title}</div><div>{extra}</div></header>}
-    <div className="ui-card-body">{loading ? <Spin /> : children}</div>
+  return <section {...props} className={cx("ui-card", size && `ui-card-${size}`, className)}>
+    {(title || extra) && <header className="ui-card-head"><div className="ui-card-title" style={styles?.title}>{title}</div><div className="ui-card-extra">{extra}</div></header>}
+    <div className="ui-card-body" style={styles?.body}>{loading ? <Spin /> : children}</div>
   </section>;
 }
 
@@ -83,8 +83,9 @@ export function Flex({ children, vertical, gap, align, justify, wrap, className,
   return <div {...omit(props, ["style"])} className={cx("ui-flex", className)} style={style}>{children}</div>;
 }
 
-export function Space({ children, direction, size, wrap, className, ...props }: AnyProps) {
-  return <div {...props} className={cx("ui-space", direction === "vertical" && "ui-space-vertical", wrap && "ui-wrap", className)} style={{ gap: size === "small" ? 8 : size === "large" ? 20 : 12, ...props.style }}>{children}</div>;
+export function Space({ children, direction, orientation, size, wrap, className, ...props }: AnyProps) {
+  const vertical = direction === "vertical" || orientation === "vertical";
+  return <div {...props} className={cx("ui-space", vertical && "ui-space-vertical", wrap && "ui-wrap", className)} style={{ gap: size === "small" ? 8 : size === "large" ? 20 : 12, ...props.style }}>{children}</div>;
 }
 Space.Compact = ({ children, block, className, ...props }: AnyProps) => <div {...props} className={cx("ui-compact", block && "ui-block", className)}>{children}</div>;
 
@@ -95,7 +96,7 @@ Form.Item = ({ label, children, required, extra, help, validateStatus, htmlFor, 
   const nestedLabel = isValidElement(children) && Children.toArray((children.props as AnyProps).children).some(child => isValidElement(child) && Boolean((child.props as AnyProps)["aria-label"]));
   const control = isValidElement(children) && !nestedLabel && typeof label === "string" && !(children.props as AnyProps)["aria-label"]
     ? cloneElement(children as React.ReactElement<any>, { "aria-label": label }) : children;
-  return <div {...omit(props, ["name", "rules", "valuePropName", "tooltip", "labelCol", "wrapperCol"])} className={cx("ui-form-item", "ant-form-item", props.layout === "vertical" && "ant-form-item-vertical", validateStatus && `ui-form-${validateStatus}`, className)}>
+  return <div {...omit(props, ["name", "rules", "valuePropName", "tooltip", "labelCol", "wrapperCol"])} className={cx("ui-form-item", props.layout === "vertical" && "ui-form-item-vertical", validateStatus && `ui-form-${validateStatus}`, className)}>
     {label && <div className="ui-form-label"><label htmlFor={htmlFor}>{label}</label>{required && <span className="ui-required" aria-hidden> *</span>}</div>}
     {control}{(help || extra) && <div className="ui-form-help">{help || extra}</div>}
   </div>;
@@ -133,13 +134,13 @@ export function Select({ options = [], value, onChange, mode, allowClear, placeh
   const formDisabled = useContext(FormDisabledContext);
   const multiple = mode === "multiple" || mode === "tags";
   const current = multiple ? (value ?? []).map(String) : value == null ? "" : String(value);
-  return <select {...omit(props, ["showSearch", "optionFilterProp", "popupMatchSelectWidth", "maxTagCount", "maxCount"])} disabled={props.disabled || formDisabled || loading} aria-busy={loading || undefined} className={cx("ui-select", "ant-select", className)} multiple={multiple} value={current}
+  return <select {...omit(props, ["showSearch", "optionFilterProp", "popupMatchSelectWidth", "maxTagCount", "maxCount"])} disabled={props.disabled || formDisabled || loading} aria-busy={loading || undefined} className={cx("ui-select", className)} multiple={multiple} value={current}
     onChange={event => {
       if (multiple) onChange?.(Array.from(event.currentTarget.selectedOptions).map(option => nativeValue(options, option.value)));
       else onChange?.(nativeValue(options, event.currentTarget.value));
     }}>
     {(allowClear || placeholder || (!multiple && value == null)) && <option value="">{placeholder ?? "请选择"}</option>}
-    {options.map((option: any, index: number) => <option className="ant-select-item-option ant-select-item-option-content" aria-disabled={option.disabled || undefined} key={`${String(option.value)}-${index}`} value={String(option.value)} disabled={option.disabled} onClick={() => {
+    {options.map((option: any, index: number) => <option className="ui-option" aria-disabled={option.disabled || undefined} key={`${String(option.value)}-${index}`} value={String(option.value)} disabled={option.disabled} onClick={() => {
       if (option.disabled) return;
       if (multiple) onChange?.((value ?? []).includes(option.value) ? (value ?? []).filter((item: any) => item !== option.value) : [...(value ?? []), option.value]);
       else onChange?.(option.value);
@@ -178,13 +179,21 @@ export function Segmented({ options = [], value, onChange, block, className, ...
   return <div {...props} role="radiogroup" className={cx("ui-segmented", block && "ui-block", className)}>{options.map((option: any) => { const item = typeof option === "object" ? option : { value: option, label: option }; return <label key={String(item.value)} className={cx("ui-segmented-option", item.value === value && "is-active")}><input type="radio" name={props["aria-label"] ?? "segmented"} value={item.value} checked={item.value === value} disabled={item.disabled} onChange={() => onChange?.(item.value)} /><span>{item.label}</span></label>; })}</div>;
 }
 
-export function Modal({ open, title, children, footer, onCancel, onOk, okText = "确定", cancelText = "取 消", okButtonProps = {}, cancelButtonProps = {}, confirmLoading, closable = true, closeIcon, width, className, styles, ...props }: AnyProps) {
+export function Modal({ open, title, children, footer, onCancel, onOk, okText = "确定", cancelText = "取消", okButtonProps = {}, cancelButtonProps = {}, confirmLoading, closable = true, closeIcon, width, className, styles, keyboard = true, ...props }: AnyProps) {
   const titleId = useId();
+  const dialogRef = useRef<HTMLElement>(null);
+  useEffect(() => { if (open) dialogRef.current?.focus(); }, [open]);
+  useEffect(() => {
+    if (!open || !keyboard) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onCancel?.(); };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [keyboard, onCancel, open]);
   if (!open) return null;
-  return <div className={cx("ui-modal-mask", "ant-modal-wrap", props.centered && "ant-modal-centered")} role="presentation" onMouseDown={event => { const maskClosable = props.maskClosable ?? props.mask?.closable ?? true; if (event.target === event.currentTarget && maskClosable) onCancel?.(); }}>
-    <section role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined} className={cx("ui-modal", "ant-modal", className)} style={{ width, ...props.style }}>
-      <header className="ui-modal-head"><div id={titleId} className="ui-dialog-title ant-modal-title" role="heading" aria-level={2}>{title}</div>{closable && <button type="button" aria-label={isValidElement(closeIcon) ? (closeIcon.props as AnyProps)["aria-label"] ?? "关闭" : "关闭"} className="ui-close" onClick={onCancel}>{isValidElement(closeIcon) ? cloneElement(closeIcon as React.ReactElement<any>, { "aria-label": undefined }) : "×"}</button>}</header>
-      <div className="ui-modal-body ant-modal-body" style={styles?.body}>{children}</div>
+  return <div className={cx("ui-modal-mask", props.centered && "is-centered")} role="presentation" onMouseDown={event => { const maskClosable = props.maskClosable ?? props.mask?.closable ?? true; if (event.target === event.currentTarget && maskClosable) onCancel?.(); }}>
+    <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined} className={cx("ui-modal", className)} style={{ width, ...props.style }}>
+      <header className="ui-modal-head"><div id={titleId} className="ui-dialog-title" role="heading" aria-level={2}>{title}</div>{closable && <button type="button" aria-label={isValidElement(closeIcon) ? (closeIcon.props as AnyProps)["aria-label"] ?? "关闭" : "关闭"} className="ui-close" onClick={onCancel}>{isValidElement(closeIcon) ? cloneElement(closeIcon as React.ReactElement<any>, { "aria-label": undefined }) : "×"}</button>}</header>
+      <div className="ui-modal-body" style={styles?.body}>{children}</div>
       {footer !== null && <footer className="ui-modal-foot">{footer ?? <><Button {...cancelButtonProps} onClick={onCancel}>{cancelText}</Button><Button {...okButtonProps} loading={confirmLoading} type="primary" onClick={onOk}>{okText}</Button></>}</footer>}
     </section>
   </div>;
@@ -241,14 +250,6 @@ export function Collapse({ items = [], defaultActiveKey = [], activeKey, onChang
   return <div {...omit(props, ["destroyOnHidden", "accordion", "bordered", "size", "expandIconPosition"])} className={cx("ui-collapse", props.className)}>{items.map((item: any) => { const expanded = current.has(item.key); return <section key={item.key}><button type="button" className="ui-collapse-trigger" aria-expanded={expanded} onClick={() => { const next = new Set(current); expanded ? next.delete(item.key) : next.add(item.key); if (activeKey == null) setOpen(next); onChange?.([...next]); }}>{item.label}</button>{expanded && <div className="ui-collapse-body">{item.children}</div>}</section>; })}</div>;
 }
 
-export function Menu({ items = [], selectedKeys = [], onClick, className, ...props }: AnyProps) {
-  return <nav {...omit(props, ["mode", "theme"])} role="menu" className={cx("ui-menu", className)}>{items.map((item: any) => item?.type === "divider" ? <hr key={item.key} /> : item?.children ? <section key={item.key}><strong>{item.label}</strong>{item.children.map((child: any) => <button role="menuitem" type="button" key={child.key} className={selectedKeys.includes(child.key) ? "is-active" : ""} onClick={() => onClick?.({ key: child.key })}>{child.icon}{child.label}</button>)}</section> : <button role="menuitem" type="button" key={item.key} className={selectedKeys.includes(item.key) ? "is-active" : ""} onClick={() => onClick?.({ key: item.key })}>{item.icon}{item.label}</button>)}</nav>;
-}
-
-export function Dropdown({ menu, children, disabled }: AnyProps & { menu?: { items?: any[]; onClick?: (info: { key: string }) => void } }) {
-  return <span className="ui-dropdown">{cloneElement(children, { disabled, onClick: () => { if (disabled) return; const choice = window.prompt(menu?.items?.map((item: any, index: number) => `${index + 1}. ${item.label}`).join("\n")); const item = menu?.items?.[Number(choice) - 1]; if (item) menu.onClick?.({ key: item.key }); } })}</span>;
-}
-
 export function Popconfirm({ title, description, onConfirm, children, disabled, okText = "确定" }: AnyProps) {
   if (!isValidElement(children)) return children;
   return <InlineConfirm title={title} description={description} onConfirm={onConfirm} disabled={disabled} okText={okText}>{children}</InlineConfirm>;
@@ -274,26 +275,41 @@ Typography.Paragraph = ({ children, copyable, ellipsis, className, ...props }: A
 Typography.Text = ({ children, strong, code, keyboard, copyable, className, ...props }: AnyProps) => { const content = code ? <code>{children}</code> : keyboard ? <kbd>{children}</kbd> : children; return <span {...omit(props, ["type", "ellipsis", "delete", "mark"])} className={cx("ui-text", props.type && `ui-text-${props.type}`, className)} style={{ fontWeight: strong ? 700 : undefined, ...props.style }}>{content}{copyable && <Button aria-label="复制" onClick={() => navigator.clipboard?.writeText(String(children))}>复制</Button>}</span>; };
 Typography.Link = ({ children, ...props }: AnyProps) => <a {...props}>{children}</a>;
 
-export function Tag({ children, color, closable, onClose, className, ...props }: AnyProps) { return <span {...props} className={cx("ui-tag", "ant-tag", color && `ui-tag-${color}`, className)}>{children}{closable && <button type="button" aria-label="移除" onClick={onClose}>×</button>}</span>; }
-export const Empty: any = ({ description = "暂无数据", children, ...props }: AnyProps) => <div {...props} title={typeof description === "string" ? description : undefined} className={cx("ui-empty", props.className)}><span aria-hidden>◇</span><div className="ui-empty-description ant-empty-description">{description}</div>{children}</div>;
+export function Tag({ children, color, closable, onClose, className, ...props }: AnyProps) { return <span {...props} className={cx("ui-tag", color && `ui-tag-${color}`, className)}>{children}{closable && <button type="button" aria-label="移除" onClick={onClose}>×</button>}</span>; }
+export const Empty: any = ({ description = "暂无数据", children, ...props }: AnyProps) => <div {...props} title={typeof description === "string" ? description : undefined} className={cx("ui-empty", props.className)}><span className="ui-empty-mark" aria-hidden>—</span><div className="ui-empty-description">{description}</div>{children}</div>;
 Empty.PRESENTED_IMAGE_SIMPLE = null;
 export function Spin({ tip, children, spinning = true, ...props }: AnyProps) { return children ? <div className="ui-spin-container">{spinning && <div className="ui-spin-overlay"><span className="ui-spinner" />{tip}</div>}{children}</div> : spinning ? <span {...props} className={cx("ui-spinner", props.className)} aria-label={tip ?? "加载中"} /> : null; }
 export function Progress({ percent = 0, status, format, showInfo = true, size: _size, className, ...props }: AnyProps) { return <div {...props} className={cx("ui-progress", status && `ui-progress-${status}`, className)}><progress max={100} value={percent} />{showInfo && <span>{format ? format(percent) : `${Math.round(percent)}%`}</span>}</div>; }
 export function Divider({ children, ...props }: AnyProps) { return <div {...props} className={cx("ui-divider", props.className)}>{children && <span>{children}</span>}</div>; }
 export function Avatar({ children, src, icon, size, ...props }: AnyProps) { return <span {...props} className={cx("ui-avatar", props.className)} style={{ width: size, height: size, ...props.style }}>{src ? <img src={src} alt="" /> : icon ?? children}</span>; }
 export function Image(props: AnyProps) { return <img {...omit(props, ["preview"])} />; }
-export function Statistic({ title, value, suffix, prefix, precision, ...props }: AnyProps) { const display = typeof value === "number" && precision != null ? value.toFixed(precision) : value; return <div {...props} className={cx("ui-statistic", props.className)}><span>{title}</span><strong>{prefix}{display}{suffix}</strong></div>; }
+export function Statistic({ title, value, suffix, prefix, precision, styles, className, ...props }: AnyProps) { const display = typeof value === "number" && precision != null ? value.toFixed(precision) : value; return <div {...props} className={cx("ui-statistic", className)}><span>{title}</span><strong style={styles?.content}>{prefix}{display}{suffix}</strong></div>; }
 export function Tooltip({ title, children }: AnyProps) { return isValidElement(children) ? cloneElement(children as React.ReactElement<any>, { title: typeof title === "string" ? title : undefined }) : <span title={typeof title === "string" ? title : undefined}>{children}</span>; }
 export function Result({ status, title, subTitle, extra, icon, ...props }: AnyProps) { return <section {...props} className={cx("ui-result", status && `ui-result-${status}`, props.className)}>{icon}<h2>{title}</h2><div>{subTitle}</div>{extra}</section>; }
 export function AutoComplete({ onChange, options = [], ...props }: AnyProps) { const listId = `${props.id ?? props["aria-label"] ?? "autocomplete"}-options`; return <><Input {...props} list={listId} onChange={event => onChange?.(event.target.value)} /><datalist id={listId}>{options.map((option: any) => <option key={option.value} value={option.value}>{option.label}</option>)}</datalist></>; }
 
-export function Row({ children, gutter, className, ...props }: AnyProps) { return <div {...omit(props, ["align", "justify"])} className={cx("ui-row", className)} style={{ gap: Array.isArray(gutter) ? gutter[0] : gutter, ...props.style }}>{children}</div>; }
-export function Col({ children, flex, className, ...props }: AnyProps) { const span = props.xs ?? props.sm ?? props.md ?? props.lg ?? props.span; return <div className={cx("ui-col", className)} style={{ flex: flex ?? (span ? `1 1 ${Math.min(100, Number(span) / 24 * 100)}%` : "1 1 0"), ...props.style }}>{children}</div>; }
+export function Row({ children, gutter, className, ...props }: AnyProps) {
+  const horizontal = Array.isArray(gutter) ? gutter[0] : gutter;
+  const vertical = Array.isArray(gutter) ? gutter[1] : gutter;
+  const style = { "--ui-row-gap-x": `${Number(horizontal ?? 0)}px`, rowGap: vertical, ...props.style } as React.CSSProperties;
+  return <div {...omit(props, ["align", "justify"])} className={cx("ui-row", className)} style={style}>{children}</div>;
+}
+export function Col({ children, flex, className, ...props }: AnyProps) {
+  const span = props.span ?? 24;
+  const style = {
+    "--ui-col": Math.min(24, Number(span)),
+    "--ui-col-xs": Math.min(24, Number(props.xs ?? span)),
+    "--ui-col-sm": Math.min(24, Number(props.sm ?? props.xs ?? span)),
+    "--ui-col-md": Math.min(24, Number(props.md ?? props.sm ?? props.xs ?? span)),
+    "--ui-col-lg": Math.min(24, Number(props.lg ?? props.md ?? props.sm ?? props.xs ?? span)),
+    "--ui-col-xl": Math.min(24, Number(props.xl ?? props.lg ?? props.md ?? props.sm ?? props.xs ?? span)),
+    "--ui-col-xxl": Math.min(24, Number(props.xxl ?? props.xl ?? props.lg ?? props.md ?? props.sm ?? props.xs ?? span)),
+    ...(flex ? { flex } : {}), ...props.style,
+  } as React.CSSProperties;
+  return <div className={cx("ui-col", className)} style={style}>{children}</div>;
+}
 
 export const Layout: any = ({ children, className, ...props }: AnyProps) => <div {...props} className={cx("ui-layout", className)}>{children}</div>;
 Layout.Header = ({ children, className, ...props }: AnyProps) => <header {...props} className={cx("ui-layout-header", className)}>{children}</header>;
 Layout.Content = ({ children, className, ...props }: AnyProps) => <main {...props} className={cx("ui-layout-content", className)}>{children}</main>;
-Layout.Sider = ({ children, className, collapsed, width, ...props }: AnyProps) => <aside {...omit(props, ["breakpoint", "collapsedWidth", "trigger", "onBreakpoint", "collapsible", "onCollapse", "theme"])} className={cx("ui-layout-sider", collapsed && "is-collapsed", className)} style={{ width, ...props.style }}>{children}</aside>;
-
-export const Grid = { useBreakpoint() { const matches = (query: string, fallback: boolean) => typeof window === "undefined" ? fallback : typeof window.matchMedia === "function" ? window.matchMedia(query).matches : fallback; return { xs: true, sm: matches("(min-width: 576px)", true), md: matches("(min-width: 768px)", true), lg: matches("(min-width: 992px)", true), xl: matches("(min-width: 1200px)", false), xxl: matches("(min-width: 1600px)", false) }; } };
 export const theme = { darkAlgorithm: "dark", defaultAlgorithm: "light", useToken: () => ({ token: { colorBgLayout: "var(--ui-bg)", colorBgContainer: "var(--ui-surface)", colorText: "var(--ui-text)", colorTextSecondary: "var(--ui-muted)", colorBorderSecondary: "var(--ui-border)", colorPrimary: "var(--ui-primary)", colorSuccess: "#17834f", colorWarning: "#a46000", colorError: "#c63b3b", borderRadiusLG: 14, boxShadowTertiary: "0 16px 45px rgba(15,23,42,.1)" } }) };
