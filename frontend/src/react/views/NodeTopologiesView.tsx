@@ -24,6 +24,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
 import type {
+  ManagedNodeTopologyCandidate,
   NodeTopology,
   NodeTopologyCandidate,
   NodeTopologyLayout,
@@ -49,7 +50,7 @@ import "./NodeTopologiesView.css";
 
 const candidateMime = "application/x-open-node-topology-candidate";
 const stageMime = "application/x-open-node-topology-stage";
-const kindLabels: Record<NodeTopologyCandidate["server_kind"], string> = {
+const kindLabels: Record<ManagedNodeTopologyCandidate["server_kind"], string> = {
   direct: "直连",
   "leased-line": "专线",
   residential: "住宅",
@@ -80,9 +81,18 @@ export default function NodeTopologiesView() {
   );
   const candidateById = useMemo(() => new Map(candidates.map(item => [item.id, item])), [candidates]);
   const usedNodeIds = useMemo(() => new Set(draft.stages.flatMap(stage => stage.node_ids)), [draft.stages]);
-  const usedServerIds = useMemo(() => new Set(
-    [...usedNodeIds].map(id => candidateById.get(id)?.server_id).filter((id): id is string => Boolean(id)),
-  ), [candidateById, usedNodeIds]);
+  const usedCandidates = useMemo(
+    () => [...usedNodeIds].map(id => candidateById.get(id)).filter((item): item is NodeTopologyCandidate => Boolean(item)),
+    [candidateById, usedNodeIds],
+  );
+  const usedServerIds = useMemo(
+    () => new Set(usedCandidates.filter(item => item.kind === "managed").map(item => item.server_id)),
+    [usedCandidates],
+  );
+  const usedExternalOwners = useMemo(
+    () => new Set(usedCandidates.filter(item => item.kind === "external").map(item => item.owner_username)),
+    [usedCandidates],
+  );
 
   function report(failure: unknown) { setError(nodeTopologyErrorMessage(failure)); }
 
@@ -220,10 +230,10 @@ export default function NodeTopologiesView() {
 
   return <div className="node-topologies-view">
     <Flex className="node-topologies-heading" justify="space-between" align="center" gap={12} wrap>
-      <div><Typography.Title level={2}>节点编排</Typography.Title><Typography.Text type="secondary">把物理节点组合成从左到右的多跳线路，同一跳的多个节点使用轮询负载均衡。</Typography.Text></div>
+      <div><Typography.Title level={2}>节点编排</Typography.Title><Typography.Text type="secondary">把托管物理节点与外部订阅节点组合成从左到右的多跳线路，同一跳的多个节点使用轮询负载均衡。</Typography.Text></div>
       <Space><Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>刷新</Button><Button type="primary" icon={<PlusOutlined />} onClick={createDraft}>新建编排</Button></Space>
     </Flex>
-    <Alert type="info" showIcon title="流向：入口 → 中继 → 最终出口" description="每台服务器在一条线路中只能经过一次；最终出口固定为单节点。拖动跳数列可以调整顺序。" />
+    <Alert type="info" showIcon title="流向：入口 → 中继 → 最终出口" description="托管节点的同一台服务器只能经过一次；一条编排中的外部节点必须属于同一用户，且仅该用户的主订阅可渲染；最终出口固定为单节点。" />
     {error && <Alert className="node-topologies-feedback" type="error" showIcon title={error} role="alert" closable onClose={() => setError("")} />}
     {notice && <Alert className="node-topologies-feedback" type="success" showIcon title={notice} role="status" closable onClose={() => setNotice("")} />}
 
@@ -245,13 +255,19 @@ export default function NodeTopologiesView() {
           <div className="node-topology-candidate-list">
             {candidates.length ? candidates.map(candidate => {
               const used = usedNodeIds.has(candidate.id);
-              const reusedServer = !used && usedServerIds.has(candidate.server_id);
-              return <Card key={candidate.id} size="small" draggable data-testid={`candidate-${candidate.id}`} onDragStart={event => dragCandidate(event, candidate)} className="node-topology-candidate-card">
-                <Flex justify="space-between" align="start" gap={8}><div><Typography.Text strong>{candidate.name}</Typography.Text><div><Typography.Text type="secondary">{candidate.server_name} · {candidate.protocol.toUpperCase()}</Typography.Text></div></div><Tag>{kindLabels[candidate.server_kind]}</Tag></Flex>
+              const reusedServer = !used && candidate.kind === "managed" && usedServerIds.has(candidate.server_id);
+              const ownerConflict = !used && candidate.kind === "external" && usedExternalOwners.size > 0
+                && (usedExternalOwners.size > 1 || !usedExternalOwners.has(candidate.owner_username));
+              const blocked = used || reusedServer || ownerConflict;
+              const origin = candidate.kind === "managed"
+                ? `${candidate.server_name} · ${candidate.protocol.toUpperCase()}`
+                : `来源：${candidate.source_name} · ${candidate.protocol.toUpperCase()}`;
+              return <Card key={candidate.id} size="small" draggable={!blocked} data-testid={`candidate-${candidate.id}`} onDragStart={blocked ? undefined : event => dragCandidate(event, candidate)} className="node-topology-candidate-card">
+                <Flex justify="space-between" align="start" gap={8}><div><Typography.Text strong>{candidate.name}</Typography.Text><div><Typography.Text type="secondary">{origin}</Typography.Text></div>{candidate.kind === "external" && <div><Typography.Text type="secondary">所属用户：{candidate.owner_username}</Typography.Text></div>}</div><Tag color={candidate.kind === "external" ? "orange" : undefined}>{candidate.kind === "managed" ? kindLabels[candidate.server_kind] : "外部"}</Tag></Flex>
                 <Space wrap size={[4, 4]} className="node-topology-candidate-actions">
-                  <Button size="small" aria-label={`添加 ${candidate.name} 为新一跳`} aria-disabled={used || reusedServer} onClick={() => add(candidate, null)}>新一跳</Button>
-                  <Button size="small" aria-label={`加入当前跳 ${candidate.name}`} aria-disabled={used || reusedServer || selectedStage === null} onClick={() => selectedStage === null ? setError("请先选择一个跳数列。") : add(candidate, selectedStage)}>加入当前跳</Button>
-                  {used && <Tag color="success">已使用</Tag>}{reusedServer && <Tag color="warning">同服务器已经过</Tag>}
+                  <Button size="small" aria-label={`添加 ${candidate.name} 为新一跳`} disabled={blocked} onClick={() => add(candidate, null)}>新一跳</Button>
+                  <Button size="small" aria-label={`加入当前跳 ${candidate.name}`} disabled={blocked || selectedStage === null} onClick={() => selectedStage === null ? setError("请先选择一个跳数列。") : add(candidate, selectedStage)}>加入当前跳</Button>
+                  {used && <Tag color="success">已使用</Tag>}{reusedServer && <Tag color="warning">同服务器已经过</Tag>}{ownerConflict && <Tag color="warning">外部节点属于其他用户</Tag>}
                 </Space>
               </Card>;
             }) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有可编排的启用节点" />}
@@ -279,7 +295,12 @@ export default function NodeTopologiesView() {
                 <div className="node-topology-stage-nodes">
                   {stage.node_ids.map(nodeId => {
                     const candidate = candidateById.get(nodeId);
-                    return <div className="node-topology-stage-node" key={nodeId}><div><Typography.Text strong>{candidate?.name ?? "不可用节点"}</Typography.Text><div><Typography.Text type="secondary">{candidate ? `${candidate.server_name} · ${candidate.protocol.toUpperCase()}` : nodeId}</Typography.Text></div></div><Button size="small" danger type="text" icon={<DeleteOutlined />} aria-label={`移除 ${candidate?.name ?? nodeId}`} onClick={event => { event.stopPropagation(); removeNode(nodeId); }} /></div>;
+                    const origin = candidate?.kind === "managed"
+                      ? `${candidate.server_name} · ${candidate.protocol.toUpperCase()}`
+                      : candidate?.kind === "external"
+                        ? `来源：${candidate.source_name} · 用户：${candidate.owner_username} · ${candidate.protocol.toUpperCase()}`
+                        : nodeId;
+                    return <div className="node-topology-stage-node" key={nodeId}><div><Typography.Text strong>{candidate?.name ?? "不可用节点"}</Typography.Text><div><Typography.Text type="secondary">{origin}</Typography.Text></div></div><Button size="small" danger type="text" icon={<DeleteOutlined />} aria-label={`移除 ${candidate?.name ?? nodeId}`} onClick={event => { event.stopPropagation(); removeNode(nodeId); }} /></div>;
                   })}
                 </div>
               </Card>

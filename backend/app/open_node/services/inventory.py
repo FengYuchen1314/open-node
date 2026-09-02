@@ -23,6 +23,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -42,6 +43,7 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from open_node.domain.changes import (
     AgentChangeSetAcceptRequest,
@@ -1348,9 +1350,10 @@ class ManagedNodeModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(120), index=True)
-    server_id: Mapped[str] = mapped_column(
+    server_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("servers.id", ondelete="CASCADE"),
+        nullable=True,
         index=True,
     )
     protocol: Mapped[str] = mapped_column(String(40))
@@ -1384,6 +1387,10 @@ class ManagedNodeModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     __table_args__ = (
+        CheckConstraint(
+            "server_id IS NOT NULL OR node_type = 'orchestrated'",
+            name="ck_managed_node_server_or_topology",
+        ),
         Index(
             "uq_managed_node_server_camouflage_pool",
             "server_id",
@@ -1412,6 +1419,17 @@ class NodeTopologyModel(Base):
     revision: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+@dataclass(frozen=True)
+class _NodeTopologyComponent:
+    id: str
+    name: str
+    protocol: str
+    kind: Literal["managed", "external"]
+    managed: ManagedNodeModel | None = None
+    external: Any = None
+    source: Any = None
 
 
 class PrivateRoutedPolicyModel(Base):
@@ -1867,6 +1885,24 @@ class InventoryStore:
             )
 
     def _migrate_schema(self) -> None:
+        if self._engine.dialect.name == "postgresql":
+            with self._engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE managed_nodes ALTER COLUMN server_id DROP NOT NULL")
+                )
+                connection.execute(
+                    text(
+                        "DO $$ BEGIN "
+                        "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+                        "WHERE conname = 'ck_managed_node_server_or_topology' "
+                        "AND conrelid = 'managed_nodes'::regclass) THEN "
+                        "ALTER TABLE managed_nodes ADD CONSTRAINT "
+                        "ck_managed_node_server_or_topology CHECK "
+                        "(server_id IS NOT NULL OR node_type = 'orchestrated'); "
+                        "END IF; END $$"
+                    )
+                )
+            return
         if self._engine.dialect.name != "sqlite":
             return
         inspector = inspect(self._engine)
@@ -2086,6 +2122,7 @@ class InventoryStore:
                     "runtime_config": "JSON NOT NULL DEFAULT '{}'",
                 },
             )
+            self._sqlite_relax_managed_node_server_id()
             with self._engine.begin() as connection:
                 connection.execute(
                     text(
@@ -2151,6 +2188,55 @@ class InventoryStore:
         with self._engine.begin() as connection:
             for name, kind in missing:
                 connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {kind}"))
+
+    def _sqlite_relax_managed_node_server_id(self) -> None:
+        columns = {
+            column["name"]: column
+            for column in inspect(self._engine).get_columns("managed_nodes")
+        }
+        constraints = {
+            constraint.get("name")
+            for constraint in inspect(self._engine).get_check_constraints("managed_nodes")
+        }
+        if (
+            columns.get("server_id", {}).get("nullable") is True
+            and "ck_managed_node_server_or_topology" in constraints
+        ):
+            return
+
+        table = ManagedNodeModel.__table__
+        temporary_name = "_managed_nodes_nullable_migration"
+        create_sql = str(CreateTable(table).compile(dialect=self._engine.dialect))
+        create_sql = create_sql.replace(
+            "CREATE TABLE managed_nodes",
+            f"CREATE TABLE {temporary_name}",
+            1,
+        )
+        column_names = ", ".join(column.name for column in table.columns)
+        with self._engine.connect() as connection:
+            try:
+                connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+                connection.commit()
+                if connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() != 0:
+                    raise RuntimeError("SQLite foreign-key suspension is unavailable")
+                connection.commit()
+                with connection.begin():
+                    connection.exec_driver_sql(create_sql)
+                    connection.exec_driver_sql(
+                        f"INSERT INTO {temporary_name} ({column_names}) "
+                        f"SELECT {column_names} FROM managed_nodes"
+                    )
+                    connection.exec_driver_sql("DROP TABLE managed_nodes")
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE {temporary_name} RENAME TO managed_nodes"
+                    )
+                    for index in table.indexes:
+                        connection.execute(CreateIndex(index))
+            finally:
+                if connection.in_transaction():
+                    connection.rollback()
+                connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+                connection.commit()
 
     def _backfill_subscription_billing_attribution(
         self,
@@ -4371,6 +4457,7 @@ class InventoryStore:
                 raise SubscriptionPlanNotFoundError(
                     f"subscription plan not found: {payload.plan_id}"
                 )
+            self._ensure_plan_topology_ownership(session, user, plan)
 
             started_at = self._date_to_utc_start(payload.start_date) if payload.start_date else now
             expires_at = (
@@ -4617,14 +4704,8 @@ class InventoryStore:
             template_content,
             selected_node_ids,
             include_external=include_external,
+            subscription_entry_id=str(node_id) if node_id is not None else None,
         )
-        if node_id is not None:
-            allowed_ids = [node.node_id for node in report.nodes if node.available]
-            proxies = [
-                proxy
-                for proxy, identifier in zip(proxies, allowed_ids, strict=True)
-                if identifier == node_id
-            ]
         if not proxies:
             raise SubscriptionUnavailableError(
                 "subscription has no compatible nodes for this format and selection"
@@ -4831,9 +4912,14 @@ class InventoryStore:
         selected_node_ids: set[str] | None = None,
         *,
         include_external: bool = False,
+        subscription_entry_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], SubscriptionFormatPreview]:
         candidates, warnings = self._subscription_proxy_configs(
-            session, user, plan, selected_node_ids
+            session,
+            user,
+            plan,
+            selected_node_ids,
+            include_external,
         )
         managed_ids = {identifier for identifier, _proxy in candidates}
         proxies, nodes = [], []
@@ -4984,10 +5070,14 @@ class InventoryStore:
         reported_topologies: set[str] = set()
         for identifier, proxy, unique, reason in evaluated:
             topology_id = proxy.get("_open_node_topology_id")
+            entry_id = topology_id if isinstance(topology_id, str) else identifier
+            selected_for_content = (
+                subscription_entry_id is None or entry_id == subscription_entry_id
+            )
             if isinstance(topology_id, str):
                 group_reason = topology_reasons.get(topology_id)
                 if proxy.get("_open_node_hidden"):
-                    if group_reason is None:
+                    if group_reason is None and selected_for_content:
                         proxy["port"] = int(proxy["port"])
                         proxies.append(proxy)
                     continue
@@ -5002,7 +5092,7 @@ class InventoryStore:
                         )
                     )
                     reported_topologies.add(topology_id)
-                if group_reason is None:
+                if group_reason is None and selected_for_content:
                     proxy["port"] = int(proxy["port"])
                     proxies.append(proxy)
                 continue
@@ -5015,7 +5105,7 @@ class InventoryStore:
                     reason=reason,
                 )
             )
-            if reason is None:
+            if reason is None and selected_for_content:
                 proxy["port"] = int(proxy["port"])
                 proxies.append(proxy)
         return proxies, SubscriptionFormatPreview(
@@ -6536,7 +6626,10 @@ class InventoryStore:
         return ManagedNodeRead(
             id=UUID(node.id),
             name=node.name,
-            server_id=UUID(node.server_id),
+            # Orchestrated topologies made solely from subscriber-owned external
+            # nodes deliberately have no host server.  The established read
+            # contract remains UUID-shaped; the nil UUID denotes that absence.
+            server_id=UUID(node.server_id) if node.server_id else UUID(int=0),
             protocol=node.protocol,
             protocol_profile=node.protocol_profile,
             node_type=node.node_type,
@@ -6990,6 +7083,62 @@ class InventoryStore:
                     "together with one of its component nodes"
                 )
             component_owner.update({component_id: identifier for component_id in components})
+        if (
+            len(
+                InventoryStore._plan_topology_owners(
+                    session, [str(identifier) for identifier in node_ids]
+                )
+            )
+            > 1
+        ):
+            raise ManagedNodeConflict(
+                "A plan cannot contain external topologies for multiple subscribers"
+            )
+
+    @staticmethod
+    def _plan_topology_owners(session: Session, node_ids: list[str]) -> set[str]:
+        from open_node.services.external_subscriptions import (
+            ExternalNodeModel,
+            ExternalSourceModel,
+        )
+
+        owners: set[str] = set()
+        for identifier in node_ids:
+            topology = session.get(NodeTopologyModel, identifier)
+            if topology is None:
+                continue
+            component_ids = [
+                component_id
+                for stage in topology.stages or []
+                if isinstance(stage, dict)
+                for component_id in stage.get("node_ids", [])
+                if isinstance(component_id, str)
+            ]
+            external_nodes = session.scalars(
+                select(ExternalNodeModel).where(ExternalNodeModel.id.in_(component_ids))
+            ).all()
+            source_ids = {node.source_id for node in external_nodes}
+            owners.update(
+                session.scalars(
+                    select(ExternalSourceModel.owner_username).where(
+                        ExternalSourceModel.id.in_(source_ids)
+                    )
+                )
+            )
+        return owners
+
+    @staticmethod
+    def _ensure_plan_topology_ownership(
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        node_ids: list[str] | None = None,
+    ) -> None:
+        owners = InventoryStore._plan_topology_owners(
+            session, node_ids if node_ids is not None else (plan.node_ids or [])
+        )
+        if owners and owners != {user.username}:
+            raise ManagedNodeConflict("Node topology external nodes belong to another subscriber")
 
     @staticmethod
     def _effective_subscription_entry_ids(
@@ -7031,7 +7180,8 @@ class InventoryStore:
     def _validated_node_topology_stages(
         session: Session,
         virtual_id: str,
-    ) -> list[list[ManagedNodeModel]] | None:
+        owner_username: str | None = None,
+    ) -> list[list[_NodeTopologyComponent]] | None:
         """Return an intact topology graph, otherwise fail closed.
 
         Creation-time validation is not enough: component nodes can subsequently be
@@ -7074,12 +7224,19 @@ class InventoryStore:
         if len(set(flattened)) != len(flattened):
             return None
 
-        rows = session.scalars(
+        from open_node.services.external_subscriptions import (
+            ExternalNodeModel,
+            ExternalSourceModel,
+        )
+
+        managed_rows = session.scalars(
             select(ManagedNodeModel).where(ManagedNodeModel.id.in_(flattened))
         ).all()
-        by_id = {row.id: row for row in rows}
-        if len(by_id) != len(flattened):
-            return None
+        external_rows = session.scalars(
+            select(ExternalNodeModel).where(ExternalNodeModel.id.in_(flattened))
+        ).all()
+        managed_by_id = {row.id: row for row in managed_rows}
+        external_by_id = {row.id: row for row in external_rows}
         private_ids = set(
             session.scalars(
                 select(PrivateRoutedNodeModel.node_id).where(
@@ -7088,31 +7245,91 @@ class InventoryStore:
             ).all()
         )
         server_ids: set[str] = set()
-        result: list[list[ManagedNodeModel]] = []
+        external_owners: set[str] = set()
+        managed_components: list[ManagedNodeModel] = []
+        result: list[list[_NodeTopologyComponent]] = []
         for identifiers in stage_identifiers:
-            current: list[ManagedNodeModel] = []
+            current: list[_NodeTopologyComponent] = []
             for identifier in identifiers:
-                component = by_id[identifier]
+                managed = managed_by_id.get(identifier)
+                external = external_by_id.get(identifier)
+                if managed is not None and external is not None:
+                    return None
+                if managed is not None:
+                    if (
+                        managed.node_type != "physical"
+                        or not managed.server_id
+                        or not managed.enabled
+                        or managed.removal_id
+                        or not managed.config
+                        or managed.id in private_ids
+                        or managed.server_id in server_ids
+                        or session.get(ServerModel, managed.server_id) is None
+                    ):
+                        return None
+                    server_ids.add(managed.server_id)
+                    managed_components.append(managed)
+                    current.append(
+                        _NodeTopologyComponent(
+                            id=managed.id,
+                            name=managed.name,
+                            protocol=managed.protocol,
+                            kind="managed",
+                            managed=managed,
+                        )
+                    )
+                    continue
+                if external is None:
+                    return None
+                source = session.get(ExternalSourceModel, external.source_id)
+                owner = session.get(ProductUserModel, source.owner_username) if source else None
                 if (
-                    component.node_type != "physical"
-                    or not component.enabled
-                    or component.removal_id
-                    or not component.config
-                    or component.id in private_ids
-                    or component.server_id in server_ids
-                    or session.get(ServerModel, component.server_id) is None
+                    source is None
+                    or owner is None
+                    or owner.removal_id
+                    or not source.enabled
+                    or not external.enabled
+                    or not external.present
+                    or external.reason
+                    or external.secret is None
                 ):
                     return None
-                server_ids.add(component.server_id)
-                current.append(component)
+                external_owners.add(source.owner_username)
+                current.append(
+                    _NodeTopologyComponent(
+                        id=external.id,
+                        name=external.display_name or external.upstream_name,
+                        protocol=external.protocol,
+                        kind="external",
+                        external=external,
+                        source=source,
+                    )
+                )
             result.append(current)
-        exit_node = result[-1][0]
-        if virtual.server_id != exit_node.server_id or virtual.protocol != exit_node.protocol:
+        if (
+            len(external_owners) > 1
+            or owner_username is not None
+            and external_owners
+            and external_owners != {owner_username}
+        ):
+            return None
+        exit_component = result[-1][0]
+        anchor_server_id = (
+            managed_components[-1].server_id if managed_components else None
+        )
+        if (
+            virtual.server_id != anchor_server_id
+            or virtual.protocol != exit_component.protocol
+        ):
             return None
         return result
 
     @staticmethod
-    def _expand_node_topologies(session: Session, node_ids: list[str]) -> list[str]:
+    def _expand_node_topologies(
+        session: Session,
+        node_ids: list[str],
+        owner_username: str | None = None,
+    ) -> list[str]:
         expanded: list[str] = []
         for node_id in node_ids:
             node = session.get(ManagedNodeModel, node_id)
@@ -7121,10 +7338,17 @@ class InventoryStore:
                 continue
             if not node.enabled or node.removal_id:
                 continue
-            stages = InventoryStore._validated_node_topology_stages(session, node_id)
+            stages = InventoryStore._validated_node_topology_stages(
+                session, node_id, owner_username
+            )
             if stages is None:
                 continue
-            expanded.extend(component.id for stage in stages for component in stage)
+            expanded.extend(
+                component.id
+                for stage in stages
+                for component in stage
+                if component.kind == "managed"
+            )
         return list(dict.fromkeys(expanded))
 
     @staticmethod
@@ -7137,7 +7361,7 @@ class InventoryStore:
         entries = InventoryStore._effective_subscription_entry_ids(
             session, user, plan, selected_node_ids
         )
-        return InventoryStore._expand_node_topologies(session, entries)
+        return InventoryStore._expand_node_topologies(session, entries, user.username)
 
     @staticmethod
     def _subscription_node_allowed(
@@ -7167,10 +7391,10 @@ class InventoryStore:
             if (
                 entry is not None
                 and entry.node_type == "orchestrated"
-                and self._validated_node_topology_stages(session, entry_id) is None
+                and self._validated_node_topology_stages(session, entry_id, user.username) is None
             ):
                 warnings.append(f"node topology {entry.name} is invalid or unavailable")
-        effective_node_ids = self._expand_node_topologies(session, entry_ids)
+        effective_node_ids = self._expand_node_topologies(session, entry_ids, user.username)
         if not effective_node_ids:
             return [], warnings
 
@@ -7296,6 +7520,7 @@ class InventoryStore:
         user: ProductUserModel,
         plan: SubscriptionPlanModel,
         selected_node_ids: set[str] | None = None,
+        allow_external_topologies: bool = False,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
         warnings: list[str] = []
         plan_node_ids = self._effective_subscription_entry_ids(
@@ -7318,7 +7543,16 @@ class InventoryStore:
             if not node.enabled or node.removal_id:
                 continue
             if node.node_type == "orchestrated":
-                proxies.extend(self._topology_proxy_configs(session, user, plan, node, warnings))
+                proxies.extend(
+                    self._topology_proxy_configs(
+                        session,
+                        user,
+                        plan,
+                        node,
+                        warnings,
+                        allow_external=allow_external_topologies,
+                    )
+                )
                 continue
             proxy = self._subscription_proxy_for_node(session, user, plan, node, warnings)
             if proxy is not None:
@@ -7392,11 +7626,20 @@ class InventoryStore:
         plan: SubscriptionPlanModel,
         virtual: ManagedNodeModel,
         warnings: list[str],
+        *,
+        allow_external: bool,
     ) -> list[tuple[str, dict[str, Any]]]:
         topology = session.get(NodeTopologyModel, virtual.id)
-        stage_nodes = self._validated_node_topology_stages(session, virtual.id)
+        stage_nodes = self._validated_node_topology_stages(session, virtual.id, user.username)
         if topology is None or stage_nodes is None:
             warnings.append(f"node topology {virtual.name} is invalid or unavailable")
+            return []
+        if not allow_external and any(
+            component.kind == "external" for stage in stage_nodes for component in stage
+        ):
+            warnings.append(
+                f"node topology {virtual.name} contains external nodes outside this subscription"
+            )
             return []
 
         graph_id = virtual.id
@@ -7405,6 +7648,7 @@ class InventoryStore:
         stage_proxy_names: list[list[str]] = []
         generated: list[tuple[str, dict[str, Any]]] = []
         groups: list[dict[str, Any]] = []
+        endpoint_keys: set[str] = set()
         for index, components in enumerate(stage_nodes):
             names = []
             for component in components:
@@ -7414,12 +7658,37 @@ class InventoryStore:
                     if is_exit
                     else f"{virtual.name} · hop {index + 1} · {component.name}"
                 )
-                proxy = self._subscription_proxy_for_node(session, user, plan, component, warnings)
+                if component.kind == "managed":
+                    proxy = self._subscription_proxy_for_node(
+                        session, user, plan, component.managed, warnings
+                    )
+                else:
+                    try:
+                        proxy = self.external_subscriptions().topology_proxy(
+                            session,
+                            component.id,
+                            component.source.id,
+                            user.username,
+                        )
+                    except ValueError:
+                        proxy = None
                 if proxy is None:
                     warnings.append(
                         f"node topology {virtual.name} could not render every component"
                     )
                     return []
+                endpoint = proxy.get("server")
+                endpoint_key = (
+                    endpoint.strip().rstrip(".").casefold()
+                    if isinstance(endpoint, str) and endpoint.strip()
+                    else None
+                )
+                if endpoint_key is None or endpoint_key in endpoint_keys:
+                    warnings.append(
+                        f"node topology {virtual.name} revisits a server or has an invalid endpoint"
+                    )
+                    return []
+                endpoint_keys.add(endpoint_key)
                 proxy["name"] = name
                 proxy["_open_node_topology_id"] = graph_id
                 proxy["_open_node_hidden"] = not is_exit
@@ -7745,22 +8014,8 @@ class InventoryStore:
                     "json",
                 )
             case SubscriptionClientFormat.XRAY:
-                ordered = sorted(proxies, key=lambda proxy: bool(proxy.get("_open_node_hidden")))
-                payload = {
-                    "log": {"loglevel": "warning"},
-                    "inbounds": [
-                        {
-                            "tag": "socks-in",
-                            "listen": "127.0.0.1",
-                            "port": 1080,
-                            "protocol": "socks",
-                            "settings": {"auth": "noauth", "udp": True},
-                        }
-                    ],
-                    "outbounds": [subscription_clients.xray_outbound(proxy) for proxy in ordered],
-                }
                 return (
-                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                    cls._render_xray_subscription(proxies),
                     "application/json; charset=utf-8",
                     "json",
                 )
@@ -7812,6 +8067,18 @@ class InventoryStore:
             (proxy, outbound) for proxy in proxies if (outbound := cls._sing_box_outbound(proxy))
         ]
         outbounds = [outbound for _proxy, outbound in converted]
+        # Upstream sing-box 1.14 has selector and URLTest groups, but no
+        # round-robin strategy.  URLTest is the executable automatic-routing
+        # fallback: it keeps every topology branch available and selects a
+        # healthy low-latency branch without emitting a fictitious strategy.
+        topology_groups = [
+            {
+                "type": "urltest",
+                "tag": tag,
+                "outbounds": members,
+            }
+            for tag, members in cls._subscription_topology_groups(proxies)
+        ]
         tags = [
             str(outbound["tag"])
             for proxy, outbound in converted
@@ -7830,11 +8097,141 @@ class InventoryStore:
                     "default": tags[0] if tags else "",
                 },
                 {"type": "direct", "tag": "direct"},
+                *topology_groups,
                 *outbounds,
             ],
             "route": {"final": "Proxy"},
         }
         return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+    @classmethod
+    def _render_xray_subscription(cls, proxies: list[dict[str, Any]]) -> str:
+        ordered = sorted(proxies, key=lambda proxy: bool(proxy.get("_open_node_hidden")))
+        groups = cls._subscription_topology_groups(proxies)
+        original_tags = {str(proxy.get("name") or "proxy") for proxy in ordered}
+        all_members = {member for _tag, members in groups for member in members}
+
+        # Xray balancer selectors are tag prefixes rather than exact tag lists.
+        # Give each group's members a private, collision-checked prefix so an
+        # unrelated user-facing tag can never be selected accidentally.
+        member_tags: dict[str, str] = {}
+        member_prefixes: list[str] = []
+        nonmember_tags = original_tags - all_members
+        for group_tag, members in groups:
+            digest = hashlib.sha256(group_tag.encode("utf-8")).hexdigest()[:16]
+            attempt = 1
+            while True:
+                suffix = "" if attempt == 1 else f"{attempt}-"
+                prefix = f"open-node-xray-member-{digest}-{suffix}"
+                conflicts = any(tag.startswith(prefix) for tag in nonmember_tags)
+                conflicts = conflicts or any(
+                    prefix.startswith(existing) or existing.startswith(prefix)
+                    for existing in member_prefixes
+                )
+                if not conflicts:
+                    break
+                attempt += 1
+            member_prefixes.append(prefix)
+            width = max(2, len(str(len(members))))
+            for index, member in enumerate(members, start=1):
+                member_tags[member] = f"{prefix}{index:0{width}d}"
+
+        occupied_tags = (original_tags - all_members) | set(member_tags.values())
+        loopback_tags: dict[str, tuple[str, str]] = {}
+        for group_tag, _members in groups:
+            digest = hashlib.sha256(group_tag.encode("utf-8")).hexdigest()[:16]
+            base = f"open-node-xray-loopback-{digest}"
+            loopback_tag = base
+            suffix = 2
+            while loopback_tag in occupied_tags:
+                loopback_tag = f"{base}-{suffix}"
+                suffix += 1
+            occupied_tags.add(loopback_tag)
+            loopback_tags[group_tag] = (loopback_tag, f"{loopback_tag}-in")
+
+        outbounds = []
+        for proxy in ordered:
+            converted_proxy = deepcopy(proxy)
+            original_tag = str(converted_proxy.get("name") or "proxy")
+            converted_proxy["name"] = member_tags.get(original_tag, original_tag)
+            dialer = converted_proxy.get("dialer-proxy")
+            if isinstance(dialer, str):
+                if dialer in loopback_tags:
+                    converted_proxy["dialer-proxy"] = loopback_tags[dialer][0]
+                elif dialer in member_tags:
+                    converted_proxy["dialer-proxy"] = member_tags[dialer]
+            outbounds.append(subscription_clients.xray_outbound(converted_proxy))
+
+        for group_tag, _members in groups:
+            loopback_tag, inbound_tag = loopback_tags[group_tag]
+            outbounds.append(
+                {
+                    "tag": loopback_tag,
+                    "protocol": "loopback",
+                    "settings": {"inboundTag": inbound_tag},
+                }
+            )
+
+        payload: dict[str, Any] = {
+            "log": {"loglevel": "warning"},
+            "inbounds": [
+                {
+                    "tag": "socks-in",
+                    "listen": "127.0.0.1",
+                    "port": 1080,
+                    "protocol": "socks",
+                    "settings": {"auth": "noauth", "udp": True},
+                }
+            ],
+            "outbounds": outbounds,
+        }
+        if groups:
+            payload["routing"] = {
+                "domainStrategy": "AsIs",
+                "rules": [
+                    {
+                        "type": "field",
+                        "inboundTag": [loopback_tags[group_tag][1]],
+                        "balancerTag": group_tag,
+                    }
+                    for group_tag, _members in groups
+                ],
+                "balancers": [
+                    {
+                        "tag": group_tag,
+                        "selector": [prefix],
+                        "strategy": {"type": "roundRobin"},
+                    }
+                    for (group_tag, _members), prefix in zip(groups, member_prefixes, strict=True)
+                ],
+            }
+        return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+    @staticmethod
+    def _subscription_topology_groups(
+        proxies: list[dict[str, Any]],
+    ) -> list[tuple[str, list[str]]]:
+        groups: list[tuple[str, list[str]]] = []
+        seen: set[str] = set()
+        for proxy in proxies:
+            raw_groups = proxy.get("_open_node_proxy_groups")
+            if not isinstance(raw_groups, list):
+                continue
+            for raw_group in raw_groups:
+                if not isinstance(raw_group, dict):
+                    continue
+                tag = raw_group.get("name")
+                raw_members = raw_group.get("proxies")
+                if not isinstance(tag, str) or not tag or tag in seen:
+                    continue
+                if not isinstance(raw_members, list):
+                    continue
+                members = [member for member in raw_members if isinstance(member, str) and member]
+                if len(members) < 2 or len(set(members)) != len(members):
+                    continue
+                seen.add(tag)
+                groups.append((tag, members))
+        return groups
 
     @classmethod
     def _sing_box_outbound(cls, proxy: dict[str, Any]) -> dict[str, Any] | None:
@@ -11521,10 +11918,15 @@ class InventoryStore:
         payload: AgentCommandResultRequest,
         created_at: datetime,
     ) -> None:
-        if command.path not in {
-            "/api/child/xray/config",
-            "/api/child/egress/apply",
-        } or payload.error or payload.status >= 400:
+        if (
+            command.path
+            not in {
+                "/api/child/xray/config",
+                "/api/child/egress/apply",
+            }
+            or payload.error
+            or payload.status >= 400
+        ):
             return
         if (
             command.path == "/api/child/egress/apply"

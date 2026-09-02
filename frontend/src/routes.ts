@@ -21,6 +21,7 @@ export const routes: WorkspaceRoute[] = [
   { path: "/templates", name: "templates", component: lazy(() => import("./react/views/TemplatesView")) },
   { path: "/plans", name: "plans", component: lazy(() => import("./react/views/PlansView")) },
   { path: "/users", name: "users", component: lazy(() => import("./react/views/UsersView")) },
+  { path: "/certificates", name: "certificates", component: lazy(() => import("./react/views/CertificatesView")) },
   { path: "/system-settings", name: "system-settings", component: lazy(() => import("./react/views/SystemWorkspaceView")) },
 ];
 
@@ -31,7 +32,6 @@ export const legacyRouteRedirects: LegacyRouteRedirect[] = [
   { path: "/server-sharing", to: "/servers?tab=sharing" },
   { path: "/ddns", to: "/servers?tab=ddns" },
   { path: "/speedtests", to: "/nodes?tab=speed" },
-  { path: "/certificates", to: "/servers" },
   { path: "/node-topologies", to: "/nodes?tab=topologies" },
   { path: "/subscription-customizations", to: "/templates?tab=customizations" },
   { path: "/access", to: "/system-settings?tab=access" },

@@ -1,5 +1,5 @@
 import { App as AntApp, Alert, Button, ConfigProvider, Drawer, Grid, Layout, Menu, Result, Space, Spin, Tag, Typography, theme as antTheme } from "antd";
-import { ApartmentOutlined, BranchesOutlined, ControlOutlined, DashboardOutlined, FileTextOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined } from "@ant-design/icons";
+import { ApartmentOutlined, BranchesOutlined, ControlOutlined, DashboardOutlined, FileTextOutlined, LockOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined } from "@ant-design/icons";
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import zhCN from "antd/locale/zh_CN";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -18,6 +18,7 @@ const navigation = [
   { key: "/templates", label: "模板管理", icon: <FileTextOutlined aria-hidden /> },
   { key: "/plans", label: "套餐管理", icon: <ApartmentOutlined aria-hidden /> },
   { key: "/users", label: "用户管理", icon: <SafetyOutlined aria-hidden /> },
+  { key: "/certificates", label: "证书管理", icon: <LockOutlined aria-hidden /> },
   { key: "/system-settings", label: "系统设置", icon: <ControlOutlined aria-hidden /> },
 ];
 class WorkspaceBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {

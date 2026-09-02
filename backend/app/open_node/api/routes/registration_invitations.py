@@ -44,6 +44,8 @@ def create_registration_invitation(
         issued = store._registration_invitations().create(payload)
     except SubscriptionPlanNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except RegistrationInvitationConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
     base = str(request.base_url).rstrip("/")
     return RegistrationInvitationCreateResponse(
         invitation=issued.invitation,

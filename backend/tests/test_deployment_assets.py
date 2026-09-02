@@ -318,12 +318,12 @@ def test_ci_uses_parallel_backend_and_frontend_shards():
 
     assert backend["strategy"] == {
         "fail-fast": False,
-        "matrix": {"shard": list(range(12))},
+        "matrix": {"shard": list(range(18))},
     }
     backend_commands = [step.get("run", "") for step in backend["steps"]]
     assert any(
         "run_backend_test_shard.py" in command
-        and "--shard-count 12" in command
+        and "--shard-count 18" in command
         and "--shard-index ${{ matrix.shard }}" in command
         for command in backend_commands
     )
@@ -345,17 +345,17 @@ def test_ci_uses_parallel_backend_and_frontend_shards():
     )
     assert result.returncode == 0, result.stderr
     test_file_count = len(list((ROOT / "backend/tests").rglob("test_*.py")))
-    assert f"{test_file_count} files across 12 shards" in result.stdout
+    assert f"{test_file_count} files across 18 shards" in result.stdout
     assert "shard 0: 1 files" in result.stdout
     assert "(test_inventory.py)" in result.stdout
 
     assert frontend["strategy"] == {
         "fail-fast": False,
-        "matrix": {"shard": list(range(1, 11))},
+        "matrix": {"shard": list(range(1, 13))},
     }
     frontend_steps = frontend["steps"]
     assert any(
-        step.get("run") == "npm test -- --shard=${{ matrix.shard }}/10"
+        step.get("run") == "npm test -- --shard=${{ matrix.shard }}/12"
         for step in frontend_steps
     )
     for command in ("npm run build", "npm run build:probe", "test -f dist-probe/index.html"):

@@ -89,6 +89,10 @@ class RegistrationInvitations:
                 raise SubscriptionPlanNotFoundError(
                     f"subscription plan not found: {payload.plan_id}"
                 )
+            if self.store._plan_topology_owners(session, plan.node_ids or []):
+                raise RegistrationInvitationConflict(
+                    "Plans with subscriber-owned topology nodes cannot be invited"
+                )
             row = RegistrationInvitationModel(
                 id=str(uuid4()),
                 token_hash=sha256(token.encode()).hexdigest(),
@@ -150,6 +154,8 @@ class RegistrationInvitations:
                 raise RegistrationInvitationConflict("Username is unavailable")
             plan = session.get(SubscriptionPlanModel, invitation.plan_id)
             if plan is None:
+                raise RegistrationInvitationUnavailable("Invitation unavailable")
+            if self.store._plan_topology_owners(session, plan.node_ids or []):
                 raise RegistrationInvitationUnavailable("Invitation unavailable")
             reset_day = plan.reset_day
             if plan.is_reset and reset_day == 0:

@@ -1,11 +1,30 @@
-export interface NodeTopologyCandidate {
+interface NodeTopologyCandidateBase {
   id: string;
   name: string;
+  protocol: string;
+}
+
+export interface ManagedNodeTopologyCandidate extends NodeTopologyCandidateBase {
+  kind: "managed";
   server_id: string;
   server_name: string;
   server_kind: "direct" | "leased-line" | "residential";
-  protocol: string;
+  source_id: null;
+  source_name: null;
+  owner_username: null;
 }
+
+export interface ExternalNodeTopologyCandidate extends NodeTopologyCandidateBase {
+  kind: "external";
+  server_id: null;
+  server_name: null;
+  server_kind: null;
+  source_id: string;
+  source_name: string;
+  owner_username: string;
+}
+
+export type NodeTopologyCandidate = ManagedNodeTopologyCandidate | ExternalNodeTopologyCandidate;
 
 export interface NodeTopologyPoint {
   x: number;
@@ -97,6 +116,7 @@ export function validateTopologyDraft(
   const nodeIds = nodes(stages);
   const seenNodes = new Set<string>();
   const seenServers = new Set<string>();
+  const externalOwners = new Set<string>();
   for (const nodeId of nodeIds) {
     if (seenNodes.has(nodeId)) {
       errors.push("同一个节点不能在编排中重复出现。");
@@ -110,12 +130,17 @@ export function validateTopologyDraft(
       errors.push("编排包含已停用或不存在的节点，请移除后再保存。");
       continue;
     }
-    if (seenServers.has(candidate.server_id)) {
-      errors.push("同一台服务器不能重复经过，已阻止回还环路。");
-      break;
+    if (candidate.kind === "managed") {
+      if (seenServers.has(candidate.server_id)) {
+        errors.push("同一台服务器不能重复经过，已阻止回还环路。");
+        break;
+      }
+      seenServers.add(candidate.server_id);
+    } else {
+      externalOwners.add(candidate.owner_username);
     }
-    seenServers.add(candidate.server_id);
   }
+  if (externalOwners.size > 1) errors.push("一条节点编排中的外部节点只能属于同一用户。");
   return { valid: errors.length === 0, errors: [...new Set(errors)] };
 }
 
@@ -128,9 +153,17 @@ export function insertTopologyCandidate(
   const used = new Set(nodes(stages));
   if (used.has(candidate.id)) return { stages, error: `节点“${candidate.name}”已经在编排中。` };
   const byId = new Map(candidates.map(item => [item.id, item]));
-  const reusedServer = [...used].map(id => byId.get(id)).find(item => item?.server_id === candidate.server_id);
-  if (reusedServer) {
-    return { stages, error: `服务器“${candidate.server_name}”已经经过，不能形成重复路径或回还环路。` };
+  const usedCandidates = [...used].map(id => byId.get(id)).filter((item): item is NodeTopologyCandidate => Boolean(item));
+  if (candidate.kind === "managed") {
+    const reusedServer = usedCandidates.find(item => item.kind === "managed" && item.server_id === candidate.server_id);
+    if (reusedServer) {
+      return { stages, error: `服务器“${candidate.server_name}”已经经过，不能形成重复路径或回还环路。` };
+    }
+  } else {
+    const externalOwners = new Set(usedCandidates.filter(item => item.kind === "external").map(item => item.owner_username));
+    if (externalOwners.size && (!externalOwners.has(candidate.owner_username) || externalOwners.size > 1)) {
+      return { stages, error: "一条节点编排中的外部节点只能属于同一用户。" };
+    }
   }
   if (stageIndex === null) {
     if (stages.length >= 8) return { stages, error: "节点编排最多支持 8 跳。" };

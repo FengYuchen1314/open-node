@@ -71,12 +71,32 @@ class NodeTopologyDelete(BaseModel):
 
 
 class NodeTopologyCandidate(BaseModel):
+    model_config = {"extra": "forbid"}
+
     id: UUID
     name: str
-    server_id: UUID
-    server_name: str
-    server_kind: Literal["direct", "leased-line", "residential"]
+    kind: Literal["managed", "external"]
     protocol: str
+    server_id: UUID | None = None
+    server_name: str | None = None
+    server_kind: Literal["direct", "leased-line", "residential"] | None = None
+    source_id: UUID | None = None
+    source_name: str | None = None
+    owner_username: str | None = None
+
+    @model_validator(mode="after")
+    def validate_origin(self):
+        managed = (self.server_id, self.server_name, self.server_kind)
+        external = (self.source_id, self.source_name, self.owner_username)
+        if self.kind == "managed" and (
+            None in managed or any(value is not None for value in external)
+        ):
+            raise ValueError("Managed topology candidates require only server identity")
+        if self.kind == "external" and (
+            None in external or any(value is not None for value in managed)
+        ):
+            raise ValueError("External topology candidates require only owner/source identity")
+        return self
 
 
 class NodeTopologyRead(NodeTopologyWrite):

@@ -18,9 +18,9 @@ function renderRoute(path: string) {
 }
 
 describe("canonical management routes", () => {
-  it("publishes exactly the six consolidated administrator workspaces", () => {
+  it("publishes exactly the seven administrator workspaces", () => {
     expect(routes.filter(route => !route.meta).map(route => route.path)).toEqual([
-      "/servers", "/nodes", "/templates", "/plans", "/users", "/system-settings",
+      "/servers", "/nodes", "/templates", "/plans", "/users", "/certificates", "/system-settings",
     ]);
   });
 

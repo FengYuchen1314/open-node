@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_SHARD_COUNT = 12
+DEFAULT_SHARD_COUNT = 18
 
 
 @dataclass(frozen=True, slots=True)

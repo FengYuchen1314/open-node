@@ -818,6 +818,44 @@ class ExternalSubscriptions:
             imported += 1
         return dict(imported_count=imported, updated_count=updated, missing_count=missing)
 
+    def topology_proxy(
+        self,
+        session,
+        node_id: str,
+        source_id: str,
+        owner_username: str,
+    ) -> dict:
+        """Open one owner-bound node for an explicitly selected topology.
+
+        Topology rows store only immutable node/source identities.  Re-resolving
+        both records here prevents a stale or tampered graph from transferring an
+        encrypted proxy to another subscriber.  The decrypted mapping is returned
+        only to the in-process subscription renderer and is never part of a
+        topology API response.
+        """
+
+        source = self._source(session, source_id, owner_username=owner_username)
+        row = session.get(ExternalNodeModel, node_id)
+        if row is None or row.source_id != source.id:
+            raise ExternalSubscriptionNotFound("External topology node not found")
+        state = self._node_read(source, row)
+        if not state.available or row.secret is None:
+            raise ExternalSubscriptionUnavailable("External topology node is unavailable")
+        cipher, _key = self._keys(session)
+        proxy = self._open(cipher, source, "node:" + row.id, row.secret)
+        if (
+            not isinstance(proxy, dict)
+            or not proxy
+            or "dialer-proxy" in proxy
+            or any(str(key).startswith("_open_node_") for key in proxy)
+        ):
+            raise ExternalSubscriptionUnavailable(
+                "External node configuration is unavailable"
+            )
+        result = deepcopy(proxy)
+        result["name"] = state.name
+        return result
+
     def subscription_candidates(self, session, username):
         return self._subscription_candidates(session, username)
 

@@ -14,8 +14,9 @@ const topologyId = "33333333-3333-4333-8333-333333333333";
 const revision = "a".repeat(64);
 const now = "2026-09-02T00:00:00Z";
 const candidates: NodeTopologyCandidate[] = [
-  { id: nodeId, name: "东京入口", server_id: "44444444-4444-4444-8444-444444444444", server_name: "东京", server_kind: "direct", protocol: "vless" },
-  { id: exitId, name: "洛杉矶出口", server_id: "55555555-5555-4555-8555-555555555555", server_name: "洛杉矶", server_kind: "residential", protocol: "trojan" },
+  { id: nodeId, name: "东京入口", kind: "managed", server_id: "44444444-4444-4444-8444-444444444444", server_name: "东京", server_kind: "direct", source_id: null, source_name: null, owner_username: null, protocol: "vless" },
+  { id: exitId, name: "洛杉矶出口", kind: "managed", server_id: "55555555-5555-4555-8555-555555555555", server_name: "洛杉矶", server_kind: "residential", source_id: null, source_name: null, owner_username: null, protocol: "trojan" },
+  { id: "66666666-6666-4666-8666-666666666666", name: "外部中继", kind: "external", server_id: null, server_name: null, server_kind: null, source_id: "77777777-7777-4777-8777-777777777777", source_name: "Alice 订阅", owner_username: "alice", protocol: "ss" },
 ];
 const draft: NodeTopologyWrite = {
   name: "跨境线路", enabled: true, layout: {}, stages: [
@@ -62,8 +63,23 @@ describe("node topologies service", () => {
       .rejects.toThrow("未能确认节点编排操作结果");
   });
 
+  it("localizes external-node conflicts without echoing identifiers or provider details", async () => {
+    await expect(createNodeTopology(draft, () => response({ detail: "Topology external nodes must belong to one subscriber" }, 409)))
+      .rejects.toThrow("外部节点只能属于同一用户");
+    await expect(createNodeTopology(draft, () => response({ detail: "Topology external node configuration is unavailable" }, 409)))
+      .rejects.toThrow("外部节点配置不可用");
+    await expect(createNodeTopology(draft, () => response({ detail: "Topology node identity is ambiguous: SECRET-ID" }, 409)))
+      .rejects.toThrow("候选节点标识发生冲突");
+  });
+
   it("rejects malformed success bodies", async () => {
     await expect(listNodeTopologies(() => response({ topologies: [topology], candidates, license_required: true })))
+      .rejects.toThrow("未能确认节点编排操作结果");
+  });
+
+  it("rejects candidates whose discriminator and origin fields disagree", async () => {
+    const mixed = { ...candidates[0], kind: "external" };
+    await expect(listNodeTopologies(() => response({ topologies: [topology], candidates: [mixed], license_required: false })))
       .rejects.toThrow("未能确认节点编排操作结果");
   });
 });

@@ -147,6 +147,11 @@ class PlanManagement:
             ):
                 raise DuplicateSubscriptionPlanNameError("A plan with this name already exists")
             self.store._ensure_plan_nodes_assignable(session, payload.node_ids)
+            updated_node_ids = [str(node_id) for node_id in payload.node_ids]
+            for user in users:
+                self.store._ensure_plan_topology_ownership(
+                    session, user, plan, updated_node_ids
+                )
             aliases = (
                 {str(key): value for key, value in payload.node_name_overrides.items()}
                 if "node_name_overrides" in payload.model_fields_set

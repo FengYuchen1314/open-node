@@ -82,9 +82,12 @@ def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
     if proxy.get("dialer-proxy"):
         if target not in {"clash", "stash", "sing-box", "xray"}:
             return "This client format cannot represent chained proxies"
-        if target == "xray" and proxy.get("_open_node_has_load_balance"):
-            return "Xray subscriptions cannot represent chained load-balancer groups"
-    if proxy.get("_open_node_proxy_groups") and target not in {"clash", "stash"}:
+    if proxy.get("_open_node_proxy_groups") and target not in {
+        "clash",
+        "stash",
+        "sing-box",
+        "xray",
+    }:
         return "This client format cannot represent chained load-balancer groups"
     supported = {"vless", "vmess", "trojan", "shadowsocks", "hysteria2", "anytls", "socks", "http"}
     if target in {"clash", "xray"}:

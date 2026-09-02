@@ -19,8 +19,10 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentCommand } from "../../domain/inventory";
 import type {
+  SharedIngressConfiguration,
   SharedIngressRoute,
   SharedIngressState,
+  SharedIngressWebsite,
   SharedIngressWebsiteDraft,
 } from "../../domain/shared-ingress";
 import {
@@ -49,6 +51,23 @@ const profileLabels = {
 } as const;
 const emptyWebsite = () => sharedIngressWebsiteDraft(null);
 const commandColors = { waiting: "default", pending: "warning", leased: "processing", succeeded: "success", failed: "error", skipped: "error" } as const;
+function sameWebsite(left: SharedIngressWebsite | null, right: SharedIngressWebsite | null) {
+  return left === right || Boolean(left && right
+    && left.sni === right.sni && left.upstream_url === right.upstream_url
+    && left.tls_address === right.tls_address && left.tls_port === right.tls_port
+    && left.certificate_name === right.certificate_name && left.redirect_http === right.redirect_http);
+}
+function sameConfiguration(left: SharedIngressConfiguration | null, right: SharedIngressConfiguration | null) {
+  return left === right || Boolean(left && right
+    && left.listen_port === right.listen_port && left.listen_ipv6 === right.listen_ipv6
+    && left.routes.length === right.routes.length
+    && left.routes.every((route, index) => {
+      const candidate = right.routes[index];
+      return candidate && route.node_id === candidate.node_id && route.profile === candidate.profile
+        && route.sni === candidate.sni && route.upstream_address === candidate.upstream_address
+        && route.upstream_port === candidate.upstream_port;
+    }) && sameWebsite(left.website, right.website));
+}
 
 export default function SharedIngressDialog({ open, onOpenChange, serverId }: SharedIngressDialogProps) {
   const generation = useRef(0);
@@ -67,8 +86,7 @@ export default function SharedIngressDialog({ open, onOpenChange, serverId }: Sh
     () => sharedIngressConfiguration(state?.configuration ?? null, routes, website),
     [routes, state?.configuration, website],
   );
-  const dirty = Boolean(state && candidate
-    && JSON.stringify(candidate) !== JSON.stringify(state.configuration));
+  const dirty = Boolean(state && candidate && !sameConfiguration(candidate, state.configuration));
 
   function accept(value: SharedIngressState) {
     setState(value);
@@ -95,7 +113,7 @@ export default function SharedIngressDialog({ open, onOpenChange, serverId }: Sh
   }, [open, serverId]);
 
   async function save() {
-    if (!state || !candidate || validation.length || !dirty || busyRef.current) return;
+    if (!state || !candidate || validation.length || (!dirty && !state.configuration) || busyRef.current) return;
     const run = ++generation.current;
     setBusy("save"); busyRef.current = true; setError(""); setNotice(""); setCommand(null);
     try {
@@ -138,7 +156,7 @@ export default function SharedIngressDialog({ open, onOpenChange, serverId }: Sh
     <Modal open={open} destroyOnHidden width={920} centered title={<Space wrap><span>443 分流与网站反向代理</span><Button type="text" icon={<ReloadOutlined />} aria-label="重新读取 443 分流配置" disabled={Boolean(busy)} onClick={() => void load()} /></Space>}
       mask={{ closable: !busy }} keyboard={!busy} closable={!busy} onCancel={() => { if (!busyRef.current) onOpenChange(false); }}
       styles={{ body: { maxHeight: "calc(100dvh - 180px)", overflowY: "auto" } }}
-      footer={<Space wrap><Button disabled={Boolean(busy)} onClick={() => onOpenChange(false)}>关闭</Button><Button danger icon={<StopOutlined aria-hidden />} disabled={Boolean(busy) || !state?.configuration} onClick={() => { setDisableOpen(true); setDisableAcknowledged(false); }}>确认禁用</Button><Button type="primary" icon={<SaveOutlined aria-hidden />} loading={busy === "save"} disabled={Boolean(busy) || !state || !candidate || !dirty || Boolean(validation.length)} onClick={() => void save()}>保存并下发</Button></Space>}>
+      footer={<Space wrap><Button disabled={Boolean(busy)} onClick={() => onOpenChange(false)}>关闭</Button><Button danger icon={<StopOutlined aria-hidden />} disabled={Boolean(busy) || !state?.configuration} onClick={() => { setDisableOpen(true); setDisableAcknowledged(false); }}>确认禁用</Button><Button type="primary" icon={<SaveOutlined aria-hidden />} loading={busy === "save"} disabled={Boolean(busy) || !state || !candidate || (!dirty && !state.configuration) || Boolean(validation.length)} onClick={() => void save()}>{dirty ? "保存并下发" : "重新下发"}</Button></Space>}>
       {open && <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
         {busy === "load" && <Spin aria-label="正在读取 443 分流配置" />}
         {error && <Alert type="error" showIcon title={error} role="alert" />}
@@ -156,7 +174,8 @@ export default function SharedIngressDialog({ open, onOpenChange, serverId }: Sh
           </section>
 
           <section aria-labelledby="shared-ingress-website-title">
-            <Space wrap><Typography.Title level={4} id="shared-ingress-website-title" style={{ margin: 0 }}>网站反向代理</Typography.Title><Switch aria-label="启用网站反向代理" checked={website.enabled} disabled={Boolean(busy)} onChange={enabled => setWebsite(previous => ({ ...previous, enabled, redirect_http: enabled && !previous.enabled ? true : previous.redirect_http }))} /></Space>
+            <Space wrap><Typography.Title level={4} id="shared-ingress-website-title" style={{ margin: 0 }}>网站反向代理</Typography.Title><Switch aria-label="启用网站反向代理" checked={website.enabled} disabled={Boolean(busy)} onChange={enabled => setWebsite(previous => ({ ...previous, enabled, redirect_http: enabled && !previous.enabled ? true : previous.redirect_http }))} /><Button href="/certificates">管理可信证书</Button></Space>
+            {website.enabled && <Alert style={{ marginTop: 12 }} type="info" showIcon title="启用前请在证书管理中签发覆盖网站 SNI 的受信证书，并部署到当前服务器。部署目标的证书文件名必须与下方证书名称完全一致。" />}
             <Form layout="vertical" disabled={Boolean(busy) || !website.enabled} style={{ marginTop: 12 }}>
               <Row gutter={16}>
                 <Col xs={24} md={12}><Form.Item label="网站 SNI"><Input aria-label="网站 SNI" value={website.sni} maxLength={253} placeholder="site.example.com" onChange={event => setWebsite(previous => ({ ...previous, sni: event.target.value }))} /></Form.Item></Col>

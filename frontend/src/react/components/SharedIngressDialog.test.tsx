@@ -51,14 +51,25 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("shared TCP 443 ingress dialog", () => {
+  it("allows an unchanged saved declaration to be dispatched again after its prior Agent command failed", async () => {
+    await mount();
+    const retry = screen.getByRole("button", { name: "重新下发" }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(false);
+    fireEvent.click(retry); await flush();
+    expect(applySharedIngress).toHaveBeenCalledExactlyOnceWith(serverId, {
+      expected_revision: 3, command_timeout_ms: 60000, configuration: configured,
+    });
+  });
+
   it("shows immutable automatic routes, enforces unique SNI and saves with CAS", async () => {
     await mount();
     expect(screen.getByText("受管分流会独占公网 TCP 443")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "管理可信证书" }).getAttribute("href")).toBe("/certificates");
     expect(screen.getByText("VLESS Reality Vision", { selector: "td" })).toBeTruthy();
     expect(screen.getByText(/node\.example\.com → 127\.0\.0\.1:62041/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("网站 SNI"), { target: { value: "node.example.com" } }); await flush();
     expect(screen.getByText("网站 SNI 与节点路由重复，请更换域名。")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "保存并下发" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "重新下发" }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.change(screen.getByLabelText("网站 SNI"), { target: { value: "new.example.com" } });
     fireEvent.change(screen.getByLabelText("绝对 HTTP(S) 上游"), { target: { value: "http://127.0.0.1:8080/app" } });

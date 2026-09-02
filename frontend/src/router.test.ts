@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { legacyRouteRedirects, routes } from "./routes";
 
 describe("router", () => {
-  it("registers exactly six canonical administrator workspaces in sidebar order", () => {
+  it("registers exactly seven canonical administrator workspaces in sidebar order", () => {
     expect(routes.filter(route => !route.meta?.subscriber).map(route => route.path)).toEqual([
-      "/servers", "/nodes", "/templates", "/plans", "/users", "/system-settings",
+      "/servers", "/nodes", "/templates", "/plans", "/users", "/certificates", "/system-settings",
     ]);
   });
 
@@ -33,8 +33,8 @@ describe("router", () => {
     });
   });
 
-  it("removes certificate management instead of loading its former page", () => {
-    expect(routes.some(route => route.path === "/certificates")).toBe(false);
-    expect(legacyRouteRedirects.find(route => route.path === "/certificates")?.to).toBe("/servers");
+  it("keeps certificate management as a canonical administrator workspace", () => {
+    expect(routes.some(route => route.path === "/certificates")).toBe(true);
+    expect(legacyRouteRedirects.some(route => route.path === "/certificates")).toBe(false);
   });
 });

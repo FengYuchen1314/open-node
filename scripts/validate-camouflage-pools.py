@@ -12,6 +12,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,33 +49,77 @@ def cloudflare_ranges(
     return result
 
 
-def resolve(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+def _system_addresses(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     addresses = []
     for result in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM):
         address = ipaddress.ip_address(result[4][0])
         if address not in addresses:
             addresses.append(address)
-    if not addresses or any(not address.is_global for address in addresses):
-        raise ValueError("DNS did not return only public addresses")
     return addresses
 
 
-def validate_tls(host: str, timeout: float) -> dict[str, str]:
+def _doh_addresses(
+    opener, host: str, timeout: float
+) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    addresses = []
+    encoded = quote(host, safe="")
+    for record_type, record_code in (("A", 1), ("AAAA", 28)):
+        value = json.loads(
+            request_text(
+                opener,
+                f"https://dns.google/resolve?name={encoded}&type={record_type}",
+                timeout,
+            )
+        )
+        if value.get("Status") != 0:
+            raise ValueError(f"DoH returned DNS status {value.get('Status')} for {record_type}")
+        for answer in value.get("Answer") or []:
+            if answer.get("type") != record_code:
+                continue
+            address = ipaddress.ip_address(answer.get("data", ""))
+            if address not in addresses:
+                addresses.append(address)
+    return addresses
+
+
+def resolve(
+    opener, host: str, timeout: float
+) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Resolve normally, falling back to DoH when a fake-IP DNS is detected."""
+    try:
+        addresses = _system_addresses(host)
+    except OSError:
+        addresses = []
+    if not addresses or any(not address.is_global for address in addresses):
+        addresses = _doh_addresses(opener, host, timeout)
+    if not addresses or any(not address.is_global for address in addresses):
+        raise ValueError("DNS and DoH did not return only public addresses")
+    return addresses
+
+
+def validate_tls(host: str, addresses, timeout: float) -> dict[str, str]:
     context = ssl.create_default_context()
     context.minimum_version = ssl.TLSVersion.TLSv1_3
     context.set_alpn_protocols(["h2"])
-    with (
-        socket.create_connection((host, 443), timeout=timeout) as connection,
-        context.wrap_socket(connection, server_hostname=host) as tls,
-    ):
-        if tls.version() != "TLSv1.3" or tls.selected_alpn_protocol() != "h2":
-            raise ValueError("target did not negotiate TLS 1.3 with h2")
-        certificate = tls.getpeercert()
-    return {
-        "tls_version": "TLSv1.3",
-        "alpn": "h2",
-        "certificate_not_after": certificate.get("notAfter", ""),
-    }
+    failures = []
+    for address in addresses:
+        try:
+            with (
+                socket.create_connection((str(address), 443), timeout=timeout) as connection,
+                context.wrap_socket(connection, server_hostname=host) as tls,
+            ):
+                if tls.version() != "TLSv1.3" or tls.selected_alpn_protocol() != "h2":
+                    raise ValueError("target did not negotiate TLS 1.3 with h2")
+                certificate = tls.getpeercert()
+            return {
+                "tls_address": str(address),
+                "tls_version": "TLSv1.3",
+                "alpn": "h2",
+                "certificate_not_after": certificate.get("notAfter", ""),
+            }
+        except (OSError, ValueError, ssl.SSLError) as exc:
+            failures.append(f"{address}: {exc}")
+    raise ValueError("TLS validation failed for every resolved address: " + "; ".join(failures))
 
 
 def parse_time(value: str) -> datetime:
@@ -103,7 +148,7 @@ def validate_pool(opener, pool, ranges, timeout, freshness):
     host = pool["server_name"]
     if pool["target"] != f"{host}:443":
         raise ValueError("catalog target and server name differ")
-    addresses = resolve(host)
+    addresses = resolve(opener, host, timeout)
     if any(any(address in network for network in ranges) for address in addresses):
         raise ValueError("DNS contains an address in Cloudflare's official ranges")
     return {
@@ -112,7 +157,7 @@ def validate_pool(opener, pool, ranges, timeout, freshness):
         "server_name": host,
         "addresses": [str(address) for address in addresses],
         "cloudflare": False,
-        **validate_tls(host, timeout),
+        **validate_tls(host, addresses, timeout),
         **validate_gfw(opener, host, timeout, freshness),
     }
 

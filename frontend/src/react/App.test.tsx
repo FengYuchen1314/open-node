@@ -18,6 +18,7 @@ vi.mock("../routes", () => ({ routes: [
   { path: "/templates", component: () => <div>Templates workspace</div> },
   { path: "/plans", component: () => <div>Plans workspace</div> },
   { path: "/users", component: () => <div>Users workspace</div> },
+  { path: "/certificates", component: () => <div>Certificates workspace</div> },
   { path: "/system-settings", component: () => <div>System settings workspace</div> },
   { path: "/account", component: () => <div>Separate subscriber portal</div>, meta: { subscriber: true } },
   { path: "/account/external-subscriptions", component: () => <div>Subscriber external sources</div>, meta: { subscriber: true } },
@@ -25,7 +26,6 @@ vi.mock("../routes", () => ({ routes: [
 ], legacyRouteRedirects: [
   { path: "/", to: "/servers" },
   { path: "/notifications", to: "/system-settings?tab=notifications" },
-  { path: "/certificates", to: "/servers" },
 ] }));
 vi.mock("../services/auth", async importOriginal => ({ ...await importOriginal<typeof import("../services/auth")>(), loadSession: vi.fn(), signOut: vi.fn() }));
 vi.mock("../services/branding", async original => ({ ...await original<typeof import("../services/branding")>(), getPublicBranding: vi.fn() }));
@@ -145,12 +145,12 @@ describe("React application shell", () => {
     authState.session = { configured: true, authenticated: true, username: "admin", csrf_token: "test-csrf" };
     mount(); await flush(); expect(screen.getByText("Servers workspace")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "切换导航菜单" })); await flush();
-    expect(screen.getAllByRole("menuitem").map(item => item.textContent)).toEqual(["服务器管理", "节点管理", "模板管理", "套餐管理", "用户管理", "系统设置"]);
+    expect(screen.getAllByRole("menuitem").map(item => item.textContent)).toEqual(["服务器管理", "节点管理", "模板管理", "套餐管理", "用户管理", "证书管理", "系统设置"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "节点管理" })); await flush();
     expect(screen.getByText("Nodes workspace")).toBeTruthy();
     expect(document.title).toBe("节点管理 - Open Node");
     expect(screen.queryByText("Servers workspace")).toBeNull();
-    expect(screen.queryByRole("menuitem", { name: "证书管理" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "证书管理" })).toBeTruthy();
   });
   it("contains a broken workspace without exposing raw errors or disabling navigation", async () => {
     routeState.broken = true;

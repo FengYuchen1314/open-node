@@ -19,6 +19,10 @@ const fixedErrors: Record<string, string> = {
   "Node topology changed; reload before saving": "节点编排已被其他操作修改，请刷新后重新编辑。",
   "Node topology changed; reload before deleting": "节点编排已被其他操作修改，请刷新后再删除。",
   "Topology name confirmation does not match": "确认名称与节点编排名称不一致。",
+  "Topology external nodes must belong to one subscriber": "一条节点编排中的外部节点只能属于同一用户。",
+  "Topology external node is unavailable": "编排中的外部节点已停用或不可用，请刷新候选节点。",
+  "Topology external node configuration is unavailable": "编排中的外部节点配置不可用，请刷新外部订阅后重试。",
+  "Topology external nodes belong to another assigned subscriber": "外部节点归属与已分配此编排的订阅用户不一致。",
   "Remove this topology from subscription plans before deleting it": "请先从订阅套餐中移除此编排，再执行删除。",
 };
 
@@ -52,6 +56,7 @@ function instant(value: unknown) {
     ? value : invalid();
 }
 function license(value: unknown) { if (value !== false) invalid(); return false as const; }
+function nil(value: unknown) { if (value !== null) invalid(); return null; }
 function stage(value: unknown): NodeTopologyStage {
   const row = exact(value, ["node_ids", "load_balance_strategy"]);
   if (!Array.isArray(row.node_ids) || row.node_ids.length < 1 || row.node_ids.length > 16
@@ -69,13 +74,27 @@ function layout(value: unknown): NodeTopologyLayout {
   }));
 }
 function candidate(value: unknown): NodeTopologyCandidate {
-  const row = exact(value, ["id", "name", "server_id", "server_name", "server_kind", "protocol"]);
-  if (!(["direct", "leased-line", "residential"] as unknown[]).includes(row.server_kind)) invalid();
-  return {
-    id: uuid(row.id), name: text(row.name, 120, true), server_id: uuid(row.server_id),
-    server_name: text(row.server_name, 120, true),
-    server_kind: row.server_kind as NodeTopologyCandidate["server_kind"], protocol: text(row.protocol, 80, true),
-  };
+  const row = exact(value, [
+    "id", "name", "kind", "protocol", "server_id", "server_name", "server_kind",
+    "source_id", "source_name", "owner_username",
+  ]);
+  const base = { id: uuid(row.id), name: text(row.name, 160, true), protocol: text(row.protocol, 80, true) };
+  if (row.kind === "managed") {
+    if (!(["direct", "leased-line", "residential"] as unknown[]).includes(row.server_kind)) invalid();
+    return {
+      ...base, kind: "managed", server_id: uuid(row.server_id), server_name: text(row.server_name, 120, true),
+      server_kind: row.server_kind as "direct" | "leased-line" | "residential",
+      source_id: nil(row.source_id), source_name: nil(row.source_name), owner_username: nil(row.owner_username),
+    };
+  }
+  if (row.kind === "external") {
+    return {
+      ...base, kind: "external", server_id: nil(row.server_id), server_name: nil(row.server_name),
+      server_kind: nil(row.server_kind), source_id: uuid(row.source_id),
+      source_name: text(row.source_name, 160, true), owner_username: text(row.owner_username, 80, true),
+    };
+  }
+  return invalid();
 }
 function topology(value: unknown): NodeTopology {
   const row = exact(value, ["name", "enabled", "stages", "layout", "id", "revision", "created_at", "updated_at"]);
@@ -98,6 +117,7 @@ function knownError(detail: unknown, status: number) {
     const fixed = fixedErrors[detail]
       ?? (detail.startsWith("Node topology not found:") ? "节点编排不存在，请刷新列表。" : null)
       ?? (detail.startsWith("Topology node not found:") ? "编排中的节点不存在，请刷新候选节点。" : null)
+      ?? (detail.startsWith("Topology node identity is ambiguous:") ? "候选节点标识发生冲突，请刷新后重试。" : null)
       ?? (detail.startsWith("Topology node is not an active physical node:") ? "编排中的节点已停用或不可用。" : null)
       ?? (detail.startsWith("Topology node has no server:") ? "编排中的节点没有可用服务器。" : null);
     if (fixed) return new NodeTopologyRequestError(status, fixed);

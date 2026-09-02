@@ -608,9 +608,14 @@ YAML, and callers can request alternate formats with
 - `clash`: Clash-compatible YAML with a select group.
 - `surge`: Surge-compatible profile text with server-side compatibility checks.
 - `sing-box`: sing-box JSON outbounds with a selector, including AnyTLS when
-  its managed-node config contains the required client fields.
+  its managed-node config contains the required client fields. A topology
+  round-robin stage is emitted as a standard `urltest` detour: upstream
+  sing-box 1.14 has no round-robin group, so this is an explicit automatic
+  low-latency/failover downgrade and no unsupported strategy field is emitted.
 - `xray`: native Xray JSON for the pinned compatibility runtime, with optional
-  selection of one plan-scoped node.
+  selection of one plan-scoped node. Topology round-robin stages use that
+  runtime's native `routing.balancers` `roundRobin` strategy; loopback
+  outbounds route chained dial attempts through the corresponding balancer.
 - `uri-list`: plaintext proxy URI lines.
 - `base64`: base64-encoded URI list for clients that expect legacy
   subscription bodies.
