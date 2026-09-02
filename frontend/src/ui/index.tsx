@@ -133,18 +133,72 @@ function nativeValue(options: any[], raw: string) {
 export function Select({ options = [], value, onChange, mode, allowClear, placeholder, className, children, loading, ...props }: AnyProps) {
   const formDisabled = useContext(FormDisabledContext);
   const multiple = mode === "multiple" || mode === "tags";
-  const current = multiple ? (value ?? []).map(String) : value == null ? "" : String(value);
-  return <select {...omit(props, ["showSearch", "optionFilterProp", "popupMatchSelectWidth", "maxTagCount", "maxCount"])} disabled={props.disabled || formDisabled || loading} aria-busy={loading || undefined} className={cx("ui-select", className)} multiple={multiple} value={current}
-    onChange={event => {
-      if (multiple) onChange?.(Array.from(event.currentTarget.selectedOptions).map(option => nativeValue(options, option.value)));
-      else onChange?.(nativeValue(options, event.currentTarget.value));
-    }}>
-    {(allowClear || placeholder || (!multiple && value == null)) && <option value="">{placeholder ?? "请选择"}</option>}
-    {options.map((option: any, index: number) => <option className="ui-option" aria-disabled={option.disabled || undefined} key={`${String(option.value)}-${index}`} value={String(option.value)} disabled={option.disabled} onClick={() => {
-      if (option.disabled) return;
-      if (multiple) onChange?.((value ?? []).includes(option.value) ? (value ?? []).filter((item: any) => item !== option.value) : [...(value ?? []), option.value]);
-      else onChange?.(option.value);
-    }}>{typeof option.label === "string" || typeof option.label === "number" ? option.label : String(option.value)}</option>)}
+  const [query, setQuery] = useState("");
+  const [tagDraft, setTagDraft] = useState("");
+  const disabled = props.disabled || formDisabled || loading;
+  const selected = Array.isArray(value) ? value : [];
+  const selectedKeys = new Set(selected.map(String));
+  const optionLabel = (option: any) => typeof option.label === "string" || typeof option.label === "number" ? String(option.label) : String(option.value);
+
+  if (multiple) {
+    const maxCount = Number.isFinite(Number(props.maxCount)) ? Number(props.maxCount) : Number.POSITIVE_INFINITY;
+    const searchable = Boolean(props.showSearch) || options.length > 8;
+    const visibleOptions = options.filter((option: any) => !query || optionLabel(option).toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+    const toggle = (option: any) => {
+      if (disabled || option.disabled) return;
+      const key = String(option.value);
+      if (selectedKeys.has(key)) onChange?.(selected.filter((item: any) => String(item) !== key));
+      else if (selected.length < maxCount) onChange?.([...selected, option.value]);
+    };
+    const addTag = () => {
+      const next = tagDraft.trim();
+      if (!next || disabled || selectedKeys.has(next) || selected.length >= maxCount) return;
+      onChange?.([...selected, next]);
+      setTagDraft("");
+    };
+    const selectedOptions = selected.map((entry: any) => options.find((option: any) => String(option.value) === String(entry)) ?? { value: entry, label: entry });
+    const ariaLabel = props["aria-label"] ?? "多选";
+    return <div
+      {...omit(props, ["aria-label", "showSearch", "optionFilterProp", "popupMatchSelectWidth", "maxTagCount", "maxCount", "disabled", "style"])}
+      role="group" aria-label={ariaLabel} aria-disabled={disabled || undefined} aria-busy={loading || undefined}
+      className={cx("ui-multiselect", disabled && "is-disabled", className)} style={props.style}>
+      <div className="ui-multiselect-head">
+        <div className="ui-multiselect-selection" aria-live="polite">
+          {selectedOptions.length ? selectedOptions.map((option: any) => <span className="ui-multiselect-chip" key={String(option.value)}>
+            <span>{optionLabel(option)}</span>
+            {!disabled && <button type="button" aria-label={`移除 ${optionLabel(option)}`} onClick={() => toggle(option)}>×</button>}
+          </span>) : <span className="ui-multiselect-placeholder">{placeholder ?? "请选择，可多选"}</span>}
+        </div>
+        <span className="ui-multiselect-count">已选 {selected.length}</span>
+        {allowClear && selected.length > 0 && <button type="button" className="ui-multiselect-clear" disabled={disabled} onClick={() => onChange?.([])}>清空</button>}
+      </div>
+      {searchable && <input type="search" className="ui-multiselect-search" aria-label={`${ariaLabel}搜索`} placeholder="搜索选项" value={query} disabled={disabled} onChange={event => setQuery(event.target.value)} />}
+      {mode === "tags" && <div className="ui-multiselect-tag-entry">
+        <input className="ui-multiselect-search" aria-label={`${ariaLabel}新增`} placeholder="输入后按回车添加" value={tagDraft} disabled={disabled}
+          onChange={event => setTagDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addTag(); } }} />
+        <button type="button" className="ui-button" disabled={disabled || !tagDraft.trim()} onClick={addTag}>添加</button>
+      </div>}
+      <div className="ui-multiselect-options">
+        {visibleOptions.map((option: any, index: number) => {
+          const checked = selectedKeys.has(String(option.value));
+          const optionDisabled = disabled || option.disabled || (!checked && selected.length >= maxCount);
+          return <label className={cx("ui-multiselect-option", checked && "is-selected", optionDisabled && "is-disabled")} key={`${String(option.value)}-${index}`}>
+            <input type="checkbox" checked={checked} disabled={optionDisabled} onChange={() => toggle(option)} />
+            <span>{optionLabel(option)}</span>
+          </label>;
+        })}
+        {!visibleOptions.length && <div className="ui-multiselect-empty">{query ? "没有匹配的选项" : "暂无可选项"}</div>}
+      </div>
+      {children}
+    </div>;
+  }
+
+  const current = value == null ? "" : String(value);
+  return <select {...omit(props, ["showSearch", "optionFilterProp", "popupMatchSelectWidth", "maxTagCount", "maxCount"])} disabled={disabled} aria-busy={loading || undefined} className={cx("ui-select", className)} value={current}
+    onChange={event => onChange?.(nativeValue(options, event.currentTarget.value))}>
+    {(allowClear || placeholder || value == null) && <option value="">{placeholder ?? "请选择"}</option>}
+    {options.map((option: any, index: number) => <option className="ui-option" aria-disabled={option.disabled || undefined} key={`${String(option.value)}-${index}`} value={String(option.value)} disabled={option.disabled}
+      onClick={() => { if (!disabled && !option.disabled) onChange?.(option.value); }}>{optionLabel(option)}</option>)}
     {children}
   </select>;
 }

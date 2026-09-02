@@ -61,9 +61,7 @@ describe("React subscription management dialogs", { timeout: 20_000 }, () => {
   });
   it("refuses to save a plan after all nodes are removed", async () => {
     render(<PlanManagementDialog open id="p" mode="edit" nodes={[node]} onOpenChange={vi.fn()} />); await flush();
-    const selection = screen.getByLabelText("套餐节点") as HTMLSelectElement;
-    Array.from(selection.options).forEach(option => { option.selected = false; });
-    fireEvent.change(selection); await flush();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" })); await flush();
     fireEvent.click(screen.getByRole("checkbox", { name: /我接受/ }));
     expect(screen.getByText("套餐至少需要一个节点。")).toBeTruthy();
     expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);

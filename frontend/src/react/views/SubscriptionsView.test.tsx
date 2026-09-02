@@ -319,11 +319,11 @@ describe("focused management workspaces", { timeout: 40_000 }, () => {
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Dual node" } });
     expect((screen.getByRole("button", { name: "创建套餐" }) as HTMLButtonElement).disabled).toBe(true);
     expect(subscriptions.createSubscriptionPlan).not.toHaveBeenCalled();
-    expect(screen.getByText(/至少选择一个节点/)).toBeTruthy();
+    expect(screen.getByText(/必须选择至少一个节点/)).toBeTruthy();
 
-    const nodeSelect = screen.getByLabelText("节点") as HTMLSelectElement;
-    Array.from(nodeSelect.options).forEach(item => { item.selected = ["a", "b"].includes(item.value); });
-    fireEvent.change(nodeSelect); await flush();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Alpha (vless)" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Beta (vless)" }));
+    await flush();
     await selectOption("订阅模板", "main.yaml");
     fireEvent.click(screen.getByRole("button", { name: "创建套餐" })); await flush();
     expect(subscriptions.createSubscriptionPlan).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({

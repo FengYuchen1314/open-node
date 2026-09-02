@@ -177,8 +177,29 @@ a:hover { color: var(--ui-primary-strong); }
 .ui-textarea { min-height: 104px; resize: vertical; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; line-height: 1.6; }
 .ui-search { width: 100%; display: flex; }
 .ui-search .ui-input-wrap { flex: 1; }
-.ui-select[multiple] { min-height: 112px; }
 .ui-option { color: CanvasText; background: Canvas; }
+.ui-multiselect { width: 100%; padding: 10px; color: var(--ui-text); background: var(--ui-surface); border: 1px solid var(--ui-border-strong); border-radius: var(--ui-radius-sm); transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.ui-multiselect:focus-within { border-color: var(--ui-primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ui-primary) 15%, transparent); }
+.ui-multiselect.is-disabled { color: var(--ui-muted); background: var(--ui-surface-strong); opacity: .72; }
+.ui-multiselect-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+.ui-multiselect-selection { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.ui-multiselect-placeholder { color: var(--ui-muted); line-height: 28px; }
+.ui-multiselect-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 28px; padding: 3px 7px 3px 10px; color: color-mix(in srgb, var(--ui-primary) 82%, var(--ui-text)); background: color-mix(in srgb, var(--ui-primary) 10%, var(--ui-surface)); border: 1px solid color-mix(in srgb, var(--ui-primary) 24%, var(--ui-border)); border-radius: 999px; font-size: 13px; font-weight: 700; }
+.ui-multiselect-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-multiselect-chip button { flex: 0 0 auto; width: 20px; height: 20px; padding: 0; color: inherit; background: transparent; border: 0; border-radius: 50%; cursor: pointer; line-height: 1; }
+.ui-multiselect-chip button:hover { background: color-mix(in srgb, var(--ui-primary) 14%, transparent); }
+.ui-multiselect-count { flex: 0 0 auto; padding: 4px 8px; color: var(--ui-muted); background: var(--ui-surface-muted); border-radius: 999px; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.ui-multiselect-clear { flex: 0 0 auto; padding: 4px 2px; color: var(--ui-primary); background: transparent; border: 0; cursor: pointer; font-size: 13px; }
+.ui-multiselect-search { width: 100%; min-height: 38px; margin-bottom: 8px; padding: 7px 10px; color: var(--ui-text); background: var(--ui-surface); border: 1px solid var(--ui-border); border-radius: 9px; outline: none; }
+.ui-multiselect-tag-entry { display: flex; gap: 8px; margin-bottom: 8px; }
+.ui-multiselect-tag-entry .ui-multiselect-search { margin-bottom: 0; }
+.ui-multiselect-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 7px; max-height: 224px; overflow: auto; }
+.ui-multiselect-option { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 8px 10px; background: var(--ui-surface-muted); border: 1px solid transparent; border-radius: 9px; cursor: pointer; transition: color .15s ease, border-color .15s ease, background .15s ease; }
+.ui-multiselect-option:hover:not(.is-disabled) { border-color: color-mix(in srgb, var(--ui-primary) 38%, var(--ui-border)); background: color-mix(in srgb, var(--ui-primary) 5%, var(--ui-surface)); }
+.ui-multiselect-option.is-selected { color: color-mix(in srgb, var(--ui-primary) 88%, var(--ui-text)); background: color-mix(in srgb, var(--ui-primary) 10%, var(--ui-surface)); border-color: color-mix(in srgb, var(--ui-primary) 35%, var(--ui-border)); font-weight: 750; }
+.ui-multiselect-option.is-disabled { cursor: not-allowed; opacity: .55; }
+.ui-multiselect-option input { width: 17px; height: 17px; margin: 0; accent-color: var(--ui-primary); }
+.ui-multiselect-empty { grid-column: 1 / -1; padding: 18px 10px; color: var(--ui-muted); text-align: center; }
 .ui-check, .ui-radio { display: inline-flex; align-items: flex-start; gap: 8px; color: var(--ui-text); cursor: pointer; }
 .ui-check input, .ui-radio input { width: 16px; height: 16px; margin-top: 3px; accent-color: var(--ui-primary); }
 .ui-choice-group { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
