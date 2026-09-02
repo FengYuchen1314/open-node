@@ -42,11 +42,16 @@ from uuid import UUID
 
 ROOT_UID = 0
 API_PATH = "/api/v1/agents/bootstrap"
+PANEL_ARTIFACT_PATH = API_PATH + "/artifacts"
 XRAY_VERSION = "v26.3.27"
 XRAY_SHA256 = "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"
 XRAY_BYTES = 21_136_402
 BOOTSTRAP_FILES = {
-    "service.py", "lifecycle_protocol.py", "lifecycle_host.py", "lifecycle_report.py", "LICENSE"
+    "service.py",
+    "lifecycle_protocol.py",
+    "lifecycle_host.py",
+    "lifecycle_report.py",
+    "LICENSE",
 }
 JSON_LIMIT = 64 * 1024
 WHEEL_LIMIT = 32 * 1024 * 1024
@@ -248,13 +253,12 @@ def validate_manifest(value):
     )
     validate_asset(agent["build"], filename="BUILD.json", maximum=JSON_LIMIT)
     xray = fields(value["xray"], {"version", "architecture", "archive"})
-    archive = validate_asset(
-        xray["archive"], filename="Xray-linux-64.zip", maximum=XRAY_LIMIT
-    )
+    archive = validate_asset(xray["archive"], filename="Xray-linux-64.zip", maximum=XRAY_LIMIT)
     require(
         xray["version"] == XRAY_VERSION
         and xray["architecture"] == "x86_64"
-        and archive == {
+        and archive
+        == {
             "filename": "Xray-linux-64.zip",
             "path": API_PATH + "/artifacts/Xray-linux-64.zip",
             "sha256": XRAY_SHA256,
@@ -272,8 +276,7 @@ def validate_manifest(value):
             maximum=MIHOMO_LIMIT,
         )
         require(
-            artifact["sha256"] == expected["sha256"]
-            and artifact["bytes"] == expected["bytes"],
+            artifact["sha256"] == expected["sha256"] and artifact["bytes"] == expected["bytes"],
             "Mihomo release does not match the supported pinned artifact",
         )
     return value
@@ -287,9 +290,8 @@ def validate_build(value, manifest):
         and value["version"] == agent["version"]
         and string(value["python"], maximum=512)
         and string(value["platform"], maximum=512)
-        and value["artifacts"] == {
-            agent[key]["filename"]: agent[key]["sha256"] for key in ("wheel", "bootstrap")
-        },
+        and value["artifacts"]
+        == {agent[key]["filename"]: agent[key]["sha256"] for key in ("wheel", "bootstrap")},
         "BUILD.json does not match the pinned release manifest",
     )
     return value
@@ -330,9 +332,7 @@ def check_parents(path):
             info = parent.lstat()
         except OSError:
             raise BootstrapError("Cannot safely inspect a directory component") from None
-        sticky_temp = (
-            parent == Path("/tmp") and info.st_uid == 0 and info.st_mode & stat.S_ISVTX
-        )
+        sticky_temp = parent == Path("/tmp") and info.st_uid == 0 and info.st_mode & stat.S_ISVTX
         require(
             stat.S_ISDIR(info.st_mode)
             and info.st_uid in {0, ROOT_UID}
@@ -592,8 +592,7 @@ def download_artifact(client, control_url, artifact, directory, *, limit):
     control_url = validate_control_url(control_url)
     path = artifact["path"]
     require(
-        path == f"{API_PATH}/artifacts/{filename}"
-        and artifact["bytes"] <= limit,
+        path == f"{API_PATH}/artifacts/{filename}" and artifact["bytes"] <= limit,
         "Artifact path is outside the fixed panel resource endpoint",
     )
     deadline = time.monotonic() + 180
@@ -606,9 +605,7 @@ def download_artifact(client, control_url, artifact, directory, *, limit):
         response = client.open(request, timeout=30)
     except urllib.error.HTTPError as error:
         error.close()
-        raise BootstrapError(
-            "Panel artifact request failed; redirects are not accepted"
-        ) from None
+        raise BootstrapError("Panel artifact request failed; redirects are not accepted") from None
     except (OSError, urllib.error.URLError, http.client.HTTPException):
         raise BootstrapError("Panel artifact HTTPS request failed") from None
     fd, temporary = tempfile.mkstemp(prefix=".download-", dir=directory)
@@ -829,9 +826,7 @@ def prepare_artifacts(job, control_client):
         job.directory,
         limit=MIHOMO_LIMIT,
     )
-    mihomo = unpack_mihomo(
-        mihomo_archive, job.directory / "mihomo", platform_name
-    ) / "mihomo"
+    mihomo = unpack_mihomo(mihomo_archive, job.directory / "mihomo", platform_name) / "mihomo"
     return {
         "manifest": manifest,
         "wheel": wheel,
@@ -929,8 +924,7 @@ def check_platform():
     except OSError:
         raise BootstrapError("Cannot verify the Debian or Ubuntu host release") from None
     require(
-        (release.get("ID", "").lower(), release.get("VERSION_ID", ""))
-        in SUPPORTED_RELEASES,
+        (release.get("ID", "").lower(), release.get("VERSION_ID", "")) in SUPPORTED_RELEASES,
         f"Automatic Agent bootstrap supports {SUPPORTED_RELEASE_LABEL} only",
     )
 
@@ -958,8 +952,12 @@ def ensure_dependencies(*, install=False):
     run_command(["apt-get", "update"], timeout=300)
     run_command(
         [
-            "apt-get", "install", "--yes", "--no-install-recommends",
-            "python3-venv", "ca-certificates",
+            "apt-get",
+            "install",
+            "--yes",
+            "--no-install-recommends",
+            "python3-venv",
+            "ca-certificates",
         ],
         timeout=600,
     )
@@ -1064,9 +1062,13 @@ def configuration_data(job, claim, stats_address):
         "api": {"tag": "api", "listen": stats_address, "services": ["StatsService"]},
         "stats": {},
         "policy": {
-            "levels": {"0": {
-                "statsUserUplink": True, "statsUserDownlink": True, "statsUserOnline": True,
-            }},
+            "levels": {
+                "0": {
+                    "statsUserUplink": True,
+                    "statsUserDownlink": True,
+                    "statsUserOnline": True,
+                }
+            },
             "system": {"statsInboundUplink": True, "statsInboundDownlink": True},
         },
         "inbounds": [],
@@ -1094,11 +1096,28 @@ def install_agent(job, claim, artifacts):
     agent_path, xray_path, mihomo_path = prepare_configuration(job, claim)
     run_command(
         [
-            sys.executable, "-I", artifacts["service"],
-            "--root", job.root, "--unit", job.unit, "--timeout", "90", "install",
-            "--wheel", artifacts["wheel"], "--config", agent_path,
-            "--xray-config", xray_path, "--xray", artifacts["xray"],
-            "--mihomo-config", mihomo_path, "--mihomo", artifacts["mihomo"],
+            sys.executable,
+            "-I",
+            artifacts["service"],
+            "--root",
+            job.root,
+            "--unit",
+            job.unit,
+            "--timeout",
+            "90",
+            "install",
+            "--wheel",
+            artifacts["wheel"],
+            "--config",
+            agent_path,
+            "--xray-config",
+            xray_path,
+            "--xray",
+            artifacts["xray"],
+            "--mihomo-config",
+            mihomo_path,
+            "--mihomo",
+            artifacts["mihomo"],
         ],
         timeout=1200,
     )
@@ -1108,8 +1127,10 @@ def install_agent(job, claim, artifacts):
         and installed.get("root") == str(job.root)
         and installed.get("unit") == job.unit
         and installed.get("user") == job.unit.removesuffix(".service")
-        and type(installed.get("uid")) is int and installed["uid"] > 0
-        and type(installed.get("gid")) is int and installed["gid"] > 0
+        and type(installed.get("uid")) is int
+        and installed["uid"] > 0
+        and type(installed.get("gid")) is int
+        and installed["gid"] > 0
         and installed.get("status") == "installed"
         and installed.get("current")
         and installed.get("pending") is None
@@ -1124,14 +1145,44 @@ def install_agent(job, claim, artifacts):
         and current.get("sha256") == artifacts["manifest"]["agent"]["wheel"]["sha256"],
         "Installed release does not match the verified artifact",
     )
-    write_new(job.directory / "success.json", json_bytes({
-        "schema_version": 1,
-        "root": str(job.root),
-        "unit": job.unit,
-        "installation_id": installed.get("installation_id"),
-        "version": current["version"],
-        "source_commit": artifacts["manifest"]["agent"]["source_commit"],
-    }))
+    lifecycle_arguments = [
+        sys.executable,
+        "-I",
+        artifacts["service"],
+        "--root",
+        job.root,
+        "--unit",
+        job.unit,
+        "--timeout",
+        "90",
+        "enable-remote",
+        "--release-base-url",
+        job.control_url + PANEL_ARTIFACT_PATH,
+    ]
+    release_ca = job.directory / "control-ca.pem"
+    if release_ca.exists():
+        lifecycle_arguments.extend(("--release-ca", release_ca))
+    run_command(lifecycle_arguments, timeout=180)
+    installed = parse_json(read_owned(job.root / "installation.json"))
+    lifecycle = installed.get("lifecycle") if isinstance(installed, dict) else None
+    require(
+        isinstance(lifecycle, dict)
+        and lifecycle.get("base_url") == job.control_url + PANEL_ARTIFACT_PATH,
+        "Host installer did not enable panel-managed Agent lifecycle operations",
+    )
+    write_new(
+        job.directory / "success.json",
+        json_bytes(
+            {
+                "schema_version": 1,
+                "root": str(job.root),
+                "unit": job.unit,
+                "installation_id": installed.get("installation_id"),
+                "version": current["version"],
+                "source_commit": artifacts["manifest"]["agent"]["source_commit"],
+            }
+        ),
+    )
 
 
 class SafeArgumentParser(argparse.ArgumentParser):
@@ -1147,7 +1198,9 @@ def main(argv=None):
     parser.add_argument("--ticket", required=True)
     parser.add_argument("--server-id", required=True)
     parser.add_argument(
-        "--ca-file", type=Path, default=os.environ.get("OPEN_NODE_AGENT_CA_FILE") or None,
+        "--ca-file",
+        type=Path,
+        default=os.environ.get("OPEN_NODE_AGENT_CA_FILE") or None,
         help="Control-plane CA for every installer and artifact request",
     )
     parser.add_argument("--install-dependencies", action="store_true")
@@ -1162,8 +1215,11 @@ def main(argv=None):
         ensure_dependencies(install=args.install_dependencies)
         ca_data = read_owned(args.ca_file, limit=CA_LIMIT, private=False) if args.ca_file else None
         job = prepare_job(
-            control_url=control_url, ticket=args.ticket, server_id=server_id,
-            ca_data=ca_data, test_directory=args.test_directory,
+            control_url=control_url,
+            ticket=args.ticket,
+            server_id=server_id,
+            ca_data=ca_data,
+            test_directory=args.test_directory,
         )
         with job_lock(job):
             require_fresh_resources(job)

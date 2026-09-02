@@ -1,5 +1,5 @@
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Form, Input, Modal, Select, Space, Table, Typography } from "antd";
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "../../ui/icons";
+import { Alert, Button, Form, Input, Modal, Select, Space, Table, Typography } from "../../ui";
 import { useEffect, useRef, useState } from "react";
 
 import { certificateRequest, type CertificateCapabilities, type DNSProvider } from "../../services/certificates";

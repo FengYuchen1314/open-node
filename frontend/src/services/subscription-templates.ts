@@ -111,7 +111,6 @@ export const updateSubscriptionTemplateSettings = (
     method: "PUT",
     body: JSON.stringify({
       clash_template_id: settings.clash_template_id,
-      surge_template_id: settings.surge_template_id,
       enabled: settings.enabled,
       expected_revision: settings.revision,
     }),

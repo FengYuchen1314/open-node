@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Col, Form, Input, Modal, Row, Select, Space, Table, Tag, Typography } from "antd";
-import { DeleteOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Col, Form, Input, Modal, Row, Select, Space, Table, Tag, Typography } from "../../ui";
+import { DeleteOutlined, PlusOutlined, ReloadOutlined } from "../../ui/icons";
 import { validAutoSpeedRule, type AutoSpeedRule } from "../../domain/auto-speed";
 import type { AgentCommand, AgentLimiterOperationRequest, XrayRuntimeInbound } from "../../domain/inventory";
 import { listServerCommands, queueAgentOperation } from "../../services/inventory";

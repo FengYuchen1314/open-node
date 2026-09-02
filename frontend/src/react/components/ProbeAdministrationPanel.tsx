@@ -1,5 +1,5 @@
-import { CopyOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Flex, Form, Input, Popconfirm, Row, Select, Space, Switch, Table, Tag, Typography } from "antd";
+import { CopyOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Col, Flex, Form, Input, Popconfirm, Row, Select, Space, Switch, Table, Tag, Typography } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { latencyCommandTimeout, routeTargets, selectedRouteTargets } from "../../domain/diagnostics";
 import type { ServerSummary } from "../../domain/inventory";

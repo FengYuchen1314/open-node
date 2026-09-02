@@ -1,6 +1,6 @@
 import { zhMessage } from "../../i18n/zh-CN";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Flex, Form, Input, Modal, Spin, Tag } from "antd";
+import { Alert, Flex, Form, Input, Modal, Spin, Tag } from "../../ui";
 import type { SubscriptionIpPolicy } from "../../domain/subscriptions";
 import { subscriberIpPolicy, updateSubscriberIpPolicy } from "../../services/subscriber-auth";
 import { getProductUserIpPolicy, updateProductUserIpPolicy } from "../../services/subscriptions";

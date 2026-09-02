@@ -1,7 +1,7 @@
 import { zhMessage } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Flex, Form, Input, Modal, Select } from "antd";
-import { CheckOutlined, CopyOutlined } from "@ant-design/icons";
+import { Alert, Button, Flex, Form, Input, Modal, Select } from "../../ui";
+import { CheckOutlined, CopyOutlined } from "../../ui/icons";
 import type { TemporarySubscription } from "../../domain/temporary-subscriptions";
 import { createTemporarySubscription } from "../../services/temporary-subscriptions";
 import StrictInputNumber from "./StrictInputNumber";

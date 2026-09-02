@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, screen } from "@testing-library/react";
-import { Modal, Pagination, Table } from "antd";
+import { Modal, Pagination, Table } from "../ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installDom, renderUi } from "./test-utils";
 

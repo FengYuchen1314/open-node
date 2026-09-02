@@ -5,7 +5,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   ShareAltOutlined,
-} from "@ant-design/icons";
+} from "../../ui/icons";
 import {
   Alert,
   Button,
@@ -22,7 +22,7 @@ import {
   Tabs,
   Tag,
   Typography,
-} from "antd";
+} from "../../ui";
 import { useEffect, useRef, useState } from "react";
 
 import type { ServerSummary } from "../../domain/inventory";

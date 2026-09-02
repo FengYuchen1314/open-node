@@ -9,7 +9,7 @@ changed atomically.
 ```text
 open-node
 |-- backend       FastAPI application and tests
-|-- frontend      React + Ant Design application and tests
+|-- frontend      React + project semantic UI application and tests
 |-- probe-worker  Cloudflare Worker for the standalone probe surface
 |-- docs          migration notes and architecture decisions
 `-- scripts       VPS bootstrap and verification helpers
@@ -606,7 +606,6 @@ YAML, and callers can request alternate formats with
 `GET /api/v1/subscribe/{token_or_short_code}?format=...`:
 
 - `clash`: Clash-compatible YAML with a select group.
-- `surge`: Surge-compatible profile text with server-side compatibility checks.
 - `sing-box`: sing-box JSON outbounds with a selector, including AnyTLS when
   its managed-node config contains the required client fields. A topology
   round-robin stage is emitted as a standard `urltest` detour: upstream

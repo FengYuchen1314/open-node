@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Checkbox, Descriptions, Form, Input, Space, Typography } from "antd";
+import { Alert, Button, Card, Checkbox, Descriptions, Form, Input, Space, Typography } from "../../ui";
 import { useRef, useState } from "react";
 import type { RestoreStatus } from "../../domain/backups";
 import { authState, type OperatorSession } from "../../services/auth";

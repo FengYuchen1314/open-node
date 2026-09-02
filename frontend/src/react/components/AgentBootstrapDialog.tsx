@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Descriptions, Form, Input, Modal, Select, Space, Spin, Tag, Typography } from "antd";
-import { CopyOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Checkbox, Descriptions, Form, Input, Modal, Select, Space, Spin, Tag, Typography } from "../../ui";
+import { CopyOutlined, ReloadOutlined } from "../../ui/icons";
 import { useAgentBootstrap } from "../hooks/useAgentBootstrap";
 import { zhMessage } from "../../i18n/zh-CN";
 import type { ServerKind } from "../../domain/inventory";

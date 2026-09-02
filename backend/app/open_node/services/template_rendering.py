@@ -1,8 +1,5 @@
 """Bounded configuration parsing and client-only subscription template expansion."""
 
-import configparser
-import json
-import shlex
 from copy import deepcopy
 from functools import lru_cache
 
@@ -33,19 +30,6 @@ proxy-groups:
     proxies: [__PROXY_NODES__]
 rules:
   - MATCH,Proxy
-"""
-DEFAULT_SURGE = """[General]
-loglevel = notify
-allow-wifi-access = false
-udp-policy-not-supported-behaviour = reject
-
-[Proxy]
-
-[Proxy Group]
-Proxy = select, include-all-proxies=true
-
-[Rule]
-FINAL,Proxy
 """
 
 
@@ -109,73 +93,7 @@ def checked_yaml(content):
         loader.dispose()
 
 
-def surge_sections(content):
-    parser = configparser.ConfigParser(
-        interpolation=None,
-        allow_no_value=True,
-        strict=False,
-        delimiters=("=",),
-        comment_prefixes=("#", ";", "//"),
-        empty_lines_in_values=False,
-    )
-    parser.optionxform = str
-    try:
-        parser.read_string(content)
-        seen, section, chunks = set(), None, []
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("[") and stripped.endswith("]"):
-                section = stripped[1:-1].strip().casefold()
-                if section in seen:
-                    raise TemplateError("Surge sections must be distinct")
-                seen.add(section)
-            chunks.append((section, line))
-        if not seen.intersection({"general", "proxy", "proxy group", "rule"}):
-            raise TemplateError("Surge template requires a profile section")
-        groups = {}
-        for name in parser.sections():
-            if name.casefold() != "proxy group":
-                continue
-            strict = configparser.ConfigParser(interpolation=None, strict=True, delimiters=("=",))
-            strict.optionxform = str
-            strict.read_string(
-                "[Groups]\n"
-                + "\n".join(
-                    line
-                    for section, line in chunks
-                    if section == "proxy group" and not line.strip().startswith("[")
-                )
-            )
-            for key, value in strict.items("Groups"):
-                if not safe_policy_name(key) or key in BUILTINS:
-                    raise TemplateError("Surge group name contains reserved syntax")
-                parts = surge_parts(value)
-                if not parts:
-                    raise TemplateError("Surge policy group type is missing")
-                groups[key] = parts
-        check_cycles(
-            {key: [part for part in parts[1:] if part in groups] for key, parts in groups.items()}
-        )
-        return {"chunks": chunks, "groups": groups}
-    except (configparser.Error, ValueError) as exc:
-        if isinstance(exc, TemplateError):
-            raise
-        raise TemplateError("Invalid Surge profile structure") from exc
-
-
-def surge_parts(value):
-    lexer = shlex.shlex(value, posix=True)
-    lexer.whitespace = ","
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return [part.strip() for part in lexer]
-
-
-def safe_policy_name(name):
-    return bool(name.strip()) and not any(c in name for c in ",=\r\n\"'\\#;[]")
-
-
-def surge_name(name):
+def portable_name(name):
     return "".join("_" if c in ",=\r\n\"'\\#;[]" else c for c in name).strip() or "Node"
 
 
@@ -200,8 +118,8 @@ def check_cycles(graph):
 @lru_cache(maxsize=32)
 def parse_template(content, format):
     checked_text(content)
-    if format == "surge":
-        return surge_sections(content)
+    if format != "clash":
+        raise TemplateError("Only Clash/Mihomo YAML templates are supported")
     value = checked_yaml(content)
     groups = value.get("proxy-groups", [])
     if not isinstance(groups, list) or len(groups) > 1000:
@@ -242,11 +160,7 @@ def parse_template(content, format):
 
 def reserved_names(content, format):
     parsed = parse_template(content, format)
-    return (
-        set(parsed["groups"])
-        if format == "surge"
-        else {group["name"] for group in parsed.get("proxy-groups", [])}
-    )
+    return {group["name"] for group in parsed.get("proxy-groups", [])}
 
 
 def render_clash(content, proxies):
@@ -405,143 +319,7 @@ def render_stash(content, proxies):
     return result, warnings
 
 
-def surge_value(value):
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    value = str(value)
-    if any(ord(c) < 32 or 127 <= ord(c) <= 159 or 0xD800 <= ord(c) <= 0xDFFF for c in value):
-        raise TemplateError("Proxy parameter contains control characters")
-    return (
-        json.dumps(value, ensure_ascii=False)
-        if any(c in value for c in ",\"'\\#;") or value != value.strip()
-        else value
-    )
-
-
-def surge_proxy(proxy):
-    kind, network = clients.protocol(proxy), clients.network(proxy)
-    if not safe_policy_name(str(proxy.get("name") or "")):
-        raise TemplateError("Surge proxy name contains reserved syntax")
-    if not isinstance(proxy.get("server"), str) or not proxy["server"].strip():
-        raise TemplateError("Surge proxy server is missing")
-    port = proxy.get("port")
-    if not (type(port) is int or isinstance(port, str) and port.isascii() and port.isdigit()):
-        raise TemplateError("Surge proxy port is invalid")
-    if not 1 <= int(port) <= 65535:
-        raise TemplateError("Surge proxy port is invalid")
-    tls = clients.sing_box_tls(proxy)
-    type_name = {"shadowsocks": "ss", "socks": "socks5"}.get(kind, kind)
-    if tls and kind in {"http", "socks"}:
-        type_name = "https" if kind == "http" else "socks5-tls"
-    parameters = {}
-    if kind == "snell":
-        parameters |= {"psk": proxy["psk"], "version": proxy.get("version", 4)}
-        if parameters["version"] == 6:
-            parameters["mode"] = proxy.get("mode") or "default"
-        obfs = clients.record(proxy.get("obfs-opts"))
-        if obfs.get("mode") not in (None, "", "none"):
-            parameters["obfs"] = obfs["mode"]
-            if obfs.get("host"):
-                parameters["obfs-host"] = obfs["host"]
-    elif kind == "vmess":
-        parameters |= {
-            "username": proxy.get("uuid") or proxy.get("id"),
-            "vmess-aead": proxy.get("alterId", 0) == 0,
-            "encrypt-method": "aes-128-gcm"
-            if (proxy.get("cipher") or "auto") == "auto"
-            else proxy["cipher"],
-        }
-        if tls:
-            parameters["tls"] = True
-    elif kind == "shadowsocks":
-        parameters |= {
-            "encrypt-method": proxy.get("cipher") or proxy.get("method") or "aes-128-gcm",
-            "password": proxy["password"],
-            "udp-relay": proxy.get("udp", True),
-        }
-        if proxy.get("plugin"):
-            obfs = clients.record(proxy.get("plugin-opts"))
-            parameters["obfs"] = obfs["mode"]
-            if obfs.get("host"):
-                parameters["obfs-host"] = obfs["host"]
-    elif kind in {"http", "socks"}:
-        for key in ("username", "password"):
-            if proxy.get(key) is not None:
-                parameters[key] = proxy[key]
-        if kind == "socks":
-            parameters["udp-relay"] = proxy.get("udp", True)
-    else:
-        parameters["password"] = proxy.get("password") or proxy.get("auth")
-    if kind == "hysteria2":
-        if proxy.get("down"):
-            parameters["download-bandwidth"] = proxy["down"]
-        if proxy.get("ports"):
-            ports = proxy["ports"]
-            parameters["port-hopping"] = ";".join(
-                ports.split(",") if isinstance(ports, str) else map(str, ports)
-            )
-        if proxy.get("hop-interval"):
-            parameters["port-hopping-interval"] = proxy["hop-interval"]
-        if proxy.get("obfs"):
-            parameters[proxy["obfs"] + "-password"] = proxy["obfs-password"]
-    if network == "ws":
-        ws = clients.record(proxy.get("ws-opts"))
-        parameters |= {"ws": True, "ws-path": ws.get("path") or "/"}
-        if ws.get("headers"):
-            parameters["ws-headers"] = "|".join(
-                f"{key}:{value}" for key, value in ws["headers"].items()
-            )
-    if tls:
-        for key, target in (("server_name", "sni"), ("insecure", "skip-cert-verify")):
-            if key in tls:
-                parameters[target] = tls[key]
-        if tls.get("alpn"):
-            parameters["alpn"] = ",".join(tls["alpn"])
-    for key, target in (
-        ("fingerprint", "server-cert-fingerprint-sha256"),
-        ("name-cert-verify", "server-cert-verify-name"),
-        ("dialer-proxy", "underlying-proxy"),
-        ("tfo", "tfo"),
-    ):
-        if key in proxy:
-            parameters[target] = proxy[key]
-    fields = [type_name, surge_value(proxy["server"]), str(proxy["port"])]
-    fields.extend(key + "=" + surge_value(value) for key, value in parameters.items())
-    return proxy["name"] + " = " + ", ".join(fields)
-
-
-def render_surge(content, proxies):
-    parsed = parse_template(content, "surge")
-    generated = [surge_proxy(proxy) for proxy in proxies]
-    names = {proxy["name"] for proxy in proxies}
-    if len(names) != len(proxies) or names.intersection(parsed["groups"]):
-        raise TemplateError("Rendered proxy names must be distinct from policy groups")
-    known = names | set(parsed["groups"]) | BUILTINS
-    for group, parts in parsed["groups"].items():
-        for member in parts[1:]:
-            if "=" not in member and member not in known:
-                raise TemplateError(
-                    f"Surge group {group} references a missing proxy or group: {member}"
-                )
-    output, injected = [], False
-    for section, line in parsed["chunks"]:
-        stripped = line.strip()
-        if section == "proxy":
-            if stripped.startswith("["):
-                output.append(line)
-                output.extend(generated)
-                injected = True
-            elif not stripped or stripped.startswith(("#", ";", "//")):
-                output.append(line)
-        else:
-            output.append(line)
-    if not injected:
-        output.extend(["", "[Proxy]", *generated])
-    result = "\n".join(output).rstrip() + "\n"
-    if len(result.encode()) > 8 * 1024 * 1024:
-        raise TemplateError("Rendered subscription exceeds 8 MiB")
-    return result, []
-
-
 def render(content, format, proxies):
-    return render_surge(content, proxies) if format == "surge" else render_clash(content, proxies)
+    if format != "clash":
+        raise TemplateError("Only Clash/Mihomo YAML templates are supported")
+    return render_clash(content, proxies)

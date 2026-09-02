@@ -1,7 +1,7 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Flex, Modal, Switch, Tag, Typography } from "antd";
-import { ReloadOutlined, SyncOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Flex, Modal, Switch, Tag, Typography } from "../../ui";
+import { ReloadOutlined, SyncOutlined } from "../../ui/icons";
 import type { ProductUser, SubscriptionAccessResponse } from "../../domain/subscriptions";
 import { getSubscriptionAccess, setProductUserActive, syncSubscriptionAccess } from "../../services/subscriptions";
 

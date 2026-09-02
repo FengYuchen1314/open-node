@@ -1,5 +1,5 @@
-import { ReloadOutlined, SaveOutlined, UndoOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Form, Input, Space, Typography } from "antd";
+import { ReloadOutlined, SaveOutlined, UndoOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Form, Input, Space, Typography } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { defaultBranding, normalizeBrandingText, type BrandingSettings } from "../../domain/branding";
 import { authState, type OperatorSession } from "../../services/auth";

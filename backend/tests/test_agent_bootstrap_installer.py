@@ -203,15 +203,30 @@ def test_bootstrap_control_url_canonicalizes_safe_https(value, expected):
 @pytest.mark.parametrize(
     "value",
     [
-        "http://example.com", "https://admin:password@example.com", "https://@example.com",
-        "https://example.com?token=" + SECRET, "https://example.com#fragment",
-        "https://example.com:0", "https://example.com:65536", "https://example.com:bad",
-        "https://example.com:", "https://[fe80::1%eth0]",
-        "https://example.com/../panel", "https://example.com/%2e%2e/panel",
-        "https://example.com/panel//nested", "https://example.com\\@other.test",
-        "https://example.com/\nsecret", " https://example.com", "https://example.com/ ",
-        "https://[::1", "https://example.com/%0d%0a", "https://example.com./panel",
-        "https://bad_host.test", "https://example.com\x7f", None, {"token": SECRET},
+        "http://example.com",
+        "https://admin:password@example.com",
+        "https://@example.com",
+        "https://example.com?token=" + SECRET,
+        "https://example.com#fragment",
+        "https://example.com:0",
+        "https://example.com:65536",
+        "https://example.com:bad",
+        "https://example.com:",
+        "https://[fe80::1%eth0]",
+        "https://example.com/../panel",
+        "https://example.com/%2e%2e/panel",
+        "https://example.com/panel//nested",
+        "https://example.com\\@other.test",
+        "https://example.com/\nsecret",
+        " https://example.com",
+        "https://example.com/ ",
+        "https://[::1",
+        "https://example.com/%0d%0a",
+        "https://example.com./panel",
+        "https://bad_host.test",
+        "https://example.com\x7f",
+        None,
+        {"token": SECRET},
     ],
 )
 def test_bootstrap_rejects_unsafe_urls_without_echoing_credentials(value):
@@ -220,9 +235,7 @@ def test_bootstrap_rejects_unsafe_urls_without_echoing_credentials(value):
     assert SECRET not in str(caught.value)
 
 
-@pytest.mark.parametrize(
-    "ticket", ["", "x" * 42, "x" * 44, "x" * 42 + "+", "T" * 43, [TICKET]]
-)
+@pytest.mark.parametrize("ticket", ["", "x" * 42, "x" * 44, "x" * 42 + "+", "T" * 43, [TICKET]])
 def test_bootstrap_ticket_shape_is_strict(ticket):
     with pytest.raises(installer.BootstrapError):
         installer.validate_ticket(ticket)
@@ -232,16 +245,21 @@ def test_bootstrap_requires_explicit_pinned_manifest_and_exact_build_identity():
     pinned = installer.validate_manifest(manifest())
     agent = pinned["agent"]
     build = {
-        "source_commit": agent["source_commit"], "version": VERSION,
-        "python": "3.11.2", "platform": "Linux-x86_64",
+        "source_commit": agent["source_commit"],
+        "version": VERSION,
+        "python": "3.11.2",
+        "platform": "Linux-x86_64",
         "artifacts": {
             agent[key]["filename"]: agent[key]["sha256"] for key in ("wheel", "bootstrap")
         },
     }
     assert installer.validate_build(build, pinned) == build
     for changes in [
-        {"source_commit": "b" * 40}, {"version": "0.3.0"}, {"artifacts": {}},
-        {"python": ["3.11"]}, {"platform": SECRET + "\n"},
+        {"source_commit": "b" * 40},
+        {"version": "0.3.0"},
+        {"artifacts": {}},
+        {"python": ["3.11"]},
+        {"platform": SECRET + "\n"},
     ]:
         with pytest.raises(installer.BootstrapError):
             installer.validate_build({**build, **changes}, pinned)
@@ -273,8 +291,14 @@ def test_bootstrap_rejects_manifest_mismatches(change):
 
 @pytest.mark.parametrize(
     "data",
-    [b'{"token":"one","token":"two"}', b'{"secret":"' + SECRET.encode(),
-     b'{"value":NaN}', b"\xff", b"[" * 1500, b" " * (installer.JSON_LIMIT + 1)],
+    [
+        b'{"token":"one","token":"two"}',
+        b'{"secret":"' + SECRET.encode(),
+        b'{"value":NaN}',
+        b"\xff",
+        b"[" * 1500,
+        b" " * (installer.JSON_LIMIT + 1),
+    ],
 )
 def test_bootstrap_json_boundary_never_reflects_secret_payload(data):
     with pytest.raises(installer.BootstrapError) as caught:
@@ -285,10 +309,14 @@ def test_bootstrap_json_boundary_never_reflects_secret_payload(data):
 @pytest.mark.parametrize(
     "changes",
     [
-        {"server_id": str(uuid4())}, {"control_url": "https://other.example.test"},
-        {"agent_token": {"secret": SECRET}}, {"transport": ["http"]},
-        {"transport": "tcp"}, {"expires_at": "2026-08-31T12:00:00"},
-        {"expires_at": SECRET}, {"server_name": "unsafe\n"},
+        {"server_id": str(uuid4())},
+        {"control_url": "https://other.example.test"},
+        {"agent_token": {"secret": SECRET}},
+        {"transport": ["http"]},
+        {"transport": "tcp"},
+        {"expires_at": "2026-08-31T12:00:00"},
+        {"expires_at": SECRET},
+        {"server_name": "unsafe\n"},
     ],
 )
 def test_bootstrap_redeemed_configuration_is_strict_and_redacted(changes):
@@ -350,12 +378,17 @@ def test_bootstrap_persisted_claim_can_resume_after_claim_retry_deadline(job):
 
 def test_bootstrap_control_requests_never_follow_redirect_or_echo_http_body():
     body = io.BytesIO(SECRET.encode())
-    client = Client(urllib.error.HTTPError(
-        CONTROL, 307, "untrusted", {"Location": "https://attacker.test/"}, body
-    ))
+    client = Client(
+        urllib.error.HTTPError(
+            CONTROL, 307, "untrusted", {"Location": "https://attacker.test/"}, body
+        )
+    )
     with pytest.raises(installer.BootstrapError) as caught:
-        installer.request_json(client, CONTROL + installer.API_PATH + "/redeem",
-                               payload={"ticket": TICKET, "claim_nonce": "n" * 43})
+        installer.request_json(
+            client,
+            CONTROL + installer.API_PATH + "/redeem",
+            payload={"ticket": TICKET, "claim_nonce": "n" * 43},
+        )
     assert SECRET not in str(caught.value)
     assert len(client.requests) == 1
     assert body.closed
@@ -395,8 +428,10 @@ def test_bootstrap_rejects_unsafe_file_owner(job, monkeypatch):
     def unsafe(fd):
         info = original(fd)
         return SimpleNamespace(
-            st_uid=installer.ROOT_UID + 1, st_mode=info.st_mode,
-            st_nlink=info.st_nlink, st_size=info.st_size,
+            st_uid=installer.ROOT_UID + 1,
+            st_mode=info.st_mode,
+            st_nlink=info.st_nlink,
+            st_size=info.st_size,
         )
 
     monkeypatch.setattr(installer.os, "fstat", unsafe)
@@ -420,21 +455,26 @@ def test_bootstrap_test_override_does_not_allow_arbitrary_paths(path):
 
 def test_bootstrap_download_uses_only_panel_origin_hash_and_private_cache(job):
     data = b"verified fixture artifact"
-    artifact = {
-        **manifest()["agent"]["wheel"], "sha256": digest(data), "bytes": len(data)
-    }
-    client = Client(Response(data, headers={
-        "Content-Length": str(len(data)), "X-Content-SHA256": digest(data),
-    }))
+    artifact = {**manifest()["agent"]["wheel"], "sha256": digest(data), "bytes": len(data)}
+    client = Client(
+        Response(
+            data,
+            headers={
+                "Content-Length": str(len(data)),
+                "X-Content-SHA256": digest(data),
+            },
+        )
+    )
     result = installer.download_artifact(client, CONTROL, artifact, job.directory, limit=1024)
     assert result.read_bytes() == data
     assert stat.S_IMODE(result.stat().st_mode) == 0o600
     assert result.stat().st_nlink == 1
     assert len(client.requests) == 1
     assert client.requests[0].full_url == CONTROL + artifact["path"]
-    assert installer.download_artifact(
-        Client(), CONTROL, artifact, job.directory, limit=1024
-    ) == result
+    assert (
+        installer.download_artifact(Client(), CONTROL, artifact, job.directory, limit=1024)
+        == result
+    )
     result.write_bytes(b"tampered")
     with pytest.raises(installer.BootstrapError, match="SHA-256"):
         installer.download_artifact(Client(), CONTROL, artifact, job.directory, limit=1024)
@@ -452,11 +492,11 @@ def test_bootstrap_download_uses_only_panel_origin_hash_and_private_cache(job):
     ],
 )
 def test_bootstrap_bad_download_never_publishes_an_artifact(job, data, headers, sha256, limit):
-    artifact = {
-        **manifest()["agent"]["wheel"], "sha256": sha256, "bytes": len(data)
-    }
+    artifact = {**manifest()["agent"]["wheel"], "sha256": sha256, "bytes": len(data)}
     headers = {
-        "Content-Length": str(len(data)), "X-Content-SHA256": sha256, **headers,
+        "Content-Length": str(len(data)),
+        "X-Content-SHA256": sha256,
+        **headers,
     }
     client = Client(Response(data, headers=headers))
     with pytest.raises(installer.BootstrapError):
@@ -467,9 +507,11 @@ def test_bootstrap_bad_download_never_publishes_an_artifact(job, data, headers, 
 
 def test_bootstrap_download_rejects_external_redirect_before_contact(job):
     artifact = manifest()["agent"]["wheel"]
-    client = Client(urllib.error.HTTPError(
-        CONTROL + artifact["path"], 302, "redirect", {"Location": "https://evil.test/"}, None
-    ))
+    client = Client(
+        urllib.error.HTTPError(
+            CONTROL + artifact["path"], 302, "redirect", {"Location": "https://evil.test/"}, None
+        )
+    )
     with pytest.raises(installer.BootstrapError):
         installer.download_artifact(client, CONTROL, artifact, job.directory, limit=1024)
     assert len(client.requests) == 1
@@ -486,10 +528,14 @@ def test_bootstrap_archive_contains_only_exact_regular_top_level_files(job):
 @pytest.mark.parametrize(
     ("name", "kind"),
     [
-        ("../service.py", tarfile.REGTYPE), ("prefix/service.py", tarfile.REGTYPE),
-        ("/etc/passwd", tarfile.REGTYPE), ("extra.py", tarfile.REGTYPE),
-        ("service.py", tarfile.SYMTYPE), ("service.py", tarfile.LNKTYPE),
-        ("service.py", tarfile.DIRTYPE), ("service.py", tarfile.FIFOTYPE),
+        ("../service.py", tarfile.REGTYPE),
+        ("prefix/service.py", tarfile.REGTYPE),
+        ("/etc/passwd", tarfile.REGTYPE),
+        ("extra.py", tarfile.REGTYPE),
+        ("service.py", tarfile.SYMTYPE),
+        ("service.py", tarfile.LNKTYPE),
+        ("service.py", tarfile.DIRTYPE),
+        ("service.py", tarfile.FIFOTYPE),
     ],
 )
 def test_bootstrap_archive_rejects_links_paths_and_special_members(job, name, kind):
@@ -501,10 +547,12 @@ def test_bootstrap_archive_rejects_links_paths_and_special_members(job, name, ki
 
 
 def test_bootstrap_archive_rejects_duplicate_and_missing_members(job):
-    for index, members in enumerate([
-        [("service.py", tarfile.REGTYPE, b"x"), ("service.py", tarfile.REGTYPE, b"y")],
-        [("service.py", tarfile.REGTYPE, b"x")],
-    ]):
+    for index, members in enumerate(
+        [
+            [("service.py", tarfile.REGTYPE, b"x"), ("service.py", tarfile.REGTYPE, b"y")],
+            [("service.py", tarfile.REGTYPE, b"x")],
+        ]
+    ):
         source = private_file(job.directory / f"bad-{index}.tar.gz", bootstrap_tar(members))
         with pytest.raises(installer.BootstrapError):
             installer.unpack_bootstrap(source, job.directory / f"bootstrap-{index}")
@@ -541,8 +589,12 @@ def test_bootstrap_mihomo_archive_is_hash_size_and_architecture_bound(job, monke
 
 @pytest.mark.parametrize(
     ("name", "mode"),
-    [("../secret", stat.S_IFREG), ("nested/xray", stat.S_IFREG),
-     ("README.md", stat.S_IFLNK), ("setup.sh", stat.S_IFREG)],
+    [
+        ("../secret", stat.S_IFREG),
+        ("nested/xray", stat.S_IFREG),
+        ("README.md", stat.S_IFLNK),
+        ("setup.sh", stat.S_IFREG),
+    ],
 )
 def test_bootstrap_xray_archive_rejects_unexpected_or_link_members(job, name, mode):
     source = private_file(job.directory / "xray.zip", xray_zip([(name, b"x", mode)]))
@@ -640,8 +692,12 @@ def test_bootstrap_dependencies_require_explicit_opt_in_and_verified_platform(mo
     assert commands == [
         ["apt-get", "update"],
         [
-            "apt-get", "install", "--yes", "--no-install-recommends",
-            "python3-venv", "ca-certificates",
+            "apt-get",
+            "install",
+            "--yes",
+            "--no-install-recommends",
+            "python3-venv",
+            "ca-certificates",
         ],
     ]
 
@@ -699,7 +755,8 @@ def test_bootstrap_installer_arguments_never_include_long_lived_token(job, tmp_p
     job = replace(job, root=tmp_path / "installed")
     pinned, calls = manifest(), []
     artifacts = {
-        "manifest": pinned, "service": job.directory / "bootstrap/service.py",
+        "manifest": pinned,
+        "service": job.directory / "bootstrap/service.py",
         "wheel": job.directory / pinned["agent"]["wheel"]["filename"],
         "xray": job.directory / "xray/xray",
         "mihomo": job.directory / "mihomo/mihomo",
@@ -708,25 +765,49 @@ def test_bootstrap_installer_arguments_never_include_long_lived_token(job, tmp_p
 
     def simulated_host_install(arguments, **kwargs):
         calls.append(list(map(str, arguments)))
-        job.root.mkdir(mode=0o700)
-        private_file(job.root / "installation.json", installer.json_bytes({
-            "root": str(job.root), "unit": job.unit, "user": job.unit.removesuffix(".service"),
-            "uid": 12345, "gid": 12345, "status": "installed", "current": "release",
-            "pending": None, "staging": None, "network_diagnostics": False,
-            "installation_id": "fixture", "releases": {"release": {
-                "version": VERSION, "sha256": pinned["agent"]["wheel"]["sha256"],
-            }},
-        }))
+        job.root.mkdir(mode=0o700, exist_ok=True)
+        installation = {
+            "root": str(job.root),
+            "unit": job.unit,
+            "user": job.unit.removesuffix(".service"),
+            "uid": 12345,
+            "gid": 12345,
+            "status": "installed",
+            "current": "release",
+            "pending": None,
+            "staging": None,
+            "network_diagnostics": False,
+            "installation_id": "fixture",
+            "releases": {
+                "release": {
+                    "version": VERSION,
+                    "sha256": pinned["agent"]["wheel"]["sha256"],
+                }
+            },
+        }
+        if "enable-remote" in arguments:
+            installation["lifecycle"] = {
+                "base_url": CONTROL + installer.PANEL_ARTIFACT_PATH,
+                "ca_file": None,
+            }
+        target = job.root / "installation.json"
+        if target.exists():
+            target.unlink()
+        private_file(target, installer.json_bytes(installation))
         return b"{}"
 
     monkeypatch.setattr(installer, "run_command", simulated_host_install)
     installer.install_agent(job, claim(), artifacts)
-    assert len(calls) == 1
+    assert len(calls) == 2
     arguments = calls[0]
     assert SECRET not in " ".join(arguments)
     assert TICKET not in " ".join(arguments)
     assert "--network-diagnostics" not in arguments
-    assert "enable-remote" not in arguments
+    lifecycle_arguments = calls[1]
+    assert "enable-remote" in lifecycle_arguments
+    assert lifecycle_arguments[lifecycle_arguments.index("--release-base-url") + 1] == (
+        CONTROL + installer.PANEL_ARTIFACT_PATH
+    )
     assert "--config" in arguments and "--xray-config" in arguments
     assert "--mihomo-config" in arguments and "--mihomo" in arguments
     assert arguments[arguments.index("--root") + 1] == str(job.root)
@@ -737,8 +818,10 @@ def test_bootstrap_claim_and_zero_exit_without_installation_are_not_success(job,
     monkeypatch.setattr(installer, "require_fresh_resources", lambda value: None)
     monkeypatch.setattr(installer, "run_command", lambda *args, **kwargs: b"{}")
     artifacts = {
-        "manifest": manifest(), "service": job.directory / "service.py",
-        "wheel": job.directory / "agent.whl", "xray": job.directory / "xray",
+        "manifest": manifest(),
+        "service": job.directory / "service.py",
+        "wheel": job.directory / "agent.whl",
+        "xray": job.directory / "xray",
         "mihomo": job.directory / "mihomo",
     }
     with pytest.raises(installer.BootstrapError):
@@ -759,7 +842,8 @@ def test_bootstrap_panel_client_uses_only_explicit_or_debian_trust(monkeypatch):
 
     monkeypatch.setattr(installer.ssl, "SSLContext", Context)
     monkeypatch.setattr(
-        installer.ssl, "create_default_context",
+        installer.ssl,
+        "create_default_context",
         lambda **kwargs: calls.append(("system", kwargs)) or object(),
     )
     monkeypatch.setattr(installer.urllib.request, "HTTPSHandler", lambda **kwargs: object())
@@ -799,9 +883,9 @@ def test_bootstrap_main_prepares_before_claim_and_does_not_leak_failures(
     monkeypatch.setattr(installer, "prepare_artifacts", prepare)
     monkeypatch.setattr(installer, "redeem_claim", redeem)
     monkeypatch.setattr(installer, "install_agent", install)
-    assert installer.main([
-        "--control-url", CONTROL, "--ticket", TICKET, "--server-id", SERVER
-    ]) == 1
+    assert (
+        installer.main(["--control-url", CONTROL, "--ticket", TICKET, "--server-id", SERVER]) == 1
+    )
     captured = capsys.readouterr()
     assert order == ["prepare", "claim", "install"]
     assert contexts == [{"ca_data": b"fixture-private-ca"}]

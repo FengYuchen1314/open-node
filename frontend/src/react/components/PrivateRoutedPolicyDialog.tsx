@@ -1,6 +1,6 @@
 import { zhMessage } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Form, Modal, Switch } from "antd";
+import { Alert, Form, Modal, Switch } from "../../ui";
 import type { PrivateRoutedPolicy } from "../../domain/private-routed-nodes";
 import { updatePrivateRoutePolicy } from "../../services/private-routed-nodes";
 import StrictInputNumber from "./StrictInputNumber";

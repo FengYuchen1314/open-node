@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Alert, AutoComplete, Button, Card, Checkbox, Col, Divider, Empty, Form, Input, Modal,
-  Radio, Row, Select, Space, Statistic, Switch, Table, Tag, Typography } from "antd";
-import { DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
-import type { ColumnsType } from "antd/es/table";
+  Radio, Row, Select, Space, Statistic, Switch, Table, Tag, Typography } from "../../ui";
+import { DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "../../ui/icons";
+import type { ColumnsType } from "../../ui";
 import { type AgentCommand, type AgentCommandStreamFrame, type AgentRead,
   type AgentOperationKind, type AgentOperationPayload, type AgentScanResult, type AgentTelemetry,
   type RenewalCycle, type ServerKind, type ServerProbeMetadataUpdate,

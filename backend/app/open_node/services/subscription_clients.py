@@ -13,12 +13,11 @@ def select_client_format(value, user_agent: str = ""):
 
     if value is not None and value != "auto":
         return SubscriptionClientFormat(value)
-    # Specific clients precede generic Clash/Surge substrings, as in pinned client_ua.go.
+    # Specific clients precede generic Clash substrings, as in pinned client_ua.go.
     agent = user_agent[:4096].casefold()
     for keywords, target in (
         (("stash",), "stash"),
         (("shadowrocket",), "shadowrocket"),
-        (("surge",), "surge"),
         (("loon",), "loon"),
         (("quantumult%20x", "quantumult x", "quantumultx"), "quantumult-x"),
         (("egern",), "egern"),
@@ -94,17 +93,6 @@ def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
         supported.add("snell")
     if target == "clash":
         supported.add("mieru")
-    if target == "surge":
-        supported = {
-            "vmess",
-            "trojan",
-            "shadowsocks",
-            "snell",
-            "anytls",
-            "hysteria2",
-            "http",
-            "socks",
-        }
     if target in {"uri-list", "base64"}:
         supported.discard("anytls")
     if proxy.get("shadow-tls-opts") and target != "clash":
@@ -163,7 +151,6 @@ def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
             "xray": {"tcp", "ws", "grpc", "httpupgrade", "xhttp"},
             "uri-list": {"tcp", "ws", "grpc", "httpupgrade"},
             "base64": {"tcp", "ws", "grpc", "httpupgrade"},
-            "surge": {"tcp", "ws"},
         }
         if target in transports and transport not in transports[target]:
             return "Transport is not supported by this client format"
@@ -186,7 +173,7 @@ def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
         return "Custom TLS options require native sing-box export"
     if target != "sing-box" and record(tls.get("utls")).keys() - {"enabled", "fingerprint"}:
         return "Custom uTLS options require native sing-box export"
-    if target not in {"clash", "surge"} and any(
+    if target != "clash" and any(
         proxy.get(key)
         for key in ("fingerprint", "name-cert-verify", "certificate", "private-key", "ca", "ca-str")
     ):
@@ -204,7 +191,7 @@ def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
             and ws.get("early-data-header-name", "").lower() != "sec-websocket-protocol"
         ):
             return "Xray WebSocket early data requires Sec-WebSocket-Protocol"
-    if target not in {"clash", "surge"} and proxy.get("plugin"):
+    if target != "clash" and proxy.get("plugin"):
         return "Shadowsocks plugin conversion is not supported"
     if target in {"uri-list", "base64"}:
         if transport == "httpupgrade":
@@ -232,63 +219,6 @@ def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
     if proxy.get("reality-opts"):
         if kind != "vless" or not record(proxy["reality-opts"]).get("public-key"):
             return "REALITY requires VLESS and a public key"
-    return surge_unsupported_reason(proxy) if target == "surge" else None
-
-
-def surge_unsupported_reason(proxy):
-    from open_node.services.template_rendering import surge_proxy
-
-    kind, transport = protocol(proxy), network(proxy)
-    tls = sing_box_tls(proxy)
-    if kind == "trojan" and (
-        proxy.get("tls") is False or record(proxy.get("tls")).get("enabled") is False
-    ):
-        return "Surge Trojan requires TLS"
-    if (
-        proxy.get("reality-opts")
-        or proxy.get("client-fingerprint")
-        or record(record(tls).get("utls")).get("enabled")
-    ):
-        return "Surge cannot represent REALITY or custom uTLS fingerprints"
-    if any(proxy.get(key) for key in ("certificate", "private-key", "ca", "ca-str")):
-        return "Custom certificate material requires another client format"
-    if kind == "vmess" and (proxy.get("cipher") or "auto") not in {
-        "auto",
-        "aes-128-gcm",
-        "chacha20-ietf-poly1305",
-    }:
-        return "Surge VMess does not support this cipher"
-    if kind == "snell":
-        obfs_mode = record(proxy.get("obfs-opts")).get("mode", "none")
-        if proxy.get("version", 4) == 6 and obfs_mode not in {"", "none"}:
-            return "Surge Snell v6 does not support obfuscation"
-        if proxy.get("version", 4) != 6 and obfs_mode not in {"", "none", "http"}:
-            return "Surge Snell v4/v5 only supports HTTP obfuscation"
-    if proxy.get("plugin") and (
-        kind != "shadowsocks"
-        or proxy["plugin"] != "obfs"
-        or record(proxy.get("plugin-opts")).get("mode") not in {"http", "tls"}
-    ):
-        return "Surge supports only Shadowsocks simple-obfs plugins"
-    if transport == "ws":
-        ws = record(proxy.get("ws-opts"))
-        headers = record(ws.get("headers"))
-        if ws.get("max-early-data") or any(
-            not isinstance(value, str) or "|" in key or ":" in key or "|" in value
-            for key, value in headers.items()
-        ):
-            return "Surge cannot represent these WebSocket headers or early data"
-    if kind == "hysteria2":
-        if proxy.get("up"):
-            return "Surge does not expose an upload bandwidth option"
-        if proxy.get("obfs") and (
-            proxy["obfs"] not in {"salamander", "gecko"} or not proxy.get("obfs-password")
-        ):
-            return "Surge Hysteria2 requires a supported obfuscator and password"
-    try:
-        surge_proxy(proxy)
-    except (ValueError, TypeError, KeyError):
-        return "Proxy parameters cannot be safely represented in Surge"
     return None
 
 

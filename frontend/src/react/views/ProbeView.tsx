@@ -1,7 +1,6 @@
-import { LineChartOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Avatar, Button, Card, Col, ConfigProvider, Descriptions, Drawer, Empty, Flex, Form, Progress, Row, Segmented, Select, Space, Spin, Statistic, Table, Tag, Tooltip, Typography, theme } from "antd";
-import type { TableColumnsType } from "antd";
-import zhCN from "antd/locale/zh_CN";
+import { LineChartOutlined, ReloadOutlined } from "../../ui/icons";
+import { Alert, Avatar, Button, Card, Col, ConfigProvider, Descriptions, Drawer, Empty, Flex, Form, Progress, Row, Segmented, Select, Space, Spin, Statistic, Table, Tag, Tooltip, Typography, theme } from "../../ui";
+import type { TableColumnsType } from "../../ui";
 import { zhMessage } from "../../i18n/zh-CN";
 import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import type { ProbeMetricPoint, ProbePayload, ProbePingSeries, ProbeServer, ProbeSeriesResponse, ProbeSettings, ProbeSystemSeries, ProbeTargetComparison } from "../../domain/probe";
@@ -191,7 +190,7 @@ export default function ProbeView({ publicOnly: requestedPublic = false }: Probe
   ];
   const dark = settings.appearance?.color_mode === "dark" || (settings.appearance?.color_mode === "system" && systemDark);
   const endpointNote = streamActive ? "实时连接已建立" : !publicOnly && settings.require_access_token ? "需要 Worker 令牌" : payload?.enabled ? "探针接口已启用" : "探针接口已停用";
-  return <ConfigProvider locale={zhCN} theme={{ algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm }}><ProbeSurface publicOnly={publicOnly} dark={dark}>
+  return <ConfigProvider theme={{ algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm }}><ProbeSurface publicOnly={publicOnly} dark={dark}>
     <Flex justify="space-between" align="start" gap="middle"><Flex align="start" gap="small" style={{ flex: 1, minWidth: 0 }}><Avatar src={safeImageUrl(settings.logo)} shape="square" size={48} style={{ flexShrink: 0 }}>ON</Avatar><div style={{ minWidth: 0, overflowWrap: "anywhere" }}><Typography.Text type="secondary">公共探针</Typography.Text><Typography.Title level={1} style={{ margin: "8px 0" }}>{settings.title ?? "Open Node 探针"}</Typography.Title><Typography.Paragraph type="secondary">{settings.description ?? "兼容 MMWX 探针的节点状态页面，无需授权许可。"}</Typography.Paragraph></div></Flex><Button style={{ flexShrink: 0 }} icon={<ReloadOutlined aria-hidden />} aria-label="刷新探针状态" loading={loading} onClick={refreshAll} /></Flex>
     {error && <Alert type="error" showIcon title={!publicOnly && settings.require_access_token && !token ? "需要 Worker 令牌。" : error} />}
     <section aria-label="探针状态"><Row gutter={[16, 16]}>

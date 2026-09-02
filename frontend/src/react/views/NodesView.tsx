@@ -1,4 +1,4 @@
-import { Tabs, Typography } from "antd";
+import { Tabs, Typography } from "../../ui";
 import { useSearchParams } from "react-router-dom";
 
 import NodeTopologiesView from "./NodeTopologiesView";

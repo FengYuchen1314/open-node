@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
-import { ConfigProvider } from "antd";
-import zhCN from "antd/locale/zh_CN";
+import { ConfigProvider } from "../../ui";
 import { act, cleanup, fireEvent, render as renderTesting, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentCommand, AgentCommandCreateResponse, XrayRuntimeInbound } from "../../domain/inventory";
@@ -20,7 +19,7 @@ function command(body: unknown = state(), patch: Partial<AgentCommand> = {}): Ag
   return { id: "limiter-read", server_id: "edge", request_id: "r", method: "GET", path: "/api/child/limiter", query: "", timeout_ms: 30000, stream: false, status: "succeeded", attempts: 1, result_status: 200, result_body: body, created_at: "2026-08-31T03:00:00Z", updated_at: "2026-08-31T03:00:00Z", ...patch };
 }
 async function flush() { await act(async () => { for (let i = 0; i < 16; i += 1) await Promise.resolve(); }); }
-function render(ui: ReactNode) { return renderTesting(ui, { wrapper: ({ children }) => <ConfigProvider locale={zhCN} theme={{ token: { motion: false } }}>{children}</ConfigProvider> }); }
+function render(ui: ReactNode) { return renderTesting(ui, { wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider> }); }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks();
   installDom();

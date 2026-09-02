@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Flex, Spin, Typography } from "antd";
+import { Alert, Button, Card, Flex, Spin, Typography } from "../../ui";
 import { useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { accountExternalSubscriptions } from "../../services/external-subscriptions";

@@ -1,7 +1,6 @@
-import { App as AntApp, Alert, Button, ConfigProvider, Drawer, Grid, Layout, Menu, Result, Space, Spin, Tag, Typography, theme as antTheme } from "antd";
-import { ApartmentOutlined, BranchesOutlined, ControlOutlined, DashboardOutlined, FileTextOutlined, LockOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined } from "@ant-design/icons";
+import { App as UiApp, Alert, Button, ConfigProvider, Drawer, Grid, Layout, Menu, Result, Space, Spin, Tag, Typography, theme as uiTheme } from "../ui";
+import { ApartmentOutlined, BranchesOutlined, ControlOutlined, DashboardOutlined, FileTextOutlined, LockOutlined, LogoutOutlined, MenuOutlined, SafetyOutlined } from "../ui/icons";
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
-import zhCN from "antd/locale/zh_CN";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { legacyRouteRedirects, routes } from "../routes";
 import { loadSession, signOut } from "../services/auth";
@@ -84,7 +83,7 @@ function ApplicationLayout() {
 function ThemedApplication() {
   const { dark } = useAppearance();
   useEffect(() => { document.documentElement.dataset.openNodeTheme = dark ? "dark" : "light"; }, [dark]);
-  return <ConfigProvider locale={zhCN} theme={{ algorithm: dark ? antTheme.darkAlgorithm : antTheme.defaultAlgorithm }}><AntApp><BrandingProvider><ApplicationLayout /></BrandingProvider></AntApp></ConfigProvider>;
+  return <ConfigProvider theme={{ algorithm: dark ? uiTheme.darkAlgorithm : uiTheme.defaultAlgorithm }}><UiApp><BrandingProvider><ApplicationLayout /></BrandingProvider></UiApp></ConfigProvider>;
 }
 export default function App() {
   return <AppearanceProvider><ThemedApplication /></AppearanceProvider>;

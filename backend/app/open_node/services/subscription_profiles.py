@@ -31,8 +31,6 @@ LEGACY_FORMATS = {
     "": SubscriptionClientFormat.CLASH,
     "clash": SubscriptionClientFormat.CLASH,
     "clashmeta": SubscriptionClientFormat.CLASH,
-    "surge": SubscriptionClientFormat.SURGE,
-    "surgemac": SubscriptionClientFormat.SURGE,
     "sing-box": SubscriptionClientFormat.SING_BOX,
     "v2ray": SubscriptionClientFormat.BASE64,
     "uri": SubscriptionClientFormat.URI_LIST,
@@ -84,7 +82,6 @@ class SubscriptionProfiles:
             "description": profile.description,
             "node_ids": profile.node_ids or [],
             "clash_template_id": profile.clash_template_id,
-            "surge_template_id": profile.surge_template_id,
             "custom_rules_enabled": profile.custom_rules_enabled,
             "selected_custom_rule_ids": profile.selected_custom_rule_ids or [],
             "proxy_providers_enabled": profile.proxy_providers_enabled,
@@ -104,7 +101,6 @@ class SubscriptionProfiles:
             description=profile.description,
             node_ids=profile.node_ids or [],
             clash_template_id=profile.clash_template_id,
-            surge_template_id=profile.surge_template_id,
             custom_rules_enabled=profile.custom_rules_enabled,
             selected_custom_rule_ids=profile.selected_custom_rule_ids or [],
             proxy_providers_enabled=profile.proxy_providers_enabled,
@@ -172,10 +168,7 @@ class SubscriptionProfiles:
                     raise SubscriptionProfileConflict(
                         f"{user.username}: selected nodes are outside the current plan"
                     )
-            for field, expected_format in (
-                ("clash_template_id", "clash"),
-                ("surge_template_id", "surge"),
-            ):
+            for field, expected_format in (("clash_template_id", "clash"),):
                 template_id = getattr(payload, field)
                 template = session.get(TemplateRecord, str(template_id)) if template_id else None
                 if template_id and (template is None or template.format != expected_format):
@@ -426,7 +419,7 @@ class SubscriptionProfiles:
     @staticmethod
     def _template(session, profile, client_format):
         format = "clash" if client_format == SubscriptionClientFormat.STASH else client_format.value
-        if profile is None or format not in {"clash", "surge"}:
+        if profile is None or format != "clash":
             return None
         identifier = getattr(profile, format + "_template_id")
         row = session.get(TemplateRecord, identifier) if identifier else None

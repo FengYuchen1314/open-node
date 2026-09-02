@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, InputNumber, Modal, Select, Switch, Tag } from "antd";
+import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, InputNumber, Modal, Select, Switch, Tag } from "../../ui";
 import { useRef, useState } from "react";
 import type { ExternalRefreshCode, ExternalSourceDetail, ExternalSourceRead } from "../../domain/external-subscriptions";
 import { externalSubscriptionsErrorMessage, type ExternalSubscriptionsClient } from "../../services/external-subscriptions";

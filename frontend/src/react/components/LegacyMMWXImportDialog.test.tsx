@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
-import zhCN from "antd/locale/zh_CN";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ConfigProvider, Upload } from "antd";
+import { ConfigProvider, Upload } from "../../ui";
 import LegacyMMWXImportDialog from "./LegacyMMWXImportDialog";
 import { importLegacyMMWXIdentities, previewLegacyMMWXIdentities } from "../../services/legacy-mmwx";
 import type { LegacyMMWXIdentityBundle, LegacyMMWXImportPreview } from "../../domain/legacy-mmwx";
 import type { SubscriptionPlan } from "../../domain/subscriptions";
 
-const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider locale={zhCN}>{children}</ConfigProvider> });
+const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
 
 vi.mock("../../services/legacy-mmwx", () => ({ importLegacyMMWXIdentities: vi.fn(), previewLegacyMMWXIdentities: vi.fn() }));
 const bundle: LegacyMMWXIdentityBundle = { version: 1, users: [], packages: [{ source_id: 17, name: "Legacy package", short_code: null }] };

@@ -1,5 +1,5 @@
-import { DeleteOutlined, DownloadOutlined, ReloadOutlined, SafetyCertificateOutlined, UploadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Checkbox, Descriptions, Empty, Form, Input, Modal, Radio, Space, Tag, Typography, Upload } from "antd";
+import { DeleteOutlined, DownloadOutlined, ReloadOutlined, SafetyCertificateOutlined, UploadOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Checkbox, Descriptions, Empty, Form, Input, Modal, Radio, Space, Tag, Typography, Upload } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { backupInProgress, validBackupRecipient, type BackupJob, type BackupsOverview, type BackupStatus, type RestoreArchiveFormat } from "../../domain/backups";
 import { authState, type OperatorSession } from "../../services/auth";

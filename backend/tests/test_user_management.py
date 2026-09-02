@@ -158,14 +158,13 @@ def test_disabling_preview_credentials_enrolls_only_for_current_access_intent(tm
 def test_removal_waits_for_confirmation_then_purges_only_user_data(env):
     client, token = env[:2]
     client.post("/api/v1/users", json={"username": "bob"}).raise_for_status()
-    from open_node.services.subscription_templates import TemplatePreference
     from open_node.services.template_rendering import DEFAULT_CLASH
 
     template = (
         client.post(
             "/api/v1/subscription-templates",
             json={
-                "name": "alice-private.yaml",
+                "name": "global-shared.yaml",
                 "format": "clash",
                 "content": DEFAULT_CLASH,
                 "owner_username": "alice",
@@ -175,19 +174,6 @@ def test_removal_waits_for_confirmation_then_purges_only_user_data(env):
         .raise_for_status()
         .json()
     )
-    template_settings = client.get(
-        "/api/v1/subscription-templates/settings", params={"username": "alice"}
-    ).json()
-    client.put(
-        "/api/v1/subscription-templates/settings",
-        params={"username": "alice"},
-        json={
-            "expected_revision": template_settings["revision"],
-            "enabled": True,
-            "clash_template_id": template["id"],
-            "surge_template_id": None,
-        },
-    ).raise_for_status()
     old_token = client.post("/api/v1/users/alice/subscription-token").json()["subscription"][
         "token"
     ]
@@ -223,9 +209,8 @@ def test_removal_waits_for_confirmation_then_purges_only_user_data(env):
     orphan = (
         client.get("/api/v1/subscription-templates/" + template["id"]).raise_for_status().json()
     )
-    assert orphan["owner_username"] is None and not orphan["is_public"]
+    assert orphan["owner_username"] is None and orphan["is_public"]
     with client.app.state.inventory._session() as session:
-        assert session.get(TemplatePreference, "user:alice") is None
         for table in (
             "subscription_credentials",
             "subscription_access",

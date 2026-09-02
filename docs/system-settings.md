@@ -83,7 +83,7 @@ SQLite 和 PostgreSQL 使用同一版本化品牌存储合同。以下内容不�
 - 通知正文、套餐、订阅、模板、Agent 命令和服务器配置。
 - 环境变量、登录策略、CORS、TLS、许可证状态及其他安全设置。
 
-Logo、登录背景、上传和标准 Ant Design 主题已经作为独立版本的
+Logo、登录背景、上传和项目内语义主题已经作为独立版本的
 [站点外观设置](appearance.md)实现；发布、到期、删除和套餐用户展示见
 [Web 公告](announcements.md)。安装器管理的官方 `main` 部署还提供固定目标、带备份
 和恢复标记的[网页内应用更新](application-updates.md)。普通用户的四项可选功能及

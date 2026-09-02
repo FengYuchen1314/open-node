@@ -309,10 +309,8 @@ all blockers for the restricted first-Preview support matrix above:
   and removal cleanup without changing runtime identity. Ordered automatic
   speed rules bind to each subscriber's credentials, preserve other plans and
   inbound rules, and reject incapable Agents/runtimes. Custom
-  [Clash/Surge templates](subscription-templates.md) now include owned/public
-  libraries, personal permissions, plan/system defaults, draft preview,
-  catalog remapping and guarded deletion. Native Surge app import remains an
-  Apple-platform verification gate.
+  [Global Clash templates](subscription-templates.md) now include plan/system
+  defaults, draft preview, catalog remapping and guarded deletion.
 - Native [node resource cleanup](node-cleanup.md) now supplies revision-guarded
   remote removal, suspended-template and limiter cleanup, local outbound
   dependency closure, shared-rule preservation and recoverable receipts.

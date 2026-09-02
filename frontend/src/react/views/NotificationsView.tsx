@@ -1,5 +1,5 @@
-import { ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, Input, Modal, Select, Spin, Switch, Table, Tag, Typography } from "antd";
+import { ReloadOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, Input, Modal, Select, Spin, Switch, Table, Tag, Typography } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   notificationDefaults, validNotificationChatId, validNotificationTimezone, validNotificationToken,

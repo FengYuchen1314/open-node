@@ -10,8 +10,8 @@ an Agent.
 
 The HTTPS response may contain Clash/Mihomo YAML with a `proxies` list, a URI
 list, or one Base64-encoded layer containing either format. The form still
-accepts a private HTTPS source URL, not pasted node credentials. Surge input
-and fetching during downloads are not supported. Rules,
+accepts a private HTTPS source URL, not pasted node credentials. Fetching during
+downloads is not supported. Rules,
 scripts, proxy providers and whole-client settings are not imported. The
 original source review is in
 [external-subscriptions-plan.md](external-subscriptions-plan.md).
@@ -139,7 +139,7 @@ subscription-IP checks still apply. A confirmed external source does not grant
 access to an otherwise ineligible subscriber. Named subscription profiles and
 temporary links do not automatically include external nodes.
 
-The twelve output formats—Clash/Mihomo, Surge, sing-box, Xray, URI list, Base64,
+The eleven output formats—Clash/Mihomo, sing-box, Xray, URI list, Base64,
 Loon, Quantumult X, Shadowrocket, Stash, Surfboard and Egern—apply their own
 compatibility checks. A
 protocol being accepted as input does not mean every output format can express
@@ -269,7 +269,7 @@ do not delete the database or create a new key as a recovery step.
 
 [testing.md](testing.md#external-subscriptions) records the exact tested source
 and release gates. The end-to-end fixture exercises real HTTPS input, the
-production Ant Design bundle, managed and external VLESS forwarding through
+production React bundle, managed and external VLESS forwarding through
 Mihomo and official Xray, credential rotation, failure preservation, original
 sessions and cold database/key restoration. Parser coverage of other protocol
 families is not a claim that this new fixture forwards all of them. The existing

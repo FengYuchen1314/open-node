@@ -1498,10 +1498,6 @@ class SubscriptionPlanModel(Base):
     clash_template_id: Mapped[str | None] = mapped_column(
         ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
     )
-    surge_template_id: Mapped[str | None] = mapped_column(
-        ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
-    )
-
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
@@ -1557,9 +1553,6 @@ class SubscriptionProfileModel(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     node_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     clash_template_id: Mapped[str | None] = mapped_column(
-        ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
-    )
-    surge_template_id: Mapped[str | None] = mapped_column(
         ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
     )
     custom_rules_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -1866,6 +1859,7 @@ class InventoryStore:
         # existing orphaned rows, then verify again after our own migrations.
         self._assert_sqlite_foreign_key_integrity()
         self._migrate_schema()
+        self.subscription_templates().ensure_default()
         self._change_sets().migrate_legacy()
         self._server_traffic().backfill()
         self._assert_sqlite_foreign_key_integrity()
@@ -1924,9 +1918,6 @@ class InventoryStore:
                     "node_name_override_enabled": "BOOLEAN NOT NULL DEFAULT 0",
                     "auto_speed_rules": "JSON NOT NULL DEFAULT '[]'",
                     "clash_template_id": (
-                        "VARCHAR(36) REFERENCES subscription_templates(id) ON DELETE SET NULL"
-                    ),
-                    "surge_template_id": (
                         "VARCHAR(36) REFERENCES subscription_templates(id) ON DELETE SET NULL"
                     ),
                 },
@@ -4320,7 +4311,7 @@ class InventoryStore:
                     plan = self._catalog_plan_model(plan_entry, node_ids, node_ids_by_name, now)
                     session.add(plan)
                     summary.created_plans += 1
-                for format in ("clash", "surge"):
+                for format in ("clash",):
                     field = format + "_template_name"
                     if field in plan_entry.model_fields_set:
                         setattr(
@@ -4951,15 +4942,14 @@ class InventoryStore:
             "COMPATIBLE",
         }
         from open_node.services.template_rendering import (
-            DEFAULT_SURGE,
             TemplateError,
+            portable_name,
             reserved_names,
-            surge_name,
             validate_stash_template,
         )
 
         template_reason = None
-        if client_format.value in {"clash", "surge", "stash"}:
+        if client_format.value in {"clash", "stash"}:
             template_format = "clash" if client_format.value == "stash" else client_format.value
             selected = self.subscription_templates().resolve(session, user, plan, template_format)
             content = (
@@ -4967,8 +4957,6 @@ class InventoryStore:
                 if template_override is not None
                 else selected.content
                 if selected
-                else DEFAULT_SURGE
-                if client_format.value == "surge"
                 else None
             )
             if content is not None:
@@ -4987,8 +4975,8 @@ class InventoryStore:
         for identifier, proxy in candidates:
             original_name = str(proxy.get("name") or "Node")
             name = original_name
-            if client_format.value in {"surge", *subscription_clients.TEXT_NODE_FORMATS}:
-                name = surge_name(name)
+            if client_format.value in subscription_clients.TEXT_NODE_FORMATS:
+                name = portable_name(name)
             unique, suffix = name, 2
             while unique in used_names:
                 unique = f"{name} ({suffix})"
@@ -5042,17 +5030,6 @@ class InventoryStore:
                 # generic node validator intentionally rejects private Panel
                 # metadata, so validate only the public node fields and leave the
                 # chaining key for render_stash to serialize.
-                validation_proxy = subscription_clients.public_proxy(proxy)
-                validation_proxy.pop("dialer-proxy", None)
-            elif (
-                client_format == SubscriptionClientFormat.SURGE
-                and proxy.get("dialer-proxy")
-                and not proxy.get("_open_node_has_load_balance")
-                and not proxy.get("_open_node_proxy_groups")
-            ):
-                # Surge represents a single upstream hop as underlying-proxy.
-                # Load-balancer groups still fail closed because Surge cannot
-                # represent the generated Mihomo policy graph.
                 validation_proxy = subscription_clients.public_proxy(proxy)
                 validation_proxy.pop("dialer-proxy", None)
             reason = reason or subscription_clients.unsupported_reason(
@@ -6683,7 +6660,6 @@ class InventoryStore:
     def _subscription_plan_read(plan: SubscriptionPlanModel) -> SubscriptionPlanRead:
         return SubscriptionPlanRead(
             clash_template_id=plan.clash_template_id,
-            surge_template_id=plan.surge_template_id,
             id=UUID(plan.id),
             name=plan.name,
             description=plan.description,
@@ -6733,7 +6709,6 @@ class InventoryStore:
             )
         return SubscriptionCatalogPlanEntry(
             clash_template_name=(template_names or {}).get(plan.clash_template_id),
-            surge_template_name=(template_names or {}).get(plan.surge_template_id),
             name=plan.name,
             description=plan.description,
             traffic_limit_gb=plan.traffic_limit_bytes / (1024 * 1024 * 1024),
@@ -7985,7 +7960,7 @@ class InventoryStore:
         client_format: SubscriptionClientFormat,
         template_content: str | None = None,
     ) -> tuple[str, str, str]:
-        from open_node.services.template_rendering import DEFAULT_SURGE, render
+        from open_node.services.template_rendering import render
 
         if client_format == SubscriptionClientFormat.STASH:
             from open_node.services.template_rendering import DEFAULT_CLASH, render_stash
@@ -7999,12 +7974,6 @@ class InventoryStore:
             from open_node.services.subscription_extra_clients import render_nodes
 
             return render_nodes(proxies, client_format.value)
-        if client_format == SubscriptionClientFormat.SURGE:
-            return (
-                render(template_content or DEFAULT_SURGE, "surge", proxies)[0],
-                "text/plain; charset=utf-8",
-                "conf",
-            )
         if template_content is not None and client_format == SubscriptionClientFormat.CLASH:
             return render(template_content, "clash", proxies)[0], "text/yaml; charset=utf-8", "yaml"
         match client_format:

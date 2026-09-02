@@ -23,7 +23,6 @@ export interface SubscriptionProfile {
   description: string;
   node_ids: string[];
   clash_template_id: string | null;
-  surge_template_id: string | null;
   custom_rules_enabled: boolean;
   selected_custom_rule_ids: string[];
   proxy_providers_enabled: boolean;
@@ -54,7 +53,6 @@ export interface SubscriptionProfileUpdate {
   description: string;
   node_ids: string[];
   clash_template_id: string | null;
-  surge_template_id: string | null;
   custom_rules_enabled: boolean;
   selected_custom_rule_ids: string[];
   proxy_providers_enabled: boolean;

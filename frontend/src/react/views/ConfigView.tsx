@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Checkbox, Col, Collapse, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography } from "antd";
-import { ArrowDownOutlined, ArrowUpOutlined, CloseOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Checkbox, Col, Collapse, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography } from "../../ui";
+import { ArrowDownOutlined, ArrowUpOutlined, CloseOutlined, ReloadOutlined } from "../../ui/icons";
 import type { AgentCommand, AgentCommandStreamFrame, AgentRead, AgentOperationKind, AgentOperationPayload, AgentXraySystemConfigOperationRequest, ServerSummary, XrayConfigSnapshot, XrayRuntimeInbound, XrayRuntimeInventoryResponse, XrayRuntimeTunnel, XrayRuntimeTunnelChain, XrayRuntimeTunnelInventoryResponse } from "../../domain/inventory";
 import type { XrayRuntimeCredentialReconciliationEntry, XrayRuntimeCredentialReconciliationResponse, XrayRuntimeNodeDraft, XrayRuntimeNodeReconciliationManagedEntry, XrayRuntimeNodeReconciliationResponse } from "../../domain/subscriptions";
 import { isJsoncFilename, isWritableXrayFileResult, latestSuccessfulGetResult, parseJsonObjectText } from "../../domain/xray-config-workspace";

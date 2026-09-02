@@ -1,7 +1,7 @@
 import { zhMessage } from "../../i18n/zh-CN";
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Flex, Select, Typography } from "antd";
-import { CloseOutlined, PlusOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Descriptions, Flex, Select, Typography } from "../../ui";
+import { CloseOutlined, PlusOutlined } from "../../ui/icons";
 import type { ManagedNode } from "../../domain/subscriptions";
 import { limitSource, maxSpeed, maxTraffic, type UserLimitOverrides, type UserLimitsRead } from "../../domain/user-limits";
 import LimitOverrideField from "./LimitOverrideField";

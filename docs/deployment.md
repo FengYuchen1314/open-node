@@ -89,7 +89,7 @@ curl -fsS https://PUBLIC_IP:58090/healthz
 
 ## 完整工程参考
 
-The root Dockerfile builds React/Ant Design assets and installs FastAPI in one
+The root Dockerfile builds React assets and installs FastAPI in one
 image. FastAPI serves both the application and API on container port 62031; Node and Vite
 are build tools, not production services. No activation or paid license is
 required. This package is usable for the implemented workflows, not a claim

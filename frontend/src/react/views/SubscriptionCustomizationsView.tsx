@@ -1,4 +1,4 @@
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "../../ui/icons";
 import {
   Alert,
   Button,
@@ -16,7 +16,7 @@ import {
   Tabs,
   Tag,
   Typography,
-} from "antd";
+} from "../../ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ExternalSourceRead } from "../../domain/external-subscriptions";

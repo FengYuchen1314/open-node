@@ -1,5 +1,5 @@
-import { Alert, Button, Card, Input, Space, Spin, Table, Tag, Typography } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Input, Space, Spin, Table, Tag, Typography } from "../../ui";
+import { ReloadOutlined } from "../../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import type { AgentTelemetry, OnlineCollectionStatus } from "../../domain/inventory";
 import { getLatestTelemetry } from "../../services/inventory";

@@ -1,5 +1,5 @@
-import { CopyOutlined, CheckOutlined, DownloadOutlined, EditOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Descriptions, Flex, Form, Input, Layout, Progress, Segmented, Select, Space, Spin, Table, Tabs, Tag, Typography } from "antd";
+import { CopyOutlined, CheckOutlined, DownloadOutlined, EditOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Descriptions, Flex, Form, Input, Layout, Progress, Segmented, Select, Space, Spin, Table, Tabs, Tag, Typography } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ProductUserSubscriptionToken, SubscriptionClientFormat } from "../../domain/subscriptions";
@@ -13,7 +13,6 @@ import {
 import PrivateRoutedNodesPanel from "../components/PrivateRoutedNodesPanel";
 import SubscriberSecurityPanel from "../components/SubscriberSecurityPanel";
 import SubscriptionShortCodeDialog from "../components/SubscriptionShortCodeDialog";
-import TemplatesWorkspace from "../components/TemplatesWorkspace";
 import SubscriptionCustomizationsView from "./SubscriptionCustomizationsView";
 import { useAsyncScope } from "../hooks/useAsyncScope";
 import { useBranding } from "../hooks/useBranding";
@@ -26,7 +25,7 @@ import type { SubscriberPermissionsAccount } from "../../domain/subscriber-permi
 import { getAccountSubscriberPermissions } from "../../services/subscriber-permissions";
 
 const formats: { label: string; value: SubscriptionClientFormat }[] = [
-  { label: "Clash / Mihomo", value: "clash" }, { label: "sing-box", value: "sing-box" }, { label: "Surge", value: "surge" },
+  { label: "Clash / Mihomo", value: "clash" }, { label: "sing-box", value: "sing-box" },
   { label: "Xray", value: "xray" }, { label: "URI 列表", value: "uri-list" }, { label: "Base64", value: "base64" },
   ...extraSubscriptionFormats,
 ];
@@ -177,7 +176,6 @@ function SubscriberWorkspace({ username }: { username: string }) {
   useEffect(() => { setCopied(false); }, [url]);
   useEffect(() => {
     if ((tab === "routes" && !permissions?.pages.includes("private_routes"))
-      || (tab === "templates" && !permissions?.pages.includes("templates"))
       || (tab === "customizations" && !permissions?.pages.some(page => page === "templates" || page === "external_subscriptions"))) setTab("subscription");
   }, [permissions, tab]);
   async function logout() {
@@ -221,7 +219,6 @@ function SubscriberWorkspace({ username }: { username: string }) {
         {permissions?.pages.includes("external_subscriptions") && <Link to="/account/external-subscriptions">外部订阅（{permissions.external_sources.used}/{permissions.external_sources.maximum || "不限"}）</Link>}
         {permissions?.pages.includes("renewals") && <Link to="/account/renewals">申请续费</Link>}
       </Space></div>
-      {permissions?.pages.includes("templates") && <Typography.Paragraph type="secondary">个人模板：{permissions.templates.used} / {permissions.templates.maximum || "不限"}</Typography.Paragraph>}
       {!quota.available && <Alert className="form-alert" type="warning" showIcon title={!quota.has_plan ? "尚未分配订阅套餐" : quota.expired ? "你的套餐已到期" : "你的流量额度已用尽"} />}
     </Form></Card></section>
     {profile.node_limits?.length > 0 && <section aria-label="节点限制"><Card title="节点限制"><Table rowKey="node_id" dataSource={profile.node_limits} pagination={false} scroll={{ x: 420 }} columns={[
@@ -242,7 +239,6 @@ function SubscriberWorkspace({ username }: { username: string }) {
       <Tabs activeKey={tab} onChange={setTab} destroyOnHidden items={[
         { key: "subscription", label: "订阅", children: subscriptionContent },
         ...(permissions?.pages.includes("private_routes") ? [{ key: "routes", label: "路由", children: <PrivateRoutedNodesPanel /> }] : []),
-        ...(permissions?.pages.includes("templates") ? [{ key: "templates", label: "模板", children: <TemplatesWorkspace subscriber /> }] : []),
         ...(permissions?.pages.some(page => page === "templates" || page === "external_subscriptions") ? [{
           key: "customizations",
           label: "订阅自定义",

@@ -5,7 +5,7 @@ import {
   EditOutlined,
   PlusOutlined,
   ReloadOutlined,
-} from "@ant-design/icons";
+} from "../../ui/icons";
 import {
   Alert,
   Button,
@@ -20,7 +20,7 @@ import {
   Table,
   Tag,
   Typography,
-} from "antd";
+} from "../../ui";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
 import type {

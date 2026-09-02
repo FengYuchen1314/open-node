@@ -7,7 +7,6 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from open_node.domain.subscription_templates import (
-    CatalogTemplatePreference,
     CatalogTemplateSettings,
     TemplateList,
     TemplateRead,
@@ -16,9 +15,11 @@ from open_node.domain.subscription_templates import (
 )
 from open_node.services.inventory import Base, ProductUserModel, SubscriptionPlanModel
 from open_node.services.subscription_access import revision
-from open_node.services.template_rendering import TemplateError
+from open_node.services.template_rendering import DEFAULT_CLASH, TemplateError
 
-FIELDS = ("clash_template_id", "surge_template_id")
+FIELDS = ("clash_template_id",)
+DEFAULT_TEMPLATE_ID = "00000000-0000-4000-8000-000000000001"
+DEFAULT_TEMPLATE_NAME = "default.yaml"
 
 
 class TemplateNotFound(TemplateError):
@@ -58,9 +59,6 @@ class TemplatePreference(Base):
     clash_template_id: Mapped[str | None] = mapped_column(
         ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
     )
-    surge_template_id: Mapped[str | None] = mapped_column(
-        ForeignKey("subscription_templates.id", ondelete="SET NULL"), nullable=True
-    )
 
 
 class TemplateStore:
@@ -92,16 +90,11 @@ class TemplateStore:
         )
 
     def allowed(self, session, actor):
-        if actor is None:
-            return True
-        user = self.user(session, actor)
-        return user.is_active and self.settings(session, actor).enabled
+        return actor is None
 
     def get(self, session, identifier, actor=None, *, write=False):
         row = session.get(TemplateRecord, str(identifier))
-        if row is None or (
-            actor is not None and not (row.is_public or row.owner_username == actor)
-        ):
+        if row is None or (actor is not None and row.owner_username is not None):
             raise TemplateNotFound("Template not found")
         if (
             write
@@ -115,18 +108,12 @@ class TemplateStore:
     def references(session, row):
         plans = session.scalars(
             select(SubscriptionPlanModel)
-            .where(
-                (SubscriptionPlanModel.clash_template_id == row.id)
-                | (SubscriptionPlanModel.surge_template_id == row.id)
-            )
+            .where(SubscriptionPlanModel.clash_template_id == row.id)
             .order_by(SubscriptionPlanModel.name)
         ).all()
         defaults = session.scalars(
             select(TemplatePreference)
-            .where(
-                (TemplatePreference.clash_template_id == row.id)
-                | (TemplatePreference.surge_template_id == row.id)
-            )
+            .where(TemplatePreference.clash_template_id == row.id)
             .order_by(TemplatePreference.scope)
         ).all()
         return plans, defaults
@@ -164,12 +151,10 @@ class TemplateStore:
             statement = select(TemplateRecord).order_by(TemplateRecord.name_key)
             if actor is not None:
                 self.user(session, actor)
-                statement = statement.where(
-                    (TemplateRecord.owner_username == actor) | TemplateRecord.is_public
-                )
+                statement = statement.where(TemplateRecord.owner_username.is_(None))
             return TemplateList(
                 templates=[self.read(session, row, actor) for row in session.scalars(statement)],
-                settings=self.settings(session, actor),
+                settings=self.settings(session, None),
                 can_manage=self.allowed(session, actor),
             )
 
@@ -179,19 +164,13 @@ class TemplateStore:
 
     def write(self, payload, identifier=None, actor=None):
         with self.inventory._coordinated_session() as session:
+            if actor is not None:
+                raise TemplateForbidden("Only administrators can manage global templates")
             row = self.get(session, identifier, actor, write=True) if identifier else None
             if not self.allowed(session, actor):
                 raise TemplateForbidden("Template editing is not permitted")
             if row and self.read(session, row, actor).revision != payload.expected_revision:
                 raise TemplateConflict("Template or bindings changed; reload before saving")
-            if actor is not None and (
-                payload.owner_username not in (None, actor)
-                or payload.is_public != (row.is_public if row else False)
-            ):
-                raise TemplateForbidden("Only an administrator can change ownership or visibility")
-            owner = actor if actor is not None else payload.owner_username
-            if owner is not None:
-                self.user(session, owner)
             conflict = session.scalar(
                 select(TemplateRecord.id).where(TemplateRecord.name_key == payload.name.casefold())
             )
@@ -201,17 +180,13 @@ class TemplateStore:
                 raise TemplateConflict("An assigned template cannot change format")
             now = datetime.now(UTC)
             if row is None:
-                if actor is not None:
-                    self.inventory.subscriber_permissions().enforce_create(
-                        session, actor, "templates"
-                    )
                 if session.scalar(select(func.count()).select_from(TemplateRecord)) >= 200:
                     raise TemplateConflict("The template library is limited to 200 files")
                 row = TemplateRecord(id=str(uuid4()), created_at=now)
                 session.add(row)
             row.name, row.name_key = payload.name, payload.name.casefold()
-            row.format, row.content, row.owner_username = payload.format, payload.content, owner
-            row.is_public, row.updated_at = payload.is_public, now
+            row.format, row.content, row.owner_username = "clash", payload.content, None
+            row.is_public, row.updated_at = True, now
             session.flush()
             result = self.read(session, row, actor, content=True)
             session.commit()
@@ -244,53 +219,50 @@ class TemplateStore:
                 row = self.get(session, identifier)
                 if row.format != field.split("_", 1)[0]:
                     raise TemplateError("Selected template has the wrong format")
-                if username is not None and row.owner_username != username:
-                    raise TemplateForbidden("Personal defaults must use your own templates")
             result[field] = str(identifier) if identifier is not None else None
         return result
 
     def get_settings(self, username=None):
         with self.inventory._session() as session:
-            return self.settings(session, username)
+            if username is not None:
+                self.user(session, username)
+            return self.settings(session, None)
 
     def save_settings(self, payload, username=None, actor=None):
         with self.inventory._coordinated_session() as session:
-            if actor is not None and (username != actor or not self.allowed(session, actor)):
-                raise TemplateForbidden("Template defaults cannot be edited")
-            before = self.settings(session, username)
+            if actor is not None or username is not None:
+                raise TemplateForbidden(
+                    "Only administrators can change the global default template"
+                )
+            before = self.settings(session, None)
             if before.revision != payload.expected_revision:
                 raise TemplateConflict("Template settings changed; reload before saving")
-            if (
-                actor is not None
-                and payload.enabled is not None
-                and payload.enabled != before.enabled
-            ):
-                raise TemplateForbidden("Only an administrator can grant template permission")
-            row = self.preference(session, username)
-            values = self.validate_selection(session, payload, existing=row, username=username)
-            if row is None:
-                row = TemplatePreference(
-                    scope=self.scope(username), username=username, enabled=before.enabled
+            row = self.preference(session, None)
+            values = self.validate_selection(session, payload, existing=row)
+            if values["clash_template_id"] is None:
+                default = session.scalar(
+                    select(TemplateRecord).where(
+                        TemplateRecord.name_key == DEFAULT_TEMPLATE_NAME.casefold()
+                    )
                 )
+                if default is None:
+                    raise TemplateConflict("The built-in default template is unavailable")
+                values["clash_template_id"] = default.id
+            if row is None:
+                row = TemplatePreference(scope=self.scope(None), username=None, enabled=True)
                 session.add(row)
             for field, value in values.items():
                 setattr(row, field, value)
-            if payload.enabled is not None and username is not None:
-                row.enabled = payload.enabled
+            row.enabled = True
             session.flush()
-            result = self.settings(session, username)
+            result = self.settings(session, None)
             session.commit()
             return result
 
     def resolve(self, session, user, plan, format):
-        if format not in {"clash", "surge"}:
+        if format != "clash":
             return None
-        field = format + "_template_id"
-        preference = self.preference(session, user.username)
-        if preference and preference.enabled and getattr(preference, field):
-            row = session.get(TemplateRecord, getattr(preference, field))
-            if row and row.owner_username == user.username and row.format == format:
-                return row
+        field = "clash_template_id"
         system = self.preference(session, None)
         for selection in (plan, system):
             if selection and getattr(selection, field):
@@ -315,42 +287,17 @@ class TemplateStore:
 
     def export_catalog(self, session):
         rows = session.scalars(select(TemplateRecord).order_by(TemplateRecord.name_key)).all()
-        preferences = session.scalars(
-            select(TemplatePreference).order_by(TemplatePreference.scope)
-        ).all()
-        catalog_users = set(
-            session.scalars(
-                select(ProductUserModel.username).where(ProductUserModel.removal_id.is_(None))
-            )
+        system = self.preference(session, None)
+        defaults = CatalogTemplateSettings(
+            clash_template_name=self.name_for(session, system.clash_template_id if system else None)
         )
-        defaults, users = CatalogTemplateSettings(), []
-        for row in preferences:
-            values = {
-                field.replace("_id", "_name"): self.name_for(session, getattr(row, field))
-                for field in FIELDS
-            }
-            if row.username is None:
-                defaults = CatalogTemplateSettings(**values)
-            elif row.username in catalog_users:
-                users.append(
-                    CatalogTemplatePreference(username=row.username, enabled=row.enabled, **values)
-                )
         return {
             "templates": [
-                TemplateWrite(
-                    **{
-                        key: (
-                            None
-                            if key == "owner_username" and row.owner_username not in catalog_users
-                            else getattr(row, key)
-                        )
-                        for key in TemplateWrite.model_fields
-                    }
-                )
+                TemplateWrite(**{key: getattr(row, key) for key in TemplateWrite.model_fields})
                 for row in rows
             ],
             "template_defaults": defaults,
-            "template_preferences": users,
+            "template_preferences": [],
         }
 
     def import_templates(self, session, entries):
@@ -361,8 +308,6 @@ class TemplateStore:
         if sum(len(entry.content.encode()) for entry in entries) > 16 * 1024 * 1024:
             raise TemplateError("Catalog template content exceeds 16 MiB")
         for entry in entries:
-            if entry.owner_username:
-                self.user(session, entry.owner_username)
             row = session.scalar(
                 select(TemplateRecord).where(TemplateRecord.name_key == entry.name.casefold())
             )
@@ -373,32 +318,69 @@ class TemplateStore:
                 raise TemplateConflict("An assigned template cannot change format")
             for key in TemplateWrite.model_fields:
                 setattr(row, key, getattr(entry, key))
+            row.owner_username, row.is_public, row.format = None, True, "clash"
             row.name_key, row.updated_at = entry.name.casefold(), datetime.now(UTC)
         session.flush()
         if session.scalar(select(func.count()).select_from(TemplateRecord)) > 200:
             raise TemplateConflict("The template library is limited to 200 files")
 
     def import_preferences(self, session, defaults, preferences):
-        entries = [(None, defaults)] if defaults is not None else []
-        entries.extend((entry.username, entry) for entry in preferences or [])
-        if len({username for username, _ in entries}) != len(entries):
-            raise TemplateConflict("Catalog template preferences must be distinct")
-        for username, entry in entries:
-            row = self.preference(session, username)
-            if row is None:
-                row = TemplatePreference(scope=self.scope(username), username=username)
-                session.add(row)
-            row.enabled = entry.enabled if username is not None else True
-            for field in FIELDS:
-                identifier = self.id_for(
-                    session, getattr(entry, field.replace("_id", "_name")), field.split("_", 1)[0]
+        if preferences:
+            raise TemplateConflict("Personal template preferences are no longer supported")
+        if defaults is None:
+            return
+        row = self.preference(session, None)
+        if row is None:
+            row = TemplatePreference(scope=self.scope(None), username=None)
+            session.add(row)
+        row.enabled = True
+        if defaults.clash_template_name is not None:
+            row.clash_template_id = self.id_for(session, defaults.clash_template_name, "clash")
+        else:
+            fallback = session.scalar(
+                select(TemplateRecord).where(
+                    TemplateRecord.name_key == DEFAULT_TEMPLATE_NAME.casefold()
                 )
-                if (
-                    identifier
-                    and username is not None
-                    and self.get(session, identifier).owner_username != username
-                ):
-                    raise TemplateForbidden(
-                        "Catalog personal defaults must reference owned templates"
+            )
+            if fallback is None:
+                raise TemplateConflict("The built-in default template is unavailable")
+            row.clash_template_id = fallback.id
+
+    def ensure_default(self):
+        """Create the global all-traffic-through-proxy template exactly once."""
+        with self.inventory._coordinated_session() as session:
+            now = datetime.now(UTC)
+            row = session.get(TemplateRecord, DEFAULT_TEMPLATE_ID)
+            if row is None:
+                row = session.scalar(
+                    select(TemplateRecord).where(
+                        TemplateRecord.name_key == DEFAULT_TEMPLATE_NAME.casefold()
                     )
-                setattr(row, field, identifier)
+                )
+            if row is None:
+                row = TemplateRecord(
+                    id=DEFAULT_TEMPLATE_ID,
+                    name=DEFAULT_TEMPLATE_NAME,
+                    name_key=DEFAULT_TEMPLATE_NAME.casefold(),
+                    format="clash",
+                    content=DEFAULT_CLASH,
+                    owner_username=None,
+                    is_public=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+                session.flush()
+            preference = self.preference(session, None)
+            if preference is None:
+                preference = TemplatePreference(
+                    scope=self.scope(None),
+                    username=None,
+                    enabled=True,
+                    clash_template_id=row.id,
+                )
+                session.add(preference)
+            elif not preference.clash_template_id:
+                preference.clash_template_id = row.id
+                preference.enabled = True
+            session.commit()

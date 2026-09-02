@@ -1,6 +1,6 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Checkbox, Descriptions, Empty, Flex, Form, Input, Modal, Select, Spin, Switch, Table, Tag, Typography } from "antd";
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Checkbox, Descriptions, Empty, Flex, Form, Input, Modal, Select, Spin, Switch, Table, Tag, Typography } from "../../ui";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type {
   ExternalNodeRead, ExternalPreviewConfirm, ExternalPreviewNode, ExternalPreviewRead,

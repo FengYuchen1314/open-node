@@ -294,7 +294,7 @@ def test_managed_mihomo_only_transport_options_fail_closed_for_other_clients():
         "shadow-tls-opts": {"version": 3, "password": "fixture-password"},
     }
     assert subscription_clients.unsupported_reason(anytls, "clash") is None
-    for target in ("sing-box", "xray", "surge", "uri-list", "base64"):
+    for target in ("sing-box", "xray", "uri-list", "base64"):
         reason = subscription_clients.unsupported_reason(anytls, target)
         assert reason is not None and "ShadowTLS" in reason
 

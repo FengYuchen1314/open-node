@@ -113,7 +113,7 @@ describe("subscriber authentication", () => {
 
   it("builds each format URL using the issued token URL", () => {
     const subscription = { subscription_url: "https://panel.example/api/v1/subscribe/private-token" } as ProductUserSubscriptionToken;
-    for (const format of ["clash", "surge", "sing-box", "xray", "uri-list", "base64"] as const) {
+    for (const format of ["clash", "sing-box", "xray", "uri-list", "base64"] as const) {
       expect(subscriberFormatUrl(subscription, format)).toBe(`https://panel.example/api/v1/subscribe/private-token?format=${format}`);
     }
   });

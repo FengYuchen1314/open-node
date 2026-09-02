@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Descriptions, Form, Input, Modal, Space, Spin, Switch, Typography } from "antd";
-import { BranchesOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { Alert, Button, Checkbox, Descriptions, Form, Input, Modal, Space, Spin, Switch, Typography } from "../../ui";
+import { BranchesOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined } from "../../ui/icons";
 import { getServerRemoval, getServerSettings, removeServer, updateServerSettings,
   type RemovalPreview, type ServerSettings } from "../../services/server-management";
 import { zhMessage } from "../../i18n/zh-CN";

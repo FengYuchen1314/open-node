@@ -1,4 +1,4 @@
-export type SubscriptionTemplateFormat = "clash" | "surge";
+export type SubscriptionTemplateFormat = "clash";
 
 export interface SubscriptionTemplate {
   id: string;
@@ -18,7 +18,6 @@ export interface SubscriptionTemplate {
 
 export interface SubscriptionTemplateSettings {
   clash_template_id: string | null;
-  surge_template_id: string | null;
   enabled: boolean;
   revision: string;
 }

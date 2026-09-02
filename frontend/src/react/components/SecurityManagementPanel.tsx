@@ -1,5 +1,5 @@
-import { DeleteOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, StopOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Checkbox, Flex, Form, Input, InputNumber, Select, Space, Table, Tag, Typography } from "antd";
+import { DeleteOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, StopOutlined } from "../../ui/icons";
+import { Alert, App, Button, Card, Checkbox, Flex, Form, Input, InputNumber, Select, Space, Table, Tag, Typography } from "../../ui";
 import { useEffect, useRef, useState } from "react";
 
 import type { SecurityBan, SecurityEvent, SecurityEventKind, SecuritySettings } from "../../domain/security";

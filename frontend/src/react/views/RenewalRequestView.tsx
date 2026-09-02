@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Descriptions, Flex, Form, Input, Modal, Spin, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Flex, Form, Input, Modal, Spin, Typography } from "../../ui";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { validRenewalPassphrase, type AccountRenewals, type RenewalRequest } from "../../domain/renewals";

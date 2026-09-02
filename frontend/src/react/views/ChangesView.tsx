@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Checkbox, Col, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
-import { PlusOutlined, ReloadOutlined, RollbackOutlined, SendOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "../../ui";
+import { PlusOutlined, ReloadOutlined, RollbackOutlined, SendOutlined } from "../../ui/icons";
 import { changeSetActions, type AgentChangeSet, type AgentChangeSetStatus, type AgentChangeSetStepCreateRequest } from "../../domain/changes";
 import type { AgentCommand, AgentCommandCreateRequest, ServerSummary } from "../../domain/inventory";
 import { listServers } from "../../services/inventory";

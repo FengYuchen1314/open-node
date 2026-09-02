@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
-import zhCN from "antd/locale/zh_CN";
-import { ConfigProvider } from "antd";
+import { ConfigProvider } from "../../ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PlanManagementDialog from "./PlanManagementDialog";
 import UserManagementDialog from "./UserManagementDialog";
@@ -20,7 +19,7 @@ import { updatePrivateRoutePolicy } from "../../services/private-routed-nodes";
 import type { ManagedNode, ProductUser, SubscriptionAccessResponse, SubscriptionPlan } from "../../domain/subscriptions";
 import type { SubscriptionProfile } from "../../domain/subscription-profiles";
 
-const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider locale={zhCN}>{children}</ConfigProvider> });
+const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
 
 vi.mock("../../services/plan-management", async importOriginal => ({ ...await importOriginal<typeof import("../../services/plan-management")>(), getPlanManagement: vi.fn(), removePlan: vi.fn(), savePlan: vi.fn() }));
 vi.mock("../../services/user-management", async importOriginal => ({ ...await importOriginal<typeof import("../../services/user-management")>(), getUserManagement: vi.fn(), getUserRemoval: vi.fn(), retryUserRemoval: vi.fn(), removeUser: vi.fn(), saveUser: vi.fn() }));
@@ -42,7 +41,7 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   const getStyle = window.getComputedStyle; vi.spyOn(window, "getComputedStyle").mockImplementation(element => getStyle(element));
   vi.mocked(getPlanManagement).mockResolvedValue({ plan, revision: "plan-r1", users: [{ username: "alice", display_name: "Alice", is_active: true, managed: true }], warnings: [] });
-  vi.mocked(listSubscriptionTemplates).mockResolvedValue({ templates: [], settings: { enabled: true, clash_template_id: null, surge_template_id: null, revision: "" }, can_manage: true, license_required: false });
+  vi.mocked(listSubscriptionTemplates).mockResolvedValue({ templates: [], settings: { enabled: true, clash_template_id: null, revision: "" }, can_manage: true, license_required: false });
   vi.mocked(listCustomRules).mockResolvedValue({ rules: [], license_required: false });
   vi.mocked(listProxyProviders).mockResolvedValue({ providers: [], license_required: false });
   vi.mocked(listOverrideScripts).mockResolvedValue({ scripts: [], runtime: "quickjs-subprocess", license_required: false });
@@ -62,8 +61,9 @@ describe("React subscription management dialogs", { timeout: 20_000 }, () => {
   });
   it("refuses to save a plan after all nodes are removed", async () => {
     render(<PlanManagementDialog open id="p" mode="edit" nodes={[node]} onOpenChange={vi.fn()} />); await flush();
-    const remove = document.querySelector(".ant-select-selection-item-remove") as HTMLElement;
-    expect(remove).toBeTruthy(); fireEvent.mouseDown(remove); fireEvent.click(remove); await flush();
+    const selection = screen.getByLabelText("套餐节点") as HTMLSelectElement;
+    Array.from(selection.options).forEach(option => { option.selected = false; });
+    fireEvent.change(selection); await flush();
     fireEvent.click(screen.getByRole("checkbox", { name: /我接受/ }));
     expect(screen.getByText("套餐至少需要一个节点。")).toBeTruthy();
     expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);
@@ -140,11 +140,11 @@ describe("React subscription management dialogs", { timeout: 20_000 }, () => {
     fireEvent.click(screen.getByRole("button", { name: "重试移除节点" })); await flush(); expect(retryNodeRemoval).toHaveBeenCalledWith("job"); expect(screen.getByText("正在等待 Agent 确认移除")).toBeTruthy();
   });
   it("keeps profile node subset, assignments and templates scoped in a revisioned update", async () => {
-    const profile = { id: "profile", name: "Travel", description: "Subset", node_ids: ["a"], assigned_usernames: ["alice"], clash_template_id: "clash1", surge_template_id: null, enabled: false, revision: "profile-r1", migration_warnings: ["规则需要设置"] } as SubscriptionProfile;
+    const profile = { id: "profile", name: "Travel", description: "Subset", node_ids: ["a"], assigned_usernames: ["alice"], clash_template_id: "clash1", enabled: false, revision: "profile-r1", migration_warnings: ["规则需要设置"] } as SubscriptionProfile;
     vi.mocked(updateSubscriptionProfile).mockResolvedValue(profile);
     render(<SubscriptionProfileDialog open profile={profile} nodes={[node]} users={[user]} templates={[]} onOpenChange={vi.fn()} />);
     fireEvent.click(screen.getByRole("switch", { name: "已启用" })); fireEvent.click(screen.getByRole("button", { name: "保存" })); await flush();
-    expect(updateSubscriptionProfile).toHaveBeenCalledWith("profile", { name: "Travel", description: "Subset", node_ids: ["a"], assigned_usernames: ["alice"], clash_template_id: "clash1", surge_template_id: null, custom_rules_enabled: false, selected_custom_rule_ids: [], proxy_providers_enabled: false, selected_proxy_provider_ids: [], override_scripts_enabled: false, selected_override_script_ids: [], enabled: true, expected_revision: "profile-r1" });
+    expect(updateSubscriptionProfile).toHaveBeenCalledWith("profile", { name: "Travel", description: "Subset", node_ids: ["a"], assigned_usernames: ["alice"], clash_template_id: "clash1", custom_rules_enabled: false, selected_custom_rule_ids: [], proxy_providers_enabled: false, selected_proxy_provider_ids: [], override_scripts_enabled: false, selected_override_script_ids: [], enabled: true, expected_revision: "profile-r1" });
     expect(screen.getByText("规则需要设置")).toBeTruthy();
   });
   it("validates private-route policy bounds before updating", async () => {

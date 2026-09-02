@@ -1,4 +1,4 @@
-import { Col, Form, Row, Select, Typography } from "antd";
+import { Col, Form, Row, Select, Typography } from "../../ui";
 import { validLimit } from "../../domain/user-limits";
 import StrictInputNumber from "./StrictInputNumber";
 

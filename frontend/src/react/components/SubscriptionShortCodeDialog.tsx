@@ -1,7 +1,7 @@
 import { zhMessage } from "../../i18n/zh-CN";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Descriptions, Flex, Form, Input, Modal, Spin, Typography } from "antd";
-import { CopyOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Descriptions, Flex, Form, Input, Modal, Spin, Typography } from "../../ui";
+import { CopyOutlined, ReloadOutlined } from "../../ui/icons";
 import type { ProductUserSubscriptionToken } from "../../domain/subscriptions";
 import { shortCodeError } from "../../domain/subscription-links";
 import { getProductUserSubscriptionToken, updateProductUserShortCode } from "../../services/subscriptions";

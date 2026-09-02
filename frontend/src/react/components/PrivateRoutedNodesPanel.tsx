@@ -1,6 +1,6 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
-import { ArrowRightOutlined, DeleteOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Flex, Form, Input, Select, Space, Table, Tag, Typography } from "antd";
+import { ArrowRightOutlined, DeleteOutlined, ReloadOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Flex, Form, Input, Select, Space, Table, Tag, Typography } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PrivateRoutedNode, PrivateRoutedNodesResponse } from "../../domain/private-routed-nodes";
 import { createSubscriberPrivateRoute, deleteSubscriberPrivateRoute, listSubscriberPrivateRoutes } from "../../services/private-routed-nodes";

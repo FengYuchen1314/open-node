@@ -1,112 +1,59 @@
-# React and Ant Design frontend
+# React 前端
 
-The administrator console and subscriber portal use React 19, TypeScript, Vite
-and the official `antd` package. The current dependency pins are React 19.2.7,
-Ant Design 6.6.2 and `@ant-design/icons` 6.3.2. Vue, Vuetify, Pinia, the Vue
-router/compiler and the MDI font are no longer runtime or build dependencies.
+管理端、用户中心和独立 Probe 使用 React 19、TypeScript 与 Vite。界面组件位于
+`frontend/src/ui`，基于原生语义元素和项目 CSS 实现；运行时和构建依赖中不包含
+Ant Design、`@ant-design/icons`、Vue、Vuetify、Pinia 或图标字体。
 
-The integration follows [Ant Design's Vite guide](https://ant.design/docs/react/use-with-vite/).
-It uses standard Layout, Menu, Form, Table, Tabs, Modal, Drawer and feedback
-components with the default theme. The probe can choose the built-in light or
-dark algorithm. Project CSS handles spacing, responsive layout, code blocks and
-SVG charts; it does not replace Ant Design's component appearance. V6-specific
-APIs and icon compatibility follow the [official migration guide](https://ant.design/docs/react/migration-v6/).
+这套组件优先保证高频操作效率：表单标签和错误紧邻字段，危险操作需要明确确认，
+列表在窄屏下可横向滚动，抽屉和对话框保持键盘可达，加载中按钮保持稳定的可访问名称。
+浅色、深色和跟随系统三种主题共用相同的信息层级，不依赖第三方主题运行时。
 
-## Interface language
+## 界面语言
 
-The current candidate defaults to Simplified Chinese throughout the administrator
-console, subscriber portal and independent public Probe. All three entry points
-use the official `antd/locale/zh_CN` locale, following
-[Ant Design's localization guide](https://ant.design/docs/react/i18n-cn/).
-Page language/title, navigation, forms, accessible labels, confirmation warnings,
-status labels, empty states and date/number display are localized explicitly.
-The prior published React rewrite used English; Chinese acceptance and publication
-are tracked separately in [testing.md](testing.md#simplified-chinese-interface).
+管理端、用户中心和 Probe 默认使用简体中文。页面标题、导航、表单、确认提示、状态、
+空状态以及日期和数字显示均由项目自己的消息表处理。API 路径、字段名、枚举、协议名、
+命令、用户填写的名称和原始诊断日志不会被翻译。
 
-Localization does not modify API routes, payload keys, enum values, protocol names,
-commands, configuration source, user-supplied titles/names or raw diagnostic logs.
-`src/i18n/zh-CN.ts` translates display states; it is not a schema or security
-validator. API clients first retain their response/secret checks and use the
-bounded allowlist in `src/i18n/messages.ts` and `src/services/request-error.ts` for
-known errors. Unknown upstream text uses a Chinese context fallback, not raw
-provider bodies or credentials. Validation paths expose only known schema fields.
+未知的上游错误不会直接回显给浏览器；前端只展示经过白名单映射的错误或中文上下文提示。
+安装命令、密码、恢复码和 MFA 数据只保留在当前对话框内，完成或关闭时清除。
 
-The stock Ant Design two-character button spacing remains enabled. Explicit
-operation labels keep accessible names stable without changing that appearance;
-built-in confirmation/cancellation controls use the official Chinese defaults.
+## 页面边界
 
-## Application boundaries
-
-| Route | Workspace |
+| 路径 | 工作区 |
 | --- | --- |
-| `/servers` | Server Management: access and maintenance, Server Settings (Outbound & Routing plus advanced configuration), reverse proxy, sharing and DDNS |
-| `/nodes` | Node Management: managed nodes, topology and speed tests |
-| `/templates` | Template Management: Clash/Surge templates and subscription customization |
-| `/plans` | Plan Management: plans composed from one or more nodes and templates |
-| `/users` | User Management: users, plan assignment, subscriptions, invitations and migration |
-| `/system-settings` | System Settings: access security, notifications, backups, change history, renewals and Probe administration |
-| `/account` | Separate subscriber sign-in, subscription links, routes, templates and security |
+| `/servers` | 服务器接入、Agent 生命周期、出站路由、443 分流、反向代理、共享与 DDNS |
+| `/nodes` | 受管节点、外部节点、图形化编排和测速 |
+| `/templates` | 全局 Clash/Mihomo 模板与订阅自定义 |
+| `/plans` | 套餐、节点和全局模板绑定 |
+| `/users` | 用户、套餐绑定、订阅、邀请和迁移 |
+| `/certificates` | 证书签发、导入、部署与撤销 |
+| `/system-settings` | 安全、通知、备份、变更历史、续费和 Probe 管理 |
+| `/account` | 独立用户登录、订阅、个人路由和账户安全 |
 
-The administrator sidebar contains exactly those six management workspaces.
-Legacy administrator URLs such as `/config`, `/subscriptions`, `/changes` and
-`/certificates` are redirects into the relevant consolidated workspace; they do
-not create additional sidebar entries. Certificate management is not exposed as
-an administrator frontend workspace.
+管理员侧边栏只包含七个管理工作区。旧管理路径会重定向到相应工作区，不生成重复入口。
+`/account` 只加载用户会话，普通用户身份不会获得管理权限。
 
-`src/main.tsx` mounts the application. `src/react/App.tsx` gates management
-routes on the administrator session and lazy-loads workspaces from `src/routes.ts`.
-The `/account` route loads only the subscriber session; subscriber roles never
-grant administrator permissions. Failed workspace loads offer a reload action
-without rendering raw exception data.
+## 状态与输入
 
-The framework-independent types and API clients remain in `src/domain` and
-`src/services`. FastAPI routes, cookie/CSRF contracts, SQLite state and Agent
-protocols are unchanged by this rewrite. A memory-only observable store connects
-session updates to React's `useSyncExternalStore`; authentication and installation
-secrets are not persisted in localStorage or sessionStorage.
+框架无关的类型和 API 客户端保留在 `src/domain` 和 `src/services`。会话状态只放在内存，
+认证和安装凭据不会写入 localStorage 或 sessionStorage。异步作用域在页面卸载、目标切换
+或操作被替代时使旧回调失效。
 
-Asynchronous view scopes invalidate callbacks after disposal, target changes or
-replacement operations. Sensitive dialogs keep passwords, enrollment QR data,
-recovery codes and installation commands local and clear them on completion or
-close. Recovery codes require explicit acknowledgment. Mutation guards and
-existing backend revisions/confirmation tokens remain in place.
+`StrictInputNumber` 保留用户尚未填完或无效的数字草稿，不会在失焦时偷偷钳制、取整或
+恢复旧值。每个表单按照后端约束自行校验；其中 `0` 表示不限的字段不会被误改为空值。
 
-Numeric fields still render the official Ant Design `InputNumber`, through a
-small `StrictInputNumber` adapter. It preserves incomplete or invalid drafts
-instead of silently clamping a negative quota, rounding a fractional connection
-limit, or restoring an old port on blur/Enter. An optional field becomes `null`
-only when explicitly emptied; malformed or non-finite input stays invalid.
-Each submitting form checks its own backend-compatible bounds. This matters
-especially where zero means unlimited. Probe settings and scheduled-task writes
-also stay disabled until their initial data has loaded successfully.
+## 独立 Probe
 
-Asynchronous action buttons use stable accessible labels matching their visible
-text. A loading indicator must not become part of an action's name after a
-failed request or prevent assistive technology from finding the retry action.
+`public-probe/main.tsx` 生成 `dist-probe`。公开构建在编译阶段排除管理设置、任务模块、
+管理路由和认证 API 客户端，只发送无 Cookie、禁止缓存且不跟随重定向的只读请求。
+Worker 访问令牌属于服务端秘密，不能放进前端环境变量或 URL。
 
-## Independent public Probe build
+## 构建与验证
 
-`public-probe/main.tsx` produces `dist-probe`. Its compile-time public flag
-excludes the administrator settings/task module, router and authenticated API
-clients. `src/services/probe-public.ts` sends only read-only public requests with
-cookies omitted, no cache, no referrer and redirects rejected. A Worker access
-token is a server-side Worker secret, not a frontend environment variable or URL
-parameter.
-
-The read-only build retains HTTP polling while WebSocket is idle or reconnecting,
-range selection, node filters and ping/system history. The Worker independently
-enforces its route/method allowlist and strips credentials in both directions.
-The public bundle's deep links remain read-only; `/access` on that deployment
-does not become an administrator login page.
-
-## Build and verification
-
-Use the designated VPS and an isolated source checkout, not the production
-database or service. The Vite React plugin requires Node 20.19+ or 22.12+; the
-pinned Docker Node stage remains the production build path.
+Node.js 要求 20.19+ 或 22.12+；生产构建仍由根 Dockerfile 完成：
 
 ```bash
-cd /path/to/isolated/open-node/frontend
+cd frontend
 npm ci
 npm run typecheck
 npm test
@@ -114,14 +61,6 @@ npm run build
 npm run build:probe
 ```
 
-`dist` is still served by FastAPI in the single Docker image. No frontend
-development server, separate web host, or change to the root installer is needed.
-The optional public Worker deploys `dist-probe` separately.
-
-Vitest retains the domain/API tests and adds real Ant Design DOM behavior tests.
-Some jsdom suites skip expensive CSS visibility inference and disable animation
-only in their test wrappers; those tests are not responsive-layout evidence.
-Production-bundle Playwright gates check actual desktop/narrow-screen rendering,
-accessible controls, secret cleanup, MFA, Agent installation and subscription
-flows against disposable VPS services. [Testing records](testing.md) distinguish
-those results from earlier Vue runs and from unverified external deployments.
+`dist` 与后端一起进入单个镜像，不需要额外部署前端开发服务器。Vitest 覆盖组件交互、
+权限、敏感信息清理和 API 契约；GitHub Actions 的 12 个前端分片与 18 个后端分片共同
+构成发布门禁。

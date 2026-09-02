@@ -1,6 +1,6 @@
 import { zhMessage } from "../../i18n/zh-CN";
-import { CopyOutlined, DownloadOutlined, LogoutOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, Input, Modal, Space, Table, Tag, Typography } from "antd";
+import { CopyOutlined, DownloadOutlined, LogoutOutlined, ReloadOutlined, SafetyCertificateOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, Input, Modal, Space, Table, Tag, Typography } from "../../ui";
 import QRCode from "qrcode";
 import { useEffect, useRef, useState } from "react";
 import type { SubscriptionIpPolicy } from "../../domain/subscriptions";

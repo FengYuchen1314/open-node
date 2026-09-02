@@ -7,7 +7,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
-} from "@ant-design/icons";
+} from "../../ui/icons";
 import {
   Alert,
   App,
@@ -24,7 +24,7 @@ import {
   Table,
   Tag,
   Typography,
-} from "antd";
+} from "../../ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SpeedTester, SpeedTesterSecret, SpeedTestResult } from "../../domain/speedtests";

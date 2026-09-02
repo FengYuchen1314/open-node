@@ -650,11 +650,6 @@ export interface AgentDomainLatencyProbeRequest {
   command_timeout_ms?: number;
 }
 
-export interface AgentUpgradeOperationRequest {
-  version: string;
-  sha256: string;
-}
-
 export interface AgentLifecycleConfirmationRequest {
   confirm: true;
 }
@@ -895,7 +890,6 @@ export interface AgentUpdateMasterURLOperationRequest {
 }
 
 export type AgentOperationPayload =
-  | AgentUpgradeOperationRequest
   | AgentLifecycleConfirmationRequest
   | AgentXrayInstallOperationRequest
   | AgentDomainLatencyProbeRequest

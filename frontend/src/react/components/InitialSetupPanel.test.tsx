@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { ConfigProvider } from "antd";
+import { ConfigProvider } from "../../ui";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { completeInitialSetup, getInitialSetupStatus, InitialSetupError, prepareInitialRestore, uploadInitialRestore, type InitialSetupStatus } from "../../services/initial-setup";

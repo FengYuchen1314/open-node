@@ -1,7 +1,7 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Empty, Flex, Form, Input, Modal, Select, Spin, Tag, Typography } from "antd";
-import { CheckOutlined, CopyOutlined, LinkOutlined, UserAddOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Empty, Flex, Form, Input, Modal, Select, Spin, Tag, Typography } from "../../ui";
+import { CheckOutlined, CopyOutlined, LinkOutlined, UserAddOutlined } from "../../ui/icons";
 import type { RegistrationInvitation, RegistrationInvitationCreateResponse } from "../../domain/registration-invitations";
 import type { SubscriptionPlan } from "../../domain/subscriptions";
 import { createRegistrationInvitation, listRegistrationInvitations, revokeRegistrationInvitation } from "../../services/registration-invitations";

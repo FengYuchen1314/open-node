@@ -20,7 +20,6 @@ describe("subscription profile management", () => {
       description: "Phone",
       node_ids: [],
       clash_template_id: null,
-      surge_template_id: null,
       custom_rules_enabled: false,
       selected_custom_rule_ids: [],
       proxy_providers_enabled: false,

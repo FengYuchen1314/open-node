@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Col, Descriptions, Form, Modal, Progress, Row, Select, Space, Typography } from "antd";
-import { ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Col, Descriptions, Form, Modal, Progress, Row, Select, Space, Typography } from "../../ui";
+import { ReloadOutlined, SaveOutlined } from "../../ui/icons";
 import type { ServerSummary, ServerTraffic, TrafficSource, TrafficStatsMode } from "../../domain/inventory";
 import { getServerTraffic, resetServerTraffic, updateServerTraffic } from "../../services/inventory";
 import StrictInputNumber from "./StrictInputNumber";

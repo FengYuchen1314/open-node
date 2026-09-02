@@ -79,6 +79,16 @@ def test_release_source_requires_host_approved_https(source):
         host.validate_base_url(source)
 
 
+def test_release_wheel_url_uses_the_panel_without_bypassing_it():
+    filename = "open_node_agent-0.3.0a4-py3-none-any.whl"
+    panel = "https://control.example/api/v1/agents/bootstrap/artifacts"
+    assert host.release_wheel_url(panel, "0.3.0a4", filename) == panel + "/" + filename
+    github = "https://github.com/FengYuchen1314/open-node/releases/download"
+    assert host.release_wheel_url(github, "0.3.0a4", filename) == (
+        github + "/agent-v0.3.0a4/" + filename
+    )
+
+
 def test_reporter_never_reads_agent_configuration_as_root(tmp_path):
     with pytest.raises(ValueError, match="Agent account"):
         deliver(tmp_path / "unreadable.json", {})

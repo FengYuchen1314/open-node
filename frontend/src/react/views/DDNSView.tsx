@@ -1,5 +1,5 @@
-import { EditOutlined, ReloadOutlined, SyncOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Collapse, Descriptions, Flex, Input, Modal, Select, Space, Switch, Table, Tag, Typography } from "antd";
+import { EditOutlined, ReloadOutlined, SyncOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Collapse, Descriptions, Flex, Input, Modal, Select, Space, Switch, Table, Tag, Typography } from "../../ui";
 import { useEffect, useRef, useState } from "react";
 
 import type { DDNSProvider, DDNSServer } from "../../domain/ddns";

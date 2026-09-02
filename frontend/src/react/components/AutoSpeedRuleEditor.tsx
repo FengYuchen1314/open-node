@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { Alert, Button, Card, Col, Empty, Flex, Form, Radio, Row, Typography } from "antd";
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Col, Empty, Flex, Form, Radio, Row, Typography } from "../../ui";
+import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from "../../ui/icons";
 import { newAutoSpeedRule, validAutoSpeedRule, type AutoSpeedRule } from "../../domain/auto-speed";
 import StrictInputNumber from "./StrictInputNumber";
 

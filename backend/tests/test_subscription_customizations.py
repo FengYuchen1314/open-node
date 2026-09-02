@@ -42,7 +42,6 @@ def profile_update(value, **changes):
         "description",
         "node_ids",
         "clash_template_id",
-        "surge_template_id",
         "custom_rules_enabled",
         "selected_custom_rule_ids",
         "proxy_providers_enabled",

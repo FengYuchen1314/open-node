@@ -94,7 +94,7 @@ validation errors:
 Each imported MMWX subscription file becomes a named Open Node subscription profile
 with its original owner, user assignments, sort order, expiry and short codes. A
 subscriber can switch between assigned profiles in `/account`; an administrator can
-edit profile users, Open Node node selection, Clash/Surge templates and enabled state
+edit profile users, Open Node node selection, the plan's global Clash template and enabled state
 from Subscriptions. Profiles remain views over each assigned user's current plan,
 quota, runtime credentials and availability checks. They do not grant a second plan.
 

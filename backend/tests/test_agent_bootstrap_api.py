@@ -162,7 +162,12 @@ def test_issue_exposes_only_a_short_ticket_command_and_status_has_no_secrets(api
     assert set(issued) == {"issued", "command", "license_required"}
     assert issued["license_required"] is False
     assert set(issued["issued"]) == {
-        "server_id", "server_name", "control_url", "transport", "issued_at", "expires_at"
+        "server_id",
+        "server_name",
+        "control_url",
+        "transport",
+        "issued_at",
+        "expires_at",
     }
     assert issued["issued"]["server_id"] == str(api.server.id)
     assert issued["issued"]["control_url"] == CONTROL_URL
@@ -212,12 +217,15 @@ def test_installer_download_is_public_and_exact_bytes_are_checksum_bound_in_comm
 
 
 def test_every_deployment_artifact_is_served_by_the_panel_with_manifest_pins(
-    api, monkeypatch, tmp_path,
+    api,
+    monkeypatch,
+    tmp_path,
 ):
     manifest = releases.release_manifest()
-    artifacts = [
-        manifest["agent"][key] for key in ("wheel", "bootstrap", "build")
-    ] + [manifest["xray"]["archive"], *manifest["mihomo"]["assets"].values()]
+    artifacts = [manifest["agent"][key] for key in ("wheel", "bootstrap", "build")] + [
+        manifest["xray"]["archive"],
+        *manifest["mihomo"]["assets"].values(),
+    ]
     requested = []
 
     def local_artifact(filename):
@@ -244,8 +252,22 @@ def test_every_deployment_artifact_is_served_by_the_panel_with_manifest_pins(
             f'filename="{artifact["filename"]}"'
         )
         assert artifact["path"] == api.public_path + "/artifacts/" + artifact["filename"]
-    assert requested == [artifact["filename"] for artifact in artifacts]
+    agent = manifest["agent"]
+    legacy_helper_path = (
+        api.public_path + "/artifacts/agent-v" + agent["version"] + "/" + agent["wheel"]["filename"]
+    )
+    legacy_helper_response = api.public.get(legacy_helper_path)
+    assert legacy_helper_response.status_code == 200
+    private(legacy_helper_response)
+    assert legacy_helper_response.content == b"fixture"
+    assert requested == [artifact["filename"] for artifact in artifacts] + [
+        agent["wheel"]["filename"]
+    ]
     assert all("github" not in artifact["path"].lower() for artifact in artifacts)
+
+    unavailable = api.public.get(api.public_path + "/artifacts/agent-v0.0.0/not-a-release.whl")
+    assert unavailable.status_code == 503
+    assert unavailable.json() == {"detail": "Unknown Agent release"}
 
 
 def test_unknown_panel_artifact_fails_closed_without_redirecting(api):
@@ -336,7 +358,12 @@ def test_redeem_without_administrator_cookie_returns_the_existing_long_term_cred
     assert "set-cookie" not in response.headers
     configuration = response.json()["configuration"]
     assert set(configuration) == {
-        "server_id", "server_name", "control_url", "agent_token", "transport", "expires_at"
+        "server_id",
+        "server_name",
+        "control_url",
+        "agent_token",
+        "transport",
+        "expires_at",
     }
     assert configuration["agent_token"] == api.server.agent_token
     assert configuration["server_id"] == str(api.server.id)
@@ -390,7 +417,8 @@ def test_redeem_rejects_untrusted_origin_without_consuming_the_ticket(api):
 
 @pytest.mark.parametrize("claimed_first", [False, True])
 def test_actual_registration_blocks_new_or_repeat_redemption_and_updates_public_status(
-    api, claimed_first,
+    api,
+    claimed_first,
 ):
     _, ticket = issue(api)
     nonce = token_urlsafe(32)
@@ -590,10 +618,17 @@ def test_redeem_database_lock_waits_do_not_block_the_async_request_loop(api, mon
     async def request():
         loop_thread = get_ident()
         scope = {
-            "type": "http", "http_version": "1.1", "method": "POST", "scheme": "https",
-            "path": api.public_path + "/redeem", "root_path": "", "query_string": b"",
+            "type": "http",
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "https",
+            "path": api.public_path + "/redeem",
+            "root_path": "",
+            "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
-            "client": ("testclient", 12345), "server": ("testserver", 443), "app": api.app,
+            "client": ("testclient", 12345),
+            "server": ("testserver", 443),
+            "app": api.app,
         }
         # Direct endpoint invocation bypasses the ASGI middleware that normally
         # establishes this operation; keep the real offloaded database calls.
@@ -665,12 +700,27 @@ def test_missing_or_unusable_resources_disable_issue(api, monkeypatch, tmp_path,
 @pytest.mark.parametrize(
     "invalid",
     [
-        "json", "duplicate", "boolean_schema", "extra_field", "missing_build", "path",
-        "hash", "source", "tag", "xray", "extra_artifact_field", "nonfinite", "large", "deep",
+        "json",
+        "duplicate",
+        "boolean_schema",
+        "extra_field",
+        "missing_build",
+        "path",
+        "hash",
+        "source",
+        "tag",
+        "xray",
+        "extra_artifact_field",
+        "nonfinite",
+        "large",
+        "deep",
     ],
 )
 def test_invalid_release_manifest_is_unavailable_before_issuing_commands(
-    api, monkeypatch, tmp_path, invalid,
+    api,
+    monkeypatch,
+    tmp_path,
+    invalid,
 ):
     manifest = releases.release_manifest()
     if invalid == "boolean_schema":

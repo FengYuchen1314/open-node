@@ -113,7 +113,6 @@ class SubscriptionTrafficMode(StrEnum):
 
 class SubscriptionClientFormat(StrEnum):
     CLASH = "clash"
-    SURGE = "surge"
     SING_BOX = "sing-box"
     XRAY = "xray"
     URI_LIST = "uri-list"
@@ -996,7 +995,6 @@ class SubscriptionCatalogNodeEntry(BaseModel):
 class SubscriptionCatalogPlanEntry(BaseModel):
     name: str
     clash_template_name: str | None = None
-    surge_template_name: str | None = None
     description: str = ""
     traffic_limit_gb: float = Field(gt=0)
     cycle_days: int = Field(default=30, gt=0)
@@ -1104,7 +1102,6 @@ class SubscriptionCatalogImportResponse(BaseModel):
 class SubscriptionPlanCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     clash_template_id: UUID | None = None
-    surge_template_id: UUID | None = None
     description: str = Field(default="", max_length=1000)
     traffic_limit_gb: float = Field(gt=0)
     cycle_days: int = Field(default=30, gt=0)

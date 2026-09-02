@@ -1,5 +1,5 @@
-import { ReloadOutlined, SaveOutlined, UserOutlined } from "@ant-design/icons";
-import { Alert, Avatar, Button, Card, Flex, Form, Input, Space, Typography } from "antd";
+import { ReloadOutlined, SaveOutlined, UserOutlined } from "../../ui/icons";
+import { Alert, Avatar, Button, Card, Flex, Form, Input, Space, Typography } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {

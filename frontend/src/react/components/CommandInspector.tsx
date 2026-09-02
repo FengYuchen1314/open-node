@@ -1,4 +1,4 @@
-import { Alert, Collapse, Descriptions, Empty, Flex, Space, Tag, Typography } from "antd";
+import { Alert, Collapse, Descriptions, Empty, Flex, Space, Tag, Typography } from "../../ui";
 import type { AgentCommand, AgentCommandStreamFrame } from "../../domain/inventory";
 import { diagnosticPaths } from "../../domain/diagnostics";
 import DiagnosticResult from "./DiagnosticResult";

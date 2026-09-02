@@ -1,4 +1,4 @@
-import { Descriptions, Space, Tag } from "antd";
+import { Descriptions, Space, Tag } from "../../ui";
 import { resultObject } from "../../domain/diagnostics";
 import { zhStatus } from "../../i18n/zh-CN";
 

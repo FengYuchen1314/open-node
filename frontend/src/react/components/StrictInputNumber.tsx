@@ -1,4 +1,4 @@
-import { InputNumber, type InputNumberProps } from "antd";
+import { InputNumber, type InputNumberProps } from "../../ui";
 
 export interface StrictInputNumberProps extends Omit<InputNumberProps<number>,
   "value" | "onChange" | "onInput" | "min" | "max" | "precision" | "parser" | "formatter"

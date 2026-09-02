@@ -38,7 +38,7 @@ describe("subscription templates", () => {
     const calls: Array<[string, RequestInit | undefined]> = [];
     const fetcher: typeof fetch = async (input, init) => {
       calls.push([String(input), init]);
-      return new Response(JSON.stringify({ clash_template_id: null, surge_template_id: null, enabled: true, revision: "new" }));
+      return new Response(JSON.stringify({ clash_template_id: null, enabled: true, revision: "new" }));
     };
     const settings = await getSubscriptionTemplateSettings(null, true, fetcher);
     await updateSubscriptionTemplateSettings(settings, null, true, fetcher);
@@ -49,7 +49,6 @@ describe("subscription templates", () => {
     expect(new Headers(calls[1][1]?.headers).get("X-CSRF-Token")).toBe("csrf");
     expect(JSON.parse(String(calls[1][1]?.body))).toEqual({
       clash_template_id: null,
-      surge_template_id: null,
       enabled: true,
       expected_revision: "new",
     });

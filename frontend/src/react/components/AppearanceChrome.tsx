@@ -1,4 +1,4 @@
-import { Image, Select } from "antd";
+import { Image, Select } from "../../ui";
 import { useState } from "react";
 import { useAppearance } from "../hooks/useAppearance";
 

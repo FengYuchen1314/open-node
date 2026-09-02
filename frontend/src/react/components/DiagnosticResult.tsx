@@ -1,5 +1,5 @@
-import { CheckCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
-import { Alert, Card, Descriptions, Empty, Flex, Space, Table, Typography } from "antd";
+import { CheckCircleOutlined, ExclamationCircleOutlined } from "../../ui/icons";
+import { Alert, Card, Descriptions, Empty, Flex, Space, Table, Typography } from "../../ui";
 import { resultObject, resultRows } from "../../domain/diagnostics";
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 

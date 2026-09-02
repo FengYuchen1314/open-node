@@ -46,8 +46,10 @@ function getDialog(title: string) {
   return within(dialog as HTMLElement);
 }
 async function select(label: string, option: string) {
-  fireEvent.mouseDown(screen.getByLabelText(label)); await flush();
-  fireEvent.click(screen.getByText(option, { selector: ".ant-select-item-option-content" })); await flush();
+  const control = screen.getByLabelText(label) as HTMLSelectElement;
+  const target = Array.from(control.options).find(item => item.textContent === option);
+  if (!target) throw new Error(`Missing option ${option} for ${label}`);
+  fireEvent.change(control, { target: { value: target.value } }); await flush();
 }
 function editNumber(input: HTMLElement, value: string, finish: "blur" | "Enter") {
   fireEvent.focus(input);

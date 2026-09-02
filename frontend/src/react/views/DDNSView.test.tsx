@@ -43,7 +43,7 @@ describe("DDNSView", () => {
     fireEvent.mouseDown(within(dialog).getByRole("combobox"));
     fireEvent.click(await screen.findByText("主 DNS · Cloudflare"));
     fireEvent.change(within(dialog).getByPlaceholderText("edge.example.com"), { target: { value: " edge.example.com " } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "OK" })); await flush();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确定" })); await flush();
     expect(ddns.saveDDNS).toHaveBeenCalledWith(item, {
       enabled: true, provider_id: provider.id, pull_address: "edge.example.com", pull_address_v6: null,
     });

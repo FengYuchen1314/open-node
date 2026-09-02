@@ -90,17 +90,7 @@ describe("trusted Chinese request feedback", () => {
     ["Hysteria2 obfuscation requires salamander and a password", "Hysteria2 混淆必须使用 salamander，并设置密码。"],
     ["Hysteria2 bandwidth conversion requires integer Mbps", "Hysteria2 带宽转换要求以 Mbps 为单位的整数。"],
     ["REALITY requires VLESS and a public key", "REALITY 必须使用 VLESS，并提供公钥。"],
-    ["Surge Trojan requires TLS", "Surge 的 Trojan 必须使用 TLS。"],
-    ["Surge cannot represent REALITY or custom uTLS fingerprints", "Surge 无法表示 REALITY 或自定义 uTLS 指纹。"],
     ["Custom certificate material requires another client format", "自定义证书内容需要使用其他客户端格式。"],
-    ["Surge VMess does not support this cipher", "Surge 的 VMess 不支持此加密算法。"],
-    ["Surge Snell v6 does not support obfuscation", "Surge 的 Snell v6 不支持混淆。"],
-    ["Surge Snell v4/v5 only supports HTTP obfuscation", "Surge 的 Snell v4/v5 仅支持 HTTP 混淆。"],
-    ["Surge supports only Shadowsocks simple-obfs plugins", "Surge 仅支持 Shadowsocks 的 simple-obfs 插件。"],
-    ["Surge cannot represent these WebSocket headers or early data", "Surge 无法表示这些 WebSocket 头或早期数据。"],
-    ["Surge does not expose an upload bandwidth option", "Surge 不提供上传带宽选项。"],
-    ["Surge Hysteria2 requires a supported obfuscator and password", "Surge 的 Hysteria2 必须使用受支持的混淆器，并设置密码。"],
-    ["Proxy parameters cannot be safely represented in Surge", "这些代理参数无法安全转换为 Surge 格式。"],
   ])("localizes the exact compatibility reason %s without echoing node names", (original, translated) => {
     expect(translateKnownMessage(original)).toBe(translated);
     expect(requestError(original, "请求失败。").message).toBe(translated);

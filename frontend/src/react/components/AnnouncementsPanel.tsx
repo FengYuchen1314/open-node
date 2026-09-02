@@ -1,5 +1,5 @@
-import { DeleteOutlined, ReloadOutlined, SendOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Checkbox, Empty, Form, Input, Popconfirm, Select, Space, Tag, Typography } from "antd";
+import { DeleteOutlined, ReloadOutlined, SendOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Checkbox, Empty, Form, Input, Popconfirm, Select, Space, Tag, Typography } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { safeAnnouncementText, type Announcement, type AnnouncementCreate, type AnnouncementType } from "../../domain/announcements";
 import { authState, type OperatorSession } from "../../services/auth";

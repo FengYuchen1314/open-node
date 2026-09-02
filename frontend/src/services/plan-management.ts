@@ -31,7 +31,6 @@ export function planSettings(plan: SubscriptionPlan): PlanSettings {
     auto_speed_rules: (plan.auto_speed_rules ?? []).map(rule => ({ ...rule })),
     node_device_limits: { ...plan.node_device_limits },
     clash_template_id: plan.clash_template_id ?? null,
-    surge_template_id: plan.surge_template_id ?? null,
   };
 }
 const base = import.meta.env.VITE_API_BASE_URL ?? "";

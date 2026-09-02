@@ -26,11 +26,11 @@ describe("subscriber permissions panel", () => {
     expect(screen.getByText(/关闭功能后，账户 API 也会拒绝访问/)).toBeTruthy();
     expect(updateSubscriberPermissions).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("checkbox", { name: "个人路由节点" }));
-    fireEvent.change(screen.getByLabelText("每位用户的个人模板上限"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("每位用户的外部订阅来源上限"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "保存用户权限" })); await flush();
     expect(updateSubscriberPermissions).toHaveBeenCalledExactlyOnceWith({
       expected_revision: 4, pages: ["templates", "external_subscriptions", "renewals"],
-      template_quota: 3, external_source_quota: 2, license_required: false,
+      template_quota: 0, external_source_quota: 3, license_required: false,
     });
     expect(screen.getByText("用户功能权限已保存。")).toBeTruthy();
   });

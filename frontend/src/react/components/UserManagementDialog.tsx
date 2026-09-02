@@ -1,7 +1,7 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Checkbox, Flex, Form, Input, Modal, Spin, Switch, Tabs, Tag, Typography } from "antd";
-import { ReloadOutlined, SyncOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Checkbox, Flex, Form, Input, Modal, Spin, Switch, Tabs, Tag, Typography } from "../../ui";
+import { ReloadOutlined, SyncOutlined } from "../../ui/icons";
 import type { ManagedNode, SubscriptionAccessResponse } from "../../domain/subscriptions";
 import { validUserLimits } from "../../domain/user-limits";
 import UserLimitEditor from "./UserLimitEditor";

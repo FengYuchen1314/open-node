@@ -1,7 +1,7 @@
 """Client-specific, data-only node exports.
 
 Wire fields follow MMWX's pinned proxyparser/substore v0.1.7 producers. These are
-independent serializers, not aliases to Surge, Clash, or URI output. Unsupported
+independent serializers, not aliases to Clash or URI output. Unsupported
 extensions fail the existing per-node preview; they are never silently stripped.
 Loon/QX/Surfboard and Shadowrocket/Egern are node subscriptions, not translations
 of an arbitrary Clash rule configuration. Stash template handling lives alongside

@@ -1,4 +1,4 @@
-import { ReloadOutlined, SaveOutlined, StopOutlined } from "@ant-design/icons";
+import { ReloadOutlined, SaveOutlined, StopOutlined } from "../../ui/icons";
 import {
   Alert,
   Button,
@@ -14,7 +14,7 @@ import {
   Table,
   Tag,
   Typography,
-} from "antd";
+} from "../../ui";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentCommand } from "../../domain/inventory";

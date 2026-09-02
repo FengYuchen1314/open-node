@@ -14,7 +14,6 @@ class SubscriptionProfileRead(BaseModel):
     description: str = ""
     node_ids: list[UUID] = Field(default_factory=list)
     clash_template_id: UUID | None = None
-    surge_template_id: UUID | None = None
     custom_rules_enabled: bool = False
     selected_custom_rule_ids: list[UUID] = Field(default_factory=list)
     proxy_providers_enabled: bool = False
@@ -45,7 +44,6 @@ class SubscriptionProfileUpdate(BaseModel):
     description: str = Field(default="", max_length=2000)
     node_ids: list[UUID] = Field(default_factory=list, max_length=10000)
     clash_template_id: UUID | None = None
-    surge_template_id: UUID | None = None
     custom_rules_enabled: bool = False
     selected_custom_rule_ids: list[UUID] = Field(default_factory=list, max_length=1000)
     proxy_providers_enabled: bool = False

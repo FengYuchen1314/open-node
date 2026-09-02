@@ -336,7 +336,6 @@ def test_import_maps_packages_profiles_assignments_and_legacy_x_links(tmp_path):
             "description": "Rebuilt in Open Node",
             "node_ids": [node_id],
             "clash_template_id": None,
-            "surge_template_id": None,
             "assigned_usernames": ["alice"],
             "enabled": True,
             "expected_revision": profiles[1]["revision"],

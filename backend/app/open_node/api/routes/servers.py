@@ -41,7 +41,6 @@ from open_node.domain.inventory import (
     AgentSwitchListenPortOperationRequest,
     AgentSwitchXrayModeOperationRequest,
     AgentUpdateMasterURLOperationRequest,
-    AgentUpgradeOperationRequest,
     AgentValidateSiteOperationRequest,
     AgentWarpInstallOperationRequest,
     AgentWarpLicenseOperationRequest,
@@ -2035,10 +2034,25 @@ async def queue_nginx_config_file_write_operation(
 )
 async def queue_agent_upgrade_operation(
     server_id: UUID,
+    payload: AgentLifecycleConfirmationRequest,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
-    payload: AgentUpgradeOperationRequest | None = None,
 ) -> AgentCommandCreateResponse:
+    from open_node.services.agent_bootstrap_release import (
+        AgentBootstrapReleaseUnavailable,
+        release_manifest,
+    )
+
+    try:
+        release = release_manifest()["agent"]
+        body = {
+            "version": release["version"],
+            "sha256": release["wheel"]["sha256"],
+        }
+    except (AgentBootstrapReleaseUnavailable, KeyError, TypeError) as exc:
+        raise HTTPException(
+            status_code=503, detail="Verified Agent release is unavailable"
+        ) from exc
     return await _queue_server_command(
         server_id,
         AgentCommandCreate(
@@ -2046,7 +2060,7 @@ async def queue_agent_upgrade_operation(
             path="/api/child/agent/upgrade-stream",
             stream=True,
             timeout_ms=300_000,
-            body=payload.model_dump() if payload else None,
+            body=body,
         ),
         store,
         connections,
@@ -2060,9 +2074,9 @@ async def queue_agent_upgrade_operation(
 )
 async def queue_agent_uninstall_operation(
     server_id: UUID,
+    payload: AgentLifecycleConfirmationRequest,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
-    payload: AgentLifecycleConfirmationRequest | None = None,
 ) -> AgentCommandCreateResponse:
     return await _queue_server_command(
         server_id,
@@ -2071,7 +2085,7 @@ async def queue_agent_uninstall_operation(
             path="/api/child/agent/uninstall-stream",
             stream=True,
             timeout_ms=300_000,
-            body=payload.model_dump() if payload else None,
+            body=payload.model_dump(),
         ),
         store,
         connections,
@@ -2341,8 +2355,7 @@ async def _queue_server_command(
 def _reject_internal_only_command(payload: AgentCommandCreate) -> None:
     details = {
         "/api/child/egress/apply": (
-            "Managed egress apply is only available through the previewed "
-            "server egress workflow"
+            "Managed egress apply is only available through the previewed server egress workflow"
         ),
         "/api/child/node-cleanup": (
             "Node cleanup is only available through the dedicated node management workflow"

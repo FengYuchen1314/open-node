@@ -1,5 +1,5 @@
-import { CloudDownloadOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Checkbox, Descriptions, Popconfirm, Space, Tag, Typography } from "antd";
+import { CloudDownloadOutlined, ReloadOutlined, SafetyCertificateOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Checkbox, Descriptions, Popconfirm, Space, Tag, Typography } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApplicationUpdateState } from "../../domain/application-updates";
 import { authState, type OperatorSession } from "../../services/auth";

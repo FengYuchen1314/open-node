@@ -1,6 +1,6 @@
 import { zhMessage } from "../../i18n/zh-CN";
 import { useEffect, type ReactNode } from "react";
-import { Card, Flex, Form, Input, Switch, Typography } from "antd";
+import { Card, Flex, Form, Input, Switch, Typography } from "../../ui";
 import { aliasErrors } from "../../domain/plan-node-aliases";
 
 export interface PlanNodeAliasesProps {

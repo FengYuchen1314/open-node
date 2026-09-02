@@ -1,4 +1,4 @@
-import { Col, Form, Input, Row, Typography } from "antd";
+import { Col, Form, Input, Row, Typography } from "../../ui";
 import { useId } from "react";
 import type { AgentReturnRouteTarget } from "../../domain/inventory";
 import StrictInputNumber from "./StrictInputNumber";

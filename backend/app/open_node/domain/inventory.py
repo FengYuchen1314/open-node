@@ -1149,12 +1149,6 @@ class AgentDomainLatencyProbeRequest(BaseModel):
         return value
 
 
-class AgentUpgradeOperationRequest(BaseModel):
-    model_config = {"extra": "forbid"}
-    version: str = Field(max_length=64, pattern=r"^[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$")
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
 class AgentLifecycleConfirmationRequest(BaseModel):
     model_config = {"extra": "forbid"}
     confirm: Literal[True]

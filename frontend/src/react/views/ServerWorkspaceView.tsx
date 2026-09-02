@@ -1,5 +1,5 @@
-import { ApartmentOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Flex, Form, Select, Spin, Tabs, Typography } from "antd";
+import { ApartmentOutlined, ReloadOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Flex, Form, Select, Spin, Tabs, Typography } from "../../ui";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 

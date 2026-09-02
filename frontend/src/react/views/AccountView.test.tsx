@@ -152,7 +152,8 @@ describe("Chinese subscriber portal", () => {
     expect(screen.getByText("English Plan Name")).toBeTruthy();
     expect(screen.getByRole("region", { name: "当前套餐" })).toBeTruthy();
     expect(screen.getByText("下次流量重置")).toBeTruthy();
-    for (const name of ["订阅", "路由", "模板", "订阅自定义", "安全设置"]) expect(screen.getByRole("tab", { name })).toBeTruthy();
+    for (const name of ["订阅", "路由", "订阅自定义", "安全设置"]) expect(screen.getByRole("tab", { name })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "模板" })).toBeNull();
     const url = new URL(input("订阅地址").value);
     expect(url.pathname).toBe("/sub/fixture-token"); expect(url.searchParams.get("format")).toBe("clash");
     fireEvent.click(screen.getByRole("radio", { name: "短链接" })); await flush();

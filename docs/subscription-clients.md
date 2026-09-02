@@ -17,7 +17,7 @@
 
 Shadowrocket 此处导出 **YAML，不是 Base64**，遵循固定版官方转换器的输出行为。需要 URI 或 Base64 节点列表时，应明确选择现有的“URI 列表”或“Base64”格式；它们的协议支持范围与 Shadowrocket YAML 不相同。
 
-除 Stash 外，上表导出均为节点订阅，不携带 Clash/Surge 的分流规则、脚本或完整应用设置。应使用客户端适合该内容类型的导入入口，不能把节点列表直接当成完整配置文件。具体版本是否接受该入口，仍需在目标客户端确认。
+除 Stash 外，上表导出均为节点订阅，不携带 Clash/Mihomo 的分流规则、脚本或完整应用设置。应使用客户端适合该内容类型的导入入口，不能把节点列表直接当成完整配置文件。具体版本是否接受该入口，仍需在目标客户端确认。
 
 各格式支持列表中的协议，也有参数限制。不能据此把任意同名协议配置视为可转换：
 
@@ -38,7 +38,6 @@ Shadowrocket 此处导出 **YAML，不是 Base64**，遵循固定版官方转换
 | --- | --- |
 | `Stash` | `stash`，优先于其中同时出现的 `Clash` |
 | `Shadowrocket` | `shadowrocket` YAML |
-| `Surge` | `surge` |
 | `Loon` | `loon` |
 | `Quantumult%20X`、`Quantumult X`、`QuantumultX` | `quantumult-x` |
 | `Egern` | `egern` |
@@ -51,7 +50,7 @@ Shadowrocket 此处导出 **YAML，不是 Base64**，遵循固定版官方转换
 
 ## Stash 模板范围
 
-Stash 复用当前 Clash 模板选择，包括命名订阅绑定的模板、用户/套餐/系统设置及内置模板，不新增独立的 Stash 模板库。支持范围内的节点组、规则、规则来源和 DNS 配置会保留；Hysteria2 等节点字段按 Stash 的字段名转换。
+Stash 复用当前全局 Clash 模板选择，包括套餐绑定、系统默认及内置模板，不新增独立的 Stash 模板库。支持范围内的节点组、规则、规则来源和 DNS 配置会保留；Hysteria2 等节点字段按 Stash 的字段名转换。
 
 当前模板检查只允许节点、节点组、节点来源、规则、规则来源、DNS、hosts，以及 mode/log-level/ipv6/端口/allow-lan 等基础字段。`tun` 等额外顶层设置会被拒绝。MRs 规则来源或以 `.mrs` 结尾的 URL/路径也会被拒绝；不会靠改后缀猜测另一个下载地址。
 

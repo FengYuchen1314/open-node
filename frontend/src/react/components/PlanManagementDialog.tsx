@@ -1,7 +1,7 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Checkbox, Col, Flex, Form, Input, Modal, Row, Select, Spin, Switch, Tag, Typography } from "antd";
-import { ReloadOutlined, SyncOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Checkbox, Col, Flex, Form, Input, Modal, Row, Select, Spin, Switch, Tag, Typography } from "../../ui";
+import { ReloadOutlined, SyncOutlined } from "../../ui/icons";
 import PlanNodeAliases from "./PlanNodeAliases";
 import AutoSpeedRuleEditor from "./AutoSpeedRuleEditor";
 import StrictInputNumber from "./StrictInputNumber";
@@ -91,9 +91,7 @@ function PlanContent({ id, mode, nodes, onOpenChange, onUpdated }: PlanManagemen
             <Col xs={24} sm={12}><Form.Item label="新分配的重置日（UTC）"><Select aria-label="新分配的重置日（UTC）" value={form.reset_day} disabled={busy || !form.is_reset} options={Array.from({ length: 31 }, (_, i) => ({ label: i + 1, value: i + 1 }))} onChange={reset_day => patch({ reset_day })} /></Form.Item></Col>
           </Row>
           <Form.Item label="新分配的套餐按月重置"><Switch aria-label="新分配的套餐按月重置" checked={form.is_reset} onChange={is_reset => patch({ is_reset })} /></Form.Item>
-          <Row gutter={16}>{(["clash", "surge"] as const).map(format => <Col xs={24} sm={12} key={format}><Form.Item label={format === "clash" ? "Clash 模板" : "Surge 模板"}>
-            <Select aria-label={format === "clash" ? "Clash 模板" : "Surge 模板"} value={form[`${format}_template_id`] ?? undefined} allowClear options={templates.filter(item => item.format === format).map(item => ({ label: item.name, value: item.id }))} onChange={value => patch({ [`${format}_template_id`]: value ?? null })} />
-          </Form.Item></Col>)}</Row>
+          <Form.Item label="订阅模板" extra="留空时使用全局默认模板（全部流量走代理）。"><Select aria-label="订阅模板" value={form.clash_template_id ?? undefined} allowClear options={templates.map(item => ({ label: item.name, value: item.id }))} onChange={value => patch({ clash_template_id: value ?? null })} /></Form.Item>
           <Form.Item label="套餐节点" required help={!form.node_ids.length ? "套餐至少需要一个节点。" : `已选择 ${form.node_ids.length} 个节点。`}><Select aria-label="套餐节点" mode="multiple" optionFilterProp="label" value={form.node_ids} options={nodes.filter(node => !node.removal_id).map(node => ({ label: node.name, value: node.id }))} onChange={selectNodes} /></Form.Item>
           <PlanNodeAliases nodes={form.node_ids.map(nodeId => ({ id: nodeId, name: nodes.find(node => node.id === nodeId)?.name ?? nodeId }))}
             value={form.node_name_overrides} onChange={node_name_overrides => patch({ node_name_overrides })} enabled={form.node_name_override_enabled} onEnabledChange={node_name_override_enabled => patch({ node_name_override_enabled })} onValid={setAliasesValid} disabled={busy}

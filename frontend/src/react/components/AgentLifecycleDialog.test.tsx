@@ -27,21 +27,16 @@ function mount(action: AgentLifecycleAction = "agent_upgrade") {
   return { ...render(<AgentLifecycleDialog {...props} />), props };
 }
 function fillUpgrade() {
-  fireEvent.change(screen.getByLabelText("Agent 版本"), { target: { value: "0.4.0rc1" } });
-  fireEvent.change(screen.getByLabelText("Wheel SHA-256 校验和"), { target: { value: "c".repeat(64) } });
   fireEvent.click(screen.getByRole("checkbox", { name: "确认重启 Agent" }));
 }
 describe("React Agent lifecycle", () => {
-  it("reads host status before enabling a version/digest/confirmation-bound upgrade", async () => {
+  it("reads host status and lets the panel choose the verified upgrade release", async () => {
     mount(); await flush(); expect(queueAgentOperation).toHaveBeenCalledWith("edge", "agent_lifecycle");
     expect((screen.getByRole("button", { name: "升级" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Agent 版本"), { target: { value: "0.4.0rc1" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "确认重启 Agent" }));
-    expect((screen.getByRole("button", { name: "升级" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Wheel SHA-256 校验和"), { target: { value: "c".repeat(64) } });
     vi.mocked(queueAgentOperation).mockResolvedValue({ command: command({ path: "/api/child/agent/upgrade" }), license_required: false });
     fireEvent.click(screen.getByRole("button", { name: "升级" })); await flush();
-    expect(queueAgentOperation).toHaveBeenLastCalledWith("edge", "agent_upgrade", { version: "0.4.0rc1", sha256: "c".repeat(64) });
+    expect(queueAgentOperation).toHaveBeenLastCalledWith("edge", "agent_upgrade", { confirm: true });
     expect(screen.getByText("已完成")).toBeTruthy();
   });
   it("observes an existing pending operation instead of creating a duplicate", async () => {
@@ -57,7 +52,7 @@ describe("React Agent lifecycle", () => {
     ["running job", { ...host, jobs: [{ status: "running" }] }], ["removed", { ...host, installation_status: "removed" }],
   ])("fails closed for a host with %s state", async (_label, next) => {
     vi.mocked(queueAgentOperation).mockResolvedValue({ command: command({ result_body: next }), license_required: false }); mount(); await flush();
-    if (screen.queryByLabelText("Agent 版本")) fillUpgrade();
+    if (screen.queryByRole("checkbox", { name: "确认重启 Agent" })) fillUpgrade();
     const button = screen.queryByRole("button", { name: "升级" });
     expect(!button || (button as HTMLButtonElement).disabled).toBe(true); expect(queueAgentOperation).toHaveBeenCalledTimes(1);
   });

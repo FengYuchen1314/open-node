@@ -1,7 +1,7 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, Input, Modal, Select, Spin, Switch, Tag, Typography } from "antd";
-import { ReloadOutlined, SyncOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, Input, Modal, Select, Spin, Switch, Tag, Typography } from "../../ui";
+import { ReloadOutlined, SyncOutlined } from "../../ui/icons";
 import type { ManagedNode, SubscriptionAccessResponse } from "../../domain/subscriptions";
 import { getSubscriptionAccess, syncSubscriptionAccess } from "../../services/subscriptions";
 import { getNodeManagement, getNodeRemoval, nodeSettings, parseNodeObject, removeNode, retryNodeRemoval, saveNode, type NodeManagementRead, type NodeOperation, type NodeRemoval, type NodeSettings } from "../../services/node-management";

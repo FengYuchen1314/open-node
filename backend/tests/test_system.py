@@ -27,6 +27,6 @@ def test_meta_declares_fastapi_react_ant_design_stack(tmp_path: Path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["stack"]["backend"] == "fastapi"
-    assert payload["stack"]["frontend"] == "react-antd"
+    assert payload["stack"]["frontend"] == "react-semantic-ui"
     assert payload["license_required"] is False
     assert payload["short_links_enabled"] is False

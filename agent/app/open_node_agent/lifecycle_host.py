@@ -160,6 +160,15 @@ def validate_base_url(value):
     return value.rstrip("/")
 
 
+def release_wheel_url(base, version, filename):
+    """Resolve the historical GitHub layout or the panel's flat artifact endpoint."""
+    return (
+        base + "/agent-v" + version + "/" + filename
+        if urlsplit(base).path.rstrip("/").endswith("/releases/download")
+        else base + "/" + filename
+    )
+
+
 def start_helper(deployment):
     verify_helper(deployment)
     service.command("systemctl", "enable", "--now", *unit_names(deployment))
@@ -410,7 +419,9 @@ def download_wheel(deployment, body):
         if info["sha256"] != body["sha256"] or info["version"] != body["version"]:
             raise service.DeploymentError("Cached Agent wheel integrity check failed")
         return target
-    url = base + "/agent-v" + body["version"] + "/" + filename
+    # Fresh installations use the panel's verified same-origin artifact endpoint.
+    # Preserve the historical release layout only for manually enabled helpers.
+    url = release_wheel_url(base, body["version"], filename)
     with tempfile.TemporaryDirectory(prefix=".download-", dir=directory) as temporary:
         archive = Path(temporary) / filename
         for _ in range(5):

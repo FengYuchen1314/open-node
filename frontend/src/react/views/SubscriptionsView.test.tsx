@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
-import zhCN from "antd/locale/zh_CN";
-import { ConfigProvider } from "antd";
+import { ConfigProvider } from "../../ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import SubscriptionsView from "./SubscriptionsView";
@@ -20,7 +19,7 @@ import { listCamouflagePools } from "../../services/camouflage-pools";
 import type { ManagedNode, ManagedNodeCreationMetadataResponse, ProductUser, ProductUserSubscriptionToken, SubscriptionCredential, SubscriptionPlan, SubscriptionTemplatePreset } from "../../domain/subscriptions";
 import type { SubscriptionTemplate } from "../../domain/subscription-templates";
 
-const render = (ui: Parameters<typeof renderAnt>[0], path = "/") => renderAnt(ui, { wrapper: ({ children }) => <MemoryRouter initialEntries={[path]}><ConfigProvider locale={zhCN}>{children}</ConfigProvider></MemoryRouter> });
+const render = (ui: Parameters<typeof renderAnt>[0], path = "/") => renderAnt(ui, { wrapper: ({ children }) => <MemoryRouter initialEntries={[path]}><ConfigProvider>{children}</ConfigProvider></MemoryRouter> });
 
 vi.mock("../../services/subscriptions", async importOriginal => {
   const original = await importOriginal<typeof import("../../services/subscriptions")>();
@@ -60,8 +59,13 @@ const nodePresets: SubscriptionTemplatePreset[] = creationMetadata.profiles.map(
   client_template: { email: `{username}__${option.protocol}` } }));
 const token = (username: string): ProductUserSubscriptionToken => ({ username, token: `${username}-secret`, short_code: "System12", generated_short_code: "System12", custom_short_code: null, revision: "r1", subscription_url: `https://sub.example/${username}-secret`, short_url: `https://sub.example/s/${username}`, short_links_enabled: true, created_at: "", updated_at: "" });
 async function flush() { await act(async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); }); }
-async function selectBob() { fireEvent.mouseDown(screen.getByRole("combobox", { name: "订阅用户" })); fireEvent.click(screen.getByText("Bob", { selector: ".ant-select-item-option-content" })); await flush(); }
-async function selectOption(label: string, option: string) { fireEvent.mouseDown(screen.getByRole("combobox", { name: label })); await flush(); fireEvent.click(screen.getByText(option, { selector: ".ant-select-item-option-content" })); await flush(); }
+async function selectBob() { fireEvent.change(screen.getByRole("combobox", { name: "订阅用户" }), { target: { value: "bob" } }); await flush(); }
+async function selectOption(label: string, option: string) {
+  const select = screen.getByLabelText(label) as HTMLSelectElement;
+  const match = Array.from(select.options).find(item => item.textContent === option);
+  if (!match) throw new Error(`Missing option ${option} for ${label}`);
+  fireEvent.change(select, { target: { value: match.value } }); await flush();
+}
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
@@ -75,7 +79,7 @@ beforeEach(() => {
   vi.mocked(listCamouflagePools).mockResolvedValue({ schema_version: 1, reviewed_at: "2026-09-02", probe_vantage: "192.0.2.1", measurement_notice: "创建前重新检查。", sources: {}, pools: [
     { id: "tokyo-sony", region: "tokyo", region_label: "东京", label: "Sony", server_name: "www.sony.jp", target: "www.sony.jp:443", tls_version: "TLSv1.3", alpn: "h2", cloudflare: false, gfw_verdict: "not_blocked", gfw_last_tested: "2026-09-01" },
   ], license_required: false });
-  vi.mocked(listSubscriptionTemplates).mockResolvedValue({ templates: [], settings: { enabled: true, clash_template_id: null, surge_template_id: null, revision: "" }, can_manage: true, license_required: false });
+  vi.mocked(listSubscriptionTemplates).mockResolvedValue({ templates: [], settings: { enabled: true, clash_template_id: null, revision: "" }, can_manage: true, license_required: false });
   vi.mocked(listSubscriptionProfiles).mockResolvedValue({ profiles: [], license_required: false });
   vi.mocked(listTemporarySubscriptions).mockResolvedValue({ subscriptions: [], license_required: false });
   vi.mocked(listPrivateRoutes).mockResolvedValue({ nodes: [], candidates: [], used_nodes: 0, actions_today: 0, policy: { enabled: false, max_nodes: 2, daily_limit: 5, updated_at: "" }, license_required: false });
@@ -122,10 +126,9 @@ describe("React subscriptions view", { timeout: 40_000 }, () => {
   it("offers only the five managed profiles and binds camouflage SNI to the selected catalog pool", async () => {
     vi.mocked(subscriptions.listSubscriptionTemplatePresets).mockResolvedValue({ presets: nodePresets.map((preset, index) => index ? preset : { ...preset, node_type: "routed" }), license_required: false });
     vi.mocked(subscriptions.createManagedNode).mockResolvedValue({ node, license_required: false }); render(<SubscriptionsView />); await flush(); fireEvent.click(screen.getByRole("tab", { name: "节点" }));
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "协议档案" })); await flush();
-    for (const label of creationMetadata.profiles.map(option => option.label)) expect(screen.getByText(label, { selector: ".ant-select-item-option-content" })).toBeTruthy();
-    expect(screen.queryByText("Trojan", { selector: ".ant-select-item-option-content" })).toBeNull();
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "协议档案" }), { key: "Escape" });
+    const profile = screen.getByRole("combobox", { name: "协议档案" }) as HTMLSelectElement;
+    for (const label of creationMetadata.profiles.map(option => option.label)) expect(Array.from(profile.options).some(item => item.textContent === label)).toBe(true);
+    expect(Array.from(profile.options).some(item => item.textContent === "Trojan")).toBe(false);
     expect(screen.queryByLabelText("类型")).toBeNull();
     expect(screen.getByText("其余参数自动配置")).toBeTruthy();
     await selectOption("伪装池", "东京 · Sony · www.sony.jp");
@@ -140,10 +143,9 @@ describe("React subscriptions view", { timeout: 40_000 }, () => {
     vi.mocked(subscriptions.createManagedNode).mockResolvedValue({ node: { ...node, server_id: "leased", protocol: "mieru", protocol_profile: "mieru" }, license_required: false });
     render(<SubscriptionsView />); await flush(); fireEvent.click(screen.getByRole("tab", { name: "节点" }));
     await selectOption("服务器", "Leased（专线）");
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "协议档案" })); await flush();
-    expect(screen.getByText("Mieru", { selector: ".ant-select-item-option-content" })).toBeTruthy();
-    expect(screen.queryByText("SOCKS5", { selector: ".ant-select-item-option-content" })).toBeNull();
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "协议档案" }), { key: "Escape" });
+    const profile = screen.getByRole("combobox", { name: "协议档案" }) as HTMLSelectElement;
+    expect(Array.from(profile.options).some(item => item.textContent === "Mieru")).toBe(true);
+    expect(Array.from(profile.options).some(item => item.textContent === "SOCKS5")).toBe(false);
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Leased Mieru" } });
     fireEvent.change(screen.getByLabelText("国内入口 IP"), { target: { value: "203.0.113.8" } });
     fireEvent.change(screen.getByLabelText("国内入口端口"), { target: { value: "32000" } });
@@ -308,7 +310,7 @@ describe("focused management workspaces", { timeout: 40_000 }, () => {
   it("creates a plan with two selected nodes and a template id, while rejecting an empty node selection", async () => {
     vi.mocked(subscriptions.listManagedNodes).mockResolvedValue({ nodes: [node, secondNode], license_required: false });
     vi.mocked(listSubscriptionTemplates).mockResolvedValue({ templates: [clashTemplate],
-      settings: { enabled: true, clash_template_id: null, surge_template_id: null, revision: "settings-r1" }, can_manage: true, license_required: false });
+      settings: { enabled: true, clash_template_id: null, revision: "settings-r1" }, can_manage: true, license_required: false });
     vi.mocked(subscriptions.createSubscriptionPlan).mockResolvedValue({ plan: { ...plan, id: "new-plan", name: "Dual node" }, license_required: false });
     render(<PlansView />); await flush();
     expect(screen.getByTestId("subscriptions-view").dataset.workspace).toBe("plans");
@@ -319,11 +321,10 @@ describe("focused management workspaces", { timeout: 40_000 }, () => {
     expect(subscriptions.createSubscriptionPlan).not.toHaveBeenCalled();
     expect(screen.getByText(/至少选择一个节点/)).toBeTruthy();
 
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "节点" })); await flush();
-    fireEvent.click(screen.getByText(/Alpha/, { selector: ".ant-select-item-option-content" })); await flush();
-    fireEvent.click(screen.getByText(/Beta/, { selector: ".ant-select-item-option-content" })); await flush();
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "节点" }), { key: "Escape" });
-    await selectOption("Clash 模板", "main.yaml");
+    const nodeSelect = screen.getByLabelText("节点") as HTMLSelectElement;
+    Array.from(nodeSelect.options).forEach(item => { item.selected = ["a", "b"].includes(item.value); });
+    fireEvent.change(nodeSelect); await flush();
+    await selectOption("订阅模板", "main.yaml");
     fireEvent.click(screen.getByRole("button", { name: "创建套餐" })); await flush();
     expect(subscriptions.createSubscriptionPlan).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       name: "Dual node", node_ids: ["a", "b"], node_multipliers: { a: 1, b: 1 }, clash_template_id: "tpl-clash",

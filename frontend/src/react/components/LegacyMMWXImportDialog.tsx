@@ -1,7 +1,7 @@
 import { zhMessage } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Flex, Form, Modal, Select, Spin, Switch, Tag, Upload } from "antd";
-import { SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { Alert, Button, Flex, Form, Modal, Select, Spin, Switch, Tag, Upload } from "../../ui";
+import { SearchOutlined, UploadOutlined } from "../../ui/icons";
 import type { LegacyMMWXIdentityBundle, LegacyMMWXImportPreview } from "../../domain/legacy-mmwx";
 import type { SubscriptionPlan } from "../../domain/subscriptions";
 import { importLegacyMMWXIdentities, previewLegacyMMWXIdentities } from "../../services/legacy-mmwx";

@@ -17,37 +17,47 @@ def setup(tmp_path):
     return client, created
 
 
-def test_upgrade_queues_explicit_version_and_checksum(setup):
+def test_upgrade_queues_the_panel_verified_release_without_manual_version(setup):
+    from open_node.services.agent_bootstrap_release import release_manifest
+
     client, created = setup
-    body = {"version": "0.2.0", "sha256": "a" * 64}
     response = client.post(
-        f"/api/v1/servers/{created['server']['id']}/operations/agent/upgrade", json=body
+        f"/api/v1/servers/{created['server']['id']}/operations/agent/upgrade",
+        json={"confirm": True},
     )
     assert response.status_code == 201
     command = response.json()["command"]
-    assert command["body"] == body
+    release = release_manifest()["agent"]
+    assert command["body"] == {
+        "version": release["version"],
+        "sha256": release["wheel"]["sha256"],
+    }
     assert command["path"] == "/api/child/agent/upgrade-stream"
     assert command["stream"] and command["timeout_ms"] == 300000
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"version": "latest", "sha256": "a" * 64},
-        {"version": "../outside", "sha256": "a" * 64},
-        {"version": "0.2.0", "sha256": "A" * 64},
-        {"version": "0.2.0"},
-        {"version": "0.2.0", "sha256": "a" * 64, "url": "https://elsewhere.invalid"},
-    ],
-)
-def test_invalid_upgrade_does_not_enter_the_queue(setup, payload):
+def test_upgrade_rejects_manual_release_fields(setup):
     client, created = setup
     base = f"/api/v1/servers/{created['server']['id']}"
-    assert client.post(base + "/operations/agent/upgrade", json=payload).status_code == 422
+    assert (
+        client.post(
+            base + "/operations/agent/upgrade",
+            json={"version": "0.2.0", "sha256": "a" * 64},
+        ).status_code
+        == 422
+    )
     assert not client.get(base + "/commands").json()["commands"]
 
 
-@pytest.mark.parametrize("operation", ["rollback", "uninstall"])
+@pytest.mark.parametrize("operation", ["upgrade", "rollback", "uninstall"])
+def test_lifecycle_writes_require_an_explicit_confirmation(setup, operation):
+    client, created = setup
+    url = f"/api/v1/servers/{created['server']['id']}/operations/agent/{operation}"
+    assert client.post(url).status_code == 422
+    assert client.post(url, json={"confirm": False}).status_code == 422
+
+
+@pytest.mark.parametrize("operation", ["upgrade", "rollback", "uninstall"])
 @pytest.mark.parametrize("invalid", [False, 1, "true"])
 def test_destructive_operations_require_confirmation_when_supplied(setup, operation, invalid):
     client, created = setup

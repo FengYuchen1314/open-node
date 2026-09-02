@@ -1,4 +1,4 @@
-import { Table, Tag } from "antd";
+import { Table, Tag } from "../../ui";
 import type { ReactNode } from "react";
 import { renewalStatusLabels, type RenewalRequest } from "../../domain/renewals";
 

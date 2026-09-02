@@ -380,13 +380,15 @@ Agent Token 也不会因本机脚本自动删除。
 - 管理用户、套餐、节点、到期时间、流量额度、月度周期、带宽和并发连接限制。
 - 独立的 `/account` 用户中心支持密码登录、设备会话、修改密码、TOTP、恢复码、流量查看
   和订阅下载；管理员也可以签发一次性注册邀请。
-- 支持 Clash/Mihomo、Surge、sing-box、Xray、URI、Base64、Loon、Quantumult X、
+- 支持 Clash/Mihomo、sing-box、Xray、URI、Base64、Loon、Quantumult X、
   Shadowrocket、Stash、Surfboard 和 Egern 输出，并按客户端能力过滤不兼容节点。
 - 支持临时订阅链接、下载次数和有效期、IP/CIDR 访问限制、订阅档案以及迁移兼容短码。
-- 支持 Clash/Surge 模板的个人、套餐、系统三级选择，模板导入导出不会重启运行时或轮换
-  订阅凭据。
-- 管理员可以统一控制个人模板、外部来源、私有路由和续费入口，并为模板与外部来源设置
-  每用户数量上限；后端 API 会执行同样的权限和配额检查。
+- Clash/Mihomo 模板由管理员全局维护，每个套餐选择一个模板；新安装自动创建并启用
+  “默认模板”，其默认规则为全局流量走 `Proxy`。模板变更不会重启运行时或轮换订阅凭据。
+- 用户管理页可直接给用户绑定套餐并同步节点权限。管理员还可以统一控制订阅自定义、
+  外部来源、私有路由和续费入口；后端 API 会执行同样的权限和配额检查。
+- 服务器详情内可以直接更新或卸载 Agent。更新包、校验清单和安装文件均由面板转发，
+  操作进度会持续回传；更新、回退和卸载都必须明确勾选确认，避免误操作。
 
 详见 [订阅系统](docs/subscriptions.md)、[客户端格式](docs/subscription-clients.md)、
 [用户账户](docs/subscriber-accounts.md)、[套餐管理](docs/plan-management.md)和
@@ -453,7 +455,7 @@ Agent Token 也不会因本机脚本自动删除。
 | 目录 | 技术与职责 |
 | --- | --- |
 | `backend/` | Python 3.11+、FastAPI、SQLAlchemy；API、认证、任务、证书、备份和订阅逻辑 |
-| `frontend/` | React、官方 Ant Design、Vite、TypeScript；管理端、用户中心和 Probe 页面 |
+| `frontend/` | React、项目内语义组件、Vite、TypeScript；管理端、用户中心和 Probe 页面 |
 | `agent/` | 独立 Linux Agent；持久命令、主机遥测和 Xray/Nginx 生命周期 |
 | `probe-worker/` | Cloudflare Worker 与静态 Probe 资源 |
 | `deploy/` | Docker Compose、Caddy 和手动代理配置 |

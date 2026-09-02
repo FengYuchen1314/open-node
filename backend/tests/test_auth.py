@@ -85,6 +85,7 @@ def test_every_management_route_requires_an_operator(tmp_path: Path):
         ("get", "/api/v1/appearance/assets/{slot}/{digest}"),
         ("get", "/api/v1/agents/bootstrap/manifest"),
         ("get", "/api/v1/agents/bootstrap/installer.py"),
+        ("get", "/api/v1/agents/bootstrap/artifacts/agent-v{version}/{filename}"),
         ("get", "/api/v1/agents/bootstrap/artifacts/{filename}"),
         ("post", "/api/v1/agents/bootstrap/redeem"),
         *{
@@ -171,18 +172,14 @@ def test_administrator_totp_enrollment_login_and_recovery_are_private(tmp_path: 
         "require_totp": False,
     }
 
-    setup = client.post(
-        "/api/v1/auth/totp/setup", json={"password": ADMIN_PASSWORD, "code": ""}
-    )
+    setup = client.post("/api/v1/auth/totp/setup", json={"password": ADMIN_PASSWORD, "code": ""})
     assert setup.status_code == 200
     secret = setup.json()["secret"]
     with app.state.auth.session() as db:
         factor = db.get(AdministratorFactor, 1)
         assert factor.pending_secret and secret not in factor.pending_secret
         assert db.scalar(select(OperatorChallenge)) is None
-    confirmed = client.post(
-        "/api/v1/auth/totp/confirm", json={"code": pyotp.TOTP(secret).now()}
-    )
+    confirmed = client.post("/api/v1/auth/totp/confirm", json={"code": pyotp.TOTP(secret).now()})
     assert confirmed.status_code == 200
     recovery_codes = confirmed.json()["recovery_codes"]
     assert len(recovery_codes) == len(set(recovery_codes)) == 10

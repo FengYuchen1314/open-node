@@ -32,7 +32,7 @@ describe("TemplatesView", () => {
   it("uses the template library as the canonical default and only renders that workspace", () => {
     renderView();
     expect(screen.getByRole("heading", { name: "模板管理" })).toBeTruthy();
-    expect(screen.getByText(/Clash \/ Mihomo YAML 与 Surge 模板/)).toBeTruthy();
+    expect(screen.getByText(/全局维护 Clash \/ Mihomo YAML 模板/)).toBeTruthy();
     expect(screen.getByTestId("template-library")).toBeTruthy();
     expect(screen.queryByTestId("subscription-customizations")).toBeNull();
   });

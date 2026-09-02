@@ -2,7 +2,7 @@
 
 ## 运行入口
 
-Frontend 使用 React 19、TypeScript、Vite、React Router 和 Ant Design。主站入口
+Frontend 使用 React 19、TypeScript、Vite、React Router 和项目内语义组件。主站入口
 [`src/main.tsx`](../../frontend/src/main.tsx) 创建 `BrowserRouter` 并渲染
 [`react/App.tsx`](../../frontend/src/react/App.tsx)。生产构建由 Backend 以同源静态文件
 提供；开发环境可用 `VITE_API_BASE_URL` 指向独立 Backend。
@@ -17,7 +17,8 @@ publicOnly`，构建到独立 `dist-probe`，交给 Probe Worker 托管，不包
 src/domain/             TypeScript 类型、枚举、纯校验和显示模型
 src/services/           HTTP 客户端、严格响应解析、内存共享状态
 src/react/views/        路由页面与页面级请求编排
-src/react/components/   功能对话框、面板、编辑器和复用控件
+src/react/components/   功能对话框、面板和编辑器
+src/ui/                 原生语义元素封装与图标
 src/react/hooks/        会话、品牌、外观和异步生命周期
 src/i18n/               已知服务端消息到中文文案的受控映射
 src/routes.ts           管理端与订阅用户页面的懒加载路由表
@@ -134,7 +135,7 @@ revision，再提交含 expected revision、确认字段或 request ID 的操作
 | [`DashboardView`](../../frontend/src/react/views/DashboardView.tsx) | 服务器清单、Agent 安装、遥测、运行时动作入口 |
 | [`ConfigView`](../../frontend/src/react/views/ConfigView.tsx) | Xray 配置快照、文件工作区、恢复和主机操作 |
 | [`SubscriptionsView`](../../frontend/src/react/views/SubscriptionsView.tsx) | 用户、套餐、节点、凭据和订阅管理 |
-| [`TemplatesView`](../../frontend/src/react/views/TemplatesView.tsx) | Clash/Surge 模板与分配工作区 |
+| [`TemplatesView`](../../frontend/src/react/views/TemplatesView.tsx) | 全局 Clash 模板与套餐分配工作区 |
 | [`CertificatesView`](../../frontend/src/react/views/CertificatesView.tsx) | provider、证书、版本、job 和部署 target |
 | [`BackupsView`](../../frontend/src/react/views/BackupsView.tsx) | 备份授权、job、一次下载、上传、prepare 与恢复 review |
 | [`SystemSettingsView`](../../frontend/src/react/views/SystemSettingsView.tsx) | 管理员资料、安全、品牌、外观、更新与兼容设置 |
@@ -154,7 +155,7 @@ Worker 删除浏览器 Authorization、Cookie、Host 和上游 Set-Cookie，自�
 
 ## 样式、品牌与本地化
 
-全局样式集中在 [`react/styles.css`](../../frontend/src/react/styles.css)。Ant Design theme 由
+全局样式集中在 [`react/styles.css`](../../frontend/src/react/styles.css)。主题变量由
 AppearanceProvider 选择；品牌标题、Logo 和公开外观由 Backend 公共配置加载。外部图片 URL
 与用户提交的品牌内容必须经过对应 service/domain 校验，组件不使用 `dangerouslySetInnerHTML`。
 
@@ -163,8 +164,8 @@ AppearanceProvider 选择；品牌标题、Logo 和公开外观由 Backend 公�
 
 ## 测试与构建
 
-Vitest + Testing Library 覆盖 domain、service、hook、component 和 view。CI 将测试分成三个
-shard，并分别构建管理端与 Probe：
+Vitest + Testing Library 覆盖 domain、service、hook、component 和 view。CI 使用 12 个
+前端分片，并分别构建管理端与 Probe：
 
 ```bash
 npm --prefix frontend test

@@ -1,4 +1,4 @@
-import { Tabs, Typography } from "antd";
+import { Tabs, Typography } from "../../ui";
 import { useSearchParams } from "react-router-dom";
 
 import TemplatesWorkspace from "../components/TemplatesWorkspace";
@@ -24,7 +24,7 @@ export default function TemplatesView() {
   return <main className="page-shell" data-testid="templates-workspace">
     <div>
       <Typography.Title level={2}>模板管理</Typography.Title>
-      <Typography.Paragraph type="secondary">导入、编辑、预览和分配 Clash / Mihomo YAML 与 Surge 模板，并集中管理订阅规则、Proxy Provider 和覆写脚本。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">全局维护 Clash / Mihomo YAML 模板；每个套餐可选择一个模板，未选择时自动使用全局默认模板。</Typography.Paragraph>
     </div>
     <Tabs activeKey={active} onChange={change} destroyOnHidden items={[
       { key: "library", label: "模板库", children: active === "library" ? <TemplatesWorkspace /> : null },

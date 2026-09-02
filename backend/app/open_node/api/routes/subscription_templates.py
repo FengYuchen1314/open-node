@@ -21,7 +21,7 @@ from open_node.domain.subscription_templates import (
 from open_node.domain.subscriptions import SubscriptionClientFormat
 from open_node.services.backup_runtime import protected_sync
 from open_node.services.inventory import InventoryStore, SubscriptionUnavailableError
-from open_node.services.template_rendering import DEFAULT_CLASH, DEFAULT_SURGE, render
+from open_node.services.template_rendering import DEFAULT_CLASH, render
 
 router = APIRouter(
     route_class=BackupAPIRoute, prefix="/subscription-templates", tags=["subscription templates"]
@@ -49,7 +49,7 @@ def list_templates(request: Request, username: Actor):
 
 @router.get("/starter")
 def starter(username: Actor, format: TemplateFormat = "clash"):
-    return {"format": format, "content": DEFAULT_CLASH if format == "clash" else DEFAULT_SURGE}
+    return {"format": format, "content": DEFAULT_CLASH}
 
 
 @router.get("/settings", response_model=TemplateSettings)

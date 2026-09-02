@@ -47,6 +47,6 @@ def meta(request: Request) -> AppMeta:
         short_links_enabled=settings.short_links_enabled,
         stack={
             "backend": "fastapi",
-            "frontend": "react-antd",
+            "frontend": "react-semantic-ui",
         },
     )

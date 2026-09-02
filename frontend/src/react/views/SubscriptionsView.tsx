@@ -1,7 +1,7 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Col, Collapse, Descriptions, Empty, Flex, Form, Input, Modal, Progress, Row, Select, Spin, Switch, Tabs, Tag, Typography } from "antd";
-import { CopyOutlined, DeleteOutlined, EditOutlined, KeyOutlined, LinkOutlined, PlusOutlined, ReloadOutlined, SettingOutlined, SyncOutlined, UserAddOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Col, Collapse, Descriptions, Empty, Flex, Form, Input, Modal, Progress, Row, Select, Spin, Switch, Tabs, Tag, Typography } from "../../ui";
+import { CopyOutlined, DeleteOutlined, EditOutlined, KeyOutlined, LinkOutlined, PlusOutlined, ReloadOutlined, SettingOutlined, SyncOutlined, UserAddOutlined } from "../../ui/icons";
 import SubscriptionAccessPanel from "../components/SubscriptionAccessPanel";
 import PlanManagementDialog from "../components/PlanManagementDialog";
 import PlanNodeAliases from "../components/PlanNodeAliases";
@@ -61,9 +61,9 @@ function profileNodeForm(previous: NodeForm, option: ManagedNodeCreationOption, 
     mieru_port_mapping_mode: mieru ? previous.mieru_port_mapping_mode : "one-to-one", ix_port: mieru && previous.mieru_port_mapping_mode === "manual" ? previous.ix_port : null,
     clientTemplateText: JSON.stringify(preset?.client_template ?? {}, null, 2), configText: JSON.stringify(preset?.config ?? {}, null, 2) };
 }
-const newPlanForm = () => ({ name: "", description: "", traffic_limit_gb: 128, cycle_days: 30, is_reset: true, reset_day: 1, speed_limit_mbps: 0, device_limit: 0, traffic_mode: "twoway" as SubscriptionTrafficMode, node_ids: [] as string[], node_name_overrides: {} as Record<string, string>, auto_speed_rules: [] as AutoSpeedRule[], node_name_override_enabled: false, clash_template_id: null as string | null, surge_template_id: null as string | null });
+const newPlanForm = () => ({ name: "", description: "", traffic_limit_gb: 128, cycle_days: 30, is_reset: true, reset_day: 1, speed_limit_mbps: 0, device_limit: 0, traffic_mode: "twoway" as SubscriptionTrafficMode, node_ids: [] as string[], node_name_overrides: {} as Record<string, string>, auto_speed_rules: [] as AutoSpeedRule[], node_name_override_enabled: false, clash_template_id: null as string | null });
 const profileSourceLabel = (value: string) => ({ create: "创建", import: "导入", upload: "上传", package: "套餐" } as Record<string, string>)[value] ?? zhStatus(value);
-const formatOptions: { label: string; value: SubscriptionClientFormat }[] = [{ label: "Clash YAML", value: "clash" }, { label: "Surge 配置", value: "surge" }, { label: "sing-box JSON", value: "sing-box" }, { label: "Xray JSON", value: "xray" }, { label: "URI 列表", value: "uri-list" }, { label: "Base64 URI", value: "base64" }, ...extraSubscriptionFormats];
+const formatOptions: { label: string; value: SubscriptionClientFormat }[] = [{ label: "Clash YAML", value: "clash" }, { label: "sing-box JSON", value: "sing-box" }, { label: "Xray JSON", value: "xray" }, { label: "URI 列表", value: "uri-list" }, { label: "Base64 URI", value: "base64" }, ...extraSubscriptionFormats];
 const blankToNull = (value: string) => value.trim() || null;
 const splitCsv = (value: string) => value.split(",").map(item => item.trim()).filter(Boolean);
 const readableError = (error: unknown) => error instanceof Error ? error.message : "请求失败。";
@@ -244,6 +244,19 @@ export default function SubscriptionsView({ workspace = "all" }: SubscriptionsVi
       setSuccess(result.commands.length ? `已分配套餐 ${result.plan.name}，并将 ${result.commands.length} 条命令加入队列。` : `已分配套餐 ${result.plan.name}。`); await refresh();
     });
   }
+  function quickAssign(username: string, plan_id: string) {
+    if (!plan_id) return;
+    void perform(`assign:${username}`, async current => {
+      const result = await assignSubscriptionPlan(username, {
+        plan_id, start_date: null, expire_date: null, queue_agent_commands: true,
+        no_restart: false, command_timeout_ms: 60_000,
+      });
+      if (!current()) return;
+      if (selectedUsername.current === username) setLastAssignment(result);
+      setSuccess(`已将 ${username} 绑定到套餐 ${result.plan.name}，节点账号正在自动同步。`);
+      await refresh();
+    });
+  }
   function exportCatalog() { void perform("export", async current => { const result = await exportSubscriptionCatalog(catalogForm.includeCredentials); if (current()) { setCatalogForm(previous => ({ ...previous, catalogText: JSON.stringify(result.catalog, null, 2) })); setSuccess("订阅目录已导出。"); } }); }
   function importCatalog() { void perform("import", async current => {
     const catalog = parseJsonObject(catalogForm.catalogText, "订阅目录") as unknown as SubscriptionCatalogBundle, map = parseJsonObject(catalogForm.serverMapText, "服务器映射");
@@ -378,7 +391,7 @@ export default function SubscriptionsView({ workspace = "all" }: SubscriptionsVi
             <Row gutter={16}>{([{ key: "traffic_limit_gb", label: "流量（GB）", min: 1 }, { key: "cycle_days", label: "周期（天）", min: 1 }, { key: "speed_limit_mbps", label: "速度（Mbps）", min: 0 }, { key: "device_limit", label: "并发连接数", min: 0 }] as const).map(field => <Col xs={24} sm={12} key={field.key}><Form.Item label={field.label}><StrictInputNumber aria-label={field.label} aria-valuemin={field.min} value={planForm[field.key]} onChange={value => patchPlan({ [field.key]: value ?? Number.NaN })} /></Form.Item></Col>)}</Row>
             <Form.Item label="按月重置"><Switch aria-label="按月重置" checked={planForm.is_reset} onChange={is_reset => patchPlan({ is_reset })} /></Form.Item>
             <Form.Item label="重置日"><StrictInputNumber aria-label="重置日" aria-valuemin={1} aria-valuemax={31} disabled={disabled || !planForm.is_reset} value={planForm.reset_day} onChange={value => patchPlan({ reset_day: value ?? Number.NaN })} /></Form.Item>
-            {(["clash", "surge"] as const).map(format => <Form.Item key={format} label={`${format === "clash" ? "Clash" : "Surge"} 模板`}><Select aria-label={`${format === "clash" ? "Clash" : "Surge"} 模板`} allowClear value={planForm[`${format}_template_id`] ?? undefined} options={templates.filter(template => template.format === format).map(template => ({ label: template.name, value: template.id }))} onChange={value => patchPlan({ [`${format}_template_id`]: value ?? null })} /></Form.Item>)}
+            <Form.Item label="订阅模板" extra="留空时使用全局默认模板（全部流量走代理）。"><Select aria-label="订阅模板" allowClear value={planForm.clash_template_id ?? undefined} options={templates.map(template => ({ label: template.name, value: template.id }))} onChange={value => patchPlan({ clash_template_id: value ?? null })} /></Form.Item>
             <Form.Item label="节点" required help={!planForm.node_ids.length ? "至少选择一个节点；可同时选择多个节点。" : `已选择 ${planForm.node_ids.length} 个节点。`}><Select aria-label="节点" mode="multiple" options={nodeOptions} value={planForm.node_ids} onChange={node_ids => patchPlan({ node_ids })} /></Form.Item>
             <PlanNodeAliases nodes={planForm.node_ids.map(id => ({ id, name: nodes.find(node => node.id === id)?.name ?? id }))} value={planForm.node_name_overrides} onChange={node_name_overrides => patchPlan({ node_name_overrides })} enabled={planForm.node_name_override_enabled} onEnabledChange={node_name_override_enabled => patchPlan({ node_name_override_enabled })} onValid={setAliasesValid} disabled={disabled} />
             <AutoSpeedRuleEditor value={planForm.auto_speed_rules} onChange={auto_speed_rules => patchPlan({ auto_speed_rules })} onValid={setRulesValid} disabled={disabled} />
@@ -408,7 +421,7 @@ export default function SubscriptionsView({ workspace = "all" }: SubscriptionsVi
         {showUsers && <Card title="注册" extra={<Button aria-label="管理注册邀请" icon={<UserAddOutlined />} disabled={!plans.length} onClick={() => setInvitationsOpen(true)} />}><Tag>{plans.length} 个套餐</Tag></Card>}
         {showUsers && <Card title="临时链接"><Flex vertical gap="small">{!temporary.length && <Empty description="暂无临时链接。" />}{temporary.map(item => <Card key={item.id} size="small" title={item.label} extra={<Flex gap="small" wrap><Button icon={<CopyOutlined />} aria-label={`复制临时链接 ${item.label}`} onClick={() => void copyTemporary(item)} /><Button icon={<LinkOutlined />} aria-label={`撤销临时链接 ${item.label}`} disabled={disabled} loading={saving === `temporary:${item.id}`} onClick={() => setConfirmTemporary(item)} /><Tag color={item.status === "active" ? "success" : item.status === "expired" ? "warning" : "error"}>{zhStatus(item.status)}</Tag></Flex>}><Typography.Text>{item.username} - 已下载 {item.access_count}/{item.max_access} 次 - 有效期至 {new Date(item.expires_at).toLocaleString("zh-CN")}</Typography.Text></Card>)}</Flex></Card>}
         {showUsers && <Card title="订阅配置"><Flex vertical gap="small">{!profiles.length && <Empty description="暂无已导入的订阅配置。" />}{profiles.map(item => <Card key={item.id} size="small" title={item.name} extra={<Flex gap="small"><Button icon={<SettingOutlined />} aria-label={`编辑订阅配置 ${item.name}`} onClick={() => setProfileDialog(item)} /><Tag color={item.enabled ? "success" : "warning"}>{item.enabled ? "已启用" : "待设置"}</Tag></Flex>}><Typography.Text>{item.assigned_usernames.length} 位用户 - {profileSourceLabel(item.source_type)}</Typography.Text></Card>)}</Flex></Card>}
-        {showUsers && <Card title="用户"><Flex vertical gap="small">{!users.length && <Empty description="暂无用户。" />}{users.map(user => <Card key={user.username} size="small" title={user.display_name || user.username}><Typography.Paragraph type="secondary">{user.username}</Typography.Paragraph><Flex gap="small" wrap>
+        {showUsers && <Card title="用户"><Flex vertical gap="small">{!users.length && <Empty description="暂无用户。" />}{users.map(user => <Card key={user.username} size="small" title={user.display_name || user.username}><Typography.Paragraph type="secondary">{user.username}</Typography.Paragraph>{!user.removal_id && <Form.Item label="绑定套餐" extra="选择后立即生效，并自动同步 Agent 节点账号。"><Select aria-label={`绑定 ${user.username} 的套餐`} placeholder="选择套餐" value={user.current_plan_id ?? undefined} options={planOptions} disabled={disabled || !plans.length} onChange={plan_id => quickAssign(user.username, plan_id)} /></Form.Item>}<Flex gap="small" wrap>
           {!user.removal_id ? <>{shortLinksEnabled && <Button icon={<LinkOutlined />} aria-label={`编辑 ${user.username} 的订阅短码`} onClick={() => setShortCode({ username: user.username, open: true })} />}<Button icon={<SettingOutlined />} aria-label={`编辑 ${user.username} 的订阅 IP 访问限制`} onClick={() => setIpPolicy({ username: user.username, open: true })} /><Button icon={<KeyOutlined />} aria-label={`${user.username} 的登录设置`} onClick={() => setLoginDialog({ username: user.username, open: true })} /><Button icon={<EditOutlined />} aria-label={`编辑用户 ${user.username}`} onClick={() => manageUser(user, "edit")} /><Button danger icon={<DeleteOutlined />} aria-label={`移除用户 ${user.username}`} disabled={user.role === "admin"} onClick={() => manageUser(user, "remove")} /></> : <Button icon={<SyncOutlined />} aria-label={`查看 ${user.username} 的移除状态`} onClick={() => manageUser(user, "remove")} />}
           {user.current_plan_id && !user.removal_id && <Button icon={<LinkOutlined />} aria-label={`取消 ${user.username} 的套餐分配`} onClick={() => setPlanDialog({ id: user.username, mode: "unassign", open: true })} />}
           <Tag color={user.current_plan_id ? "processing" : "default"}>{user.removal_id ? "移除中" : !user.is_active ? "已停用" : formatDate(user.plan_expires_at)}</Tag>

@@ -51,7 +51,7 @@ export interface SubscriptionAccessResponse {
   }>;
   license_required: false;
 }
-export type SubscriptionClientFormat = "clash" | "surge" | "sing-box" | "xray" | "uri-list" | "base64"
+export type SubscriptionClientFormat = "clash" | "sing-box" | "xray" | "uri-list" | "base64"
   | "loon" | "quantumult-x" | "shadowrocket" | "stash" | "surfboard" | "egern";
 
 export const extraSubscriptionFormats: { label: string; value: SubscriptionClientFormat }[] = [
@@ -65,7 +65,7 @@ export const extraSubscriptionFormats: { label: string; value: SubscriptionClien
 
 export function subscriptionFormatHelp(format: SubscriptionClientFormat): string {
   if (format === "stash") return "使用兼容的 Clash 模板和规则；无法转换的模板扩展会明确拒绝，不会改写规则来源或关闭 TLS 校验。";
-  if (extraSubscriptionFormats.some(item => item.value === format)) return "这是客户端专用节点订阅，不转换 Clash / Surge 的分流规则或脚本。仅包含支持的协议与选项；全部节点不兼容时订阅不可用。";
+  if (extraSubscriptionFormats.some(item => item.value === format)) return "这是客户端专用节点订阅，不转换 Clash/Mihomo 的分流规则或脚本。仅包含支持的协议与选项；全部节点不兼容时订阅不可用。";
   return "订阅仅包含所选客户端支持的节点；格式预览可查看不兼容原因。";
 }
 
@@ -174,7 +174,6 @@ export interface SubscriptionPlanCreateRequest {
   device_limit?: number;
   traffic_mode?: SubscriptionTrafficMode;
   clash_template_id?: string | null;
-  surge_template_id?: string | null;
 }
 
 export interface SubscriptionPlan extends SubscriptionPlanCreateRequest {
@@ -425,12 +424,11 @@ export interface SubscriptionCatalogPlanEntry {
   device_limit: number;
   traffic_mode: SubscriptionTrafficMode;
   clash_template_name?: string | null;
-  surge_template_name?: string | null;
 }
 
 export interface SubscriptionCatalogTemplateEntry {
   name: string;
-  format: "clash" | "surge";
+  format: "clash";
   content: string;
   owner_username?: string | null;
   is_public?: boolean;
@@ -438,7 +436,6 @@ export interface SubscriptionCatalogTemplateEntry {
 
 export interface SubscriptionCatalogTemplateSettings {
   clash_template_name?: string | null;
-  surge_template_name?: string | null;
 }
 
 export interface SubscriptionCatalogTemplatePreference extends SubscriptionCatalogTemplateSettings {

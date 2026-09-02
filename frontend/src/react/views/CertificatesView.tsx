@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Checkbox, Col, Collapse, Descriptions, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
-import { CloseOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FolderOpenOutlined, PlusOutlined, ReloadOutlined, StopOutlined, UploadOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Checkbox, Col, Collapse, Descriptions, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "../../ui";
+import { CloseOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FolderOpenOutlined, PlusOutlined, ReloadOutlined, StopOutlined, UploadOutlined } from "../../ui/icons";
 import { listServers } from "../../services/inventory";
 import { certificateRequest, type CertificateCapabilities, type CertificateChallenge, type CertificateDetail, type CertificateVersion, type DNSProvider, type ManagedCertificate, type SelfSignedCertificateInput } from "../../services/certificates";
 import type { ServerSummary } from "../../domain/inventory";

@@ -1,5 +1,5 @@
-import { CopyOutlined, CheckOutlined, ReloadOutlined, LockOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Descriptions, Form, Input, Space, Tag, Typography } from "antd";
+import { CopyOutlined, CheckOutlined, ReloadOutlined, LockOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Descriptions, Form, Input, Space, Tag, Typography } from "../../ui";
 import { useEffect, useRef, useState } from "react";
 import type { AgentIdentityInfo } from "../../domain/inventory";
 import { changePassword } from "../../services/auth";

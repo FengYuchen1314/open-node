@@ -1,5 +1,5 @@
-import { ReloadOutlined, SaveOutlined, UploadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Form, Input, Segmented, Space, Typography, Upload } from "antd";
+import { ReloadOutlined, SaveOutlined, UploadOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Form, Input, Segmented, Space, Typography, Upload } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { defaultAppearance, validImageUrl, type AppearanceSettings, type SiteTheme } from "../../domain/appearance";
 import { authState, type OperatorSession } from "../../services/auth";

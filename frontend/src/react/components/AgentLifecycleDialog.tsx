@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Descriptions, Form, Input, Modal, Space, Spin, Tag, Typography } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Checkbox, Descriptions, Form, Modal, Space, Spin, Tag, Typography } from "../../ui";
+import { ReloadOutlined } from "../../ui/icons";
 import type { AgentCommand } from "../../domain/inventory";
 import { listServerCommands, queueAgentOperation } from "../../services/inventory";
 import { zhMessage } from "../../i18n/zh-CN";
@@ -32,8 +32,6 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
   const [phase, setPhaseValue] = useState<Phase>("loading");
   const [operation, setOperation] = useState<AgentCommand | null>(null);
   const [error, setError] = useState("");
-  const [version, setVersion] = useState("");
-  const [checksum, setChecksum] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const control = useRef({ generation: 0, active: false, submitting: false, phase: "loading" as Phase,
@@ -90,7 +88,7 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
     if (!control.current.active || !serverId) return;
     const target = serverId;
     setPhase("loading"); setError(""); setHost(null); setOperation(null);
-    setConfirmed(false); setVersion(""); setChecksum(""); setSubmitting(false);
+    setConfirmed(false); setSubmitting(false);
     control.current.submitting = false;
     try {
       const rows = await listServerCommands(target);
@@ -120,17 +118,14 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
   }
   const valid = Boolean(confirmed && host?.enabled && host.installation_status === "installed"
     && !host.recovery_required && !host.jobs?.some(job => ["queued", "running"].includes(job.status))
-    && (action !== "agent_rollback" || host.previous)
-    && (action !== "agent_upgrade" || (/^[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$/.test(version.trim())
-      && /^[0-9a-f]{64}$/.test(checksum.trim()))));
+    && (action !== "agent_rollback" || host.previous));
   async function submit() {
     if (!valid || control.current.submitting || control.current.phase !== "ready" || !control.current.active) return;
     const run = control.current.generation;
     const target = serverId;
     control.current.submitting = true; setSubmitting(true); setError("");
     try {
-      const payload = action === "agent_upgrade" ? { version: version.trim(), sha256: checksum.trim() } : { confirm: true as const };
-      const queued = await queueAgentOperation(target, action, payload);
+      const queued = await queueAgentOperation(target, action, { confirm: true as const });
       if (!current(run)) return;
       updated.current?.();
       setOperation(queued.command); setPhase("working");
@@ -149,7 +144,7 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
   useLayoutEffect(() => {
     control.current.active = open && Boolean(serverId);
     if (control.current.active) void loadStatus();
-    else { invalidate(); setHost(null); setOperation(null); setVersion(""); setChecksum(""); setConfirmed(false); }
+    else { invalidate(); setHost(null); setOperation(null); setConfirmed(false); }
     return () => { control.current.active = false; invalidate(); };
   }, [open, serverId, action]);
 
@@ -177,12 +172,7 @@ export default function AgentLifecycleDialog({ open, onOpenChange, serverId, ser
       ]} />}
       {host?.recovery_required && <Alert type="warning" showIcon title="需要在服务器本机恢复" />}
       {phase === "ready" && <Form id="agent-lifecycle-form" layout="vertical" preserve={false} onFinish={() => void submit()}>
-        {action === "agent_upgrade" && <>
-          <Form.Item label="Agent 版本"><Input aria-label="Agent 版本" value={version} maxLength={64}
-            disabled={submitting} onChange={event => setVersion(event.target.value)} /></Form.Item>
-          <Form.Item label="Wheel SHA-256 校验和"><Input.TextArea aria-label="Wheel SHA-256 校验和" value={checksum} maxLength={64}
-            rows={2} disabled={submitting} onChange={event => setChecksum(event.target.value)} style={{ fontFamily: "monospace" }} /></Form.Item>
-        </>}
+        {action === "agent_upgrade" && <Alert type="info" showIcon title="面板会自动使用当前已验证的 Agent 版本，无需填写版本号或校验和。" />}
         <Checkbox checked={confirmed} disabled={submitting} onChange={event => setConfirmed(event.target.checked)}>
           {action === "agent_uninstall" ? "确认卸载 Agent" : "确认重启 Agent"}</Checkbox>
       </Form>}

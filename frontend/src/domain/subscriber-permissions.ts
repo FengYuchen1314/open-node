@@ -4,7 +4,7 @@ export const subscriberFeatures = [
 export type SubscriberFeature = typeof subscriberFeatures[number];
 
 export const subscriberFeatureLabels: Record<SubscriberFeature, string> = {
-  templates: "个人订阅模板",
+  templates: "订阅自定义",
   external_subscriptions: "外部订阅来源",
   private_routes: "个人路由节点",
   renewals: "续费申请",

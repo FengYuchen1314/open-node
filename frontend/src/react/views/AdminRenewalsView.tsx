@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, Input, Modal, Select, Space, Spin, Typography } from "antd";
+import { Alert, Button, Card, Checkbox, Descriptions, Flex, Form, Input, Modal, Select, Space, Spin, Typography } from "../../ui";
 import { useEffect, useRef, useState } from "react";
 import { renewalStatusLabels, renewalStatuses, validRenewalPassphrase, type RenewalRequest, type RenewalsPage, type RenewalStatus } from "../../domain/renewals";
 import { listRenewals, renewalErrorMessage, reviewRenewal } from "../../services/renewals";

@@ -484,7 +484,7 @@ class LegacyMMWXMigration:
                     profile.name = entry.name
                     profile.description = entry.description
                     profile.node_ids = []
-                    profile.clash_template_id = profile.surge_template_id = None
+                    profile.clash_template_id = None
                     profile.enabled = not entry.raw_output
                     profile.sort_order = entry.sort_order
                     profile.source_type = entry.source_type

@@ -26,15 +26,20 @@ Removing the source subscriber deletes its temporary links.
 
 ## Public Rendering
 
-The public endpoint is `/t/{code}`. It supports the same six formats as a normal
+The public endpoint is `/t/{code}`. It supports the same eleven formats as a normal
 subscription:
 
 - `clash` (default)
-- `surge`
 - `sing-box`
 - `xray`
 - `uri-list`
 - `base64`
+- `loon`
+- `quantumult-x`
+- `shadowrocket`
+- `stash`
+- `surfboard`
+- `egern`
 
 Use `?format=xray&node_id={managed-node-uuid}` to select one allowed node. The
 selected node must be in both the share and the subscriber's current plan.

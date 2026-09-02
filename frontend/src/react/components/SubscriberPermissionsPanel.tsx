@@ -1,5 +1,5 @@
-import { ReloadOutlined, SaveOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Checkbox, Form, InputNumber, Space, Typography } from "antd";
+import { ReloadOutlined, SaveOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Checkbox, Form, InputNumber, Space, Typography } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { subscriberFeatureLabels, subscriberFeatures, type SubscriberFeature, type SubscriberPermissionsSettings } from "../../domain/subscriber-permissions";
 import { authState, type OperatorSession } from "../../services/auth";
@@ -26,8 +26,7 @@ export default function SubscriberPermissionsPanel({ operator }: { operator: Ope
     finally { if (current(request)) { busyRef.current = false; setBusy(""); } }
   }, [apply, current, scope]);
   useEffect(() => { busyRef.current = false; void reload(); return () => scope.invalidate(); }, [reload, scope]);
-  const dirty = Boolean(saved && (saved.template_quota !== draft.template_quota
-    || saved.external_source_quota !== draft.external_source_quota
+  const dirty = Boolean(saved && (saved.external_source_quota !== draft.external_source_quota
     || saved.pages.join("\0") !== draft.pages.join("\0")));
   async function save() {
     if (!saved || !dirty || busyRef.current) return;
@@ -52,7 +51,6 @@ export default function SubscriberPermissionsPanel({ operator }: { operator: Ope
     {notice && <Alert className="form-alert" type={notice.type} showIcon title={notice.text} />}
     <Form layout="vertical" className="form-narrow" disabled={Boolean(busy) || !saved} onFinish={() => void save()}>
       <Form.Item label="开放的账户功能"><Checkbox.Group aria-label="开放的账户功能" value={draft.pages} options={subscriberFeatures.map(value => ({ value, label: subscriberFeatureLabels[value] }))} onChange={values => setDraft(previous => ({ ...previous, pages: subscriberFeatures.filter(value => values.includes(value)) }))} /></Form.Item>
-      <Form.Item label="每位用户的个人模板上限"><InputNumber aria-label="每位用户的个人模板上限" min={0} max={1000} precision={0} value={draft.template_quota} onChange={value => setDraft(previous => ({ ...previous, template_quota: value ?? 0 }))} /></Form.Item>
       <Form.Item label="每位用户的外部订阅来源上限"><InputNumber aria-label="每位用户的外部订阅来源上限" min={0} max={1000} precision={0} value={draft.external_source_quota} onChange={value => setDraft(previous => ({ ...previous, external_source_quota: value ?? 0 }))} /></Form.Item>
       <Space wrap><Button type="primary" htmlType="submit" icon={<SaveOutlined aria-hidden />} loading={busy === "save"} disabled={!dirty}>保存用户权限</Button><Button icon={<ReloadOutlined aria-hidden />} loading={busy === "read"} disabled={Boolean(busy)} onClick={() => void reload()}>重新读取用户权限</Button></Space>
     </Form>

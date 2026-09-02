@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-TemplateFormat = Literal["clash", "surge"]
+TemplateFormat = Literal["clash"]
 MAX_TEMPLATE_BYTES = 2 * 1024 * 1024
 
 
@@ -39,9 +39,7 @@ class TemplateWrite(TemplateDocument):
 
     @model_validator(mode="after")
     def extension(self):
-        if not self.name.lower().endswith(
-            (".yaml", ".yml") if self.format == "clash" else (".conf",)
-        ):
+        if not self.name.lower().endswith((".yaml", ".yml")):
             raise ValueError("Template filename extension must match its format")
         return self
 
@@ -75,7 +73,6 @@ class TemplateRead(BaseModel):
 class TemplateSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     clash_template_id: UUID | None = None
-    surge_template_id: UUID | None = None
 
 
 class TemplateSettings(TemplateSelection):
@@ -108,7 +105,6 @@ class TemplatePreviewRead(BaseModel):
 
 class CatalogTemplateSettings(BaseModel):
     clash_template_name: str | None = None
-    surge_template_name: str | None = None
 
 
 class CatalogTemplatePreference(CatalogTemplateSettings):

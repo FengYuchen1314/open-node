@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from "react";
 import { act, cleanup, fireEvent, render as renderAnt, screen } from "@testing-library/react";
-import zhCN from "antd/locale/zh_CN";
-import { ConfigProvider } from "antd";
+import { ConfigProvider } from "../../ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AutoSpeedRuleEditor from "./AutoSpeedRuleEditor";
 import PlanNodeAliases from "./PlanNodeAliases";
@@ -12,7 +11,7 @@ import { newAutoSpeedRule, type AutoSpeedRule } from "../../domain/auto-speed";
 import type { UserLimitOverrides, UserLimitsRead } from "../../domain/user-limits";
 import type { ManagedNode } from "../../domain/subscriptions";
 
-const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider locale={zhCN}>{children}</ConfigProvider> });
+const render = (ui: Parameters<typeof renderAnt>[0]) => renderAnt(ui, { wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider> });
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

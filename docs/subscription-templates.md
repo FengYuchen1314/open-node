@@ -1,79 +1,51 @@
-# Subscription Templates
+# 全局订阅模板
 
-Open Node stores custom Clash/Mihomo YAML and Surge profiles without a license,
-activation key, or remote template service. Administrators use `/templates`;
-subscribers use the `Templates` tab in `/account` when an administrator enables
-personal editing.
+Open Node 只维护 Clash/Mihomo YAML 模板。模板属于全局资源，由管理员在“模板管理”中
+统一创建、预览、导入、导出和删除；普通用户不创建私人模板。模板操作不需要许可证，
+也不会重启 Agent/Xray、重新签发节点凭据或更换订阅链接。
 
-## Selection
+## 默认模板与选择
 
-Each format is resolved independently in this order:
+数据库首次初始化时自动创建“默认模板”，并将其设置为系统默认。模板的默认策略组是
+`Proxy`，默认规则是 `MATCH,Proxy`，因此未做额外配置时全部流量经代理，不会意外直连。
 
-1. The subscriber's enabled, owned default.
-2. The assigned plan's template.
-3. The system default.
-4. The built-in minimal template.
+每个套餐可以选择一个全局模板。生成 Clash 或 Stash 订阅时按以下顺序解析：
 
-Changing a template or binding does not provision credentials, issue Agent
-commands, or restart Xray. Subscription credentials, tokens and traffic remain
-unchanged. Plan edits that only change template IDs are metadata-only.
+1. 套餐绑定的模板；
+2. 系统默认模板；
+3. 代码内置的安全最小模板。
 
-Clash templates replace `proxies` with compatible assigned nodes. The
-`__PROXY_NODES__` member expands in place and `__PROXY_PROVIDERS__` adds the
-declared providers to `use`; native include/filter options remain client-side.
-Group order, rules and provider definitions are preserved. Unknown members,
-providers, cycles and generated-name collisions fail before download.
+用户绑定套餐后会自然使用该套餐的模板，不存在用户级模板覆盖。仅修改模板绑定属于元数据
+更新，不触发服务器命令。
 
-Surge templates replace only non-comment entries in `[Proxy]`. Other sections,
-comments, scripts and remote rule/provider declarations are preserved as text;
-the backend does not execute scripts or fetch template URLs. `[Proxy Group]`
-cycles and explicit missing members fail before export. Generated values are
-quoted and node names are normalized to prevent profile injection.
+## 渲染规则
 
-## Ownership And Safety
+Clash 模板的 `proxies` 会替换为当前用户可用且与客户端兼容的节点。
+`__PROXY_NODES__` 在原位置展开；`__PROXY_PROVIDERS__` 把已声明 Provider 加入策略组。
+组顺序、规则、DNS 和 Provider 定义保持不变。缺失成员、循环引用、未知 Provider、重复键、
+生成名称冲突或无法安全解析的 YAML 会在下载前拒绝，不产生直连兜底配置。
 
-The library is limited to 200 files, 2 MiB per file and 16 MiB per catalog
-payload. Filenames are case-insensitively unique and cannot contain paths or
-control characters. YAML uses a safe loader with duplicate-key, alias-expansion,
-cycle and depth limits. Rendered subscriptions are limited to 8 MiB.
+Stash 复用同一套全局 Clash 模板，但会先检查 Stash 能表达的字段；不兼容时明确返回错误，
+不会静默丢弃规则。
 
-Administrators can own, publish and bind any template. Subscribers can read
-public templates but can edit only their own private files after permission is
-enabled. Personal defaults must reference owned templates, not public files
-owned by somebody else. User removal deletes the preference and leaves owned
-files private with no owner; it never turns a private file public.
+## 安全与并发
 
-Writes and removals use content/binding revisions. Assigned files cannot be
-removed until plan and default references are cleared. Catalog export stores
-filenames rather than database IDs and import remaps plan/default references in
-one transaction. Legacy catalogs that omit all template fields preserve the
-existing library and bindings.
+模板库最多 200 个文件，单文件最多 2 MiB，目录导入/导出最多 16 MiB，渲染结果最多
+8 MiB。文件名不区分大小写且不能包含路径或控制字符。YAML 使用安全加载器，并限制重复键、
+别名展开、递归、深度和节点数量。
+
+写入、设置默认和删除使用 revision 乐观锁。被套餐或系统默认引用的模板不能删除；必须先
+解除引用。目录导入按文件名重新映射 ID，并在一个事务中更新模板、套餐绑定和默认绑定；
+失败时整体回滚。
 
 ## API
 
-Administrator routes are under `/api/v1/subscription-templates`; subscriber
-routes mirror them under `/api/v1/account/subscription-templates`:
+管理员接口位于 `/api/v1/subscription-templates`：
 
-- `GET /`, `GET /{id}`, `GET /{id}/file`: list, inspect and download.
-- `GET /starter?format=clash|surge`: obtain the built-in starter.
-- `POST /`, `PUT /{id}`, `POST /{id}/remove`: guarded file lifecycle.
-- `POST /preview`: render a draft without saving it.
-- `GET /settings`, `PUT /settings`: system or personal defaults and permission.
+- `GET /`、`GET /{id}`、`GET /{id}/file`：查看和下载；
+- `GET /starter?format=clash`：取得内置起始模板；
+- `POST /`、`PUT /{id}`、`POST /{id}/remove`：带 revision 的文件生命周期；
+- `POST /preview`：不保存地预览渲染结果；
+- `GET /settings`、`PUT /settings`：读取和设置系统默认模板。
 
-Administrator settings accept `?username=...`; subscriber settings are always
-scoped to the authenticated account. All responses are `no-store`, downloads
-require the appropriate session, and subscriber writes require CSRF.
-
-## Verification Boundary
-
-The VPS smoke runs custom Clash output in pinned Mihomo and forwards real TCP
-and UDP traffic for every compatible fixture node. It also generates a custom
-Surge subscription from the real public endpoint, checks the exact compatible
-node set, parses sections/groups independently, and exercises both browser
-workspaces at 1440, 390 and 320 pixels.
-
-Surge is proprietary macOS/iOS software and is not available on the Linux VPS.
-The conversion follows the published Surge policy manuals and receives strict
-server-side tests, but an actual Surge application import remains a separate
-Apple-platform release gate. See [subscription formats](subscriptions.md) and
-[VPS testing](testing.md#subscription-client-smoke).
+账户侧不挂载模板写接口。所有模板响应禁止缓存，下载需要管理员会话，写操作还需要 CSRF。

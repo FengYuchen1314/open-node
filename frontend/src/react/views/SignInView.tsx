@@ -1,5 +1,5 @@
-import { LoginOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Checkbox, Flex, Form, Input, Space, Typography } from "antd";
+import { LoginOutlined, ReloadOutlined, SafetyCertificateOutlined } from "../../ui/icons";
+import { Alert, Button, Card, Checkbox, Flex, Form, Input, Space, Typography } from "../../ui";
 import QRCode from "qrcode";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";

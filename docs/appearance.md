@@ -7,9 +7,9 @@ PRO 权限。它只改变主站管理端、管理员登录页和用户中心，�
 
 ## 主题
 
-站点默认主题支持“浅色”“深色”和“跟随系统”，使用官方 Ant Design 的标准主题
-算法。原版 MMWX 的 `flat`、`pixel`、`anime` 皮肤没有照搬，因为本项目的前端要求是
-标准 Ant Design。
+站点默认主题支持“浅色”“深色”和“跟随系统”，由项目内语义组件和 CSS 变量统一实现。
+原版 MMWX 的 `flat`、`pixel`、`anime` 皮肤没有照搬，以保持操作密度、响应式布局和
+可访问行为一致。
 
 访客和已登录用户都可以在页头或登录页选择：
 
@@ -73,4 +73,4 @@ SQLite 数据库中，因此会进入正常的一致数据库快照；不要用�
 [branding.go](https://github.com/tajiaoyezi/miaomiaowuX/blob/c12ce653bc07fe30426b7dfcb85076974b7be0e0/internal/handler/branding.go)、
 [system_settings.go](https://github.com/tajiaoyezi/miaomiaowuX/blob/c12ce653bc07fe30426b7dfcb85076974b7be0e0/internal/handler/system_settings.go)
 和[系统设置文档](https://miaomiaowux.com/docs/system-settings/)。SQLite 二进制保存、
-严格图片检查、版本冲突处理和标准 Ant Design 主题是 Open Node 的实现差异。
+严格图片检查、版本冲突处理和项目内语义主题是 Open Node 的实现差异。

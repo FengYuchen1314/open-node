@@ -1,7 +1,7 @@
 import { zhMessage } from "../../i18n/zh-CN";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Flex, Form, Input, Modal, Spin, Tag, Typography } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Checkbox, Flex, Form, Input, Modal, Spin, Tag, Typography } from "../../ui";
+import { ReloadOutlined } from "../../ui/icons";
 import { subscriberAccount, type SubscriberAccount } from "../../services/subscriber-auth";
 
 export interface UserLoginDialogProps { username: string; open: boolean; onOpenChange: (open: boolean) => void }

@@ -1,5 +1,5 @@
-import { UploadOutlined } from "@ant-design/icons";
-import { Alert, Button, Checkbox, Form, Input, Modal, Radio, Space, Typography, Upload } from "antd";
+import { UploadOutlined } from "../../ui/icons";
+import { Alert, Button, Checkbox, Form, Input, Modal, Radio, Space, Typography, Upload } from "../../ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RestoreArchiveFormat } from "../../domain/backups";
 import { completeInitialSetup, getInitialSetupStatus, prepareInitialRestore, setupErrorMessage, uploadInitialRestore, validateSetupInput, type InitialSetupStatus } from "../../services/initial-setup";

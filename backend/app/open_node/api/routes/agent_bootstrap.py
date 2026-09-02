@@ -153,8 +153,7 @@ def bootstrap_installer() -> Response:
     )
 
 
-@public_router.get("/artifacts/{filename}", response_class=FileResponse)
-async def bootstrap_artifact(filename: str, request: Request) -> FileResponse:
+async def _bootstrap_artifact(filename: str, request: Request) -> FileResponse:
     try:
         path, artifact = await run_in_threadpool(
             request.app.state.agent_bootstrap_artifacts.get, filename
@@ -171,6 +170,21 @@ async def bootstrap_artifact(filename: str, request: Request) -> FileResponse:
             "Content-Length": str(artifact.size),
         },
     )
+
+
+@public_router.get("/artifacts/agent-v{version}/{filename}", response_class=FileResponse)
+async def versioned_bootstrap_artifact(
+    version: str, filename: str, request: Request
+) -> FileResponse:
+    manifest = invoke(release_manifest)
+    if version != manifest["agent"]["version"]:
+        raise HTTPException(503, "Unknown Agent release")
+    return await _bootstrap_artifact(filename, request)
+
+
+@public_router.get("/artifacts/{filename}", response_class=FileResponse)
+async def bootstrap_artifact(filename: str, request: Request) -> FileResponse:
+    return await _bootstrap_artifact(filename, request)
 
 
 @public_router.post("/redeem")
