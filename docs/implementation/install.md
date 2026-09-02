@@ -20,7 +20,7 @@
 | `install` | 无 manifest 时必须是空的新项目；有 manifest 时按原身份 reinstall | 健康运行并完成公网/初始化配置 |
 | `update` | 已安装、无 recovery marker、目标 revision 与可达 Git ref 一致 | stopped backup、候选镜像、健康提交或明确恢复状态 |
 | `status` | manifest/env/checkout/卷身份有效 | 输出 Compose、健康、公网网关和恢复标记 |
-| `setup` | 服务健康且尚未初始化 | 签发一次性浏览器初始化凭证 |
+| `setup` | 服务健康且尚未初始化 | 仅为浏览器备份恢复签发一次性凭证 |
 | `create-admin` | 服务健康、交互式终端或私有密码文件 | 调用容器内管理员 CLI |
 | `uninstall` | 完整安装身份 | 删除运行资源，保留数据/配置/源码/备份 |
 | `purge` | 只能由交互式 `uninstall.sh` 设置固定确认变量 | 删除项目数据卷与受管目录 |
@@ -199,9 +199,10 @@ container labels/config hash、public IP/hostname/端口和上游。`wait_for_pu
 
 ## 管理员初始化
 
-fresh 默认调用容器内 `open-node-admin setup --json --if-unconfigured`，打印 30 分钟、一次性
-浏览器凭证。`setup` 只能在尚无管理员时重新签发。`create-admin` 支持 `/dev/tty` 交互或
-root-owned mode-0600 密码文件，密码不会作为命令行参数传入容器。
+fresh 默认只显示可信初始化地址，浏览器直接创建首个管理员，不签发普通初始化凭证。
+管理员创建前属于先到先得边界，安装器会提示立即初始化。`setup` 只为尚无管理员时的
+浏览器备份恢复签发一次性凭证。`create-admin` 支持 `/dev/tty` 交互或 root-owned
+mode-0600 密码文件，密码不会作为命令行参数传入容器。
 
 已有管理员时初始化命令拒绝覆盖；修改/恢复管理员身份使用 Backend 自己的安全协议，不由
 安装器直接改数据库。

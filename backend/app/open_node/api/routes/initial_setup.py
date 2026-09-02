@@ -1,4 +1,4 @@
-"""Anonymous first-run endpoints protected by a locally issued, one-use credential."""
+"""Anonymous first-run creation and credential-protected initial restore."""
 
 import json
 import re

@@ -9,7 +9,7 @@ export default function InitialSetupPanel() {
   const scope = useAsyncScope(), busyRef = useRef(false);
   const [status, setStatus] = useState<InitialSetupStatus | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
-  const [token, setToken] = useState(""), [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState(""), [confirmation, setConfirmation] = useState("");
   const [site, setSite] = useState("Open Node"), [brand, setBrand] = useState("Open Node");
   const [email, setEmail] = useState(""), [nickname, setNickname] = useState(""), [avatarUrl, setAvatarUrl] = useState("");
@@ -39,14 +39,14 @@ export default function InitialSetupPanel() {
     if (password !== confirmation) { setError("两次输入的密码不一致。"); return; }
     let payload;
     try {
-      payload = validateSetupInput({ setup_token: token, username, password, site_title: site, brand_title: brand,
+      payload = validateSetupInput({ username, password, site_title: site, brand_title: brand,
         email, nickname, avatar_url: avatarUrl, confirm_new_install: accepted });
     } catch (cause) { setError(setupErrorMessage(cause)); return; }
     const generation = scope.begin(); busyRef.current = true; setBusy(true); setError("");
-    setToken(""); setPassword(""); setConfirmation(""); setAccepted(false);
+    setPassword(""); setConfirmation(""); setAccepted(false);
     try {
       await completeInitialSetup(payload);
-      if (scope.isCurrent(generation)) setStatus({ configured: true, available: false, expires_at: null, token_required: true });
+      if (scope.isCurrent(generation)) setStatus({ configured: true, available: false });
     } catch (cause) {
       if (!scope.isCurrent(generation)) return;
       setError(setupErrorMessage(cause)); setStatus(null);
@@ -100,13 +100,12 @@ export default function InitialSetupPanel() {
   </Space>;
   return <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
     <Alert type="info" showIcon title="尚未配置管理员账户。"
-      description="一键安装默认提供 https://公网IP:58090 可信 HTTPS。安装全部完成后，终端会直接显示有效期 30 分钟的一次性初始化凭证。" />
+      description="一键安装默认提供 https://公网IP:58090 可信 HTTPS。打开面板即可直接创建首个管理员账户，无需初始化凭证；完成前首位访问者可以成为管理员，请立即初始化。" />
     {error && <Alert type="error" showIcon title={error} role="alert" />}
     {!status?.available ? <>
-      <Typography.Paragraph>当前初始化凭证不存在或已过期。请在服务器上重新运行安装脚本的 <Typography.Text code>setup</Typography.Text> 命令，或在面板容器内运行 <Typography.Text code>open-node-admin prepare-setup</Typography.Text>。只有安装时显式关闭了公网入口，才需要通过 SSH 隧道访问；重新生成后旧凭证立即失效，请勿分享终端输出。</Typography.Paragraph>
+      <Typography.Paragraph>初始化暂不可用，请确认服务运行正常后重新读取状态。</Typography.Paragraph>
       <Button loading={busy} onClick={() => void refresh()}>重新读取状态</Button>
     </> : <Form layout="vertical" onFinish={() => void submit()} style={{ width: "100%" }}>
-      <Form.Item label="初始化凭证" htmlFor="setup-token" required><Input.Password id="setup-token" value={token} onChange={e => setToken(e.target.value)} autoComplete="off" maxLength={43} disabled={busy} /></Form.Item>
       <Form.Item label="管理员用户名" htmlFor="setup-username" required extra="1–64 个英文字母、数字或 _.@- 字符。"><Input id="setup-username" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" maxLength={64} disabled={busy} /></Form.Item>
       <Form.Item label="管理员昵称" htmlFor="setup-nickname" extra="可选；留空时使用管理员用户名。"><Input id="setup-nickname" value={nickname} onChange={e => setNickname(e.target.value)} autoComplete="name" maxLength={120} disabled={busy} /></Form.Item>
       <Form.Item label="管理员邮箱" htmlFor="setup-email" extra="可选；用于显示资料，不作为登录凭据。"><Input id="setup-email" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" maxLength={254} disabled={busy} /></Form.Item>
@@ -116,12 +115,12 @@ export default function InitialSetupPanel() {
       <Form.Item label="浏览器标题" htmlFor="setup-site" required><Input id="setup-site" value={site} onChange={e => setSite(e.target.value)} disabled={busy} /></Form.Item>
       <Form.Item label="页面品牌文字" htmlFor="setup-brand" required><Input id="setup-brand" value={brand} onChange={e => setBrand(e.target.value)} disabled={busy} /></Form.Item>
       <Form.Item><Checkbox checked={accepted} onChange={e => setAccepted(e.target.checked)} disabled={busy}>确认这是新安装，创建首个管理员</Checkbox></Form.Item>
-      <Button type="primary" htmlType="submit" loading={busy} disabled={!accepted || !token || !username || !password || !confirmation} block>完成初始化</Button>
-      <Typography.Paragraph type="secondary" style={{ marginTop: 12 }}>请使用安装完成时终端显示的凭证，在默认可信 HTTPS 地址完成初始化；初始化成功后再使用管理员账户登录。</Typography.Paragraph>
+      <Button type="primary" htmlType="submit" loading={busy} disabled={!accepted || !username || !password || !confirmation} block>完成初始化</Button>
+      <Typography.Paragraph type="secondary" style={{ marginTop: 12 }}>初始化成功后，请使用刚创建的管理员账户登录并按提示启用双重验证。</Typography.Paragraph>
     </Form>}
     {status?.available && <>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-        已有本项目 v1 备份时，不必创建空管理员；可使用同一初始化凭证恢复。旧版 mmwx 备份不支持直接导入。
+        已有本项目 v1 备份时，不必创建空管理员。只有选择备份恢复时，才需先在服务器运行安装脚本的 <Typography.Text code>setup</Typography.Text> 命令获取独立恢复凭证；普通创建管理员不需要。旧版 mmwx 备份不支持直接导入。
       </Typography.Paragraph>
       <Button danger icon={<UploadOutlined aria-hidden />} disabled={busy} onClick={() => setRestoreOpen(true)}>从备份恢复现有实例</Button>
       <Modal title="初始化时从备份恢复" open={restoreOpen} onCancel={closeRestore} destroyOnHidden maskClosable={false}

@@ -8,22 +8,29 @@ import { deferred, flush, installDom, renderUi } from "../test-utils";
 import InitialSetupPanel from "./InitialSetupPanel";
 
 vi.mock("../../services/initial-setup", async original => ({ ...await original<typeof import("../../services/initial-setup")>(), getInitialSetupStatus: vi.fn(), completeInitialSetup: vi.fn(), uploadInitialRestore: vi.fn(), prepareInitialRestore: vi.fn() }));
-const ready: InitialSetupStatus = { configured: false, available: true, expires_at: "2026-09-01T12:00:00Z", token_required: true };
-const complete: InitialSetupStatus = { configured: true, available: false, expires_at: null, token_required: true };
+const ready: InitialSetupStatus = { configured: false, available: true };
+const complete: InitialSetupStatus = { configured: true, available: false };
 beforeEach(() => { vi.resetAllMocks(); installDom(); vi.mocked(getInitialSetupStatus).mockResolvedValue(ready); vi.mocked(completeInitialSetup).mockResolvedValue();
-  vi.mocked(uploadInitialRestore).mockResolvedValue({ id: "01234567-89ab-4cde-8fab-0123456789ab", size: 22, sha256: "a".repeat(64), expires_at: ready.expires_at!, license_required: false });
+  vi.mocked(uploadInitialRestore).mockResolvedValue({ id: "01234567-89ab-4cde-8fab-0123456789ab", size: 22, sha256: "a".repeat(64), expires_at: "2026-09-01T12:00:00Z", license_required: false });
   vi.mocked(prepareInitialRestore).mockResolvedValue({ id: "11234567-89ab-4cde-8fab-0123456789ab", restart_required: true, automatic_restart: true, license_required: false }); });
 afterEach(async () => { cleanup(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function fill() {
-  for (const [label, value] of [["初始化凭证", "a".repeat(43)], ["管理员密码", "  private-password  "], ["确认密码", "  private-password  "], ["浏览器标题", "  中文站点  "]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  for (const [label, value] of [["管理员密码", "  private-password  "], ["确认密码", "  private-password  "], ["浏览器标题", "  中文站点  "]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
   fireEvent.click(screen.getByRole("checkbox"));
 }
 describe("Chinese browser first-run setup", () => {
   it("presents trusted public IP HTTPS as the one-click default", async () => {
     renderUi(<InitialSetupPanel />); await flush();
     expect(screen.getByText(/一键安装默认提供 https:\/\/公网IP:58090 可信 HTTPS/)).toBeTruthy();
-    expect(screen.getByText(/安装全部完成后，终端会直接显示有效期 30 分钟的一次性初始化凭证/)).toBeTruthy();
-    expect(screen.getByText(/请使用安装完成时终端显示的凭证，在默认可信 HTTPS 地址完成初始化/)).toBeTruthy();
+    expect(screen.getByText(/打开面板即可直接创建首个管理员账户，无需初始化凭证/)).toBeTruthy();
+    expect(screen.getByText(/完成前首位访问者可以成为管理员，请立即初始化/)).toBeTruthy();
+    expect(screen.getByText(/使用刚创建的管理员账户登录并按提示启用双重验证/)).toBeTruthy();
+    expect(screen.getByText(/只有选择备份恢复时，才需先在服务器运行安装脚本/)).toBeTruthy();
+    expect(screen.getByText("setup")).toBeTruthy();
+    expect(screen.getByText(/普通创建管理员不需要/)).toBeTruthy();
+    expect(screen.queryByLabelText("初始化凭证")).toBeNull();
+    expect(document.body.textContent).not.toContain("open-node-admin prepare-setup");
+    expect(document.body.textContent).not.toContain("SSH 隧道");
     expect(screen.queryByText("初始化不会自动配置域名或 HTTPS，也不会自动登录。")).toBeNull();
   });
   it("creates the administrator once, clears secrets immediately and requires normal login", async () => {
@@ -31,8 +38,7 @@ describe("Chinese browser first-run setup", () => {
     renderUi(<InitialSetupPanel />); await flush(); fill();
     const form = screen.getByLabelText("管理员密码").closest("form")!;
     fireEvent.submit(form); fireEvent.submit(form); await flush();
-    expect(completeInitialSetup).toHaveBeenCalledExactlyOnceWith({ setup_token: "a".repeat(43), username: "admin", password: "  private-password  ", site_title: "中文站点", brand_title: "Open Node", email: "", nickname: "", avatar_url: "", confirm_new_install: true });
-    expect((screen.getByLabelText("初始化凭证") as HTMLInputElement).value).toBe("");
+    expect(completeInitialSetup).toHaveBeenCalledExactlyOnceWith({ username: "admin", password: "  private-password  ", site_title: "中文站点", brand_title: "Open Node", email: "", nickname: "", avatar_url: "", confirm_new_install: true });
     expect((screen.getByLabelText("管理员密码") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("确认密码") as HTMLInputElement).value).toBe("");
     expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain("private-password");
@@ -66,12 +72,12 @@ describe("Chinese browser first-run setup", () => {
     expect(screen.getByRole("button", { name: "重新读取状态" })).toBeTruthy();
     expect(completeInitialSetup).toHaveBeenCalledOnce();
   });
-  it("shows local issuance instructions when a ticket is absent or expired", async () => {
-    vi.mocked(getInitialSetupStatus).mockResolvedValue({ ...ready, available: false, expires_at: null });
+  it("shows a safe retry without credential issuance or SSH instructions when setup is temporarily unavailable", async () => {
+    vi.mocked(getInitialSetupStatus).mockResolvedValue({ ...ready, available: false });
     renderUi(<InitialSetupPanel />); await flush();
-    expect(screen.getByText("open-node-admin prepare-setup")).toBeTruthy();
-    expect(screen.getByText(/当前初始化凭证不存在或已过期/)).toBeTruthy();
-    expect(screen.getByText(/只有安装时显式关闭了公网入口，才需要通过 SSH 隧道访问/)).toBeTruthy();
+    expect(screen.getByText(/初始化暂不可用，请确认服务运行正常后重新读取状态/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("open-node-admin prepare-setup");
+    expect(document.body.textContent).not.toContain("SSH 隧道");
     expect(screen.queryByRole("button", { name: "完成初始化" })).toBeNull();
   });
   it("restores with the first-run credential without creating an empty administrator", async () => {
@@ -93,7 +99,7 @@ describe("Chinese browser first-run setup", () => {
     vi.mocked(getInitialSetupStatus).mockReturnValueOnce(old.promise).mockResolvedValueOnce(ready);
     const view = render(<StrictMode><ConfigProvider theme={{ token: { motion: false } }}><InitialSetupPanel /></ConfigProvider></StrictMode>); await flush();
     expect(getInitialSetupStatus).toHaveBeenCalledTimes(2);
-    expect(screen.getByLabelText("初始化凭证")).toBeTruthy();
+    expect(screen.getByLabelText("管理员用户名")).toBeTruthy();
     await act(async () => old.resolve(complete));
     expect(screen.queryByRole("button", { name: "前往登录" })).toBeNull();
     fill(); const result = deferred<void>(); vi.mocked(completeInitialSetup).mockReturnValue(result.promise);

@@ -22,7 +22,7 @@ beforeEach(() => {
   vi.mocked(signIn).mockResolvedValue(challenge);
   vi.mocked(verifySignIn).mockResolvedValue(authenticated);
   qrDataUrl.mockResolvedValue("data:image/png;base64,cXI=");
-  vi.mocked(getInitialSetupStatus).mockResolvedValue({ configured: false, available: false, expires_at: null, token_required: true });
+  vi.mocked(getInitialSetupStatus).mockResolvedValue({ configured: false, available: true });
 });
 afterEach(async () => {
   cleanup();

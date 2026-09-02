@@ -3020,22 +3020,24 @@ backup_stopped_volume() {
 }
 
 prepare_browser_setup() {
-  local if_unconfigured="${1:-0}" public_hostname public_ip public_port
-  local -a setup_args=(prepare-setup)
-  [[ "$if_unconfigured" == "0" ]] || setup_args+=(--if-unconfigured)
-  compose_with "$INSTALL_DIR" "$ENV_FILE" exec -T open-node open-node-admin "${setup_args[@]}" \
-    || die "初始化凭证签发失败。服务数据已保留，请检查后重新运行 setup。"
+  local public_hostname public_ip public_port
   public_hostname="$(read_env_value OPEN_NODE_PUBLIC_HOSTNAME || true)"
   public_ip="$(read_env_value OPEN_NODE_PUBLIC_IP || true)"
   public_port="$(read_env_value OPEN_NODE_PUBLIC_HTTPS_PORT || true)"
   if [[ -n "$public_hostname" ]]; then
-    log "若上方签发了凭证，请打开 https://$public_hostname 完成初始化；若已初始化，请直接登录。"
+    log "若尚未初始化，请直接打开 https://$public_hostname 创建首个管理员；无需初始化凭证。"
   elif [[ -n "$public_ip" ]]; then
-    log "若上方签发了凭证，请打开 $(public_ip_url "$public_ip" "$public_port") 完成初始化；若已初始化，请直接登录。"
+    log "若尚未初始化，请直接打开 $(public_ip_url "$public_ip" "$public_port") 创建首个管理员；无需初始化凭证。"
   else
-    log "公网入口已关闭；若上方签发了凭证，请通过 SSH 隧道完成初始化。"
+    log "公网入口已关闭；请通过 SSH 隧道打开面板并直接创建首个管理员，无需初始化凭证。"
   fi
-  log "凭证过期后，可重新运行此安装脚本的 setup 命令；不会重置已有管理员。"
+  warn "管理员创建前，首位访问初始化页面的人可以取得管理员权限，请立即完成初始化。"
+}
+
+prepare_browser_restore() {
+  compose_with "$INSTALL_DIR" "$ENV_FILE" exec -T open-node open-node-admin prepare-setup \
+    || die "备份恢复凭证签发失败。服务数据已保留，请检查后重新运行 setup。"
+  log "此凭证只用于未初始化实例的浏览器备份恢复；普通创建首个管理员不需要凭证。"
 }
 
 ensure_administrator_setup() {
@@ -3045,11 +3047,7 @@ ensure_administrator_setup() {
 
 create_administrator() {
   if [[ "$CREATE_ADMIN" == "web" || ( "$CREATE_ADMIN" == "auto" && -z "$ADMIN_PASSWORD_FILE" ) ]]; then
-    if [[ "$CREATE_ADMIN" == "auto" ]]; then
-      prepare_browser_setup 1
-    else
-      prepare_browser_setup 0
-    fi
+    prepare_browser_setup
     return
   fi
   local password="" confirmation="" password_mode password_owner
@@ -3116,7 +3114,7 @@ log_success() {
     warn "the panel is exposed over plain HTTP by explicit operator opt-in"
   fi
   [[ "$CREATE_ADMIN" != "0" ]] \
-    || log "使用此安装脚本的 setup 命令在浏览器初始化，或用 create-admin 在终端创建管理员。"
+    || log "直接打开面板即可创建首个管理员，或用 create-admin 在终端创建；无需初始化凭证。"
 }
 
 install_fresh() {
@@ -3575,7 +3573,7 @@ main() {
     uninstall) uninstall_preserving_data ;;
     purge) purge_installation ;;
     create-admin) create_admin_action ;;
-    setup) verify_administrator_action; prepare_browser_setup ;;
+    setup) verify_administrator_action; prepare_browser_restore ;;
   esac
   ACTION_COMPLETE_REACHED=1
   log "ACTION_COMPLETE action=$ACTION"

@@ -30,7 +30,7 @@ beforeEach(() => {
   authState.ready = true; authState.error = "";
   authState.session = { configured: true, authenticated: false, username: null, csrf_token: null };
   vi.mocked(getPublicBranding).mockResolvedValue({ ...defaultBranding });
-  vi.mocked(getInitialSetupStatus).mockResolvedValue({ configured: false, available: false, expires_at: null, token_required: true });
+  vi.mocked(getInitialSetupStatus).mockResolvedValue({ configured: false, available: true });
   vi.mocked(getPublicAppearance).mockResolvedValue({ default_theme: "light", logo_url: "", wallpaper_url: "", license_required: false });
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Unexpected network request in application test"); }));
 });
@@ -57,7 +57,8 @@ describe("React application shell", () => {
     mount("/system-settings"); await flush();
     expect(screen.getByRole("heading", { name: "首次初始化" })).toBeTruthy();
     expect(document.title).toBe("首次初始化 - Open Node");
-    expect(screen.getByText("open-node-admin prepare-setup")).toBeTruthy();
+    expect(screen.getByLabelText("管理员用户名")).toBeTruthy();
+    expect(screen.queryByLabelText("初始化凭证")).toBeNull();
     expect(screen.queryByText("System settings workspace")).toBeNull();
     expect(screen.queryByLabelText("密码")).toBeNull();
   });

@@ -21,12 +21,12 @@ def main() -> None:
     parser.add_argument("--username", default="admin")
     parser.add_argument("--password-stdin", action="store_true")
     parser.add_argument(
-        "--json", action="store_true", help="Print the local setup credential as JSON",
+        "--json", action="store_true", help="Print the initial-restore credential as JSON",
     )
     parser.add_argument(
         "--if-unconfigured",
         action="store_true",
-        help="Issue a setup credential only when the instance is not initialized",
+        help="Issue a restore credential only when the instance is not initialized",
     )
     args = parser.parse_args()
     if args.action == "prepare-setup":
@@ -87,11 +87,11 @@ def prepare_setup(parser, *, json_output=False, if_unconfigured=False):
                 auth.engine.dispose()
     except InitialSetupError as exc:
         if if_unconfigured and exc.code == "setup_already_completed":
-            print("此实例已初始化，无需签发初始化凭证。")
+            print("此实例已初始化，无需签发恢复凭证。")
             return
         message = (
             "此实例已初始化。请登录；忘记密码时使用 reset-password。"
-            if exc.code == "setup_already_completed" else "初始化凭证暂不可用，请稍后重试。"
+            if exc.code == "setup_already_completed" else "备份恢复凭证暂不可用，请稍后重试。"
         )
         parser.exit(1, message + "\n")
     except BackupCoordinationError:
@@ -101,10 +101,10 @@ def prepare_setup(parser, *, json_output=False, if_unconfigured=False):
     if json_output:
         print(json.dumps({"setup_token": token, "expires_at": expires.isoformat()}))
     else:
-        print("在浏览器打开面板，输入以下一次性凭证创建管理员：")
+        print("在未初始化页面选择“从备份恢复现有实例”，输入以下一次性恢复凭证：")
         print(token)
-        print(f"凭证有效期 30 分钟，截止 {expires.isoformat()}。请勿分享终端输出。")
-        print("再次执行 prepare-setup 会使旧凭证失效；初始化后不能再次签发。")
+        print(f"恢复凭证有效期 30 分钟，截止 {expires.isoformat()}。请勿分享终端输出。")
+        print("普通创建首个管理员不需要凭证；再次执行 prepare-setup 会使旧恢复凭证失效。")
 
 
 if __name__ == "__main__":

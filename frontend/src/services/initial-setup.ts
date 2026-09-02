@@ -4,11 +4,8 @@ import { validBackupId, type RestoreArchiveFormat, type RestorePreparedReceipt, 
 export interface InitialSetupStatus {
   configured: boolean;
   available: boolean;
-  expires_at: string | null;
-  token_required: true;
 }
 export interface InitialSetupInput {
-  setup_token: string;
   username: string;
   password: string;
   site_title: string;
@@ -27,13 +24,13 @@ export interface InitialRestorePrepareInput {
   confirm_trusted_backup: true;
 }
 const messages: Record<string, string> = {
-  setup_invalid_request: "请检查初始化凭证、用户名、密码和站点名称。",
+  setup_invalid_request: "请检查用户名、密码和站点名称。",
   setup_already_completed: "此实例已初始化。请登录，或在服务器终端恢复管理员密码。",
-  setup_ticket_invalid: "初始化凭证无效或已过期，请在安装终端重新生成。",
+  setup_ticket_invalid: "备份恢复凭证无效或已过期，请在安装终端重新生成。",
   setup_unavailable: "初始化暂不可用，请重新读取状态。",
   setup_rate_limited: "尝试过于频繁，请至少等待一分钟后重试。",
   restore_upload_invalid: "恢复文件无效、损坏或超出支持范围。",
-  restore_upload_not_found: "恢复上传不存在、已过期或不属于当前初始化凭证。",
+  restore_upload_not_found: "恢复上传不存在、已过期或不属于当前恢复凭证。",
   restore_upload_busy: "已有恢复正在准备或等待重启，请勿重复提交。",
   restore_upload_unavailable: "当前部署不支持浏览器恢复，请使用离线恢复命令。",
   restore_prepare_failed: "恢复校验未完成，当前实例没有被覆盖。请检查备份、age 私钥和 TOTP 配置密钥。",
@@ -64,13 +61,12 @@ export function validateSetupInput(value: InitialSetupInput): InitialSetupInput 
     try { const parsed = new URL(avatar); if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error(); avatarUrl = parsed.href; }
     catch { throw new InitialSetupError(422, "setup_invalid_request"); }
   }
-  if (typeof value.setup_token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value.setup_token)
-    || typeof value.username !== "string" || !/^[a-zA-Z0-9_.@-]{1,64}$/.test(value.username)
+  if (typeof value.username !== "string" || !/^[a-zA-Z0-9_.@-]{1,64}$/.test(value.username)
     || typeof value.password !== "string" || Array.from(value.password).length < 12 || Array.from(value.password).length > 1024
     || site === null || brand === null || /[\u0000-\u001f\u007f]/.test(value.nickname) || Array.from(nickname).length > 120
     || (email !== "" && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || Array.from(email).length > 254))
     || Array.from(avatarUrl).length > 2048 || value.confirm_new_install !== true) throw new InitialSetupError(422, "setup_invalid_request");
-  return { setup_token: value.setup_token, username: value.username, password: value.password,
+  return { username: value.username, password: value.password,
     site_title: site, brand_title: brand, email, nickname, avatar_url: avatarUrl, confirm_new_install: true };
 }
 async function readJson(response: Response): Promise<unknown> {
@@ -106,10 +102,9 @@ async function request(method: "GET" | "POST", payload: InitialSetupInput | null
   } finally { globalThis.clearTimeout(timeout); }
 }
 export async function getInitialSetupStatus(fetcher = fetch): Promise<InitialSetupStatus> {
-  const value = row(await request("GET", null, fetcher), ["configured", "available", "expires_at", "token_required"]);
-  if (typeof value.configured !== "boolean" || typeof value.available !== "boolean" || value.token_required !== true
-    || (value.configured && value.available)
-    || (value.available ? typeof value.expires_at !== "string" || !Number.isFinite(Date.parse(value.expires_at)) : value.expires_at !== null)) return invalid();
+  const value = row(await request("GET", null, fetcher), ["configured", "available"]);
+  if (typeof value.configured !== "boolean" || typeof value.available !== "boolean"
+    || value.available !== !value.configured) return invalid();
   return value as unknown as InitialSetupStatus;
 }
 export async function completeInitialSetup(payload: InitialSetupInput, fetcher = fetch): Promise<void> {

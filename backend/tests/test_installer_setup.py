@@ -19,29 +19,29 @@ STUBS = """
 INSTALL_DIR=/synthetic/source ENV_FILE=/synthetic/env ADMIN_USERNAME=admin
 ADMIN_PASSWORD_FILE=''
 log() { printf '%s\\n' "$*"; }
+warn() { printf '%s\\n' "$*" >&2; }
 die() { printf '%s\\n' "$*" >&2; exit 1; }
 compose_with() { printf 'COMPOSE %s\\n' "$*"; }
 read_env_value() { return 1; }
 """
 
 
-@pytest.mark.parametrize(
-    ("mode", "idempotent"), [("auto", True), ("web", False)],
-)
-def test_default_browser_enrollment_does_not_prompt_for_password(mode, idempotent):
+@pytest.mark.parametrize("mode", ["auto", "web"])
+def test_default_browser_enrollment_needs_no_credential_or_password_prompt(mode):
     script = STUBS + functions("prepare_browser_setup", "create_administrator")
     result = subprocess.run(
         ["bash", "-eu", "-c", script + f"\nCREATE_ADMIN={mode}\ncreate_administrator"],
         input="", text=True, capture_output=True, timeout=5,
     )
     assert result.returncode == 0, result.stderr
-    assert "exec -T open-node open-node-admin prepare-setup" in result.stdout
-    assert ("--if-unconfigured" in result.stdout) is idempotent
+    assert "COMPOSE" not in result.stdout
+    assert "无需初始化凭证" in result.stdout
+    assert "首位访问初始化页面" in result.stderr
     assert "--password-stdin" not in result.stdout
 
 
 def test_setup_checks_identity_health_and_propagates_failure():
-    script = STUBS + functions("verify_administrator_action", "prepare_browser_setup") + """
+    script = STUBS + functions("verify_administrator_action", "prepare_browser_restore") + """
 require_no_recovery() { log recovery; }
 require_manifest() { log manifest; }
 require_environment_file() { log environment; }
@@ -51,7 +51,7 @@ verify_active_identity() { log identity; }
 verify_volume() { log volume; }
 wait_for_health() { log health; return 1; }
 verify_administrator_action
-prepare_browser_setup
+prepare_browser_restore
 """
     result = subprocess.run(
         ["bash", "-eu", "-c", script], text=True, capture_output=True, timeout=5,
@@ -62,18 +62,17 @@ prepare_browser_setup
     assert "COMPOSE" not in result.stdout
 
 
-def test_failed_cli_is_not_hidden_by_installer_conditional():
-    script = STUBS + functions("prepare_browser_setup", "create_administrator") + """
+def test_failed_restore_credential_cli_is_not_hidden():
+    script = STUBS + functions("prepare_browser_restore") + """
 compose_with() { return 1; }
-CREATE_ADMIN=auto
-[[ "$CREATE_ADMIN" == "0" ]] || create_administrator
+prepare_browser_restore
 log should-not-reach
 """
     result = subprocess.run(
         ["bash", "-eu", "-c", script], text=True, capture_output=True, timeout=5,
     )
     assert result.returncode == 1
-    assert "签发失败" in result.stderr
+    assert "备份恢复凭证签发失败" in result.stderr
     assert "should-not-reach" not in result.stdout
 
 

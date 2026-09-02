@@ -58,6 +58,7 @@ TLS-ALPN-01，首次签发和续签期间都必须从公网可达；`58090` 不�
 ```bash
 sudo bash /opt/open-node/install.sh status
 sudo bash /opt/open-node/install.sh update
+# 仅用于未初始化实例的浏览器备份恢复凭证
 sudo bash /opt/open-node/install.sh setup
 sudo bash /opt/open-node/install.sh create-admin
 sudo bash /opt/open-node/install.sh uninstall
@@ -194,10 +195,11 @@ The installer performs these bounded actions:
 5. for an enabled managed-public identity, provisions pinned Caddy, validates
    TLS-ALPN-01 on TCP 443 and the trusted canonical HTTPS health endpoint without
    falling back to HTTP, a self-signed certificate, or private-only success; and
-6. by default, prints a 30-minute one-use credential for
-   [browser initialization](initial-setup.md). An explicit private password file
-   retains terminal provisioning. `OPEN_NODE_CREATE_ADMIN=1` retains the
-   interactive `/dev/tty` password flow; `0` skips administrator initialization.
+6. by default, exposes [browser initialization](initial-setup.md) without a setup
+   credential. The first visitor can create the administrator, so initialize the
+   panel immediately after installation. An explicit private password file retains
+   terminal provisioning. `OPEN_NODE_CREATE_ADMIN=1` retains the interactive
+   `/dev/tty` password flow; `0` skips automatic initialization guidance.
 
 The fresh public-IP default pins the official Caddy image by digest, configures
 secure cookies, exact proxy trust and the canonical Agent public URL, and starts
@@ -255,8 +257,10 @@ file without using `/dev/tty`. The installer reads the secret but deliberately
 does not delete an operator-owned file; the caller's trap owns that cleanup.
 
 Common lifecycle commands can use the same completely downloaded, reviewed
-script. `setup` renews a browser credential before initialization; `create-admin`
-creates the administrator through the terminal. Neither overwrites an account:
+script. Normal browser administrator creation needs no credential. `setup` issues
+a credential only for the advanced pre-administrator backup-restore path;
+`create-admin` creates the administrator through the terminal. Neither overwrites
+an account:
 
 ```bash
 (

@@ -1,4 +1,4 @@
-"""Local issuance and atomic SQLite first-run administrator/branding initialization."""
+"""Atomic first-run initialization plus local credentials for initial restore."""
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -73,14 +73,11 @@ class InitialSetupStore:
     def status(self):
         with self._session() as db:
             configured = self._completed(db)
-            ticket = db.get(InitialSetupTicket, 1)
-            available = bool(
-                not configured and ticket and ticket.token_hash and ticket.expires_at > self.clock()
-            )
-            return InitialSetupStatus(
-                configured=configured, available=available,
-                expires_at=datetime.fromtimestamp(ticket.expires_at, UTC) if available else None,
-            )
+            # Administrator creation is available on a pristine instance without
+            # first issuing a local credential. Restore tickets are a separate,
+            # deliberately undisclosed authorization boundary.
+            available = not configured
+            return InitialSetupStatus(configured=configured, available=available)
 
     def issue(self):
         """Only a local CLI calls this; there is intentionally no HTTP issuance API."""
@@ -99,7 +96,7 @@ class InitialSetupStore:
         return token, expires_at
 
     def authorize_restore(self, token: str) -> str:
-        """Validate without consuming the one-use setup credential; bind an upload owner."""
+        """Validate without consuming the one-use restore credential; bind an upload owner."""
         with self._session() as db:
             self._authorize(db, token)
         return self._digest(token)
@@ -116,13 +113,16 @@ class InitialSetupStore:
         return ticket
 
     def complete(self, payload):
-        token = payload.setup_token.get_secret_value()
-        # Do not perform an expensive password hash for unproven remote input.
+        # Avoid hashing after setup has already been claimed, then recheck while
+        # holding the cross-process administrator write lock. The second check is
+        # the authority: exactly one concurrent first-run request may commit.
         with self._session() as db:
-            self._authorize(db, token)
+            if self._completed(db):
+                raise InitialSetupError(409, "setup_already_completed")
         hashed = password_hash.hash(payload.password.get_secret_value())
         with self._session(write=True) as db:
-            ticket = self._authorize(db, token)
+            if self._completed(db):
+                raise InitialSetupError(409, "setup_already_completed")
             saved = BrandingStore._settings(db)
             if saved.revision >= BRANDING_MAX_REVISION:
                 raise InitialSetupError(503, "setup_unavailable")
@@ -141,6 +141,10 @@ class InitialSetupStore:
             self.auth._advance_backup_epoch(db)
             db.execute(delete(OperatorSession))
             db.execute(delete(OperatorChallenge))
+            ticket = db.get(InitialSetupTicket, 1)
+            if ticket is None:
+                ticket = InitialSetupTicket(id=1)
+                db.add(ticket)
             ticket.token_hash = None
             ticket.expires_at = 0
             ticket.completed_at = self.clock()

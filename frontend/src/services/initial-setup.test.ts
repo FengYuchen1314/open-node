@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { completeInitialSetup, getInitialSetupStatus, InitialSetupError, prepareInitialRestore, setupErrorMessage, uploadInitialRestore, validateSetupInput, type InitialSetupInput } from "./initial-setup";
 
-const input: InitialSetupInput = { setup_token: "a".repeat(43), username: "admin", password: "  private-password  ", site_title: "  中文 🧭 ", brand_title: "站点", email: " operator@example.test ", nickname: " 运维  管理员 ", avatar_url: "https://cdn.example.test/avatar.png", confirm_new_install: true };
-const ready = { configured: false, available: true, expires_at: "2026-09-01T12:00:00Z", token_required: true };
+const input: InitialSetupInput = { username: "admin", password: "  private-password  ", site_title: "  中文 🧭 ", brand_title: "站点", email: " operator@example.test ", nickname: " 运维  管理员 ", avatar_url: "https://cdn.example.test/avatar.png", confirm_new_install: true };
+const ready = { configured: false, available: true };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("first-run setup transport", () => {
-  it("uses anonymous same-origin requests without placing secrets in URLs or headers", async () => {
+  it("uses anonymous same-origin requests without an initialization credential", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response(ready)).mockResolvedValueOnce(response({ configured: true, login_required: true }, 201));
     expect(await getInitialSetupStatus(fetcher)).toEqual(ready);
     await completeInitialSetup(input, fetcher);
@@ -15,12 +15,12 @@ describe("first-run setup transport", () => {
     for (const [url, options] of fetcher.mock.calls) {
       expect(url).toBe("/api/v1/setup");
       expect(options).toMatchObject({ credentials: "omit", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer" });
-      expect(JSON.stringify(options?.headers)).not.toContain(input.setup_token);
+      expect(new Headers(options?.headers).has("X-Open-Node-Setup-Token")).toBe(false);
     }
     expect(JSON.parse(fetcher.mock.calls[1][1]!.body as string)).toEqual({ ...input, site_title: "中文 🧭", email: "operator@example.test", nickname: "运维 管理员" });
   });
   it.each([
-    { confirm_new_install: false }, { confirm_new_install: "true" }, { setup_token: "中".repeat(43) },
+    { confirm_new_install: false }, { confirm_new_install: "true" },
     { username: "invalid space" }, { password: "short" }, { password: "a".repeat(1025) },
     { site_title: "\u202eabc" }, { brand_title: "a".repeat(41) }, { email: "invalid" },
     { nickname: "a".repeat(121) }, { avatar_url: "http://example.test/avatar.png" },
@@ -49,7 +49,7 @@ describe("first-run setup transport", () => {
   });
   it("uses the setup credential for a raw restore upload and one explicit preparation", async () => {
     const id = "01234567-89ab-4cde-8fab-0123456789ab", restored = "11234567-89ab-4cde-8fab-0123456789ab";
-    const upload = { id, size: 22, sha256: "a".repeat(64), expires_at: ready.expires_at, license_required: false };
+    const upload = { id, size: 22, sha256: "a".repeat(64), expires_at: "2026-09-01T12:00:00Z", license_required: false };
     const prepared = { id: restored, restart_required: true, automatic_restart: true, license_required: false };
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response(upload, 201)).mockResolvedValueOnce(response(prepared));
     const file = new Blob([new Uint8Array(22)]), token = "a".repeat(43);

@@ -2,14 +2,14 @@
 
 Open Node has one local administrator. This is access control for your own
 installation, not activation or licensing. There are no paid roles, remote
-entitlement calls, default passwords, or unprotected administrator registration.
+entitlement calls or default passwords.
 An installation without an administrator rejects management requests.
 
 Fresh SQLite deployments now support [browser first-run setup](initial-setup.md)
-using a locally issued, 30-minute one-use credential. The default installer prints
-this credential; `install.sh setup` renews it before initialization. Existing
-administrators cannot be overwritten through this workflow. Terminal creation
-and recovery below remain available.
+without a setup credential. The first visitor can claim the uninitialized instance,
+so open the installer-reported trusted HTTPS URL and create the administrator
+immediately. Existing administrators cannot be overwritten through this workflow.
+Terminal creation and recovery below remain available.
 
 ## Create or Recover the Administrator
 
@@ -104,8 +104,9 @@ upgrades. A healthy process alone does not prove database integrity.
 ## API Contract
 
 - `GET /api/v1/setup`: safe first-run availability, never a credential.
-- `POST /api/v1/setup`: one-use local credential, explicit browser header,
-  same-origin checks, strict bounded JSON and rate-limited administrator creation.
+- `POST /api/v1/setup`: explicit browser header, same-origin checks, strict bounded
+  JSON and rate-limited first-administrator creation. The database transaction
+  rechecks permanent initialization state so concurrent requests cannot overwrite it.
   Success requires normal login; no session cookie is issued.
 - `GET /api/v1/auth/session`: returns initialization state and, when signed in,
   the username and session-bound CSRF token. It is never cacheable.

@@ -1,10 +1,8 @@
 """One-time first-administrator setup; no input is reflected in public errors."""
 
-import re
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, StrictBool, field_validator
 
 from open_node.domain.auth import AdministratorCredentials, AdministratorProfileUpdate
 from open_node.domain.branding import (
@@ -16,7 +14,7 @@ from open_node.domain.branding import (
 SETUP_MESSAGES = {
     "setup_invalid_request": "Invalid initial setup request.",
     "setup_already_completed": "Initial setup is already completed. Sign in or use local recovery.",
-    "setup_ticket_invalid": "Initial setup credential is invalid or expired.",
+    "setup_ticket_invalid": "Initial restore credential is invalid or expired.",
     "setup_unavailable": "Initial setup is temporarily unavailable.",
     "setup_rate_limited": "Too many initial setup attempts. Try again later.",
 }
@@ -32,20 +30,12 @@ class InitialSetupError(ValueError):
 class InitialSetupRequest(AdministratorCredentials):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True, strict=True)
 
-    setup_token: SecretStr = Field(min_length=43, max_length=43)
     site_title: str = DEFAULT_SITE_TITLE
     brand_title: str = DEFAULT_BRAND_TITLE
     email: str = ""
     nickname: str = ""
     avatar_url: str = ""
     confirm_new_install: StrictBool
-
-    @field_validator("setup_token")
-    @classmethod
-    def token(cls, value):
-        if not re.fullmatch(r"[A-Za-z0-9_-]{43}", value.get_secret_value()):
-            raise ValueError("Invalid initial setup credential")
-        return value
 
     @field_validator("site_title", mode="before")
     @classmethod
@@ -80,8 +70,6 @@ class InitialSetupRequest(AdministratorCredentials):
 class InitialSetupStatus(BaseModel):
     configured: bool
     available: bool
-    expires_at: datetime | None = None
-    token_required: Literal[True] = True
 
 
 class InitialSetupResult(BaseModel):

@@ -80,11 +80,10 @@ TCP `443` 时，请使用[手动反向代理方案](docs/deployment.md#https-and
 - 提供 `https://公网IP:58090`；
 - 把误输入的 `http://公网IP:58090` 以 `308` 自动跳转到同路径的 HTTPS 地址；
 - 把应用限制在宿主回环地址 `127.0.0.1:62031`；
-- 输出一个 30 分钟有效、只能使用一次的浏览器初始化凭证。
+- 直接在 HTTPS 页面创建首个管理员，不需要初始化凭证。
 
-安装完成后，打开脚本显示的 HTTPS 地址，填写初始化凭证并创建首个管理员。项目没有
-默认管理员密码。首次初始化尚未完成且凭证过期时，可运行下文完整的
-`install.sh setup` 命令重新签发；已有管理员时会拒绝，不会重置账号。
+安装完成后，立即打开脚本显示的 HTTPS 地址并创建首个管理员。项目没有默认管理员密码，
+也不签发普通初始化凭证；管理员创建前，首位访问初始化页面的人可以取得管理员权限。
 
 默认网络关系如下：
 
@@ -173,7 +172,7 @@ sudo bash /opt/open-node/install.sh status
 # 按安装清单记录的仓库/ref 检查并执行更新；默认是官方 main
 sudo bash /opt/open-node/install.sh update
 
-# 仅在首次初始化尚未完成时重新签发浏览器凭证；已有管理员时拒绝
+# 仅在未初始化实例需要从备份恢复时签发恢复凭证；普通创建管理员不需要
 sudo bash /opt/open-node/install.sh setup
 
 # 在终端交互创建管理员；不会覆盖已有账号
@@ -415,8 +414,8 @@ Agent Token 也不会因本机脚本自动删除。
 
 ### 安全、备份与系统设置
 
-- 管理员无默认密码；浏览器初始化凭证只显示在服务器终端。管理员和订阅用户均支持独立
-  会话策略，管理员可启用 TOTP、恢复码和强制二次验证。
+- 管理员无默认密码；未初始化时可在可信 HTTPS 页面直接创建首个管理员，因此安装后应
+  立即完成。管理员和订阅用户均支持独立会话策略、TOTP、恢复码和强制二次验证。
 - 安全控制台记录登录失败、订阅探测、自动或手工 IP 封禁及解封。封禁发生在应用层，
   不等同于主机防火墙规则。
 - Web 提供 SQLite/PostgreSQL 一致快照、age 加密下载和浏览器恢复；
@@ -540,7 +539,7 @@ Probe Worker 和部署 smoke。特权宿主机、真实浏览器及 VPS 验收�
 | [实现说明与源码清单](docs/implementation/README.md) | 总体架构、各模块实现、699 个维护文件及函数/类方法索引 |
 | [公网一键部署](docs/public-deployment.md) | IP/域名 HTTPS、端口、防火墙和 Caddy 边界 |
 | [完整部署指南](docs/deployment.md) | 安装器、Compose、更新、备份、恢复和手动代理 |
-| [首次初始化](docs/initial-setup.md) | 一次性凭证、浏览器创建管理员和恢复入口 |
+| [首次初始化](docs/initial-setup.md) | 无凭证浏览器创建管理员和受控备份恢复入口 |
 | [Agent 安装](docs/agent-bootstrap.md) | 面板签发命令、新主机安装和安全边界 |
 | [订阅客户端](docs/subscription-clients.md) | 输出格式、客户端识别和兼容过滤 |
 | [备份与恢复](docs/backups.md) | Web/CLI 备份、age、SQLite/PostgreSQL 和复核流程 |
