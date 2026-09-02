@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
@@ -52,7 +51,8 @@ COPY --from=lego /out/LICENSE /usr/share/licenses/lego/LICENSE
 COPY --from=age /out/age /usr/local/bin/age
 COPY --from=age /out/LICENSE /usr/share/licenses/age/LICENSE
 COPY LICENSE /usr/share/licenses/open-node/LICENSE
-COPY --chmod=755 scripts/container/entrypoint.sh /usr/local/bin/open-node-entrypoint
+COPY scripts/container/entrypoint.sh /usr/local/bin/open-node-entrypoint
+RUN chmod 0755 /usr/local/bin/open-node-entrypoint
 WORKDIR /opt/open-node
 USER 10001:10001
 VOLUME ["/var/lib/open-node"]

@@ -20,6 +20,15 @@ def test_production_container_disables_uvicorn_access_log():
     assert "http://127.0.0.1:62031/healthz" in dockerfile
 
 
+def test_production_build_does_not_fetch_a_remote_dockerfile_frontend():
+    dockerfile = (ROOT / "Dockerfile").read_text()
+
+    assert not dockerfile.startswith("# syntax=")
+    assert "COPY --chmod=" not in dockerfile
+    assert "COPY scripts/container/entrypoint.sh /usr/local/bin/open-node-entrypoint" in dockerfile
+    assert "RUN chmod 0755 /usr/local/bin/open-node-entrypoint" in dockerfile
+
+
 def test_nginx_example_disables_access_logs_for_redirect_and_tls_servers():
     nginx = (ROOT / "deploy/nginx.conf.example").read_text()
     servers = nginx.split("server {")[1:]
