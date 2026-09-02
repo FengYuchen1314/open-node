@@ -284,7 +284,7 @@ class ServerCreate(BaseModel):
     pull_address: str | None = Field(default=None, max_length=255)
     pull_address_v6: str | None = Field(default=None, max_length=255)
     pull_port: int = Field(default=0, ge=0, le=65535)
-    ipv6_enabled: bool = True
+    ipv6_enabled: bool = False
     traffic_limit: int = Field(default=0, ge=0)
     traffic_reset_day: int = Field(default=0, ge=0, le=31)
     traffic_stats_mode: TrafficStatsMode = TrafficStatsMode.BOTH

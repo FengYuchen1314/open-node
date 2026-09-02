@@ -11,6 +11,7 @@ export interface AgentBootstrapDialogProps {
   serverId: string;
   serverName: string;
   serverKind?: ServerKind;
+  autoIssue?: boolean;
   onUpdated?: () => void;
 }
 
@@ -22,8 +23,8 @@ function date(value: string | null | undefined) {
 
 const serverKindNames: Record<ServerKind, string> = { direct: "公网直连", "leased-line": "专线", residential: "家宽落地" };
 
-export default function AgentBootstrapDialog({ open, onOpenChange, serverId, serverName, serverKind = "direct", onUpdated }: AgentBootstrapDialogProps) {
-  const model = useAgentBootstrap(open, serverId, onUpdated);
+export default function AgentBootstrapDialog({ open, onOpenChange, serverId, serverName, serverKind = "direct", autoIssue = false, onUpdated }: AgentBootstrapDialogProps) {
+  const model = useAgentBootstrap(open, serverId, onUpdated, autoIssue);
   const [copyMessage, setCopyMessage] = useState("");
   const copyEpoch = useRef(0);
   useLayoutEffect(() => {
@@ -53,7 +54,7 @@ export default function AgentBootstrapDialog({ open, onOpenChange, serverId, ser
       <Typography.Text strong>{serverName}</Typography.Text>
       <Alert type="info" showIcon title={`服务器类型：${serverKindNames[serverKind]}`}
         description={serverKind === "leased-line" ? "安装完成后，这台服务器仅允许创建 Mieru 节点。" : serverKind === "residential" ? "安装完成后，这台服务器仅允许创建 SOCKS5 节点。" : "请在生成安装命令前确认服务器用途。"} />
-      <Typography.Paragraph>在此生成命令，在新的远程服务器上以 root 身份运行，然后等待 Agent 连接。</Typography.Paragraph>
+      <Typography.Paragraph>复制命令，在新的远程服务器上以 root 身份运行；完成后服务器会自动上线并显示公网 IPv4。</Typography.Paragraph>
       {model.error && <Alert type="error" showIcon title={zhMessage(model.error)} data-testid="bootstrap-error" />}
       {state && <>
         {!state.configured && <Alert type="warning" showIcon title={zhMessage(state.reason)} />}
@@ -77,18 +78,19 @@ export default function AgentBootstrapDialog({ open, onOpenChange, serverId, ser
           description="该服务器已领取凭据，但安装尚未确认完成。如遇中断，只能在原服务器上重试同一条命令，不要复制到另一台服务器。此服务器无法再签发新票据。部分安装状态可能需要在服务器本机恢复。" />
           : state.bootstrap.server_last_heartbeat ? <Alert type="info" showIcon title="已有服务器心跳"
             description={`此服务器已上报心跳（${date(state.bootstrap.server_last_heartbeat)}）。安装票据仅适用于从未连接过的新服务器。请先检查现有服务器，再为新安装创建独立的服务器记录。`} /> : null}
-        {model.canIssue && <Form layout="vertical" preserve={false} onFinish={() => void model.issue()}>
+        {model.canIssue && autoIssue && !model.command ? <Alert type="info" showIcon title={model.busy || model.loading ? "正在生成安装命令" : "安装命令尚未生成"}
+          description={!model.busy && !model.loading ? <Button type="link" onClick={() => void model.issue()}>重新生成</Button> : undefined} /> : null}
+        {model.canIssue && !autoIssue && <Form layout="vertical" preserve={false} onFinish={() => void model.issue()}>
           <Typography.Paragraph>安装以非 root 身份运行的托管 Agent 和独立的官方 Xray，不创建公开代理入站。
             {" "}不会接管现有服务，也不会启用 Nginx、WARP、仅嵌入式或分支运行时支持的协议，以及需要远程 root 权限的生命周期管理。
-            {" "}服务器需要 Python 3.11+、curl、systemd，并能通过 HTTPS 访问此控制台和 GitHub。
-            {" "}缺少的 Python venv 或 CA 软件包可能通过 apt 安装。</Typography.Paragraph>
+            {" "}支持 Debian 12/13、Ubuntu 24.04/26.04 amd64 + systemd；命令会通过 apt 自动安装基础依赖。</Typography.Paragraph>
           <Form.Item label="连接方式"><Select aria-label="连接方式" value={model.transport}
             disabled={model.busy} onChange={model.setTransport} options={[
               { label: "自动（WebSocket，失败时回退 HTTP）", value: "auto" },
               { label: "WebSocket", value: "websocket" }, { label: "HTTP 轮询", value: "http" },
             ]} /></Form.Item>
           <Form.Item><Checkbox checked={model.confirmed} disabled={model.busy}
-            onChange={event => model.setConfirmed(event.target.checked)}>我确认使用一台全新的 Debian 12 amd64 服务器，且仅用于此服务器记录。</Checkbox></Form.Item>
+            onChange={event => model.setConfirmed(event.target.checked)}>我确认使用一台受支持的全新 Debian/Ubuntu amd64 服务器，且仅用于此服务器记录。</Checkbox></Form.Item>
           {state.bootstrap.status === "issued" && <Typography.Paragraph type="secondary">再次生成会使之前尚未兑换的命令失效。</Typography.Paragraph>}
           <Button block type="primary" htmlType="submit" aria-label="生成安装命令" data-testid="bootstrap-issue" loading={model.busy}
             disabled={!model.confirmed || model.loading || model.busy}>生成安装命令</Button>

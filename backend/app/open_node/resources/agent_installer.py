@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a new, isolated Agent on Debian 12 using a short-lived panel ticket.
+"""Install a new, isolated Agent on supported Debian/Ubuntu hosts.
 
 This file deliberately imports only Python's standard library. It is served as a
 download by the control plane; it must also work outside the backend package.
@@ -75,6 +75,15 @@ INSTALL_BASE = Path("/opt")
 SYSTEM_CA = Path("/etc/ssl/certs/ca-certificates.crt")
 TOKEN_PATTERN = r"[A-Za-z0-9_-]{43}"
 VERSION_PATTERN = r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?"
+SUPPORTED_RELEASES = frozenset(
+    {
+        ("debian", "12"),
+        ("debian", "13"),
+        ("ubuntu", "24.04"),
+        ("ubuntu", "26.04"),
+    }
+)
+SUPPORTED_RELEASE_LABEL = "Debian 12/13 or Ubuntu 24.04/26.04"
 
 
 class BootstrapError(RuntimeError):
@@ -913,15 +922,16 @@ def check_platform():
         and os.geteuid() == 0
         and platform.machine() in {"x86_64", "amd64"}
         and Path("/run/systemd/system").is_dir(),
-        "Bootstrap requires root, Python 3.11+, systemd, and a Debian 12 amd64 host",
+        "Bootstrap requires root, Python 3.11+, systemd, and a supported amd64 host",
     )
     try:
         release = platform.freedesktop_os_release()
     except OSError:
-        raise BootstrapError("Cannot verify the Debian host release") from None
+        raise BootstrapError("Cannot verify the Debian or Ubuntu host release") from None
     require(
-        release.get("ID") == "debian" and release.get("VERSION_ID") == "12",
-        "Automatic Agent bootstrap supports Debian 12 only",
+        (release.get("ID", "").lower(), release.get("VERSION_ID", ""))
+        in SUPPORTED_RELEASES,
+        f"Automatic Agent bootstrap supports {SUPPORTED_RELEASE_LABEL} only",
     )
 
 
@@ -938,7 +948,7 @@ def ensure_dependencies(*, install=False):
         return
     require(
         install,
-        "Missing Python venv or system CA certificates. On Debian 12 run: "
+        "Missing Python venv or system CA certificates. Run: "
         "apt-get update && apt-get install --no-install-recommends python3-venv ca-certificates; "
         "then retry, or explicitly use --install-dependencies",
     )

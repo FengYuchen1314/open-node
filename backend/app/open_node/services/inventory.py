@@ -2415,7 +2415,8 @@ class InventoryStore:
             server.status = ServerStatus.CONNECTED.value
             server.last_heartbeat = now
             server.ip_address = payload.public_ipv4 or server.ip_address
-            server.ip_address_v6 = payload.public_ipv6 or server.ip_address_v6
+            if server.ipv6_enabled:
+                server.ip_address_v6 = payload.public_ipv6 or server.ip_address_v6
             server.connection_mode = payload.connection_mode.value
             server.listen_port = payload.listen_port
             server.xray_mode = payload.xray_mode.value
@@ -2440,7 +2441,7 @@ class InventoryStore:
             agent.connection_mode = payload.connection_mode.value
             agent.listen_port = payload.listen_port
             agent.public_ipv4 = payload.public_ipv4
-            agent.public_ipv6 = payload.public_ipv6
+            agent.public_ipv6 = payload.public_ipv6 if server.ipv6_enabled else None
             agent.xray_mode = payload.xray_mode.value
             agent.capability_rpc = payload.capabilities.rpc
             agent.capability_stream = payload.capabilities.stream
@@ -2480,7 +2481,8 @@ class InventoryStore:
             server.current_download_speed = payload.download_speed
             server.listen_port = payload.listen_port or server.listen_port
             server.ip_address = payload.public_ipv4 or server.ip_address
-            server.ip_address_v6 = payload.public_ipv6 or server.ip_address_v6
+            if server.ipv6_enabled:
+                server.ip_address_v6 = payload.public_ipv6 or server.ip_address_v6
             server.updated_at = now
 
             agent = session.scalar(select(AgentModel).where(AgentModel.server_id == server.id))
@@ -2490,7 +2492,8 @@ class InventoryStore:
                 if payload.warp_installed is not None:
                     agent.warp_installed = payload.warp_installed
                 agent.public_ipv4 = payload.public_ipv4 or agent.public_ipv4
-                agent.public_ipv6 = payload.public_ipv6 or agent.public_ipv6
+                if server.ipv6_enabled:
+                    agent.public_ipv6 = payload.public_ipv6 or agent.public_ipv6
 
             session.commit()
             session.refresh(server)

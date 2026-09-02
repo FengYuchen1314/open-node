@@ -1,6 +1,7 @@
 # Agent 部署、升级与恢复
 
-新 Debian 12 amd64 主机应优先使用[面板签发的一键命令](agent-bootstrap.md)。它从控制面
+新的 Debian 12/13、Ubuntu 24.04/26.04 amd64 主机应优先使用
+[面板签发的一键命令](agent-bootstrap.md)。它从控制面
 取得并校验固定的 Agent、Xray 和 Mihomo 制品，准备私有输入，安装后等待认证就绪。本页
 的 Host deployment CLI 适用于已经审阅仓库和运行时、需要手工指定文件的高级场景。
 
@@ -20,8 +21,8 @@ Agent 命令。
 
 ## 手工安装要求
 
-- Linux、Python 3.11+、`venv`、systemd、`useradd` 和 `runuser`；当前验证目标为
-  Debian 12 x86-64。
+- Linux、Python 3.11+、`venv`、systemd、`useradd` 和 `runuser`；自动安装支持
+  Debian 12/13、Ubuntu 24.04/26.04 x86-64。
 - 来自本仓库的可信 wheel，例如
   `agent/dist/open_node_agent-0.3.0a2-py3-none-any.whl`。
 - 与主机架构匹配、已经审阅的 Xray 可执行文件和有效 JSON 配置；需要 geodata 时另备

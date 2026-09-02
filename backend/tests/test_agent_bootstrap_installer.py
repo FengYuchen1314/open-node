@@ -646,6 +646,41 @@ def test_bootstrap_dependencies_require_explicit_opt_in_and_verified_platform(mo
     ]
 
 
+@pytest.mark.parametrize(
+    ("distribution", "version"),
+    [("debian", "12"), ("debian", "13"), ("ubuntu", "24.04"), ("ubuntu", "26.04")],
+)
+def test_bootstrap_accepts_each_supported_debian_and_ubuntu_release(
+    monkeypatch, distribution, version
+):
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer.sys, "version_info", (3, 11, 0))
+    monkeypatch.setattr(installer.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(installer.Path, "is_dir", lambda path: str(path) == "/run/systemd/system")
+    monkeypatch.setattr(
+        installer.platform,
+        "freedesktop_os_release",
+        lambda: {"ID": distribution, "VERSION_ID": version},
+    )
+    installer.check_platform()
+
+
+def test_bootstrap_rejects_unlisted_or_old_releases(monkeypatch):
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer.sys, "version_info", (3, 11, 0))
+    monkeypatch.setattr(installer.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(installer.Path, "is_dir", lambda path: str(path) == "/run/systemd/system")
+    monkeypatch.setattr(
+        installer.platform,
+        "freedesktop_os_release",
+        lambda: {"ID": "ubuntu", "VERSION_ID": "22.04"},
+    )
+    with pytest.raises(installer.BootstrapError, match="Debian 12/13 or Ubuntu 24.04/26.04"):
+        installer.check_platform()
+
+
 def test_bootstrap_dependencies_never_install_on_an_unverified_host(monkeypatch):
     monkeypatch.setattr(installer, "dependencies_missing", lambda: True)
 

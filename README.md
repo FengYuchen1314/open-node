@@ -57,7 +57,8 @@ Open Node 是 MMWX 活跃技术线的开源重构项目，用于管理服务器�
 
 ### 准备条件
 
-- 一台全新的 Debian 或 Ubuntu Linux 主机；目前重点验证 Debian 12 `amd64`。
+- 一台全新的 Debian 或 Ubuntu Linux 主机。控制面支持常见的 Debian/Ubuntu systemd
+  环境；面板生成的 Agent 一键命令明确支持 Debian 12/13、Ubuntu 24.04/26.04 `amd64`。
 - `root` 权限或可用的 `sudo`。引导命令会在缺少 `curl` 时先安装它，安装器随后检查并
   安装 Git、Docker 和 Docker Compose v2。
 - 服务器能够访问 GitHub、Docker Hub、npm、PyPI 和 Let's Encrypt ACME 服务。
@@ -321,11 +322,13 @@ Agent Token 也不会因本机脚本自动删除。
 - 管理服务器资料、在线状态、系统指标、流量、Xray/Nginx 扫描结果和命令历史。
 - 管理员可以查看 Agent 上报的在线用户与 IP；该功能要求 Agent 0.3.0a1 或更高版本，
   已有主机还需要显式启用对应统计配置。
-- 在面板创建服务器后生成一次性安装命令，为新 Debian 12 主机安装非 root Agent 和官方
+- 在“服务器管理”中只填写名称，面板随即创建记录并自动生成一次性安装命令；无需填写
+  IP、端口、连接方式或 IPv6。远端执行完成后，Agent 自动上线，面板从可信代理请求链
+  识别公网 IPv4。命令支持 Debian 12/13、Ubuntu 24.04/26.04 `amd64`，安装非 root Agent 和官方
   Xray；安装器、Agent wheel、bootstrap、构建身份、固定的 Xray 与 Mihomo 制品都从
   面板同源 HTTPS 端点拉取并校验大小及 SHA-256。子机不从 GitHub 或外部制品仓库拉项目
-  文件；仅在缺少系统依赖时使用主机已配置的 Debian APT 源。控制连接支持 WebSocket 与
-  HTTP 回退。
+  文件；CA、curl、Python 和 venv 由主机已配置的 Debian/Ubuntu APT 源确认安装。控制
+  连接支持 WebSocket 与 HTTP 回退。
 - Agent 命令带持久化日志、租约恢复、依赖关系和结果重放，可处理配置、用户、诊断、日志、
   Nginx、WARP 和运行时生命周期。
 - “服务器管理 → 服务器设置 → 出站与路由”直接管理真实 Xray `outbounds` 和 `routing`：可添加、
@@ -355,10 +358,12 @@ Agent Token 也不会因本机脚本自动删除。
   一次测量结果，部署前仍要复查。
 - 创建 Mieru 时填写国内入口 IP、国内入口端口和映射方式。一一对应模式下 IX 端口等于
   国内入口端口；手动模式必须另填 IX 端口，并自行完成国内入口到 IX 的端口转发。
+- 节点创建页只保留名称、服务器、协议以及协议真正需要的伪装池或 Mieru 入口字段；入站
+  标签、路由标签、客户端模板和底层 JSON 使用经过校验的项目预设自动生成。
 - 服务器配置中的“443 分流与网站反向代理”把前三种协议按唯一 SNI 自动转发到
-  `127.0.0.1:高位运行端口`。同一入口还可配置一个独立网站 SNI、证书名称和无凭据的
-  绝对 HTTP(S) 上游；HTTP → HTTPS `308` 默认开启。该配置独占公网 TCP `443`。保存前
-  先在“证书管理”中签发覆盖网站 SNI 的受信证书，使用相同证书文件名部署到目标服务器；
+  `127.0.0.1:高位运行端口`。网站反向代理只需填写网站域名和无凭据的绝对 HTTP(S)
+  上游；证书名、本机高位端口、IPv4 回环终止和 HTTP → HTTPS `308` 均自动配置。该配置
+  独占公网 TCP `443`。保存前先在“证书管理”中签发以网站域名命名的受信证书；
   再保存入口并确认 Agent 命令最终显示成功。若命令失败，可排除问题后用“重新下发”重试。
 - “节点编排”页面可把候选节点拖成从左到右的多跳线路。线路至少 2 跳、最多 8 跳；
   同一跳的多个节点使用轮询负载均衡，最终出口必须只有一个节点。前端和后端都会阻止
@@ -469,7 +474,7 @@ Agent Token 也不会因本机脚本自动删除。
 | --- | --- |
 | 控制面 | `main` 提供 Preview 源码和一键安装器，常规回归由 GitHub Actions 执行 |
 | Agent | [0.3.0a4 Preview](https://github.com/FengYuchen1314/open-node/releases/tag/agent-v0.3.0a4)，不是稳定版，也不是 latest 发行版 |
-| 部署范围 | 全新 Debian/Ubuntu 单机部署；重点验证 Debian 12 `amd64` |
+| 部署范围 | 全新 Debian/Ubuntu 单机部署；Agent 一键接入支持 Debian 12/13、Ubuntu 24.04/26.04 `amd64` |
 | 数据库 | 默认 SQLite；首次安装可选择固定的 PostgreSQL 15。自动化集成已通过，PostgreSQL 干净主机一键安装及浏览器恢复的最终实机门仍待完成 |
 | MMWX 对齐 | 当前范围见[源码对齐表](docs/mmwx-source-parity.md)，不使用主观完成百分比 |
 | 验收记录 | 当前门槛见[源码对齐表](docs/mmwx-source-parity.md)和[测试记录](docs/testing.md)；[交接记录](docs/refactor-handoff.md)包含历史批次，不作为当前发布状态的唯一依据 |
@@ -479,7 +484,9 @@ Agent Token 也不会因本机脚本自动删除。
 - 受管安装器面向新主机，不接管现有手工 Compose 项目、已有反向代理或历史 MMWX 数据库。
 - 当前发布范围不包含旧 MMWX 整机迁移。仓库里保留的身份导入和旧 Agent 迁移工具属于
   显式、受控流程，不代表安装器会自动迁移旧环境。
-- 面板生成的 Agent 命令用于新 Debian 12 `amd64` 主机；初始安装不会自动接管已有服务
+- 面板生成的 Agent 命令用于新的 Debian 12/13、Ubuntu 24.04/26.04 `amd64` 主机；
+  Debian 11 和 Ubuntu 22.04 的系统默认 Python 低于当前 Agent 要求，不列入自动安装范围。
+  初始安装不会自动接管已有服务
   或创建公网代理入站。受管节点和共享入口须在 Agent 上线后由面板明确创建并等待命令成功。
 - 受管公网 HTTPS 依赖操作者拥有公网地址，并保证 TCP `443` 及配置的 HTTPS 端口可达。
   证书、地址或健康检查失败时，安装器会终止，不会降级到明文 HTTP、自签证书或仅回环成功。

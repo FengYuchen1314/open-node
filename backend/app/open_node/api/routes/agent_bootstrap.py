@@ -85,7 +85,7 @@ def availability(request: Request) -> dict:
             "source_commit": manifest["agent"]["source_commit"],
             "xray_version": manifest["xray"]["version"],
             "mihomo_version": manifest["mihomo"]["version"],
-            "platform": "Debian 12 amd64 / Python 3.11+ / systemd",
+            "platform": "Debian 12/13、Ubuntu 24.04/26.04 amd64 / systemd",
         },
         "reason": (
             None

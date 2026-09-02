@@ -126,7 +126,8 @@ describe("React subscriptions view", { timeout: 40_000 }, () => {
     for (const label of creationMetadata.profiles.map(option => option.label)) expect(screen.getByText(label, { selector: ".ant-select-item-option-content" })).toBeTruthy();
     expect(screen.queryByText("Trojan", { selector: ".ant-select-item-option-content" })).toBeNull();
     fireEvent.keyDown(screen.getByRole("combobox", { name: "协议档案" }), { key: "Escape" });
-    expect((screen.getByLabelText("类型") as HTMLInputElement).value).toBe("物理节点（受管运行时）");
+    expect(screen.queryByLabelText("类型")).toBeNull();
+    expect(screen.getByText("其余参数自动配置")).toBeTruthy();
     await selectOption("伪装池", "东京 · Sony · www.sony.jp");
     expect((screen.getByLabelText("伪装 SNI") as HTMLInputElement).value).toBe("www.sony.jp");
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Tokyo Vision" } });

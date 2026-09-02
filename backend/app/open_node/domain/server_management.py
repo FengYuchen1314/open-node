@@ -16,7 +16,7 @@ class ServerSettings(BaseModel):
     ip_address_v6: str | None = Field(default=None, max_length=255)
     domain: str | None = Field(default=None, max_length=255)
     domain_v6: str | None = Field(default=None, max_length=255)
-    ipv6_enabled: bool = True
+    ipv6_enabled: bool = False
 
     @field_validator("name")
     @classmethod

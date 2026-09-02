@@ -3,9 +3,9 @@ import { Alert, AutoComplete, Button, Card, Checkbox, Col, Divider, Empty, Form,
   Radio, Row, Select, Space, Statistic, Switch, Table, Tag, Typography } from "antd";
 import { DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { defaultServerCreateRequest, type AgentCommand, type AgentCommandStreamFrame, type AgentRead,
+import { type AgentCommand, type AgentCommandStreamFrame, type AgentRead,
   type AgentOperationKind, type AgentOperationPayload, type AgentScanResult, type AgentTelemetry,
-  type ConnectionMode, type RenewalCycle, type ServerCreateRequest, type ServerKind, type ServerProbeMetadataUpdate,
+  type RenewalCycle, type ServerKind, type ServerProbeMetadataUpdate,
   type ServerSummary, type XrayMode } from "../../domain/inventory";
 import { diagnosticPaths, latencyCommandTimeout, routeTargets, selectedRouteTargets } from "../../domain/diagnostics";
 import { createServer, createServerCommand, getLatestScanResult, getLatestTelemetry, listAgents,
@@ -40,7 +40,6 @@ const connectionOptions = ["auto", "websocket", "http", "pull"].map(value => ({ 
   label: { auto: "自动", websocket: "WebSocket", http: "HTTP", pull: "拉取" }[value] }));
 const xrayOptions = [{ value: "external", label: "外部" }, { value: "embedded", label: "嵌入式" }];
 const serverKindNames: Record<ServerKind, string> = { direct: "公网直连", "leased-line": "专线", residential: "家宽落地" };
-const serverKindOptions = (Object.entries(serverKindNames) as Array<[ServerKind, string]>).map(([value, label]) => ({ value, label }));
 const cycleNames: Record<RenewalCycle, string> = { month: "月", quarter: "季度", half_year: "半年", year: "年" };
 const cycleOptions = Object.entries(cycleNames).map(([value, label]) => ({ value, label }));
 const lifecyclePaths = /^\/api\/child\/agent\/(upgrade(?:-stream)?|uninstall(?:-stream)?|rollback)$/;
@@ -101,8 +100,7 @@ export default function DashboardView(_props: DashboardViewProps) {
   const [savingOperation, setSavingOperation] = useState<AgentOperationKind | "">("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [token, setToken] = useState<{ serverId: string; serverName: string; serverKind: ServerKind; value: string } | null>(null);
-  const [form, setForm] = useState<ServerCreateRequest>(defaultServerCreateRequest);
+  const [form, setForm] = useState({ name: "" });
   const [metadataTarget, setMetadataTarget] = useState("");
   const [metadata, setMetadata] = useState<ServerProbeMetadataUpdate>(() => metadataFor());
   const [command, setCommand] = useState({ server_id: "", method: "GET", path: "/api/child/system/info", query: "", bodyText: "", timeout_ms: 30000, stream: false });
@@ -112,7 +110,7 @@ export default function DashboardView(_props: DashboardViewProps) {
   const [logs, setLogs] = useState({ name: "", all: false, confirmed: false });
   const [streamPort, setStreamPort] = useState(443);
   const [management, setManagement] = useState({ open: false, serverId: "", mode: "edit" as "edit" | "remove" });
-  const [bootstrap, setBootstrap] = useState({ open: false, serverId: "", serverName: "", serverKind: "direct" as ServerKind });
+  const [bootstrap, setBootstrap] = useState({ open: false, serverId: "", serverName: "", serverKind: "direct" as ServerKind, autoIssue: false });
   const [lifecycle, setLifecycle] = useState({ open: false, serverId: "", action: "agent_upgrade" as AgentLifecycleAction });
   const [xrayDialog, setXrayDialog] = useState({ action: "" as "" | "xray_install" | "xray_remove" | "xray_rollback", target: "", confirmed: false });
   const [xrayRelease, setXrayRelease] = useState({ version: "v26.3.27", sha256: "", state: "preserve" as "preserve" | "start" | "stop" });
@@ -201,18 +199,14 @@ export default function DashboardView(_props: DashboardViewProps) {
 
   async function submitServer() {
     if (control.current.saving || !form.name.trim()) return;
-    if (!integerInRange(form.listen_port, 0, 65535)) { setError("端口必须是 0 至 65535 之间的整数。"); return; }
-    if (!integerInRange(form.traffic_limit, 0, Number.MAX_SAFE_INTEGER)) { setError("流量限额必须是非负安全整数，单位为字节。"); return; }
-    if (!validPrice(form.renewal_price) || !validPrice(form.renewal_price_cny)) { setError("续费价格可留空；填写时必须是有限的非负数。"); return; }
     const epoch = control.current.epoch;
-    control.current.saving = true; setSaving(true); setError(""); setSuccess(""); setToken(null);
+    control.current.saving = true; setSaving(true); setError(""); setSuccess("");
     try {
-      const response = await createServer({ ...form, ...metadataPayload(form), name: form.name.trim(), ip_address: textOrNull(form.ip_address),
-        ip_address_v6: textOrNull(form.ip_address_v6), domain: textOrNull(form.domain), domain_v6: textOrNull(form.domain_v6) });
+      const response = await createServer({ name: form.name.trim(), server_kind: "direct", connection_mode: "auto", ipv6_enabled: false });
       if (!current(epoch)) return;
-      setToken({ serverId: response.server.id, serverName: response.server.name,
-        serverKind: response.server.server_kind ?? form.server_kind ?? "direct", value: response.agent_token });
-      setForm(defaultServerCreateRequest()); await refreshServers();
+      setBootstrap({ open: true, serverId: response.server.id, serverName: response.server.name,
+        serverKind: "direct", autoIssue: true });
+      setForm({ name: "" }); setSuccess("服务器记录已创建，正在生成安装命令。"); await refreshServers();
     } catch (failure) { if (current(epoch)) report(failure); }
     finally { if (current(epoch)) { control.current.saving = false; setSaving(false); } }
   }
@@ -334,7 +328,7 @@ export default function DashboardView(_props: DashboardViewProps) {
         {!server.is_federated && <Tag>{serverKindNames[server.server_kind ?? "direct"]}</Tag>}</Space>
       <Typography.Text type="secondary">{server.xray_mode === "embedded" ? "嵌入式" : zhStatus(server.xray_mode)} Xray</Typography.Text>
       {!server.is_federated && <Space size={0}><Button type="text" icon={<DownloadOutlined />} aria-label={`在 ${server.name} 上安装 Agent`}
-        onClick={() => setBootstrap({ open: true, serverId: server.id, serverName: server.name, serverKind: server.server_kind ?? "direct" })} />
+        onClick={() => setBootstrap({ open: true, serverId: server.id, serverName: server.name, serverKind: server.server_kind ?? "direct", autoIssue: false })} />
         <Button type="text" icon={<EditOutlined />} aria-label={`编辑 ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "edit" })} />
         <Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除 ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "remove" })} /></Space>}
     </Space> },
@@ -380,32 +374,13 @@ export default function DashboardView(_props: DashboardViewProps) {
     {servers.length > 0 && <ServerTrafficPanel servers={servers} />}
     <Row gutter={[24, 24]}>
       <Col xs={24} xl={9}><Space orientation="vertical" size="large" style={{ width: "100%" }}>
-        <Card title="添加服务器"><Form layout="vertical" onFinish={() => void submitServer()} disabled={saving}>
-          <Form.Item label="名称" required><Input aria-label="名称" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></Form.Item>
-          <Form.Item label="服务器类型" required><Select aria-label="服务器类型" value={form.server_kind ?? "direct"} options={serverKindOptions}
-            onChange={(server_kind: ServerKind) => setForm({ ...form, server_kind })} /></Form.Item>
-          <Alert type="info" showIcon style={{ marginBottom: 16 }} title={{ direct: "可创建公网直连协议节点。", "leased-line": "专线服务器仅允许创建 Mieru 节点。", residential: "家宽落地服务器仅允许创建 SOCKS5 节点。" }[form.server_kind ?? "direct"]} />
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="IPv4"><Input aria-label="IPv4" value={form.ip_address ?? ""} onChange={event => setForm({ ...form, ip_address: event.target.value })} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="连接方式"><Select aria-label="连接方式" value={form.connection_mode} options={connectionOptions} onChange={(value: ConnectionMode) => setForm({ ...form, connection_mode: value })} /></Form.Item></Col></Row>
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="端口"><StrictInputNumber aria-label="端口" aria-valuemin={0} aria-valuemax={65535}
-            value={form.listen_port ?? Number.NaN} onChange={value => setForm(previous => ({ ...previous, listen_port: value ?? Number.NaN }))} style={{ width: "100%" }} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="Xray"><Select aria-label="Xray" value={form.xray_mode} options={xrayOptions} onChange={(value: XrayMode) => setForm({ ...form, xray_mode: value })} /></Form.Item></Col></Row>
-          <Form.Item label="流量限额（字节）"><StrictInputNumber aria-label="流量限额（字节）" aria-valuemin={0} aria-valuemax={Number.MAX_SAFE_INTEGER}
-            value={form.traffic_limit ?? Number.NaN} onChange={value => setForm(previous => ({ ...previous, traffic_limit: value ?? Number.NaN }))} style={{ width: "100%" }} /></Form.Item>
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="探针城市"><Input aria-label="探针城市" value={form.region_city ?? ""} onChange={event => setForm({ ...form, region_city: event.target.value })} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="服务商"><Input aria-label="新服务器服务商" value={form.provider_name ?? ""} onChange={event => setForm({ ...form, provider_name: event.target.value })} /></Form.Item></Col></Row>
-          <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="到期日期"><Input aria-label="新服务器到期日期" type="date" value={form.expires_at ?? ""} onChange={event => setForm({ ...form, expires_at: event.target.value })} /></Form.Item></Col>
-            <Col xs={24} sm={12}><Form.Item label="续费价格"><StrictInputNumber aria-label="新服务器续费价格" aria-valuemin={0} allowEmpty
-              value={form.renewal_price ?? null} onChange={renewal_price => setForm(previous => ({ ...previous, renewal_price }))} style={{ width: "100%" }} /></Form.Item></Col></Row>
-          <Form.Item label="IPv6"><Switch aria-label="IPv6" checked={form.ipv6_enabled} onChange={checked => setForm({ ...form, ipv6_enabled: checked })} /></Form.Item>
-          <Button htmlType="submit" type="primary" aria-label="创建服务器" icon={<PlusOutlined aria-hidden />} loading={saving} disabled={!form.name.trim()}>创建服务器</Button>
+        <Card title="接入服务器"><Form layout="vertical" onFinish={() => void submitServer()} disabled={saving}>
+          <Alert type="info" showIcon style={{ marginBottom: 16 }} title="只需填写名称"
+            description="系统会生成一条 root 安装命令。运行后 Agent 自动连接，面板自动识别公网 IPv4；无需填写 IP、端口或 IPv6。" />
+          <Form.Item label="服务器名称" required><Input aria-label="服务器名称" value={form.name} maxLength={120}
+            placeholder="例如：东京-01" onChange={event => setForm({ name: event.target.value })} /></Form.Item>
+          <Button htmlType="submit" type="primary" aria-label="生成服务器安装命令" icon={<PlusOutlined aria-hidden />} loading={saving} disabled={!form.name.trim()}>生成安装命令</Button>
         </Form>
-        {token && <Alert style={{ marginTop: 16 }} type="success" showIcon title={`${token.serverName} 的 Agent 令牌`}
-          description={<Space orientation="vertical" style={{ width: "100%" }}>
-            <Typography.Text>请妥善保存此令牌，用于手动配置 Agent。令牌仅在此处显示。</Typography.Text>
-            <Input.TextArea aria-label="Agent 令牌" value={token.value} readOnly rows={2} autoComplete="off" spellCheck={false} style={{ fontFamily: "monospace" }} />
-            <Space wrap><Button aria-label="安装 Agent" onClick={() => setBootstrap({ open: true, serverId: token.serverId, serverName: token.serverName, serverKind: token.serverKind })}>安装 Agent</Button>
-              <Button aria-label="隐藏令牌" onClick={() => setToken(null)}>隐藏令牌</Button></Space></Space>} />}
         </Card>
         <Card title="探针元数据"><Form layout="vertical" onFinish={() => void submitMetadata()}>
           <Form.Item label="服务器"><Select aria-label="元数据服务器" value={metadataTarget || undefined} options={metadataOptions} disabled={!metadataOptions.length || savingMetadata}

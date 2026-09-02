@@ -610,6 +610,7 @@ def assert_public_surface(page: Page):
         "下发到期任务",
         "退出登录",
         "创建服务器",
+        "生成服务器安装命令",
         "生成访问令牌",
     ):
         assert forbidden not in text, (

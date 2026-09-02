@@ -35,7 +35,7 @@ describe("shared ingress domain", () => {
     const website = { ...sharedIngressWebsiteDraft(null), enabled: true, sni: "SITE.example.com", upstream_url: "https://origin.example/app", certificate_name: "site.example.com" };
     expect(website.redirect_http).toBe(true);
     expect(sharedIngressConfiguration(null, routes, website)).toEqual({
-      listen_port: 443, listen_ipv6: true, routes,
+      listen_port: 443, listen_ipv6: false, routes,
       website: { sni: "site.example.com", upstream_url: "https://origin.example/app", certificate_name: "site.example.com", redirect_http: true, tls_address: "127.0.0.1", tls_port: 62044 },
     });
     expect(sharedIngressConfiguration(null, [], { ...website, enabled: false })).toBeNull();

@@ -147,11 +147,11 @@ export function sharedIngressConfiguration(
   const upstream = normalizeSharedIngressUpstream(website.upstream_url);
   return {
     listen_port: 443,
-    listen_ipv6: current?.listen_ipv6 ?? true,
+    listen_ipv6: false,
     routes: routes.map(route => ({ ...route })),
     website: website.enabled && sni && upstream ? {
       sni, upstream_url: upstream, certificate_name: website.certificate_name,
-      redirect_http: website.redirect_http, tls_address: website.tls_address, tls_port: website.tls_port,
+      redirect_http: true, tls_address: "127.0.0.1", tls_port: website.tls_port,
     } : null,
   };
 }

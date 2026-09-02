@@ -412,9 +412,18 @@ def installation_command(control_url: str, ticket: str, server_id: UUID) -> str:
     quote = shlex.quote
     steps = [
         "( set -eu",
-        'test "$(id -u)" -eq 0 || { echo "Run as root on Debian 12 amd64" >&2; exit 1; }',
-        'command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }',
-        'command -v curl >/dev/null || { echo "curl is required" >&2; exit 1; }',
+        'test "$(id -u)" -eq 0 || { echo "Run as root on a supported amd64 server" >&2; exit 1; }',
+        'test -r /etc/os-release || { echo "Cannot verify the operating system" >&2; exit 1; }',
+        'os_id=$(sed -n \'s/^ID=//p\' /etc/os-release | tr -d \'"\')',
+        'os_version=$(sed -n \'s/^VERSION_ID=//p\' /etc/os-release | tr -d \'"\')',
+        'case "$os_id:$os_version" in debian:12|debian:13|ubuntu:24.04|ubuntu:26.04) ;; '
+        '*) echo "Supported systems: Debian 12/13 or Ubuntu 24.04/26.04 amd64" >&2; exit 1 ;; esac',
+        'test "$(uname -m)" = x86_64 || { echo "Only amd64 servers are supported" >&2; exit 1; }',
+        "export DEBIAN_FRONTEND=noninteractive",
+        "apt-get update",
+        "apt-get install --yes --no-install-recommends ca-certificates curl python3 python3-venv",
+        "python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' || "
+        '{ echo "Python 3.11 or newer is required" >&2; exit 1; }',
         "umask 077",
         "installer=$(mktemp --tmpdir open-node-agent-install.XXXXXXXX.py)",
         "trap 'rm -f -- \"$installer\"' EXIT HUP INT TERM",

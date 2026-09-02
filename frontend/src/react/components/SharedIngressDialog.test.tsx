@@ -23,7 +23,7 @@ const nodeId = "22222222-2222-4222-8222-222222222222";
 const now = "2026-09-02T00:00:00Z";
 const route = { node_id: nodeId, profile: "vless-reality-vision" as const, sni: "node.example.com", upstream_address: "127.0.0.1" as const, upstream_port: 62041 };
 const configured: SharedIngressConfiguration = {
-  listen_port: 443, listen_ipv6: true, routes: [route],
+  listen_port: 443, listen_ipv6: false, routes: [route],
   website: { sni: "site.example.com", upstream_url: "https://origin.example/app", tls_address: "127.0.0.1", tls_port: 62044, certificate_name: "site.example.com", redirect_http: true },
 };
 const saved: SharedIngressState = { server_id: serverId, configuration: configured, revision: 3, created_at: now, updated_at: now, license_required: false };
@@ -67,19 +67,19 @@ describe("shared TCP 443 ingress dialog", () => {
     expect(screen.getByRole("link", { name: "管理可信证书" }).getAttribute("href")).toBe("/certificates");
     expect(screen.getByText("VLESS Reality Vision", { selector: "td" })).toBeTruthy();
     expect(screen.getByText(/node\.example\.com → 127\.0\.0\.1:62041/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("网站 SNI"), { target: { value: "node.example.com" } }); await flush();
+    fireEvent.change(screen.getByLabelText("网站域名"), { target: { value: "node.example.com" } }); await flush();
     expect(screen.getByText("网站 SNI 与节点路由重复，请更换域名。")).toBeTruthy();
     expect((screen.getByRole("button", { name: "重新下发" }) as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.change(screen.getByLabelText("网站 SNI"), { target: { value: "new.example.com" } });
+    fireEvent.change(screen.getByLabelText("网站域名"), { target: { value: "new.example.com" } });
     fireEvent.change(screen.getByLabelText("绝对 HTTP(S) 上游"), { target: { value: "http://127.0.0.1:8080/app" } });
-    fireEvent.click(screen.getByRole("switch", { name: "自动 HTTP 转 HTTPS 308" })); await flush();
+    await flush();
     fireEvent.click(screen.getByRole("button", { name: "保存并下发" })); await flush();
     expect(applySharedIngress).toHaveBeenCalledExactlyOnceWith(serverId, {
       expected_revision: 3, command_timeout_ms: 60000,
       configuration: {
         ...configured, routes: [route],
-        website: { ...configured.website!, sni: "new.example.com", upstream_url: "http://127.0.0.1:8080/app", redirect_http: false },
+        website: { ...configured.website!, sni: "new.example.com", upstream_url: "http://127.0.0.1:8080/app", redirect_http: true, certificate_name: "new.example.com" },
       },
     });
     expect(screen.getByText("Agent 命令状态")).toBeTruthy();
@@ -90,14 +90,13 @@ describe("shared TCP 443 ingress dialog", () => {
     const empty: SharedIngressState = { server_id: serverId, configuration: null, revision: 0, created_at: null, updated_at: null, license_required: false };
     await mount(empty);
     fireEvent.click(screen.getByRole("switch", { name: "启用网站反向代理" })); await flush();
-    expect((screen.getByRole("switch", { name: "自动 HTTP 转 HTTPS 308" }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("true");
-    fireEvent.change(screen.getByLabelText("网站 SNI"), { target: { value: "site.example.com" } });
-    fireEvent.change(screen.getByLabelText("证书名称"), { target: { value: "site.example.com" } });
+    expect(screen.getByText(/启用 HTTP → HTTPS 308 重定向/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("网站域名"), { target: { value: "site.example.com" } });
     fireEvent.change(screen.getByLabelText("绝对 HTTP(S) 上游"), { target: { value: "https://origin.example/app" } }); await flush();
     fireEvent.click(screen.getByRole("button", { name: "保存并下发" })); await flush();
     expect(applySharedIngress).toHaveBeenCalledWith(serverId, {
       expected_revision: 0, command_timeout_ms: 60000,
-      configuration: { listen_port: 443, listen_ipv6: true, routes: [], website: {
+      configuration: { listen_port: 443, listen_ipv6: false, routes: [], website: {
         sni: "site.example.com", upstream_url: "https://origin.example/app", certificate_name: "site.example.com",
         redirect_http: true, tls_address: "127.0.0.1", tls_port: 62044,
       } },

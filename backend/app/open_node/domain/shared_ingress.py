@@ -103,7 +103,7 @@ class SharedIngressConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     listen_port: Literal[443] = 443
-    listen_ipv6: bool = True
+    listen_ipv6: bool = False
     routes: list[SharedIngressRoute] = Field(default_factory=list, max_length=32)
     website: SharedIngressWebsite | None = None
 

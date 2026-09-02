@@ -11,7 +11,7 @@ vi.mock("../../services/inventory", () => ({ createServer: vi.fn(), createServer
   listAgents: vi.fn(), listCommandStreamFrames: vi.fn(), listServerCommands: vi.fn(), listServers: vi.fn(), queueAgentOperation: vi.fn(), updateServerProbeMetadata: vi.fn() }));
 vi.mock("../../services/branding", async original => ({ ...await original<typeof import("../../services/branding")>(), getPublicBranding: vi.fn() }));
 vi.mock("../components/ServerTrafficPanel", () => ({ default: ({ servers }: { servers: ServerSummary[] }) => <div data-testid="traffic-panel">{servers.length}</div> }));
-vi.mock("../components/AgentBootstrapDialog", () => ({ default: ({ open, serverId, serverKind }: { open: boolean; serverId: string; serverKind?: string }) => open ? <div data-testid="bootstrap-dialog-target" data-server-kind={serverKind}>{serverId}</div> : null }));
+vi.mock("../components/AgentBootstrapDialog", () => ({ default: ({ open, serverId, serverKind, autoIssue }: { open: boolean; serverId: string; serverKind?: string; autoIssue?: boolean }) => open ? <div data-testid="bootstrap-dialog-target" data-server-kind={serverKind} data-auto-issue={String(Boolean(autoIssue))}>{serverId}</div> : null }));
 vi.mock("../components/AgentLifecycleDialog", () => ({ default: ({ open, serverId, action }: { open: boolean; serverId: string; action: string }) => open ? <div data-testid="lifecycle-dialog-target">{serverId}:{action}</div> : null }));
 vi.mock("../components/ServerManagementDialog", () => ({ default: ({ open, serverId, mode }: { open: boolean; serverId: string; mode: string }) => open ? <div data-testid="management-dialog-target">{serverId}:{mode}</div> : null }));
 vi.mock("../components/CommandInspector", () => ({ default: ({ commands }: { commands: AgentCommand[] }) => <div data-testid="dashboard-commands">{commands.map(command => `${command.id}:${command.status}`).join(",")}</div> }));
@@ -114,26 +114,16 @@ describe("React Dashboard workflows", () => {
     expect((getButton("下发命令") as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(getButton("系统信息")); expect(queueAgentOperation).not.toHaveBeenCalled();
   }, 30000);
-  it("creates the complete default request and keeps its manual token private and dismissible", async () => {
-    await mount(); fireEvent.change(screen.getByLabelText("名称"), { target: { value: " New edge " } });
-    fireEvent.change(screen.getByLabelText("IPv4", { selector: "input[type=text]" }), { target: { value: "192.0.2.9" } });
-    fireEvent.change(screen.getByLabelText("新服务器到期日期"), { target: { value: "2026-09-30" } });
-    fireEvent.click(getButton("创建服务器")); await flush();
-    expect(createServer).toHaveBeenCalledWith(expect.objectContaining({ name: "New edge", server_kind: "direct", ip_address: "192.0.2.9", ip_address_v6: null,
-      domain: null, domain_v6: null, expires_at: "2026-09-30T00:00:00Z", connection_mode: "auto", xray_mode: "external", listen_port: 23889, ipv6_enabled: true }));
-    expect((screen.getByLabelText("Agent 令牌") as HTMLTextAreaElement).value).toBe("private-manual-agent-token");
-    fireEvent.click(getButton("隐藏令牌")); expect(screen.queryByLabelText("Agent 令牌")).toBeNull();
+  it("creates a minimal IPv4-only server and immediately opens its generated installer", async () => {
+    await mount(); fireEvent.change(screen.getByLabelText("服务器名称"), { target: { value: " New edge " } });
+    expect(screen.queryByLabelText("IPv4", { selector: "input[type=text]" })).toBeNull();
+    expect(screen.queryByLabelText("IPv6", { selector: "input[type=checkbox]" })).toBeNull();
+    fireEvent.click(getButton("生成服务器安装命令")); await flush();
+    expect(createServer).toHaveBeenCalledWith({ name: "New edge", server_kind: "direct", connection_mode: "auto", ipv6_enabled: false });
+    expect(screen.getByTestId("bootstrap-dialog-target").textContent).toBe("new");
+    expect(screen.getByTestId("bootstrap-dialog-target").dataset.autoIssue).toBe("true");
+    expect(screen.queryByLabelText("Agent 令牌")).toBeNull();
     expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
-  }, 30000);
-  it("selects the server kind before creation and carries it into Agent installation", async () => {
-    vi.mocked(createServer).mockResolvedValue({ server: { ...edge, id: "leased", name: "Leased", server_kind: "leased-line" }, agent_token: "private-token", license_required: false });
-    await mount(); fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Leased" } });
-    await select("服务器类型", "专线");
-    expect(screen.getByText("专线服务器仅允许创建 Mieru 节点。")).toBeTruthy();
-    fireEvent.click(getButton("创建服务器")); await flush();
-    expect(createServer).toHaveBeenCalledWith(expect.objectContaining({ name: "Leased", server_kind: "leased-line" }));
-    fireEvent.click(getButton("安装 Agent"));
-    expect(screen.getByTestId("bootstrap-dialog-target").dataset.serverKind).toBe("leased-line");
   }, 30000);
   it("preserves all probe metadata fields and UTC expiry semantics", async () => {
     await mount(); fireEvent.change(screen.getByLabelText("国家"), { target: { value: " JP " } });
@@ -251,8 +241,8 @@ describe("React Dashboard workflows", () => {
   it("never renders a late manual Agent token after the page unmounts", async () => {
     let resolve!: (value: Awaited<ReturnType<typeof createServer>>) => void;
     vi.mocked(createServer).mockReturnValueOnce(new Promise(done => { resolve = done; }));
-    const { unmount } = await mount(); fireEvent.change(screen.getByLabelText("名称"), { target: { value: "New edge" } });
-    const button = getButton("创建服务器"); fireEvent.click(button); fireEvent.click(button); await flush();
+    const { unmount } = await mount(); fireEvent.change(screen.getByLabelText("服务器名称"), { target: { value: "New edge" } });
+    const button = getButton("生成服务器安装命令"); fireEvent.click(button); fireEvent.click(button); await flush();
     expect(createServer).toHaveBeenCalledOnce(); unmount();
     await act(async () => { resolve({ server: edge, agent_token: "late-private-token", license_required: false }); });
     expect(screen.queryByLabelText("Agent 令牌")).toBeNull(); expect(document.body.textContent).not.toContain("late-private-token");
@@ -275,8 +265,6 @@ describe("React Dashboard workflows", () => {
     expect(button.disabled).toBe(false); expect(button.getAttribute("aria-label")).toBe("下发命令");
   }, 30000);
   it.each([
-    { label: "端口", button: "创建服务器", minimum: 0, maximum: 65535 },
-    { label: "流量限额（字节）", button: "创建服务器", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
     { label: "流转发端口", button: "清理流转发", minimum: 1, maximum: 65535 },
     { label: "监听端口", button: "应用监听端口", minimum: 0, maximum: 65535 },
     { label: "延迟探测超时", button: "下发延迟探测", minimum: 200, maximum: 10000 },
@@ -284,7 +272,7 @@ describe("React Dashboard workflows", () => {
     { label: "命令超时", button: "下发命令", minimum: 1000, maximum: 300000 },
   ])("rejects blank, negative, fractional and over-bound $label after real Ant blur and Enter", async ({ label, button, minimum, maximum }) => {
     vi.mocked(listAgents).mockResolvedValue([agent]); await mount();
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "New edge" } });
+    fireEvent.change(screen.getByLabelText("服务器名称"), { target: { value: "New edge" } });
     fireEvent.change(screen.getByLabelText("延迟探测目标"), { target: { value: "example.com" } });
     fireEvent.change(screen.getByLabelText("电信主机"), { target: { value: "203.0.113.2" } });
     fireEvent.change(screen.getByLabelText("控制台地址"), { target: { value: "https://control.example" } });
@@ -304,11 +292,10 @@ describe("React Dashboard workflows", () => {
     }
   }, 30000);
   it.each([
-    { label: "新服务器续费价格", button: "创建服务器", key: "renewal_price" },
     { label: "续费价格", button: "保存元数据", key: "renewal_price" },
     { label: "人民币价格", button: "保存元数据", key: "renewal_price_cny" },
   ])("rejects invalid $label without silently clearing it, but permits explicit empty and decimal prices", async ({ label, button, key }) => {
-    await mount(); fireEvent.change(screen.getByLabelText("名称"), { target: { value: "New edge" } });
+    await mount();
     const input = screen.getByLabelText(label) as HTMLInputElement;
     for (const finish of ["blur", "Enter"] as const) {
       for (const value of ["-1", "-", "$1", "0x10", "1e", "1e999", "1e-999", " "]) {
@@ -317,26 +304,9 @@ describe("React Dashboard workflows", () => {
       }
     }
     editNumber(input, "2.5", "Enter"); fireEvent.click(getButton(button)); await flush();
-    if (button === "创建服务器") {
-      expect(createServer).toHaveBeenLastCalledWith(expect.objectContaining({ [key]: 2.5 }));
-      fireEvent.change(screen.getByLabelText("名称"), { target: { value: "New edge" } });
-    } else expect(updateServerProbeMetadata).toHaveBeenLastCalledWith("edge", expect.objectContaining({ [key]: 2.5 }));
+    expect(updateServerProbeMetadata).toHaveBeenLastCalledWith("edge", expect.objectContaining({ [key]: 2.5 }));
     editNumber(input, "", "blur"); fireEvent.click(getButton(button)); await flush();
-    if (button === "创建服务器") expect(createServer).toHaveBeenLastCalledWith(expect.objectContaining({ [key]: null }));
-    else expect(updateServerProbeMetadata).toHaveBeenLastCalledWith("edge", expect.objectContaining({ [key]: null }));
-  }, 30000);
-  it("does not reuse an old required quota for malformed or underflowed numeric drafts", async () => {
-    await mount(); fireEvent.change(screen.getByLabelText("名称"), { target: { value: "New edge" } });
-    const input = screen.getByLabelText("流量限额（字节）");
-    for (const finish of ["blur", "Enter"] as const) {
-      for (const value of ["-", "$1", "0x10", "1e", "1e999", "1e-999", " "]) {
-        editNumber(input, value, finish); fireEvent.click(getButton("创建服务器")); await flush();
-        expect(createServer).not.toHaveBeenCalled();
-      }
-    }
-    editNumber(input, "0", "Enter"); editNumber(screen.getByLabelText("端口"), "0", "blur");
-    fireEvent.click(getButton("创建服务器")); await flush();
-    expect(createServer).toHaveBeenCalledWith(expect.objectContaining({ traffic_limit: 0, listen_port: 0 }));
+    expect(updateServerProbeMetadata).toHaveBeenLastCalledWith("edge", expect.objectContaining({ [key]: null }));
   }, 30000);
   it("rejects blank and invalid selected return-route ports instead of substituting port 80", async () => {
     await mount(); fireEvent.change(screen.getByLabelText("电信主机"), { target: { value: "203.0.113.2" } });

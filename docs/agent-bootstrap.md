@@ -2,7 +2,8 @@
 
 Open Node 沿用官方 MMWX 的操作习惯：先在控制面创建服务器，再由面板生成只属于该记录的
 安装命令，最后到远端主机执行并等待 Agent 上线。当前自动安装面向全新的
-**Debian 12 amd64** 主机，要求 root、systemd、Python 3.11+ 和可信 HTTPS；它不会迁移
+**Debian 12/13、Ubuntu 24.04/26.04 amd64** 主机，要求 root、systemd、Python 3.11+
+和可信 HTTPS；命令会通过 APT 安装 CA、curl、Python 和 venv 等基础依赖。它不会迁移
 整机、自动接管已有 Xray/systemd 服务，也不会安装控制面。
 
 ## 安装前检查
@@ -29,13 +30,15 @@ sudo env OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL=https://panel.example.com \
 
 ## 面板操作
 
-1. 在“服务器”中新建一条记录，不要复用已经注册或仍在心跳的 Agent 身份。
-2. 打开“安装 Agent”。打开窗口只读取状态，不会立即签发票据。
-3. 选择自动、WebSocket 或 HTTP 轮询，确认目标是新的 Debian 12 amd64 主机。
-4. 生成并完整复制命令，在目标主机的 root shell 中执行。命令含短期、一次性安装票据，
+1. 在“服务器管理 → 接入服务器”只填写名称，点击“生成安装命令”。系统默认使用自动连接、
+   关闭 IPv6，并立即打开安装窗口。
+2. 完整复制命令，在目标主机的 root shell 中执行。命令含短期、一次性安装票据，
    不要发到聊天、工单或公开日志。
-5. 保持终端打开。只有出现 `Agent installed and ready: ...` 才算完成；随后回到面板核对
-   Agent 版本、心跳、运行时和遥测。
+3. 保持终端打开。只有出现 `Agent installed and ready: ...` 才算完成；随后面板会自动显示
+   已连接状态和公网 IPv4，再核对 Agent 版本、运行时和遥测。
+
+已有但尚未安装的服务器记录仍可点击行内“安装 Agent”，手工选择自动、WebSocket 或 HTTP
+轮询并重新签发命令。新接入主流程不会显示长期 Agent Token。
 
 安装失败不会伪装成成功，也不会只因为 systemd 进程启动就退出。安装器会等待执行中的
 release、最新本机健康状态、与控制面的认证连接以及受管运行时的期望状态。失败时会保留

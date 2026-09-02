@@ -31,10 +31,10 @@ function mayRevoke(state: AgentBootstrapState | null) {
 
 // Secrets stay in this mounted dialog only. Epoch + request sequence guards also
 // cover StrictMode replay, target changes and responses received after closing.
-export function useAgentBootstrap(open: boolean, serverId: string, onUpdated?: () => void) {
+export function useAgentBootstrap(open: boolean, serverId: string, onUpdated?: () => void, autoIssue = false) {
   const [view, setView] = useState<BootstrapView>(emptyView);
   const control = useRef({ epoch: 0, sequence: 0, active: false, serverId: "",
-    issuedAt: "", view: emptyView(), timer: undefined as ReturnType<typeof setTimeout> | undefined });
+    issuedAt: "", autoIssue: false, view: emptyView(), timer: undefined as ReturnType<typeof setTimeout> | undefined });
   const updated = useRef(onUpdated);
   useLayoutEffect(() => { updated.current = onUpdated; }, [onUpdated]);
 
@@ -86,14 +86,17 @@ export function useAgentBootstrap(open: boolean, serverId: string, onUpdated?: (
     } finally {
       if (current(run) && sequence === control.current.sequence) {
         patch({ loading: false });
-        schedule(run);
+        if (control.current.autoIssue && mayIssue(control.current.view.state)) {
+          control.current.autoIssue = false;
+          void issue(true);
+        } else schedule(run);
       }
     }
   }
-  async function issue() {
+  async function issue(skipConfirmation = false) {
     const previous = control.current.view;
     if (!current(control.current.epoch) || !mayIssue(previous.state)
-      || !previous.confirmed || previous.busy || previous.loading) return;
+      || (!skipConfirmation && !previous.confirmed) || previous.busy || previous.loading) return;
     const run = ++control.current.epoch;
     stopTimer();
     patch({ busy: true, error: "" });
@@ -140,6 +143,7 @@ export function useAgentBootstrap(open: boolean, serverId: string, onUpdated?: (
     stopTimer();
     model.serverId = serverId;
     model.active = open && Boolean(serverId);
+    model.autoIssue = model.active && autoIssue;
     model.issuedAt = "";
     model.view = emptyView();
     setView(model.view);
@@ -151,11 +155,11 @@ export function useAgentBootstrap(open: boolean, serverId: string, onUpdated?: (
       model.issuedAt = "";
       model.view = emptyView();
     };
-  }, [open, serverId]);
+  }, [open, serverId, autoIssue]);
 
   const visible = open && serverId === control.current.serverId ? view : emptyView();
   return { ...visible, canIssue: mayIssue(visible.state), canRevoke: mayRevoke(visible.state),
     setTransport: (transport: BootstrapTransport) => patch({ transport }),
     setConfirmed: (confirmed: boolean) => patch({ confirmed }),
-    refresh: () => refresh(), issue, revoke };
+    refresh: () => refresh(), issue: () => issue(autoIssue), revoke };
 }

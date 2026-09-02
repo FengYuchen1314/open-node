@@ -954,7 +954,7 @@ export const defaultServerCreateRequest = (): ServerCreateRequest => ({
   connection_mode: "auto",
   listen_port: 23889,
   pull_port: 0,
-  ipv6_enabled: true,
+  ipv6_enabled: false,
   traffic_limit: 0,
   xray_mode: "external",
   region: "",

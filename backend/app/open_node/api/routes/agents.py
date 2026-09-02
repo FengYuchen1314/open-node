@@ -1,5 +1,6 @@
 import re
 from datetime import UTC, datetime
+from ipaddress import ip_address
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -48,6 +49,33 @@ from open_node.services.secure_channel import AgentSocket, ChannelError
 router = APIRouter(route_class=BackupAPIRoute, prefix="/agents", tags=["agents"])
 
 
+def _public_ipv4(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        address = ip_address(value.strip())
+    except ValueError:
+        return None
+    return str(address) if address.version == 4 and address.is_global else None
+
+
+def _request_public_ipv4(client_host: str | None, forwarded_for: str | None) -> str | None:
+    """Use the socket peer, or one Caddy-owned forwarding chain, for IPv4 discovery."""
+    direct = _public_ipv4(client_host)
+    if direct:
+        return direct
+    try:
+        peer = ip_address((client_host or "").strip())
+    except ValueError:
+        return None
+    if not (peer.is_private or peer.is_loopback or peer.is_link_local):
+        return None
+    for candidate in reversed((forwarded_for or "").split(",")):
+        if detected := _public_ipv4(candidate):
+            return detected
+    return None
+
+
 @router.get("/identity", dependencies=[Depends(require_administrator)])
 def agent_identity(request: Request) -> dict:
     identity = request.app.state.agent_identity
@@ -76,9 +104,16 @@ def list_agents(store: Annotated[InventoryStore, Depends(get_inventory_store)]) 
 )
 async def register_agent(
     payload: AgentRegistrationRequest,
+    request: Request,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
     connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> AgentRegistrationResponse:
+    detected = _request_public_ipv4(
+        request.client.host if request.client else None,
+        request.headers.get("x-forwarded-for"),
+    )
+    if detected and not payload.public_ipv4:
+        payload = payload.model_copy(update={"public_ipv4": detected})
     try:
         agent, server = await run_in_backup_threadpool(store.register_agent, payload)
     except InvalidAgentTokenError as exc:
@@ -90,8 +125,15 @@ async def register_agent(
 @router.post("/heartbeat", response_model=AgentHeartbeatResponse)
 def record_agent_heartbeat(
     payload: AgentHeartbeatRequest,
+    request: Request,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
 ) -> AgentHeartbeatResponse:
+    detected = _request_public_ipv4(
+        request.client.host if request.client else None,
+        request.headers.get("x-forwarded-for"),
+    )
+    if detected and not payload.public_ipv4:
+        payload = payload.model_copy(update={"public_ipv4": detected})
     try:
         server = store.record_heartbeat(payload)
     except InvalidAgentTokenError as exc:
@@ -185,6 +227,10 @@ async def agent_websocket(websocket: WebSocket) -> None:
     channel = AgentSocket(websocket)
     server_id: UUID | None = None
     token = ""
+    detected_ipv4 = _request_public_ipv4(
+        websocket.client.host if websocket.client else None,
+        websocket.headers.get("x-forwarded-for"),
+    )
 
     try:
         identity = websocket.app.state.agent_identity
@@ -210,6 +256,7 @@ async def agent_websocket(websocket: WebSocket) -> None:
                     _registration_from_ws_payload(
                         auth_payload,
                         legacy_transport=websocket.url.path == "/api/remote/ws",
+                        detected_ipv4=detected_ipv4,
                     )
                 )
             except (InvalidAgentTokenError, ValidationError) as exc:
@@ -226,7 +273,9 @@ async def agent_websocket(websocket: WebSocket) -> None:
             message = await channel.receive_json()
             async with agent_backup_operation(barrier):
                 store.authenticate_agent(token)
-                await _handle_agent_ws_message(channel, store, token, message)
+                await _handle_agent_ws_message(
+                    channel, store, token, message, detected_ipv4=detected_ipv4
+                )
                 if isinstance(message, dict) and message.get("type") == "rpc_reply":
                     await connections.dispatch_ready_commands(store)
                 else:
@@ -253,7 +302,8 @@ def _message_payload(message: object) -> dict[str, Any]:
 
 
 def _registration_from_ws_payload(
-    payload: dict[str, Any], *, legacy_transport: bool = False
+    payload: dict[str, Any], *, legacy_transport: bool = False,
+    detected_ipv4: str | None = None,
 ) -> AgentRegistrationRequest:
     token = str(payload.get("token") or "")
     agent_version = payload.get("agent_version")
@@ -279,7 +329,7 @@ def _registration_from_ws_payload(
         agent_version=agent_version,
         connection_mode=payload.get("connection_mode") or "websocket",
         listen_port=(23889 if payload.get("listen_port") is None else payload.get("listen_port")),
-        public_ipv4=payload.get("public_ipv4"),
+        public_ipv4=payload.get("public_ipv4") or detected_ipv4,
         public_ipv6=payload.get("public_ipv6"),
         xray_mode=payload.get("xray_mode") or "external",
         capabilities=capabilities,
@@ -300,6 +350,8 @@ async def _handle_agent_ws_message(
     store: InventoryStore,
     token: str,
     message: object,
+    *,
+    detected_ipv4: str | None = None,
 ) -> None:
     if not isinstance(message, dict):
         await _send_ws_error(websocket, "message must be an object")
@@ -318,7 +370,7 @@ async def _handle_agent_ws_message(
                 token=token,
                 warp_installed=payload.get("warp_installed"),
                 listen_port=payload.get("listen_port"),
-                public_ipv4=payload.get("public_ipv4"),
+                public_ipv4=payload.get("public_ipv4") or detected_ipv4,
                 public_ipv6=payload.get("public_ipv6"),
             )
             store.record_heartbeat(heartbeat)

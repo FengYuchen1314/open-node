@@ -269,7 +269,7 @@ export default function SubscriptionsView({ workspace = "all" }: SubscriptionsVi
   const showNodes = workspace === "all" || workspace === "nodes";
   const showPlans = workspace === "all" || workspace === "plans";
   const workspaceTitle = workspace === "nodes" ? "节点目录" : workspace === "plans" ? "套餐管理" : workspace === "users" ? "用户管理" : workspace === "migration" ? "订阅目录迁移" : "订阅目录与用户绑定";
-  const workspaceDescription = workspace === "nodes" ? "创建、维护节点及其运行时参数" : workspace === "plans" ? "选择一个或多个节点，并为套餐应用订阅模板" : workspace === "users" ? "创建用户、绑定套餐并管理订阅访问" : workspace === "migration" ? "跨实例迁移用户、节点、套餐、模板及可选凭据" : "用户、托管节点、套餐与分配";
+  const workspaceDescription = workspace === "nodes" ? "选择服务器和协议即可创建，运行参数由预设自动生成" : workspace === "plans" ? "选择一个或多个节点，并为套餐应用订阅模板" : workspace === "users" ? "创建用户、绑定套餐并管理订阅访问" : workspace === "migration" ? "跨实例迁移用户、节点、套餐、模板及可选凭据" : "用户、托管节点、套餐与分配";
   function patchNode(change: Partial<typeof nodeForm>) { setNodeForm(previous => ({ ...previous, ...change })); }
   function selectNodeServer(server_id: string) {
     const kind = servers.find(server => server.id === server_id)?.server_kind ?? "direct";
@@ -367,12 +367,8 @@ export default function SubscriptionsView({ workspace = "all" }: SubscriptionsVi
             </>}
             {selectedCreationProfile?.profile === "socks5" && (selectedCreationProfile.warning_server_kinds ?? []).includes(selectedServerKind) && <Alert type="warning" showIcon style={{ marginBottom: 16 }}
               title={selectedCreationProfile.warning ?? "公网直连服务器使用 SOCKS5 极度不推荐，除非您知道您要做什么。"} />}
-            <Form.Item label="类型"><Input aria-label="类型" value="物理节点（受管运行时）" readOnly /></Form.Item>
-            {([{ key: "inbound_tag", label: "入站标签" }, { key: "routed_outbound_tag", label: "出站标签" }, { key: "routed_rule_marktag", label: "路由标记" }, { key: "tag", label: "主要标签" }, { key: "tagsText", label: "标签" }] as const).map(field => <Form.Item key={field.key} label={field.label}><Input aria-label={field.label} value={nodeForm[field.key]} onChange={event => patchNode({ [field.key]: event.target.value })} /></Form.Item>)}
-            {nodeForm.node_type === "routed" && <><Form.Item label="父节点"><Select aria-label="父节点" allowClear value={nodeForm.parent_id ?? undefined} options={nodes.filter(node => !node.removal_id && node.server_id === nodeForm.server_id && node.inbound_tag === nodeForm.inbound_tag && node.protocol === nodeForm.protocol).map(node => ({ label: node.name, value: node.id }))} onChange={value => patchNode({ parent_id: value ?? null })} /></Form.Item><Form.Item label="目标节点"><Select aria-label="目标节点" allowClear value={nodeForm.target_node_id ?? undefined} options={nodeOptions} onChange={value => patchNode({ target_node_id: value ?? null })} /></Form.Item></>}
-            <Form.Item label="客户端模板"><Input.TextArea aria-label="客户端模板" rows={5} value={nodeForm.clientTemplateText} onChange={event => patchNode({ clientTemplateText: event.target.value })} /></Form.Item>
-            <Form.Item label="节点配置"><Input.TextArea aria-label="节点配置" rows={4} value={nodeForm.configText} onChange={event => patchNode({ configText: event.target.value })} /></Form.Item>
-            <Form.Item label="已启用"><Switch aria-label="已启用" checked={nodeForm.enabled} onChange={enabled => patchNode({ enabled })} /></Form.Item>
+            <Alert type="success" showIcon style={{ marginBottom: 16 }} title="其余参数自动配置"
+              description="入站标签、路由标签、客户端模板和运行配置均使用项目预设；创建后可在节点管理中查看状态。" />
             <Button type="primary" htmlType="submit" icon={<PlusOutlined />} aria-label="创建节点" disabled={disabled || !servers.length || !selectedCreationProfile} loading={saving === "node"}>创建节点</Button>
           </Form> },
           { key: "plans", label: "套餐", children: <Form layout="vertical" preserve={false} disabled={disabled} onFinish={submitPlan}>

@@ -14,7 +14,7 @@ export interface ServerManagementDialogProps {
   onUpdated?: () => void;
 }
 const emptySettings = (): ServerSettings => ({ name: "", ip_address: null, ip_address_v6: null,
-  domain: null, domain_v6: null, ipv6_enabled: true });
+  domain: null, domain_v6: null, ipv6_enabled: false });
 
 export default function ServerManagementDialog({ open, onOpenChange, serverId, mode, onUpdated }: ServerManagementDialogProps) {
   const [busy, setBusy] = useState(false);
@@ -47,7 +47,7 @@ export default function ServerManagementDialog({ open, onOpenChange, serverId, m
         setRevision(value.revision);
         setForm({ name: value.server.name, domain: value.server.domain ?? null,
           ip_address: value.server.ip_address ?? null, domain_v6: value.server.domain_v6 ?? null,
-          ip_address_v6: value.server.ip_address_v6 ?? null, ipv6_enabled: value.server.ipv6_enabled ?? true });
+          ip_address_v6: value.server.ip_address_v6 ?? null, ipv6_enabled: value.server.ipv6_enabled ?? false });
         setSyncHosts(true);
       }
     } catch (failure) {

@@ -350,8 +350,13 @@ def exercise(
         sign_in(page, password)
         expect(page.get_by_role("button", name="退出登录", exact=True)).to_be_visible()
         page.get_by_role("menuitem", name="概览", exact=True).click()
-        page.get_by_label("名称", exact=True).fill("browser-smoke-edge")
-        page.get_by_role("button", name="创建服务器", exact=True).click()
+        page.get_by_label("服务器名称", exact=True).fill("browser-smoke-edge")
+        page.get_by_role("button", name="生成服务器安装命令", exact=True).click()
+        dialog = page.get_by_role("dialog", name="安装 Agent", exact=True)
+        expect(dialog).to_be_visible()
+        dialog.locator(".ant-modal-footer").get_by_role(
+            "button", name="关闭", exact=True
+        ).click()
         expect(page.get_by_text("browser-smoke-edge", exact=True).first).to_be_visible()
         page.reload()
         expect(page.get_by_text("browser-smoke-edge", exact=True).first).to_be_visible()

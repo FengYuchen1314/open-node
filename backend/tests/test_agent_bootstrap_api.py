@@ -15,6 +15,7 @@ from conftest import ADMIN_PASSWORD
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from open_node.api.routes.agent_bootstrap import BootstrapRedeemRequest, redeem_bootstrap
+from open_node.api.routes.agents import _request_public_ipv4
 from open_node.core.config import Settings
 from open_node.domain.inventory import ServerCreate, ServerRecord
 from open_node.main import create_app
@@ -29,6 +30,14 @@ from sqlalchemy import delete, update
 CONTROL_URL = "https://bootstrap.example/panel"
 REDEMPTION_ERROR = {"detail": "Invalid or expired installation ticket"}
 INPUT_SECRET = "bootstrap-request-input-must-not-be-echoed"
+
+
+def test_agent_request_ipv4_prefers_the_socket_and_trusts_only_a_private_proxy_peer():
+    assert _request_public_ipv4("8.8.8.8", "1.1.1.1") == "8.8.8.8"
+    assert _request_public_ipv4("172.18.0.2", "9.9.9.9, 1.1.1.1") == "1.1.1.1"
+    assert _request_public_ipv4("testclient", "1.1.1.1") is None
+    assert _request_public_ipv4("172.18.0.2", "127.0.0.1, 10.0.0.2") is None
+    assert _request_public_ipv4("2001:4860:4860::8888", None) is None
 
 
 @dataclass

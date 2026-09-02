@@ -30,7 +30,7 @@ function mount(overrides: Partial<Parameters<typeof AgentBootstrapDialog>[0]> = 
 async function showCommand() {
   const model = mount(); await flush();
   vi.mocked(getAgentBootstrap).mockResolvedValue(state({ status: "issued", issued_at: issuedAt, expires_at: issued.issued.expires_at }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "我确认使用一台全新的 Debian 12 amd64 服务器，且仅用于此服务器记录。" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "我确认使用一台受支持的全新 Debian/Ubuntu amd64 服务器，且仅用于此服务器记录。" }));
   fireEvent.click(screen.getByTestId("bootstrap-issue")); await flush();
   return model;
 }
@@ -40,6 +40,15 @@ describe("React Agent bootstrap dialog", () => {
     expect((screen.getByTestId("bootstrap-issue") as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/以非 root 身份运行的托管 Agent/)).toBeTruthy(); expect(screen.getByText(/不创建公开代理入站/)).toBeTruthy();
     expect(screen.getByTestId("bootstrap-status").textContent).toContain("Agent 尚未注册");
+  });
+  it("automatically issues the command for the simplified onboarding flow", async () => {
+    vi.mocked(getAgentBootstrap).mockResolvedValueOnce(state()).mockResolvedValue(
+      state({ status: "issued", issued_at: issuedAt, expires_at: issued.issued.expires_at }),
+    );
+    mount({ autoIssue: true }); await flush();
+    expect(issueAgentBootstrap).toHaveBeenCalledExactlyOnceWith("edge", "auto");
+    expect((screen.getByLabelText("root shell 安装命令") as HTMLTextAreaElement).value).toBe(issued.command);
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
   it("repeats the selected server kind before issuing an installation command", async () => {
     mount({ serverKind: "leased-line" }); await flush();

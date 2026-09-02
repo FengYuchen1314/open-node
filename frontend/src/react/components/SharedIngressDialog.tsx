@@ -29,6 +29,7 @@ import {
   sharedIngressCommandLabel,
   sharedIngressConfiguration,
   sharedIngressWebsiteDraft,
+  normalizeSharedIngressSni,
   validateSharedIngressDraft,
 } from "../../domain/shared-ingress";
 import {
@@ -175,14 +176,12 @@ export default function SharedIngressDialog({ open, onOpenChange, serverId }: Sh
 
           <section aria-labelledby="shared-ingress-website-title">
             <Space wrap><Typography.Title level={4} id="shared-ingress-website-title" style={{ margin: 0 }}>网站反向代理</Typography.Title><Switch aria-label="启用网站反向代理" checked={website.enabled} disabled={Boolean(busy)} onChange={enabled => setWebsite(previous => ({ ...previous, enabled, redirect_http: enabled && !previous.enabled ? true : previous.redirect_http }))} /><Button href="/certificates">管理可信证书</Button></Space>
-            {website.enabled && <Alert style={{ marginTop: 12 }} type="info" showIcon title="启用前请在证书管理中签发覆盖网站 SNI 的受信证书，并部署到当前服务器。部署目标的证书文件名必须与下方证书名称完全一致。" />}
+            {website.enabled && <Alert style={{ marginTop: 12 }} type="info" showIcon title="只需填写网站域名和上游地址"
+              description="证书名称自动使用网站域名，本机自动分配高位端口，并启用 HTTP → HTTPS 308 重定向。请先在证书管理中签发同名可信证书。" />}
             <Form layout="vertical" disabled={Boolean(busy) || !website.enabled} style={{ marginTop: 12 }}>
               <Row gutter={16}>
-                <Col xs={24} md={12}><Form.Item label="网站 SNI"><Input aria-label="网站 SNI" value={website.sni} maxLength={253} placeholder="site.example.com" onChange={event => setWebsite(previous => ({ ...previous, sni: event.target.value }))} /></Form.Item></Col>
-                <Col xs={24} md={12}><Form.Item label="证书名称"><Input aria-label="证书名称" value={website.certificate_name} maxLength={255} placeholder="site.example.com" onChange={event => setWebsite(previous => ({ ...previous, certificate_name: event.target.value }))} /></Form.Item></Col>
+                <Col span={24}><Form.Item label="网站域名"><Input aria-label="网站域名" value={website.sni} maxLength={253} placeholder="site.example.com" onChange={event => setWebsite(previous => ({ ...previous, sni: event.target.value, certificate_name: normalizeSharedIngressSni(event.target.value) ?? event.target.value.trim().toLowerCase() }))} /></Form.Item></Col>
                 <Col span={24}><Form.Item label="绝对 HTTP(S) 上游"><Input aria-label="绝对 HTTP(S) 上游" value={website.upstream_url} maxLength={2048} placeholder="https://origin.example.net/app" onChange={event => setWebsite(previous => ({ ...previous, upstream_url: event.target.value }))} /></Form.Item></Col>
-                <Col xs={24} md={12}><Form.Item label="自动 HTTP → HTTPS 308"><Switch aria-label="自动 HTTP 转 HTTPS 308" checked={website.redirect_http} onChange={redirect_http => setWebsite(previous => ({ ...previous, redirect_http }))} /></Form.Item></Col>
-                <Col xs={24} md={12}><Form.Item label="本机 TLS 终止"><Input aria-label="本机 TLS 终止" readOnly value={`${website.tls_address === "::1" ? "[::1]" : "127.0.0.1"}:${website.tls_port}`} /></Form.Item></Col>
               </Row>
             </Form>
           </section>
