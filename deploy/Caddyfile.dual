@@ -1,6 +1,12 @@
 {
 	admin off
 	auto_https disable_redirects
+	servers :{$OPEN_NODE_PUBLIC_HTTPS_PORT} {
+		listener_wrappers {
+			http_redirect
+			tls
+		}
+	}
 }
 
 {$OPEN_NODE_PUBLIC_HOSTNAME} {

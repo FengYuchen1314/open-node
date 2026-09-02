@@ -39,7 +39,8 @@ Encrypt 的出站网络。TCP `80` 无需开放；已有服务占用 `443` 时�
 默认安装使用 SQLite，两个独立 HTTPS 服务必须返回相同公网 IPv4。安装器随后为
 `https://公网IP:58090` 申请受系统信任的 Let's Encrypt `shortlived` IP 证书，并把请求
 转发到 `127.0.0.1:62031 → 容器 62031/tcp`。宿主 `62031` 只绑定回环，不需要也不应该
-对公网开放。
+对公网开放。误输入 `http://公网IP:58090` 时，网关以 `308` 保留路径和查询参数并跳转
+到同端口的 HTTPS 地址。
 
 安装器会实时输出公网 IP、数据库、应用健康和 HTTPS 证书进度。只有证书、规范 URL 和
 `/healthz` 连续通过后才退出，并输出：
@@ -131,6 +132,8 @@ literal, obtains a trusted short-lived certificate, and reports
 `https://IP:58090` (bracketing IPv6) only after the public gateway passes its
 certificate and health checks. The application itself remains available only
 at host loopback `127.0.0.1:62031`, mapped to container port `62031`.
+For the managed IP endpoint, a plaintext request to `http://IP:58090` receives
+a permanent `308` redirect to the same path and query on `https://IP:58090`.
 
 The anonymous Raw URL and public `main` clone were validated on 2026-08-30 in an
 unused Debian 12 VPS namespace. The release check covered fresh installation,

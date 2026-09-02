@@ -213,17 +213,29 @@ def test_managed_public_gateway_is_pinned_and_keeps_the_app_on_loopback():
 
     assert "{$OPEN_NODE_PUBLIC_HOSTNAME}" in caddyfiles["domain"]
     assert "OPEN_NODE_PUBLIC_IP_AUTHORITY" not in caddyfiles["domain"]
+    assert "listener_wrappers" not in caddyfiles["domain"]
+    assert "http_redirect" not in caddyfiles["domain"]
     assert "profile shortlived" not in caddyfiles["domain"]
     assert caddyfiles["domain"].count("reverse_proxy ") == 1
 
     ip_site = "https://{$OPEN_NODE_PUBLIC_IP_AUTHORITY}:{$OPEN_NODE_PUBLIC_HTTPS_PORT}"
+    redirect_listener = """servers :{$OPEN_NODE_PUBLIC_HTTPS_PORT} {
+		listener_wrappers {
+			http_redirect
+			tls
+		}
+	}"""
     assert ip_site in caddyfiles["ip"]
+    assert redirect_listener in caddyfiles["ip"]
+    assert caddyfiles["ip"].count("http_redirect") == 1
     assert "OPEN_NODE_PUBLIC_HOSTNAME" not in caddyfiles["ip"]
     assert caddyfiles["ip"].count("profile shortlived") == 1
     assert caddyfiles["ip"].count("reverse_proxy ") == 1
 
     assert "{$OPEN_NODE_PUBLIC_HOSTNAME}" in caddyfiles["dual"]
     assert ip_site in caddyfiles["dual"]
+    assert redirect_listener in caddyfiles["dual"]
+    assert caddyfiles["dual"].count("http_redirect") == 1
     assert caddyfiles["dual"].count("issuer acme") == 2
     assert caddyfiles["dual"].count("disable_http_challenge") == 2
     assert caddyfiles["dual"].count("profile shortlived") == 1

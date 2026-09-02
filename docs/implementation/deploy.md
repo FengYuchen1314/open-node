@@ -76,8 +76,10 @@ Compose 的空列表会关闭该门禁；投产前应把直达健康检查与对
 
 ## Caddy 网关
 
-三个 Caddy 模板共同关闭 admin API 和自动 HTTP redirect，只启用 ACME issuer、压缩、HSTS
-和反向代理健康检查：
+三个 Caddy 模板共同关闭 admin API 和 Caddy 自动生成的 HTTP 站点，只启用 ACME issuer、
+压缩、HSTS 和反向代理健康检查。IP 与 dual 模板在公网 IP 端口上显式按 `http_redirect`
+再 `tls` 的顺序包装监听器，因此误用 `http://IP:58090` 时会以 `308` 跳转到同路径、同端口
+的 HTTPS 地址；domain 模板的 `443` 监听器不受影响：
 
 - 域名入口由 `OPEN_NODE_PUBLIC_HOSTNAME` 提供，使用 Let's Encrypt 标准证书；
 - IP 入口由 `OPEN_NODE_PUBLIC_IP_AUTHORITY` 与 `OPEN_NODE_PUBLIC_HTTPS_PORT` 提供，申请
