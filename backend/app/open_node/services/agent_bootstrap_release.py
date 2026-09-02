@@ -422,6 +422,10 @@ def installation_command(control_url: str, ticket: str, server_id: UUID) -> str:
         "export DEBIAN_FRONTEND=noninteractive",
         "apt-get update",
         "apt-get install --yes --no-install-recommends ca-certificates curl python3 python3-venv",
+        "command -v python3 >/dev/null || "
+        '{ echo "Python 3 is unavailable after package installation" >&2; exit 1; }',
+        "command -v curl >/dev/null || "
+        '{ echo "curl is unavailable after package installation" >&2; exit 1; }',
         "python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' || "
         '{ echo "Python 3.11 or newer is required" >&2; exit 1; }',
         "umask 077",

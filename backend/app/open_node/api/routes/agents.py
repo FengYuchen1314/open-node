@@ -274,7 +274,7 @@ async def agent_websocket(websocket: WebSocket) -> None:
             async with agent_backup_operation(barrier):
                 store.authenticate_agent(token)
                 await _handle_agent_ws_message(
-                    channel, store, token, message, detected_ipv4=detected_ipv4
+                    channel, store, token, message, detected_ipv4
                 )
                 if isinstance(message, dict) and message.get("type") == "rpc_reply":
                     await connections.dispatch_ready_commands(store)
@@ -350,7 +350,6 @@ async def _handle_agent_ws_message(
     store: InventoryStore,
     token: str,
     message: object,
-    *,
     detected_ipv4: str | None = None,
 ) -> None:
     if not isinstance(message, dict):

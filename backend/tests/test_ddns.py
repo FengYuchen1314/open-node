@@ -40,7 +40,7 @@ def provider(browser, kind="cloudflare"):
 def server(browser, *, address="203.0.113.12"):
     response = browser.post("/api/v1/servers", json={
         "name": "动态节点", "ip_address": address,
-        "ip_address_v6": "2001:db8::12", "xray_mode": "external",
+        "ip_address_v6": "2001:db8::12", "ipv6_enabled": True, "xray_mode": "external",
     })
     assert response.status_code == 201, response.text
     return response.json()["server"]
