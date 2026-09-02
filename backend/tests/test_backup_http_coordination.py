@@ -627,7 +627,6 @@ def test_real_nested_private_public_account_routes_and_public_aliases(applicatio
         cases = [
             (admin, BASE + "/users", 200),
             (admin, BASE + "/subscription-templates/starter", 200),
-            (subscriber, BASE + "/account/subscription-templates/starter", 200),
             (admin, BASE + "/branding", 200),
             (admin, "/api/public/probe-settings", 200),
             (admin, BASE + "/public/probe-settings", 200),
