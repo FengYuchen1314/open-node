@@ -876,10 +876,10 @@ async def test_every_agent_message_and_followup_dispatch_has_an_active_lease(
     connections = app.state.agent_connections
     original_dispatch = connections.dispatch_pending_commands
 
-    async def handle(*args):
+    async def handle(*args, **kwargs):
         assert current_backup_child_fds()
-        handled.append(args[-1]["type"])
-        await original_handler(*args)
+        handled.append(args[3]["type"])
+        await original_handler(*args, **kwargs)
         assert current_backup_child_fds()
 
     async def dispatch(*args):
