@@ -1,25 +1,25 @@
 {
   "schema_version": 2,
   "agent": {
-    "version": "0.3.0a3",
-    "source_commit": "d88b5bb0440648f817c25657bf92374943cd08fb",
-    "tag": "agent-v0.3.0a3",
+    "version": "0.3.0a4",
+    "source_commit": "0fc7519f267917342fe7e7086ecc696c42ed36e8",
+    "tag": "agent-v0.3.0a4",
     "wheel": {
-      "filename": "open_node_agent-0.3.0a3-py3-none-any.whl",
-      "path": "/api/v1/agents/bootstrap/artifacts/open_node_agent-0.3.0a3-py3-none-any.whl",
-      "sha256": "980344fb2d5e00a685428200ddf1f509c266332499dce329bdb41024dc85a5be",
-      "bytes": 132326
+      "filename": "open_node_agent-0.3.0a4-py3-none-any.whl",
+      "path": "/api/v1/agents/bootstrap/artifacts/open_node_agent-0.3.0a4-py3-none-any.whl",
+      "sha256": "388cdcbfda8fbad2a9c3d977355fd2afc0fe15884ef435419009573a533531db",
+      "bytes": 140347
     },
     "bootstrap": {
-      "filename": "open-node-agent-bootstrap-0.3.0a3.tar.gz",
-      "path": "/api/v1/agents/bootstrap/artifacts/open-node-agent-bootstrap-0.3.0a3.tar.gz",
+      "filename": "open-node-agent-bootstrap-0.3.0a4.tar.gz",
+      "path": "/api/v1/agents/bootstrap/artifacts/open-node-agent-bootstrap-0.3.0a4.tar.gz",
       "sha256": "53d1d566570141c1078c95a4b1da1973324decc6ec4ba540fc8d745f34d2bd07",
       "bytes": 21094
     },
     "build": {
       "filename": "BUILD.json",
       "path": "/api/v1/agents/bootstrap/artifacts/BUILD.json",
-      "sha256": "5a0907db7f8a535084375a72dc649d773072ec50a9b5c62b73d9b191a395e5ef",
+      "sha256": "82d0db8f7dde14d06c72edf672d555546252bd0a6f663edc96a6e3675c787578",
       "bytes": 425
     }
   },
