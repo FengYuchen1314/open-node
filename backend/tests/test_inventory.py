@@ -4297,19 +4297,19 @@ def test_stream_maintenance_operations_queue_mmwx_child_commands(tmp_path: Path)
     server_id = created["server"]["id"]
 
     operations = [
-        ("xray/install", "/api/child/xray/install-stream"),
-        ("xray/remove", "/api/child/xray/remove-stream"),
-        ("nginx/remove", "/api/child/nginx/remove-stream"),
-        ("agent/upgrade", "/api/child/agent/upgrade-stream"),
-        ("agent/uninstall", "/api/child/agent/uninstall-stream"),
+        ("xray/install", "/api/child/xray/install-stream", None),
+        ("xray/remove", "/api/child/xray/remove-stream", None),
+        ("nginx/remove", "/api/child/nginx/remove-stream", None),
+        ("agent/upgrade", "/api/child/agent/upgrade-stream", {"confirm": True}),
+        ("agent/uninstall", "/api/child/agent/uninstall-stream", {"confirm": True}),
     ]
     responses = [
-        client.post(f"/api/v1/servers/{server_id}/operations/{operation}")
-        for operation, _path in operations
+        client.post(f"/api/v1/servers/{server_id}/operations/{operation}", json=body)
+        for operation, _path, body in operations
     ]
 
     assert all(response.status_code == 201 for response in responses)
-    for response, (_operation, expected_path) in zip(responses, operations, strict=True):
+    for response, (_operation, expected_path, _body) in zip(responses, operations, strict=True):
         command = response.json()["command"]
         assert response.json()["license_required"] is False
         assert command["method"] == "POST"
