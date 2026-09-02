@@ -1,23 +1,26 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "agent": {
-    "version": "0.3.0a2",
-    "source_commit": "72b38c068053ba081a1b437158e914e470e072ba",
-    "tag": "agent-v0.3.0a2",
+    "version": "0.3.0a3",
+    "source_commit": "d88b5bb0440648f817c25657bf92374943cd08fb",
+    "tag": "agent-v0.3.0a3",
     "wheel": {
-      "filename": "open_node_agent-0.3.0a2-py3-none-any.whl",
-      "url": "https://github.com/FengYuchen1314/open-node/releases/download/agent-v0.3.0a2/open_node_agent-0.3.0a2-py3-none-any.whl",
-      "sha256": "cd072ace55839feb083a8ec99b6fc360162bf20ba9c8fabe3fdc01b06314ea0c"
+      "filename": "open_node_agent-0.3.0a3-py3-none-any.whl",
+      "path": "/api/v1/agents/bootstrap/artifacts/open_node_agent-0.3.0a3-py3-none-any.whl",
+      "sha256": "980344fb2d5e00a685428200ddf1f509c266332499dce329bdb41024dc85a5be",
+      "bytes": 132326
     },
     "bootstrap": {
-      "filename": "open-node-agent-bootstrap-0.3.0a2.tar.gz",
-      "url": "https://github.com/FengYuchen1314/open-node/releases/download/agent-v0.3.0a2/open-node-agent-bootstrap-0.3.0a2.tar.gz",
-      "sha256": "9bc36c9c36b169fe1dcc67269eb11a4a12f0602ab31fc8aac493b8510dfe1310"
+      "filename": "open-node-agent-bootstrap-0.3.0a3.tar.gz",
+      "path": "/api/v1/agents/bootstrap/artifacts/open-node-agent-bootstrap-0.3.0a3.tar.gz",
+      "sha256": "53d1d566570141c1078c95a4b1da1973324decc6ec4ba540fc8d745f34d2bd07",
+      "bytes": 21094
     },
     "build": {
       "filename": "BUILD.json",
-      "url": "https://github.com/FengYuchen1314/open-node/releases/download/agent-v0.3.0a2/BUILD.json",
-      "sha256": "106fec027591cdf05976efeaf8eef0cc395409f5aaf7b137189f27c0ab4bf49b"
+      "path": "/api/v1/agents/bootstrap/artifacts/BUILD.json",
+      "sha256": "5a0907db7f8a535084375a72dc649d773072ec50a9b5c62b73d9b191a395e5ef",
+      "bytes": 425
     }
   },
   "xray": {
@@ -25,8 +28,26 @@
     "architecture": "x86_64",
     "archive": {
       "filename": "Xray-linux-64.zip",
-      "url": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip",
-      "sha256": "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"
+      "path": "/api/v1/agents/bootstrap/artifacts/Xray-linux-64.zip",
+      "sha256": "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
+      "bytes": 21136402
+    }
+  },
+  "mihomo": {
+    "version": "v1.19.30",
+    "assets": {
+      "linux-amd64": {
+        "filename": "mihomo-linux-amd64-compatible-v1.19.30.gz",
+        "path": "/api/v1/agents/bootstrap/artifacts/mihomo-linux-amd64-compatible-v1.19.30.gz",
+        "sha256": "db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9",
+        "bytes": 18899951
+      },
+      "linux-arm64": {
+        "filename": "mihomo-linux-arm64-v1.19.30.gz",
+        "path": "/api/v1/agents/bootstrap/artifacts/mihomo-linux-arm64-v1.19.30.gz",
+        "sha256": "58896873736d28628f66de3677c8654fa0f180662523148e136cff4f6e890069",
+        "bytes": 16965828
+      }
     }
   },
   "license_required": false

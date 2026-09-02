@@ -2,10 +2,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
+from open_node.api.backup import BackupAPIRoute
 from open_node.domain.camouflage import CamouflagePoolCatalogRead
 from open_node.services.camouflage_pools import CamouflagePoolError, catalog, list_pools
 
-router = APIRouter(prefix="/camouflage-pools", tags=["camouflage-pools"])
+router = APIRouter(
+    route_class=BackupAPIRoute,
+    prefix="/camouflage-pools",
+    tags=["camouflage-pools"],
+)
 
 
 @router.get("", response_model=CamouflagePoolCatalogRead)
