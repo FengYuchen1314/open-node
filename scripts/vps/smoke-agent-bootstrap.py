@@ -601,7 +601,7 @@ def exercise(repository, output):
         "all downloads, SHA checks, claim requests and service installation remain real.",
         "fixture_environment": "CURL_CA_BUNDLE and OPEN_NODE_AGENT_CA_FILE use only a private "
         "loopback control-plane CA; TMPDIR isolates the command's transient Python file. "
-        "GitHub downloads retain Debian system trust.",
+        "Every child-host artifact download stays on the trusted panel origin.",
         "production_modified": False,
     }
     cleanup_errors = []
@@ -622,6 +622,7 @@ def exercise(repository, output):
                 "OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL": url,
                 "OPEN_NODE_CORS_ORIGINS": json.dumps([url]),
                 "OPEN_NODE_CERTIFICATE_STATE_DIR": str(work / "certificate-state"),
+                "OPEN_NODE_AGENT_BOOTSTRAP_ARTIFACT_DIR": str(work / "agent-artifacts"),
                 "OPEN_NODE_AGENT_IDENTITY_FILE": str(work / "agent-identity.seed"),
             }
             capture_command(

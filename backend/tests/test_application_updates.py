@@ -127,6 +127,29 @@ def test_unsafe_or_absent_helper_state_fails_closed_without_writing(tmp_path: Pa
     assert not (state / "request.json").exists()
 
 
+def test_failed_request_handoff_is_explicit_and_removes_partial_file(
+    monkeypatch, tmp_path: Path
+):
+    operator, state = environment(tmp_path)
+
+    def fail_write(_descriptor, _content):
+        raise OSError("injected short handoff")
+
+    monkeypatch.setattr(
+        "open_node.services.application_updates._write_all", fail_write
+    )
+    response = operator.post(BASE + "/check")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "application_update_state_unavailable",
+        "detail": "更新状态暂时不可用，请稍后重新读取。",
+        "license_required": False,
+    }
+    assert response.headers["cache-control"] == "no-store"
+    assert not (state / "request.json").exists()
+
+
 def test_invalid_root_settings_are_rejected():
     for value in ["relative", "/", "/tmp/../state"]:
         try:

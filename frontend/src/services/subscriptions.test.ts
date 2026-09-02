@@ -22,6 +22,7 @@ import {
   getProductUserQuota,
   getProductUserSubscriptionToken,
   getProductUserTraffic,
+  getManagedNodeCreationMetadata,
   getSubscriptionFormatPreview,
   getXrayRuntimeNodeReconciliation,
   importSubscriptionCatalog,
@@ -220,6 +221,16 @@ function agentCommand(overrides: Partial<AgentCommand> = {}): AgentCommand {
 }
 
 describe("subscriptions API client", () => {
+  it("loads managed-node creation metadata from the dedicated endpoint", async () => {
+    const metadata = { server_kinds: { direct: "公网直连", "leased-line": "专线", residential: "家宽落地" }, profiles: [],
+      mieru_mapping_modes: { "one-to-one": "一一对应", manual: "手动" }, license_required: false };
+    const fetcher = async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("/api/v1/nodes/creation-metadata");
+      return jsonResponse(metadata);
+    };
+    expect(await getManagedNodeCreationMetadata(fetcher)).toEqual(metadata);
+  });
+
   it("lists catalog resources without sending license headers", async () => {
     const calls: Array<{ headers: HeadersInit | undefined; url: string }> = [];
     const fetcher: typeof fetch = async (input, init) => {

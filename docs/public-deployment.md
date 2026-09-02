@@ -8,7 +8,8 @@ Open Node 的根安装脚本可以在新 Debian/Ubuntu Docker 主机上同时安
 方括号形式，例如 `https://[2001:db8::10]:58090`。
 
 网关使用 Let's Encrypt `shortlived` profile 为公网 IPv4/IPv6 取得可信短期证书，
-并自动续期。ACME 验证固定使用 TCP 443 上的 TLS-ALPN-01；不使用 HTTP-01，
+有效期约 160 小时（约 6 天），并自动续期。ACME 验证固定使用 TCP 443 上的
+TLS-ALPN-01；不使用 HTTP-01，
 因此不要求开放 TCP 80，也不会因 80 不可达而降级。
 
 ## 准备工作
@@ -32,11 +33,27 @@ TCP 443 是证书控制权验证入口；58090 是默认的 IP HTTPS 服务入�
 
 ```bash
 (
+  set -eu
+  as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+      "$@"
+    else
+      command -v sudo >/dev/null 2>&1 || {
+        echo "需要 root 权限或 sudo" >&2
+        return 1
+      }
+      sudo "$@"
+    fi
+  }
+  if ! command -v curl >/dev/null 2>&1; then
+    as_root apt-get update
+    as_root apt-get install -y --no-install-recommends ca-certificates curl
+  fi
   installer="$(mktemp)" || exit 1
   trap 'rm -f -- "$installer"' EXIT
   trap 'exit 1' HUP INT TERM
   curl -fsSL https://raw.githubusercontent.com/FengYuchen1314/open-node/main/install.sh -o "$installer" || exit 1
-  sudo bash "$installer"
+  as_root bash "$installer"
 )
 ```
 
@@ -48,12 +65,13 @@ TCP 443 是证书控制权验证入口；58090 是默认的 IP HTTPS 服务入�
    应用数据卷和安装清单；
 4. 解析并持久化实际公网 IP，启用安全 Cookie、精确代理信任和对应的 Agent 公网地址；
 5. 拉取固定摘要的官方 Caddy 镜像，以只读文件系统、最小能力和受限日志启动网关；
-6. 经公网 IP 和 TLS-ALPN-01 取得可信证书，从本机检查证书、规范 URL 和 `/healthz`，
-   连续通过后才报告成功；
+6. 实时显示公网 IP、数据库、应用和公网 HTTPS 进度；经公网 IP 和 TLS-ALPN-01 取得
+   可信证书，再检查证书、规范 URL 和 `/healthz`，连续通过后才报告成功；
 7. 输出 30 分钟有效的一次性初始化凭证。
 
-安装成功后访问脚本输出的 `https://<公网 IP>:58090`。应用明文 HTTP 端口只在宿主
-回环可用，不直接暴露到公网。
+脚本只有在全部步骤完成后才退出，并输出 `ACTION_COMPLETE action=install`。看到这行后
+再访问脚本显示的 `https://<公网 IP>:58090`。应用明文 HTTP 端口只在宿主回环可用，
+不直接暴露到公网。
 
 ## 公网 IP、端口和可选域名
 
@@ -125,6 +143,15 @@ sudo env OPEN_NODE_PUBLIC_IP=off OPEN_NODE_PUBLIC_HOSTNAME= \
 网关容器，但保留应用数据卷、Caddy 证书状态卷、源码、配置、安装清单和备份。
 Caddy 卷只保存可重新签发的 ACME 状态，不代替应用数据库备份。
 
+需要交互选择是否清除数据时运行：
+
+```bash
+sudo bash /opt/open-node/uninstall.sh
+```
+
+提示 `是否彻底清除以上数据？[Y/n]` 时，直接回车或输入 `y` 默认彻底清除；输入 `n`
+才保留数据。脚本要求交互式 TTY，不能通过管道代答。
+
 ## 失败处理
 
 安装器只在公网 IP/域名、TCP 443 TLS-ALPN-01、可信证书、规范 URL 和 `/healthz`
@@ -135,11 +162,14 @@ DNS 或出站网络后，使用相同显式设置重试。
 检查默认端口和网关日志：
 
 ```bash
+sudo bash /opt/open-node/install.sh status
+sudo docker logs --tail 200 open-node-open-node-1
 sudo docker logs --tail 100 open-node-public-gateway
-sudo ss -ltnp | grep -E ':(443|58090)\b'
+sudo ss -ltnp | grep -E ':(443|58090|62031)\b'
+curl -fsS https://PUBLIC_IP:58090/healthz
 ```
 
-不要手改 `/etc/open-node/open-node.env` 或伪造网关容器；安装器会核对镜像摘要、命令、
+不要使用 `curl -k`，也不要手改 `/etc/open-node/open-node.env` 或伪造网关容器；安装器会核对镜像摘要、命令、
 能力、挂载、网络、标签和数据卷身份。
 
 ## 官方依据

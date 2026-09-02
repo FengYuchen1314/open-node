@@ -7,13 +7,22 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from open_node.domain.inventory import AgentCommandCreate
+from open_node.domain.inventory import AgentCommandCreate, ServerKind
 from open_node.domain.node_management import (
     NodeManagementRead,
     NodeManagementResult,
     NodeRemovalRead,
 )
-from open_node.domain.subscriptions import ManagedNodeCreate
+from open_node.domain.subscriptions import (
+    ManagedNodeCreate,
+    ManagedProtocolProfile,
+    MieruPortMappingMode,
+)
+from open_node.services.camouflage_pools import (
+    CamouflagePoolError,
+    get_pool,
+    validate_pool_id,
+)
 from open_node.services.inventory import (
     AgentChangeSetModel,
     AgentChangeSetStepModel,
@@ -23,6 +32,7 @@ from open_node.services.inventory import (
     ManagedNodeModel,
     ManagedNodeNotFoundError,
     ManagedNodeRemovalModel,
+    NodeTopologyModel,
     ProductUserModel,
     ServerModel,
     SubscriptionCredentialModel,
@@ -74,6 +84,7 @@ class NodeManagement:
 
     def _validate_node(self, session, node):
         self.require_editable(session, node)
+        self._validate_protocol_profile(session, node)
         if session.scalar(
             select(ManagedNodeModel.id).where(
                 ManagedNodeModel.server_id == node.server_id,
@@ -120,6 +131,90 @@ class NodeManagement:
             pending.extend(value for value in (other.parent_id, other.target_node_id) if value)
 
     @staticmethod
+    def _validate_protocol_profile(session, node):
+        if not node.protocol_profile:
+            # Existing/runtime/catalog imports intentionally retain protocols which are
+            # no longer offered by the managed-node creation UI.
+            return
+        try:
+            profile = ManagedProtocolProfile(node.protocol_profile)
+        except ValueError:
+            raise ManagedNodeConflict("Unknown managed protocol profile") from None
+        expected_protocol = {
+            ManagedProtocolProfile.VLESS_REALITY_VISION: "vless",
+            ManagedProtocolProfile.VLESS_XHTTP_REALITY_XMUX: "vless",
+            ManagedProtocolProfile.ANYTLS_SHADOWTLS: "anytls",
+            ManagedProtocolProfile.MIERU: "mieru",
+            ManagedProtocolProfile.SOCKS5: "socks",
+        }[profile]
+        if protocol(node.protocol) != expected_protocol:
+            raise ManagedNodeConflict("Node protocol does not match its managed profile")
+
+        server = session.get(ServerModel, node.server_id)
+        if server is None:
+            raise ManagedNodeConflict("Node server does not exist")
+        server_kind = ServerKind(server.server_kind)
+        allowed = {
+            ManagedProtocolProfile.VLESS_REALITY_VISION: {ServerKind.DIRECT},
+            ManagedProtocolProfile.VLESS_XHTTP_REALITY_XMUX: {ServerKind.DIRECT},
+            ManagedProtocolProfile.ANYTLS_SHADOWTLS: {ServerKind.DIRECT},
+            ManagedProtocolProfile.MIERU: {ServerKind.DIRECT, ServerKind.LEASED_LINE},
+            ManagedProtocolProfile.SOCKS5: {ServerKind.DIRECT, ServerKind.RESIDENTIAL},
+        }[profile]
+        if server_kind not in allowed:
+            raise ManagedNodeConflict(
+                f"{profile.value} is not allowed on {server_kind.value} servers"
+            )
+
+        shared_443 = profile in {
+            ManagedProtocolProfile.VLESS_REALITY_VISION,
+            ManagedProtocolProfile.VLESS_XHTTP_REALITY_XMUX,
+            ManagedProtocolProfile.ANYTLS_SHADOWTLS,
+        }
+        if shared_443:
+            if not node.camouflage_pool_id or not node.camouflage_sni:
+                raise ManagedNodeConflict(
+                    "VLESS and AnyTLS profiles require a camouflage pool and SNI"
+                )
+            try:
+                node.camouflage_pool_id = validate_pool_id(node.camouflage_pool_id)
+                camouflage_pool = get_pool(node.camouflage_pool_id)
+            except CamouflagePoolError as exc:
+                raise ManagedNodeConflict(str(exc)) from exc
+            if node.camouflage_sni != camouflage_pool.server_name:
+                raise ManagedNodeConflict(
+                    "Camouflage SNI must match the selected pool server name"
+                )
+            if (node.config or {}).get("port") != 443:
+                raise ManagedNodeConflict("VLESS and AnyTLS managed profiles must use port 443")
+            for field, message in (
+                ("camouflage_pool_id", "Camouflage pool is already used on this server"),
+                ("camouflage_sni", "Camouflage SNI is already used on this server"),
+            ):
+                if session.scalar(
+                    select(ManagedNodeModel.id).where(
+                        ManagedNodeModel.server_id == node.server_id,
+                        getattr(ManagedNodeModel, field) == getattr(node, field),
+                        ManagedNodeModel.id != node.id,
+                    )
+                ):
+                    raise ManagedNodeConflict(message)
+
+        if profile == ManagedProtocolProfile.MIERU:
+            if not node.domestic_entry_ip or not node.domestic_entry_port:
+                raise ManagedNodeConflict("Mieru requires a domestic entry IP and port")
+            try:
+                mode = MieruPortMappingMode(node.mieru_port_mapping_mode)
+            except ValueError:
+                raise ManagedNodeConflict("Mieru requires a port mapping mode") from None
+            if mode == MieruPortMappingMode.MANUAL and not node.ix_port:
+                raise ManagedNodeConflict("Manual Mieru mapping requires an IX port")
+            if mode == MieruPortMappingMode.ONE_TO_ONE and node.ix_port != node.domestic_entry_port:
+                raise ManagedNodeConflict(
+                    "One-to-one Mieru mapping must use the domestic entry port as IX port"
+                )
+
+    @staticmethod
     def credentials(session, identifiers):
         return list(
             session.scalars(
@@ -131,6 +226,7 @@ class NodeManagement:
 
     def closure(self, session, node):
         nodes = list(session.scalars(select(ManagedNodeModel).order_by(ManagedNodeModel.id)))
+        topologies = list(session.scalars(select(NodeTopologyModel)))
         selected = {node.id}
         while True:
             before = set(selected)
@@ -155,6 +251,14 @@ class NodeManagement:
                     )
                 ):
                     selected.add(item.id)
+            for topology in topologies:
+                component_ids = {
+                    str(identifier)
+                    for stage in (topology.stages or [])
+                    for identifier in stage.get("node_ids", [])
+                }
+                if component_ids.intersection(selected):
+                    selected.add(topology.id)
             if selected == before:
                 return nodes, [item for item in nodes if item.id in selected]
 
@@ -286,11 +390,18 @@ class NodeManagement:
             getattr(node, field) != getattr(entry, field)
             for field in (
                 "protocol",
+                "protocol_profile",
                 "node_type",
                 "inbound_tag",
                 "routed_outbound_tag",
                 "routed_rule_marktag",
                 "enabled",
+                "camouflage_pool_id",
+                "camouflage_sni",
+                "domestic_entry_ip",
+                "domestic_entry_port",
+                "mieru_port_mapping_mode",
+                "ix_port",
                 "client_template",
                 "config",
             )
@@ -337,6 +448,15 @@ class NodeManagement:
             for field in values:
                 value = getattr(validated, field)
                 setattr(node, field, str(value) if field.endswith("_id") and value else value)
+            if node.protocol_profile:
+                server = session.get(ServerModel, node.server_id)
+                if server is None:
+                    raise ManagedNodeConflict("Node server does not exist")
+                # Managed profiles own their public transport shape as well as the
+                # private listener.  Reapply that canonical shape after an operator
+                # edit so a generic JSON field cannot desynchronise subscriptions
+                # from the Agent's Reality/XHTTP/ShadowTLS listener.
+                self.store._managed_protocols().prepare(session, server, node)
             node.updated_at = now
             self.validate_node(session, node)
             # Refresh only existing bindings. Public-template edits never enroll preview-only users.

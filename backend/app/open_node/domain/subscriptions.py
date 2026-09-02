@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from enum import StrEnum
-from ipaddress import ip_network
+from ipaddress import ip_address, ip_network
 from math import isfinite
 from typing import Any, Literal
 from uuid import UUID
@@ -68,6 +68,42 @@ class ProductUserRole(StrEnum):
 class ManagedNodeType(StrEnum):
     PHYSICAL = "physical"
     ROUTED = "routed"
+    ORCHESTRATED = "orchestrated"
+
+
+class ManagedProtocolProfile(StrEnum):
+    VLESS_REALITY_VISION = "vless-reality-vision"
+    VLESS_XHTTP_REALITY_XMUX = "vless-xhttp-reality-xmux"
+    ANYTLS_SHADOWTLS = "anytls-shadowtls"
+    MIERU = "mieru"
+    SOCKS5 = "socks5"
+
+
+class MieruPortMappingMode(StrEnum):
+    ONE_TO_ONE = "one-to-one"
+    MANUAL = "manual"
+
+
+class ManagedNodeCreationOption(BaseModel):
+    profile: ManagedProtocolProfile
+    protocol: Literal["vless", "anytls", "mieru", "socks"]
+    label: str
+    description: str
+    allowed_server_kinds: list[Literal["direct", "leased-line", "residential"]]
+    fixed_port: int | None = Field(default=None, ge=1, le=65535)
+    requires_camouflage_pool: bool = False
+    requires_domestic_entry: bool = False
+    warning: str | None = None
+    warning_server_kinds: list[Literal["direct", "leased-line", "residential"]] = Field(
+        default_factory=list
+    )
+
+
+class ManagedNodeCreationMetadataResponse(BaseModel):
+    server_kinds: dict[str, str]
+    profiles: list[ManagedNodeCreationOption]
+    mieru_mapping_modes: dict[str, str]
+    license_required: Literal[False] = False
 
 
 class SubscriptionTrafficMode(StrEnum):
@@ -237,6 +273,7 @@ class ManagedNodeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     server_id: UUID
     protocol: str = Field(min_length=1, max_length=40)
+    protocol_profile: ManagedProtocolProfile | None = None
     node_type: ManagedNodeType = ManagedNodeType.PHYSICAL
     parent_id: UUID | None = None
     target_node_id: UUID | None = None
@@ -246,6 +283,12 @@ class ManagedNodeCreate(BaseModel):
     tag: str | None = Field(default=None, max_length=120)
     tags: list[str] = Field(default_factory=list, max_length=24)
     enabled: bool = True
+    camouflage_pool_id: str | None = Field(default=None, max_length=120)
+    camouflage_sni: str | None = Field(default=None, max_length=255)
+    domestic_entry_ip: str | None = Field(default=None, max_length=255)
+    domestic_entry_port: int | None = Field(default=None, ge=1, le=65535)
+    mieru_port_mapping_mode: MieruPortMappingMode | None = None
+    ix_port: int | None = Field(default=None, ge=1, le=65535)
     client_template: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -254,7 +297,15 @@ class ManagedNodeCreate(BaseModel):
     def validate_required_text(cls, value: str) -> str:
         return _strip_required_text(value, "node field")
 
-    @field_validator("inbound_tag", "routed_outbound_tag", "routed_rule_marktag", "tag")
+    @field_validator(
+        "inbound_tag",
+        "routed_outbound_tag",
+        "routed_rule_marktag",
+        "tag",
+        "camouflage_pool_id",
+        "camouflage_sni",
+        "domestic_entry_ip",
+    )
     @classmethod
     def validate_optional_text(cls, value: str | None) -> str | None:
         return _strip_optional_text(value, "node field")
@@ -276,9 +327,163 @@ class ManagedNodeCreate(BaseModel):
     def validate_json_objects(cls, value: dict[str, Any]) -> dict[str, Any]:
         return _ensure_json_object(value, "node JSON")
 
+    @field_validator("domestic_entry_ip")
+    @classmethod
+    def validate_domestic_entry_ip(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return str(ip_address(value))
+        except ValueError:
+            raise ValueError("domestic_entry_ip must be an IPv4 or IPv6 literal") from None
+
+    @field_validator("camouflage_pool_id")
+    @classmethod
+    def normalize_camouflage_pool_id(cls, value: str | None) -> str | None:
+        return value.lower() if value else None
+
+    @field_validator("camouflage_sni")
+    @classmethod
+    def validate_camouflage_sni(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        raw = value.rstrip(".")
+        try:
+            ip_address(raw)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("camouflage_sni must be a domain name, not an IP address")
+        try:
+            normalized = raw.encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            raise ValueError("camouflage_sni must be a valid domain name") from None
+        labels = normalized.split(".")
+        if (
+            len(normalized) > 253
+            or len(labels) < 2
+            or any(
+                not label
+                or len(label) > 63
+                or label.startswith("-")
+                or label.endswith("-")
+                or any(not (char.isalnum() or char == "-") for char in label)
+                for label in labels
+            )
+        ):
+            raise ValueError("camouflage_sni must be a valid domain name")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_profile_fields(self):
+        kind = self.protocol.strip().lower()
+        if kind == "socks5":
+            kind = "socks"
+            self.protocol = kind
+        expected = {
+            ManagedProtocolProfile.VLESS_REALITY_VISION: "vless",
+            ManagedProtocolProfile.VLESS_XHTTP_REALITY_XMUX: "vless",
+            ManagedProtocolProfile.ANYTLS_SHADOWTLS: "anytls",
+            ManagedProtocolProfile.MIERU: "mieru",
+            ManagedProtocolProfile.SOCKS5: "socks",
+        }
+        if self.protocol_profile and expected[self.protocol_profile] != kind:
+            raise ValueError("protocol does not match protocol_profile")
+        if self.protocol_profile and self.node_type != ManagedNodeType.PHYSICAL:
+            raise ValueError("managed protocol profiles must create physical nodes")
+
+        camouflage = self.protocol_profile in {
+            ManagedProtocolProfile.VLESS_REALITY_VISION,
+            ManagedProtocolProfile.VLESS_XHTTP_REALITY_XMUX,
+            ManagedProtocolProfile.ANYTLS_SHADOWTLS,
+        }
+        if camouflage and (not self.camouflage_pool_id or not self.camouflage_sni):
+            raise ValueError(
+                "VLESS and AnyTLS profiles require camouflage_pool_id and camouflage_sni"
+            )
+        if not camouflage and (self.camouflage_pool_id or self.camouflage_sni):
+            raise ValueError("camouflage fields are only valid for VLESS and AnyTLS profiles")
+
+        if camouflage:
+            self.config["port"] = 443
+            self.config["sni"] = self.camouflage_sni
+            self.config["tls"] = True
+            if self.protocol_profile == ManagedProtocolProfile.VLESS_REALITY_VISION:
+                self.config.update(
+                    {
+                        "type": "vless",
+                        "network": "tcp",
+                        "flow": "xtls-rprx-vision",
+                        "encryption": "",
+                        "udp": True,
+                    }
+                )
+            elif self.protocol_profile == ManagedProtocolProfile.VLESS_XHTTP_REALITY_XMUX:
+                raw_xhttp = self.config.get("xhttp-opts", {})
+                if not isinstance(raw_xhttp, dict):
+                    raise ValueError("xhttp-opts must be a JSON object")
+                xhttp = dict(raw_xhttp)
+                xhttp.pop("xmux", None)
+                xhttp.setdefault("mode", "auto")
+                xhttp.setdefault(
+                    "reuse-settings",
+                    {
+                        "max-concurrency": "16-32",
+                        "h-max-reusable-secs": "1800-3000",
+                        "h-keep-alive-period": 0,
+                    },
+                )
+                self.config.update(
+                    {
+                        "type": "vless",
+                        "network": "xhttp",
+                        "xhttp-opts": xhttp,
+                        "encryption": "",
+                        "udp": True,
+                        "alpn": ["h2"],
+                    }
+                )
+            else:
+                self.config.pop("shadow-tls", None)
+                self.config.update(
+                    {"type": "anytls", "shadow-tls-opts": {"version": 3}}
+                )
+
+        if self.protocol_profile == ManagedProtocolProfile.MIERU:
+            if not self.domestic_entry_ip or not self.domestic_entry_port:
+                raise ValueError("Mieru requires domestic_entry_ip and domestic_entry_port")
+            if self.mieru_port_mapping_mode is None:
+                raise ValueError("Mieru requires mieru_port_mapping_mode")
+            if self.mieru_port_mapping_mode == MieruPortMappingMode.MANUAL:
+                if self.ix_port is None:
+                    raise ValueError("manual Mieru port mapping requires ix_port")
+            elif self.ix_port is None:
+                self.ix_port = self.domestic_entry_port
+            self.config.update(
+                {
+                    "type": "mieru",
+                    "server": self.domestic_entry_ip,
+                    "port": self.domestic_entry_port,
+                    "ix-port": self.ix_port,
+                    "ix-port-mapping": self.mieru_port_mapping_mode.value,
+                }
+            )
+        elif any(
+            value is not None
+            for value in (
+                self.domestic_entry_ip,
+                self.domestic_entry_port,
+                self.mieru_port_mapping_mode,
+                self.ix_port,
+            )
+        ):
+            raise ValueError("Mieru entry fields are only valid for the Mieru profile")
+        return self
+
 
 class ManagedNodeRead(ManagedNodeCreate):
     id: UUID
+    runtime_port: int | None = Field(default=None, ge=1, le=65535)
     removal_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
@@ -291,6 +496,7 @@ class ManagedNodesResponse(BaseModel):
 
 class ManagedNodeResponse(BaseModel):
     node: ManagedNodeRead
+    commands: list[AgentCommandRead] = Field(default_factory=list)
     license_required: Literal[False] = False
 
 
@@ -635,6 +841,7 @@ class SubscriptionTemplatePresetRead(BaseModel):
     name: str
     description: str
     protocol: str
+    protocol_profile: ManagedProtocolProfile | None = None
     node_type: ManagedNodeType = ManagedNodeType.PHYSICAL
     inbound_tag: str | None = None
     routed_outbound_tag: str | None = None
@@ -661,6 +868,12 @@ class SubscriptionTemplatePresetApplyRequest(BaseModel):
     tag: str | None = Field(default=None, max_length=120)
     tags: list[str] | None = Field(default=None, max_length=24)
     enabled: bool = True
+    camouflage_pool_id: str | None = Field(default=None, max_length=120)
+    camouflage_sni: str | None = Field(default=None, max_length=255)
+    domestic_entry_ip: str | None = Field(default=None, max_length=255)
+    domestic_entry_port: int | None = Field(default=None, ge=1, le=65535)
+    mieru_port_mapping_mode: MieruPortMappingMode | None = None
+    ix_port: int | None = Field(default=None, ge=1, le=65535)
 
     @field_validator(
         "name",
@@ -669,6 +882,9 @@ class SubscriptionTemplatePresetApplyRequest(BaseModel):
         "routed_outbound_tag",
         "routed_rule_marktag",
         "tag",
+        "camouflage_pool_id",
+        "camouflage_sni",
+        "domestic_entry_ip",
     )
     @classmethod
     def validate_optional_text(cls, value: str | None) -> str | None:
@@ -714,6 +930,7 @@ class SubscriptionCatalogNodeEntry(BaseModel):
     name: str
     server_name: str
     protocol: str
+    protocol_profile: ManagedProtocolProfile | None = None
     node_type: ManagedNodeType = ManagedNodeType.PHYSICAL
     parent_name: str | None = None
     target_node_name: str | None = None
@@ -723,6 +940,12 @@ class SubscriptionCatalogNodeEntry(BaseModel):
     tag: str | None = None
     tags: list[str] = Field(default_factory=list)
     enabled: bool = True
+    camouflage_pool_id: str | None = None
+    camouflage_sni: str | None = None
+    domestic_entry_ip: str | None = None
+    domestic_entry_port: int | None = Field(default=None, ge=1, le=65535)
+    mieru_port_mapping_mode: MieruPortMappingMode | None = None
+    ix_port: int | None = Field(default=None, ge=1, le=65535)
     client_template: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -730,6 +953,44 @@ class SubscriptionCatalogNodeEntry(BaseModel):
     @classmethod
     def validate_required_text(cls, value: str) -> str:
         return _strip_required_text(value, "catalog node field")
+
+    @model_validator(mode="after")
+    def validate_managed_profile(self):
+        if self.protocol_profile is None:
+            return self
+        normalized = ManagedNodeCreate(
+            name=self.name,
+            server_id=UUID(int=0),
+            protocol=self.protocol,
+            protocol_profile=self.protocol_profile,
+            node_type=self.node_type,
+            inbound_tag=self.inbound_tag,
+            routed_outbound_tag=self.routed_outbound_tag,
+            routed_rule_marktag=self.routed_rule_marktag,
+            tag=self.tag,
+            tags=self.tags,
+            enabled=self.enabled,
+            camouflage_pool_id=self.camouflage_pool_id,
+            camouflage_sni=self.camouflage_sni,
+            domestic_entry_ip=self.domestic_entry_ip,
+            domestic_entry_port=self.domestic_entry_port,
+            mieru_port_mapping_mode=self.mieru_port_mapping_mode,
+            ix_port=self.ix_port,
+            client_template=self.client_template,
+            config=self.config,
+        )
+        for field in (
+            "protocol",
+            "camouflage_pool_id",
+            "camouflage_sni",
+            "domestic_entry_ip",
+            "domestic_entry_port",
+            "mieru_port_mapping_mode",
+            "ix_port",
+            "config",
+        ):
+            setattr(self, field, getattr(normalized, field))
+        return self
 
 
 class SubscriptionCatalogPlanEntry(BaseModel):

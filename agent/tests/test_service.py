@@ -132,6 +132,54 @@ def test_existing_unowned_directory_is_never_taken_over(tmp_path):
     assert sentinel.read_text() == "preserve"
 
 
+def test_prepare_config_installs_private_mihomo_binary_and_config(
+    deployment, tmp_path, monkeypatch
+):
+    instance, _, _ = deployment
+    (instance.release_path(OLD) / "bin").mkdir()
+    (instance.release_path(OLD) / "bin/python").write_text("fixture")
+    source = tmp_path / "agent.json"
+    source.write_text("{}")
+    xray_config = tmp_path / "xray.json"
+    xray_config.write_text('{"inbounds": []}')
+    xray_binary = tmp_path / "xray"
+    xray_binary.write_bytes(b"private-xray")
+    mihomo_config = tmp_path / "mihomo.yaml"
+    mihomo_config.write_text("listeners: []\n")
+    mihomo_binary = tmp_path / "mihomo"
+    mihomo_binary.write_bytes(b"private-mihomo")
+    parsed = {
+        "master_url": "https://panel.example.test",
+        "token": "private-token",
+        "runtime_mode": "managed",
+        "ca_file": None,
+        "nginx_binary": None,
+        "nexttrace_binary": None,
+        "nginx_modules": [],
+    }
+    monkeypatch.setattr(
+        service,
+        "command",
+        lambda *args, **kwargs: SimpleNamespace(stdout=json.dumps(parsed)),
+    )
+    monkeypatch.setattr(instance, "account_owner", lambda: (os.getuid(), os.getgid()))
+    instance.prepare_config(
+        OLD,
+        source,
+        xray_config,
+        xray_binary,
+        mihomo_config,
+        mihomo_binary,
+    )
+    installed = json.loads(instance.config.read_text())
+    assert installed["mihomo_binary"] == str(instance.root / "runtime/mihomo")
+    assert installed["mihomo_config"] == str(instance.root / "config/mihomo.yaml")
+    assert (instance.root / "runtime/mihomo").read_bytes() == b"private-mihomo"
+    assert (instance.root / "config/mihomo.yaml").read_text() == "listeners: []\n"
+    assert (instance.root / "runtime/mihomo").stat().st_mode & 0o777 == 0o755
+    assert (instance.root / "config/mihomo.yaml").stat().st_mode & 0o777 == 0o600
+
+
 def test_release_identity_collision_cannot_reuse_another_wheel(deployment, monkeypatch):
     instance, calls, _ = deployment
     instance.record["releases"][OLD]["sha256"] = "original-digest"

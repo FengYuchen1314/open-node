@@ -1,0 +1,67 @@
+mode: rule
+log-level: warning
+allow-lan: false
+listeners:
+- name: managed-vision
+  port: 12000
+  listen: 127.0.0.1
+  type: vless
+  users:
+  - username: alice
+    uuid: 9d0cb9d0-964f-4ef6-897d-6c6b3ccf9e68
+    flow: xtls-rprx-vision
+  reality-config:
+    dest: vision.example.com:443
+    private-key: jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0
+    short-id:
+    - '0123456789abcdef'
+    server-names:
+    - vision.example.com
+- name: managed-xhttp
+  port: 12001
+  listen: 127.0.0.1
+  type: vless
+  users:
+  - username: bob
+    uuid: 64c9a30b-e08b-4be4-951a-a91c20c7bcb9
+  reality-config:
+    dest: xhttp.example.com:443
+    private-key: jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0
+    short-id:
+    - '1123456789abcdef'
+    server-names:
+    - xhttp.example.com
+  xhttp-config:
+    path: /managed/xhttp
+    host: cdn.example.com
+- name: managed-anytls
+  port: 12002
+  listen: 127.0.0.1
+  type: anytls
+  users:
+    carol: anytls-secret
+  shadow-tls:
+    enable: true
+    version: 3
+    users:
+    - name: carol
+      password: anytls-secret
+    handshake:
+      dest: anytls.example.com:443
+- name: managed-mieru
+  port: 12003
+  listen: 0.0.0.0
+  type: mieru
+  transport: TCP
+  users:
+    dave: mieru-secret
+- name: managed-socks
+  port: 12004
+  listen: 0.0.0.0
+  type: socks
+  udp: true
+  users:
+  - username: erin
+    password: socks-secret
+rules:
+- MATCH,DIRECT

@@ -17,9 +17,10 @@ async def wait_until(predicate):
 def test_registration_advertises_versioned_xray_config_workspace(config):
     registration = Agent(config).registration()
 
-    assert registration["agent_version"] == "open-node/0.3.0a2"
+    assert registration["agent_version"] == "open-node/0.3.0a3"
     assert registration["xray_mode"] == "external"
     assert registration["capabilities"]["xray_config_workspace"] is True
+    assert registration["capabilities"]["managed_protocols"] is True
     assert registration["capabilities"]["agent_switch_xray_mode"] is False
     assert registration["capabilities"]["agent_switch_listen_port"] is False
     assert registration["capabilities"]["agent_probe_master_url"] is True

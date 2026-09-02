@@ -155,8 +155,8 @@ async def test_restore_failure_retains_the_suspended_template(config):
         await agent.close()
 
 
-async def test_interrupted_suspension_requires_exact_config_evidence(config):
-    agent, _, users = setup(config, count=1)
+async def test_interrupted_final_journal_save_rolls_back_xray(config):
+    agent, original, users = setup(config, count=1)
     try:
         access = agent.operations.subscription_access
         save = access.save
@@ -168,17 +168,11 @@ async def test_interrupted_suspension_requires_exact_config_evidence(config):
 
         access.save = interrupt
         assert (await execute(agent, [entry("vless", users[0], False)]))["status"] == 500
-        assert agent.runtime.read()["inbounds"] == []
+        assert agent.runtime.read() == original
         access.save = save
-        other = agent.runtime.read()
-        other["log"] = {"loglevel": "warning"}
-        config.xray_config.write_text(json.dumps(other))
-        result = await execute(agent, [entry("vless", users[0], True)])
-        assert result["status"] == 400
-        assert "operator review" in result["error"]
-        other.pop("log")
-        config.xray_config.write_text(json.dumps(other))
-        assert (await execute(agent, [entry("vless", users[0], True)]))["status"] == 200
+        assert access.load() == {}
+        assert (await execute(agent, [entry("vless", users[0], False)]))["status"] == 200
+        assert agent.runtime.read()["inbounds"] == []
     finally:
         await agent.close()
 

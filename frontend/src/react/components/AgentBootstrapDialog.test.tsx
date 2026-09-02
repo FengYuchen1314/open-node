@@ -23,8 +23,8 @@ beforeEach(() => {
   vi.mocked(revokeAgentBootstrap).mockResolvedValue(state({ status: "revoked" }));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-function mount() {
-  const props = { open: true, serverId: "edge", serverName: "Edge", onOpenChange: vi.fn(), onUpdated: vi.fn() };
+function mount(overrides: Partial<Parameters<typeof AgentBootstrapDialog>[0]> = {}) {
+  const props = { open: true, serverId: "edge", serverName: "Edge", onOpenChange: vi.fn(), onUpdated: vi.fn(), ...overrides };
   return { ...render(<AgentBootstrapDialog {...props} />), props };
 }
 async function showCommand() {
@@ -40,6 +40,11 @@ describe("React Agent bootstrap dialog", () => {
     expect((screen.getByTestId("bootstrap-issue") as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/以非 root 身份运行的托管 Agent/)).toBeTruthy(); expect(screen.getByText(/不创建公开代理入站/)).toBeTruthy();
     expect(screen.getByTestId("bootstrap-status").textContent).toContain("Agent 尚未注册");
+  });
+  it("repeats the selected server kind before issuing an installation command", async () => {
+    mount({ serverKind: "leased-line" }); await flush();
+    expect(screen.getByText("服务器类型：专线")).toBeTruthy();
+    expect(screen.getByText("安装完成后，这台服务器仅允许创建 Mieru 节点。")).toBeTruthy();
   });
   it("removes command DOM on close and does not recover it on reopen", async () => {
     const { props, rerender } = await showCommand();

@@ -253,6 +253,20 @@ def render_clash(content, proxies):
     value = deepcopy(parse_template(content, "clash"))
     groups = value.get("proxy-groups", [])
     group_names = {group["name"] for group in groups}
+    generated_groups = [
+        deepcopy(group)
+        for proxy in proxies
+        for group in proxy.get("_open_node_proxy_groups", [])
+    ]
+    generated_names = [str(group.get("name") or "") for group in generated_groups]
+    if (
+        any(not name for name in generated_names)
+        or len(set(generated_names)) != len(generated_names)
+        or set(generated_names).intersection(BUILTINS | group_names)
+    ):
+        raise TemplateError("Generated topology group names must be distinct")
+    groups.extend(generated_groups)
+    group_names.update(generated_names)
     if any(
         not isinstance(proxy, dict)
         or not isinstance(proxy.get("name"), str)
@@ -261,6 +275,10 @@ def render_clash(content, proxies):
     ):
         raise TemplateError("Rendered proxies require names")
     names = [proxy["name"] for proxy in proxies]
+    visible_names = [
+        proxy["name"] for proxy in proxies if not proxy.get("_open_node_hidden")
+    ]
+    has_hidden = len(visible_names) != len(names)
     if len(set(names)) != len(names) or set(names).intersection(BUILTINS | group_names):
         raise TemplateError("Rendered proxy names must be distinct from policy groups")
     value["proxies"] = [clients.clash_proxy(proxy) for proxy in proxies]
@@ -271,10 +289,26 @@ def render_clash(content, proxies):
         members, use = [], list(group.get("use", []))
         for member in group.get("proxies", []):
             if member == NODE_TOKEN:
-                if group.get("filter") or group.get("exclude-filter") or group.get("exclude-type"):
+                if (
+                    not has_hidden
+                    and (
+                        group.get("filter")
+                        or group.get("exclude-filter")
+                        or group.get("exclude-type")
+                    )
+                ):
                     group["include-all-proxies"] = True
                 else:
-                    members.extend(names)
+                    members.extend(visible_names)
+                    if has_hidden and (
+                        group.get("filter")
+                        or group.get("exclude-filter")
+                        or group.get("exclude-type")
+                    ):
+                        warnings.append(
+                            "Topology helper proxies are hidden; template proxy filters "
+                            "were not applied to the node placeholder"
+                        )
             elif member == PROVIDER_TOKEN:
                 use.extend(providers)
             else:
@@ -349,7 +383,9 @@ def render_stash(content, proxies):
     validate_stash_template(content)
     rendered, warnings = render_clash(content, proxies)
     value = checked_yaml(rendered)
-    value["proxies"] = [yaml_proxy(proxy, "stash") for proxy in proxies]
+    value["proxies"] = [
+        yaml_proxy(clients.public_proxy(proxy), "stash") for proxy in proxies
+    ]
     if "dns" in value:
         dns = value["dns"]
         nameservers = list(dns.get("nameserver", []))

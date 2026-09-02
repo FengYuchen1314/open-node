@@ -5,6 +5,7 @@ import type { ServerSummary } from "../../domain/inventory";
 import { getServerRemoval, getServerSettings, removeServer, updateServerSettings, type RemovalPreview } from "../../services/server-management";
 import ServerManagementDialog from "./ServerManagementDialog";
 vi.mock("../../services/server-management", () => ({ getServerRemoval: vi.fn(), getServerSettings: vi.fn(), removeServer: vi.fn(), updateServerSettings: vi.fn() }));
+vi.mock("./SharedIngressDialog", () => ({ default: ({ open, serverId }: { open: boolean; serverId: string }) => open ? <div role="dialog" aria-label="443 分流测试界面">{serverId}</div> : null }));
 const server: ServerSummary = { id: "edge", name: "Edge", domain: "edge.example", domain_v6: "v6.example", ip_address: "192.0.2.1", ip_address_v6: "2001:db8::1",
   status: "connected", connection_mode: "websocket", listen_port: 0, pull_port: 0, ipv6_enabled: true, traffic_limit: 0, xray_mode: "external",
   current_upload_speed: 0, current_download_speed: 0, created_at: "2026-08-31", updated_at: "2026-08-31" };
@@ -44,6 +45,12 @@ describe("React server management", () => {
     expect(updateServerSettings).toHaveBeenCalledWith("edge", { name: "Renamed", domain: "new.example", domain_v6: "v6.example",
       ip_address: "192.0.2.1", ip_address_v6: "2001:db8::1", ipv6_enabled: true }, "revision-1", false);
     expect(props.onUpdated).toHaveBeenCalledOnce(); expect(props.onOpenChange).toHaveBeenCalledWith(false);
+  });
+  it("opens the independent shared TCP 443 ingress interface from server settings", async () => {
+    mount(); await flush();
+    expect(screen.queryByRole("dialog", { name: "443 分流测试界面" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "443 分流与网站反向代理" }));
+    expect(screen.getByRole("dialog", { name: "443 分流测试界面" }).textContent).toBe("edge");
   });
   it("requires exact server name plus remote-runtime acknowledgement to remove", async () => {
     mount("remove"); await flush();

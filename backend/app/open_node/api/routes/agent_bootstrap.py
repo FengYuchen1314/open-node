@@ -2,7 +2,9 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from starlette.concurrency import run_in_threadpool
 
 from open_node.api.auth import check_request_origin
 from open_node.api.backup import BackupAPIRoute
@@ -12,6 +14,7 @@ from open_node.services.agent_bootstrap import (
     AgentBootstrapUnavailableError,
 )
 from open_node.services.agent_bootstrap_release import (
+    AgentBootstrapArtifactUnavailable,
     AgentBootstrapReleaseUnavailable,
     installation_command,
     installer_bytes,
@@ -57,6 +60,8 @@ def invoke(function, *args):
         raise HTTPException(401, "Invalid or expired installation ticket") from None
     except AgentBootstrapReleaseUnavailable as exc:
         raise HTTPException(503, str(exc)) from None
+    except AgentBootstrapArtifactUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
 
 
 def availability(request: Request) -> dict:
@@ -79,6 +84,7 @@ def availability(request: Request) -> dict:
             "agent_version": manifest["agent"]["version"],
             "source_commit": manifest["agent"]["source_commit"],
             "xray_version": manifest["xray"]["version"],
+            "mihomo_version": manifest["mihomo"]["version"],
             "platform": "Debian 12 amd64 / Python 3.11+ / systemd",
         },
         "reason": (
@@ -143,6 +149,26 @@ def bootstrap_installer() -> Response:
         headers={
             "X-Content-Type-Options": "nosniff",
             "Content-Disposition": 'attachment; filename="open-node-agent-install.py"',
+        },
+    )
+
+
+@public_router.get("/artifacts/{filename}", response_class=FileResponse)
+async def bootstrap_artifact(filename: str, request: Request) -> FileResponse:
+    try:
+        path, artifact = await run_in_threadpool(
+            request.app.state.agent_bootstrap_artifacts.get, filename
+        )
+    except AgentBootstrapArtifactUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=artifact.filename,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "X-Content-SHA256": artifact.sha256,
+            "Content-Length": str(artifact.size),
         },
     )
 

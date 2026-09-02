@@ -11,6 +11,7 @@ from open_node.api.routes import (
     auth,
     backups,
     branding,
+    camouflage_pools,
     certificates,
     changes,
     ddns,
@@ -19,6 +20,7 @@ from open_node.api.routes import (
     legacy_mmwx,
     license,
     node_management,
+    node_topologies,
     notifications,
     plan_management,
     private_routed_nodes,
@@ -30,6 +32,7 @@ from open_node.api.routes import (
     server_management,
     server_sharing,
     servers,
+    shared_ingress,
     speedtests,
     subscriber_auth,
     subscriber_permissions,
@@ -48,12 +51,14 @@ private_router = APIRouter(
     route_class=BackupAPIRoute, dependencies=[Depends(require_administrator)]
 )
 private_router.include_router(servers.router)
+private_router.include_router(shared_ingress.router)
 private_router.include_router(announcements.router)
 private_router.include_router(application_updates.router)
 private_router.include_router(backups.router)
 private_router.include_router(agent_bootstrap.router)
 private_router.include_router(branding.router)
 private_router.include_router(appearance.router)
+private_router.include_router(camouflage_pools.router)
 private_router.include_router(server_management.router)
 private_router.include_router(speedtests.router)
 private_router.include_router(server_sharing.router)
@@ -76,6 +81,7 @@ private_router.include_router(security.router)
 private_router.include_router(plan_management.router)
 private_router.include_router(user_management.router)
 private_router.include_router(node_management.router)
+private_router.include_router(node_topologies.router)
 private_router.include_router(notifications.router)
 private_router.include_router(subscriber_auth.management_router)
 private_router.include_router(subscriber_permissions.router)

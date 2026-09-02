@@ -1,6 +1,6 @@
 import { zhMessage, zhStatus } from "../../i18n/zh-CN";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Col, Collapse, Descriptions, Divider, Empty, Flex, Form, Input, Modal, Progress, Row, Select, Spin, Switch, Tabs, Tag, Typography } from "antd";
+import { Alert, Button, Card, Col, Collapse, Descriptions, Empty, Flex, Form, Input, Modal, Progress, Row, Select, Spin, Switch, Tabs, Tag, Typography } from "antd";
 import { CopyOutlined, DeleteOutlined, EditOutlined, KeyOutlined, LinkOutlined, PlusOutlined, ReloadOutlined, SettingOutlined, SyncOutlined, UserAddOutlined } from "@ant-design/icons";
 import SubscriptionAccessPanel from "../components/SubscriptionAccessPanel";
 import PlanManagementDialog from "../components/PlanManagementDialog";
@@ -19,6 +19,7 @@ import NodeManagementDialog from "../components/NodeManagementDialog";
 import StrictInputNumber from "../components/StrictInputNumber";
 import ExternalSubscriptionsPanel from "../components/ExternalSubscriptionsPanel";
 import type { AutoSpeedRule } from "../../domain/auto-speed";
+import type { CamouflagePoolCatalog } from "../../domain/camouflage";
 import type { NodeOperation } from "../../services/node-management";
 import type { UserOperation } from "../../services/user-management";
 import type { PlanOperation } from "../../services/plan-management";
@@ -26,19 +27,40 @@ import type { SubscriptionTemplate } from "../../domain/subscription-templates";
 import type { SubscriptionProfile } from "../../domain/subscription-profiles";
 import type { TemporarySubscription } from "../../domain/temporary-subscriptions";
 import type { PrivateRoutedNodesResponse } from "../../domain/private-routed-nodes";
-import type { ServerSummary } from "../../domain/inventory";
-import type { ManagedNode, ManagedNodeCreateRequest, ManagedNodeType, ProductUser, ProductUserRole, ProductUserSubscriptionToken, ProductUserTrafficResponse, SubscriptionCatalogBundle, SubscriptionCatalogImportResponse, SubscriptionClientFormat, SubscriptionCredential, SubscriptionDueTrafficResetResponse, SubscriptionFormatPreview, SubscriptionPlan, SubscriptionPlanAssignResponse, SubscriptionPlanCreateRequest, SubscriptionQuotaStatus, SubscriptionTemplatePreset, SubscriptionTrafficMode } from "../../domain/subscriptions";
+import type { ServerKind, ServerSummary } from "../../domain/inventory";
+import type { ManagedNode, ManagedNodeCreateRequest, ManagedNodeCreationMetadataResponse, ManagedNodeCreationOption, ManagedNodeType, ManagedProtocolProfile, MieruPortMappingMode, ProductUser, ProductUserRole, ProductUserSubscriptionToken, ProductUserTrafficResponse, SubscriptionCatalogBundle, SubscriptionCatalogImportResponse, SubscriptionClientFormat, SubscriptionCredential, SubscriptionDueTrafficResetResponse, SubscriptionFormatPreview, SubscriptionPlan, SubscriptionPlanAssignResponse, SubscriptionPlanCreateRequest, SubscriptionQuotaStatus, SubscriptionTemplatePreset, SubscriptionTrafficMode } from "../../domain/subscriptions";
 import { listSubscriptionTemplates } from "../../services/subscription-templates";
 import { extraSubscriptionFormats, subscriptionFormatHelp } from "../../domain/subscriptions";
 import { listSubscriptionProfiles } from "../../services/subscription-profiles";
 import { deleteTemporarySubscription, listTemporarySubscriptions } from "../../services/temporary-subscriptions";
 import { listPrivateRoutes } from "../../services/private-routed-nodes";
 import { fetchAppMeta } from "../../services/api";
+import { listCamouflagePools } from "../../services/camouflage-pools";
 import { listServers } from "../../services/inventory";
-import { assignSubscriptionPlan, createManagedNode, createManagedNodeFromPreset, createProductUser, createProductUserSubscriptionToken, createSubscriptionPlan, exportSubscriptionCatalog, getProductUserQuota, getProductUserTraffic, getSubscriptionFormatPreview, importSubscriptionCatalog, listProductUserCredentials, listManagedNodes, listProductUsers, listSubscriptionPlans, listSubscriptionTemplatePresets, resetDueProductUserTraffic, resetProductUserTraffic, resetProductUserSubscriptionToken } from "../../services/subscriptions";
+import { assignSubscriptionPlan, createManagedNode, createProductUser, createProductUserSubscriptionToken, createSubscriptionPlan, exportSubscriptionCatalog, getManagedNodeCreationMetadata, getProductUserQuota, getProductUserTraffic, getSubscriptionFormatPreview, importSubscriptionCatalog, listProductUserCredentials, listManagedNodes, listProductUsers, listSubscriptionPlans, listSubscriptionTemplatePresets, resetDueProductUserTraffic, resetProductUserTraffic, resetProductUserSubscriptionToken } from "../../services/subscriptions";
 
 const newUserForm = () => ({ username: "", email: "", display_name: "", role: "user" as ProductUserRole, is_active: true });
-const newNodeForm = (server_id = "") => ({ name: "", server_id, protocol: "vless", node_type: "physical" as ManagedNodeType, parent_id: null as string | null, target_node_id: null as string | null, inbound_tag: "", routed_outbound_tag: "", routed_rule_marktag: "", tag: "", tagsText: "", enabled: true, clientTemplateText: '{\n  "id": "client-{username}",\n  "email": "{username}__default"\n}', configText: "{}" });
+const managedProtocolProfiles = ["vless-reality-vision", "vless-xhttp-reality-xmux", "anytls-shadowtls", "mieru", "socks5"] as const satisfies readonly ManagedProtocolProfile[];
+const newNodeForm = (server_id = "") => ({ name: "", server_id, protocol: "vless", protocol_profile: "vless-reality-vision" as ManagedProtocolProfile,
+  node_type: "physical" as ManagedNodeType, parent_id: null as string | null, target_node_id: null as string | null, inbound_tag: "", routed_outbound_tag: "", routed_rule_marktag: "", tag: "", tagsText: "", enabled: true,
+  camouflage_pool_id: "", camouflage_sni: "", domestic_entry_ip: "", domestic_entry_port: null as number | null,
+  mieru_port_mapping_mode: "one-to-one" as MieruPortMappingMode, ix_port: null as number | null,
+  clientTemplateText: '{\n  "id": "client-{username}",\n  "email": "{username}__default"\n}', configText: "{}" });
+type NodeForm = ReturnType<typeof newNodeForm>;
+
+function presetForProfile(presets: SubscriptionTemplatePreset[], profile: ManagedProtocolProfile) {
+  return presets.find(preset => preset.protocol_profile === profile || preset.id === profile);
+}
+function profileNodeForm(previous: NodeForm, option: ManagedNodeCreationOption, presets: SubscriptionTemplatePreset[], keepName = true): NodeForm {
+  const preset = presetForProfile(presets, option.profile), camouflage = option.requires_camouflage_pool, mieru = option.profile === "mieru";
+  return { ...previous, name: keepName && previous.name.trim() ? previous.name : preset?.name ?? "", protocol: option.protocol, protocol_profile: option.profile,
+    node_type: "physical", parent_id: null, target_node_id: null, inbound_tag: preset?.inbound_tag ?? "", routed_outbound_tag: preset?.routed_outbound_tag ?? "",
+    routed_rule_marktag: preset?.routed_rule_marktag ?? "", tag: preset?.tag ?? "", tagsText: preset?.tags.join(", ") ?? "",
+    camouflage_pool_id: camouflage ? previous.camouflage_pool_id : "", camouflage_sni: camouflage ? previous.camouflage_sni : "",
+    domestic_entry_ip: mieru ? previous.domestic_entry_ip : "", domestic_entry_port: mieru ? previous.domestic_entry_port : null,
+    mieru_port_mapping_mode: mieru ? previous.mieru_port_mapping_mode : "one-to-one", ix_port: mieru && previous.mieru_port_mapping_mode === "manual" ? previous.ix_port : null,
+    clientTemplateText: JSON.stringify(preset?.client_template ?? {}, null, 2), configText: JSON.stringify(preset?.config ?? {}, null, 2) };
+}
 const newPlanForm = () => ({ name: "", description: "", traffic_limit_gb: 128, cycle_days: 30, is_reset: true, reset_day: 1, speed_limit_mbps: 0, device_limit: 0, traffic_mode: "twoway" as SubscriptionTrafficMode, node_ids: [] as string[], node_name_overrides: {} as Record<string, string>, auto_speed_rules: [] as AutoSpeedRule[], node_name_override_enabled: false, clash_template_id: null as string | null, surge_template_id: null as string | null });
 const profileSourceLabel = (value: string) => ({ create: "创建", import: "导入", upload: "上传", package: "套餐" } as Record<string, string>)[value] ?? zhStatus(value);
 const formatOptions: { label: string; value: SubscriptionClientFormat }[] = [{ label: "Clash YAML", value: "clash" }, { label: "Surge 配置", value: "surge" }, { label: "sing-box JSON", value: "sing-box" }, { label: "Xray JSON", value: "xray" }, { label: "URI 列表", value: "uri-list" }, { label: "Base64 URI", value: "base64" }, ...extraSubscriptionFormats];
@@ -66,10 +88,12 @@ export default function SubscriptionsView() {
   const [servers, setServers] = useState<ServerSummary[]>([]), [users, setUsers] = useState<ProductUser[]>([]), [nodes, setNodes] = useState<ManagedNode[]>([]), [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [templates, setTemplates] = useState<SubscriptionTemplate[]>([]), [profiles, setProfiles] = useState<SubscriptionProfile[]>([]), [temporary, setTemporary] = useState<TemporarySubscription[]>([]);
   const [privateRoutes, setPrivateRoutes] = useState<PrivateRoutedNodesResponse | null>(null), [presets, setPresets] = useState<SubscriptionTemplatePreset[]>([]), [shortLinksEnabled, setShortLinksEnabled] = useState(false);
+  const [creationMetadata, setCreationMetadata] = useState<ManagedNodeCreationMetadataResponse | null>(null);
+  const [camouflageCatalog, setCamouflageCatalog] = useState<CamouflagePoolCatalog | null>(null);
   const [loading, setLoading] = useState(false), [saving, setSaving] = useState(""), [error, setError] = useState(""), [success, setSuccess] = useState(""), [activeTab, setActiveTab] = useState("users");
   const [externalOpen, setExternalOpen] = useState(false);
   const [userForm, setUserForm] = useState(newUserForm), [nodeForm, setNodeForm] = useState(() => newNodeForm()), [planForm, setPlanForm] = useState(newPlanForm);
-  const [presetForm, setPresetForm] = useState({ preset_id: "", host: "", port: 443 as number | null }), [assignForm, setAssignForm] = useState({ username: "", plan_id: "", start_date: "", expire_date: "", queue_agent_commands: false, no_restart: false, command_timeout_ms: 60_000 });
+  const [assignForm, setAssignForm] = useState({ username: "", plan_id: "", start_date: "", expire_date: "", queue_agent_commands: true, no_restart: false, command_timeout_ms: 60_000 });
   const [catalogForm, setCatalogForm] = useState({ includeCredentials: false, importCredentials: false, serverMapText: "{}", catalogText: "" });
   const [aliasesValid, setAliasesValid] = useState(true), [rulesValid, setRulesValid] = useState(true), [lastAssignment, setLastAssignment] = useState<SubscriptionPlanAssignResponse | null>(null), [catalogImport, setCatalogImport] = useState<SubscriptionCatalogImportResponse | null>(null);
   const [planDialog, setPlanDialog] = useState({ id: "", mode: "edit" as PlanOperation, open: false }), [nodeDialog, setNodeDialog] = useState({ id: "", mode: "edit" as NodeOperation, open: false });
@@ -77,7 +101,7 @@ export default function SubscriptionsView() {
   const [shortCode, setShortCode] = useState({ username: "", open: false }), [ipPolicy, setIpPolicy] = useState({ username: "", open: false }), [profileDialog, setProfileDialog] = useState<SubscriptionProfile | null>(null);
   const [legacyOpen, setLegacyOpen] = useState(false), [invitationsOpen, setInvitationsOpen] = useState(false), [privatePolicyOpen, setPrivatePolicyOpen] = useState(false), [shareOpen, setShareOpen] = useState(false);
   const [updatedToken, setUpdatedToken] = useState<ProductUserSubscriptionToken | null>(null), [confirmTemporary, setConfirmTemporary] = useState<TemporarySubscription | null>(null), [confirmImport, setConfirmImport] = useState(false);
-  const lifecycle = useRef(0), refreshVersion = useRef(0), operationVersion = useRef(0), operationBusy = useRef(false), userEpoch = useRef(0), selectedUsername = useRef("");
+  const lifecycle = useRef(0), refreshVersion = useRef(0), operationVersion = useRef(0), operationBusy = useRef(false), userEpoch = useRef(0), selectedUsername = useRef(""), nodeFormInitialized = useRef(false);
   function selectUser(username: string) {
     if (selectedUsername.current === username) return;
     selectedUsername.current = username; ++userEpoch.current; setAssignForm(previous => ({ ...previous, username })); setLastAssignment(null); setUpdatedToken(null); setShareOpen(false);
@@ -85,11 +109,21 @@ export default function SubscriptionsView() {
   async function refresh() {
     const run = ++refreshVersion.current, life = lifecycle.current; setLoading(true); setError("");
     try {
-      const [serverList, userList, nodeList, planList, presetList, templateList, profileList, temporaryList, routes, meta] = await Promise.all([listServers(), listProductUsers(), listManagedNodes(), listSubscriptionPlans(), listSubscriptionTemplatePresets(), listSubscriptionTemplates(), listSubscriptionProfiles(), listTemporarySubscriptions(), listPrivateRoutes(), fetchAppMeta()]);
+      const [serverList, userList, nodeList, planList, presetList, nodeCreation, poolCatalog, templateList, profileList, temporaryList, routes, meta] = await Promise.all([listServers(), listProductUsers(), listManagedNodes(), listSubscriptionPlans(), listSubscriptionTemplatePresets(), getManagedNodeCreationMetadata(), listCamouflagePools(), listSubscriptionTemplates(), listSubscriptionProfiles(), listTemporarySubscriptions(), listPrivateRoutes(), fetchAppMeta()]);
       if (run !== refreshVersion.current || life !== lifecycle.current) return;
-      setServers(serverList); setUsers(userList.users); setNodes(nodeList.nodes); setPlans(planList.plans); setPresets(presetList.presets); setTemplates(templateList.templates); setProfiles(profileList.profiles); setTemporary(temporaryList.subscriptions); setPrivateRoutes(routes); setShortLinksEnabled(meta.short_links_enabled);
-      setNodeForm(previous => previous.server_id ? previous : { ...previous, server_id: serverList[0]?.id ?? "" });
-      setPresetForm(previous => previous.preset_id ? previous : { ...previous, preset_id: presetList.presets[0]?.id ?? "" });
+      setServers(serverList); setUsers(userList.users); setNodes(nodeList.nodes); setPlans(planList.plans); setPresets(presetList.presets); setCreationMetadata(nodeCreation); setCamouflageCatalog(poolCatalog); setTemplates(templateList.templates); setProfiles(profileList.profiles); setTemporary(temporaryList.subscriptions); setPrivateRoutes(routes); setShortLinksEnabled(meta.short_links_enabled);
+      setNodeForm(previous => {
+        const server_id = serverList.some(server => server.id === previous.server_id) ? previous.server_id : serverList[0]?.id ?? "";
+        const kind = serverList.find(server => server.id === server_id)?.server_kind ?? "direct";
+        const allowed = nodeCreation.profiles.filter(option => managedProtocolProfiles.includes(option.profile) && option.allowed_server_kinds.includes(kind));
+        const option = allowed.find(item => item.profile === previous.protocol_profile) ?? allowed[0];
+        if (!option) return { ...previous, server_id };
+        if (!nodeFormInitialized.current || option.profile !== previous.protocol_profile) {
+          nodeFormInitialized.current = true;
+          return profileNodeForm({ ...previous, server_id }, option, presetList.presets, nodeFormInitialized.current && !!previous.name.trim());
+        }
+        return { ...previous, server_id };
+      });
       const availableUsers = userList.users.filter(user => !user.removal_id);
       if (!availableUsers.some(user => user.username === selectedUsername.current)) selectUser(availableUsers[0]?.username ?? "");
       setAssignForm(previous => planList.plans.some(plan => plan.id === previous.plan_id) ? previous : { ...previous, plan_id: planList.plans[0]?.id ?? "" });
@@ -113,23 +147,41 @@ export default function SubscriptionsView() {
   }
   function submitNode() {
     if (!nodeForm.server_id) { setError("请选择服务器。"); return; } if (!nodeForm.name.trim()) { setError("请填写节点名称。"); return; }
+    const option = creationMetadata?.profiles.find(item => managedProtocolProfiles.includes(item.profile) && item.profile === nodeForm.protocol_profile);
+    if (!option) { setError("请选择可用的协议档案。"); return; }
+    const serverKind = servers.find(server => server.id === nodeForm.server_id)?.server_kind ?? "direct";
+    if (!option.allowed_server_kinds.includes(serverKind)) { setError("所选协议档案不适用于这类服务器。"); return; }
+    const camouflagePool = camouflageCatalog?.pools.find(pool => pool.id === nodeForm.camouflage_pool_id);
+    if (option.requires_camouflage_pool && !camouflagePool) { setError("请从目录中选择伪装池。"); return; }
+    const validPort = (value: number | null) => value !== null && Number.isInteger(value) && value >= 1 && value <= 65535;
+    if (option.requires_domestic_entry && (!nodeForm.domestic_entry_ip.trim() || !validPort(nodeForm.domestic_entry_port))) {
+      setError("请填写国内入口 IP 和 1 至 65535 的端口。"); return;
+    }
+    if (option.profile === "mieru" && nodeForm.mieru_port_mapping_mode === "manual" && !validPort(nodeForm.ix_port)) {
+      setError("手动映射时请填写 1 至 65535 的 IX 端口。"); return;
+    }
     void perform("node", async current => {
-      const payload: ManagedNodeCreateRequest = { name: nodeForm.name.trim(), server_id: nodeForm.server_id, protocol: nodeForm.protocol.trim(), node_type: nodeForm.node_type, parent_id: nodeForm.node_type === "routed" ? nodeForm.parent_id : null, target_node_id: nodeForm.node_type === "routed" ? nodeForm.target_node_id : null, inbound_tag: blankToNull(nodeForm.inbound_tag), routed_outbound_tag: blankToNull(nodeForm.routed_outbound_tag), routed_rule_marktag: blankToNull(nodeForm.routed_rule_marktag), tag: blankToNull(nodeForm.tag), tags: splitCsv(nodeForm.tagsText), enabled: nodeForm.enabled, client_template: parseJsonObject(nodeForm.clientTemplateText, "客户端模板"), config: parseJsonObject(nodeForm.configText, "节点配置") };
-      const result = await createManagedNode(payload); if (!current()) return; setSuccess(`已创建节点 ${result.node.name}。`); setNodeForm(newNodeForm(result.node.server_id)); await refresh();
-    });
-  }
-  function applyPreset() {
-    const preset = presets.find(item => item.id === presetForm.preset_id); if (!preset) { setError("请选择预设。"); return; }
-    if (presetForm.port !== null && (!Number.isInteger(presetForm.port) || presetForm.port < 1 || presetForm.port > 65535)) { setError("端口必须是 1 至 65535 的整数；留空使用预设值。"); return; }
-    const config = { ...preset.config }; if (presetForm.host.trim()) config.server = presetForm.host.trim(); if (presetForm.port !== null) config.port = presetForm.port;
-    setNodeForm(previous => ({ ...previous, name: previous.name.trim() || preset.name, protocol: preset.protocol, node_type: preset.node_type, inbound_tag: preset.inbound_tag ?? "", routed_outbound_tag: preset.routed_outbound_tag ?? "", routed_rule_marktag: preset.routed_rule_marktag ?? "", tag: preset.tag ?? "", tagsText: preset.tags.join(", "), clientTemplateText: JSON.stringify(preset.client_template, null, 2), configText: JSON.stringify(config, null, 2) }));
-  }
-  function createPresetNode() {
-    const preset = presets.find(item => item.id === presetForm.preset_id); if (!preset) { setError("请选择预设。"); return; } if (!nodeForm.server_id) { setError("请选择服务器。"); return; }
-    if (presetForm.port !== null && (!Number.isInteger(presetForm.port) || presetForm.port < 1 || presetForm.port > 65535)) { setError("端口必须是 1 至 65535 的整数；留空使用预设值。"); return; }
-    void perform("preset", async current => {
-      const result = await createManagedNodeFromPreset(preset.id, { server_id: nodeForm.server_id, name: nodeForm.name.trim() || preset.name, host: blankToNull(presetForm.host), port: presetForm.port, inbound_tag: blankToNull(nodeForm.inbound_tag), routed_outbound_tag: blankToNull(nodeForm.routed_outbound_tag), routed_rule_marktag: blankToNull(nodeForm.routed_rule_marktag), tag: blankToNull(nodeForm.tag), tags: splitCsv(nodeForm.tagsText), enabled: nodeForm.enabled });
-      if (!current()) return; setSuccess(`已创建节点 ${result.node.name}。`); setNodeForm(newNodeForm(result.node.server_id)); await refresh();
+      const config = parseJsonObject(nodeForm.configText, "节点配置");
+      if (option.fixed_port) config.port = option.fixed_port;
+      const mieru = option.profile === "mieru", camouflage = option.requires_camouflage_pool;
+      const payload: ManagedNodeCreateRequest = { name: nodeForm.name.trim(), server_id: nodeForm.server_id, protocol: option.protocol,
+        protocol_profile: option.profile, node_type: "physical", parent_id: null,
+        target_node_id: null, inbound_tag: blankToNull(nodeForm.inbound_tag),
+        routed_outbound_tag: blankToNull(nodeForm.routed_outbound_tag), routed_rule_marktag: blankToNull(nodeForm.routed_rule_marktag),
+        tag: blankToNull(nodeForm.tag), tags: splitCsv(nodeForm.tagsText), enabled: nodeForm.enabled,
+        camouflage_pool_id: camouflage ? camouflagePool?.id ?? null : null,
+        camouflage_sni: camouflage ? camouflagePool?.server_name ?? null : null,
+        domestic_entry_ip: mieru ? blankToNull(nodeForm.domestic_entry_ip) : null,
+        domestic_entry_port: mieru ? nodeForm.domestic_entry_port : null,
+        mieru_port_mapping_mode: mieru ? nodeForm.mieru_port_mapping_mode : null,
+        ix_port: mieru ? nodeForm.mieru_port_mapping_mode === "one-to-one" ? nodeForm.domestic_entry_port : nodeForm.ix_port : null,
+        client_template: parseJsonObject(nodeForm.clientTemplateText, "客户端模板"), config };
+      const result = await createManagedNode(payload); if (!current()) return;
+      const runtime = result.commands?.[0];
+      setSuccess(runtime
+        ? `已创建节点 ${result.node.name}，真实运行配置已下发 Agent（${runtime.status}）。`
+        : `已创建节点 ${result.node.name}。`);
+      setNodeForm({ ...profileNodeForm(newNodeForm(result.node.server_id), option, presets, false), name: "" }); await refresh();
     });
   }
   function submitPlan() {
@@ -163,8 +215,32 @@ export default function SubscriptionsView() {
   const userOptions = users.filter(user => !user.removal_id).map(user => ({ label: user.display_name || user.username, value: user.username }));
   const nodeOptions = nodes.filter(node => !node.removal_id).map(node => ({ label: `${node.name} (${node.protocol})`, value: node.id }));
   const planOptions = plans.map(plan => ({ label: plan.name, value: plan.id })), serverName = (id: string) => servers.find(server => server.id === id)?.name ?? "未知服务器";
+  const selectedServerKind: ServerKind = servers.find(server => server.id === nodeForm.server_id)?.server_kind ?? "direct";
+  const availableCreationProfiles = (creationMetadata?.profiles ?? []).filter(option => managedProtocolProfiles.includes(option.profile)
+    && option.allowed_server_kinds.includes(selectedServerKind));
+  const selectedCreationProfile = availableCreationProfiles.find(option => option.profile === nodeForm.protocol_profile);
+  const usedCamouflagePoolIds = new Set(nodes.filter(node => node.server_id === nodeForm.server_id && node.camouflage_pool_id).map(node => node.camouflage_pool_id));
+  const selectedCamouflagePool = camouflageCatalog?.pools.find(pool => pool.id === nodeForm.camouflage_pool_id);
   const disabled = !!saving;
   function patchNode(change: Partial<typeof nodeForm>) { setNodeForm(previous => ({ ...previous, ...change })); }
+  function selectNodeServer(server_id: string) {
+    const kind = servers.find(server => server.id === server_id)?.server_kind ?? "direct";
+    const allowed = (creationMetadata?.profiles ?? []).filter(option => managedProtocolProfiles.includes(option.profile) && option.allowed_server_kinds.includes(kind));
+    setNodeForm(previous => {
+      const option = allowed.find(item => item.profile === previous.protocol_profile) ?? allowed[0];
+      const next = option && option.profile !== previous.protocol_profile ? profileNodeForm({ ...previous, server_id }, option, presets) : { ...previous, server_id };
+      return nodes.some(node => node.server_id === server_id && node.camouflage_pool_id === next.camouflage_pool_id)
+        ? { ...next, camouflage_pool_id: "", camouflage_sni: "" } : next;
+    });
+  }
+  function selectNodeProfile(protocol_profile: ManagedProtocolProfile) {
+    const option = availableCreationProfiles.find(item => item.profile === protocol_profile);
+    if (option) setNodeForm(previous => profileNodeForm(previous, option, presets));
+  }
+  function selectCamouflagePool(camouflage_pool_id: string) {
+    const pool = camouflageCatalog?.pools.find(item => item.id === camouflage_pool_id);
+    patchNode({ camouflage_pool_id: pool?.id ?? "", camouflage_sni: pool?.server_name ?? "" });
+  }
   function patchPlan(change: Partial<typeof planForm>) { setPlanForm(previous => ({ ...previous, ...change })); }
   function patchAssignment(change: Partial<typeof assignForm>) { setAssignForm(previous => ({ ...previous, ...change })); }
   // Each subscriber's token, credentials and request epochs live in a keyed child.
@@ -188,19 +264,53 @@ export default function SubscriptionsView() {
             <Button type="primary" htmlType="submit" icon={<PlusOutlined />} aria-label="创建用户" loading={saving === "user"}>创建用户</Button>
           </Form> },
           { key: "nodes", label: "节点", children: <Form layout="vertical" preserve={false} disabled={disabled} onFinish={submitNode}>
-            <Form.Item label="预设"><Select aria-label="预设" value={presetForm.preset_id || undefined} options={presets.map(preset => ({ label: preset.name, value: preset.id }))} disabled={disabled || !presets.length} onChange={preset_id => setPresetForm(previous => ({ ...previous, preset_id }))} /></Form.Item>
-            <Row gutter={16}><Col xs={24} sm={16}><Form.Item label="主机地址"><Input aria-label="主机地址" value={presetForm.host} onChange={event => setPresetForm(previous => ({ ...previous, host: event.target.value }))} /></Form.Item></Col><Col xs={24} sm={8}><Form.Item label="端口"><StrictInputNumber aria-label="端口" allowEmpty aria-valuemin={1} aria-valuemax={65535} value={presetForm.port} onChange={value => setPresetForm(previous => ({ ...previous, port: value }))} /></Form.Item></Col></Row>
-            <Flex gap="small"><Button disabled={disabled || !presetForm.preset_id} onClick={applyPreset}>填入表单</Button><Button aria-label="预设" aria-busy={saving === "preset"} disabled={disabled || !servers.length || !presetForm.preset_id} loading={saving === "preset"} onClick={createPresetNode}>预设</Button></Flex><Divider />
             <Form.Item label="名称"><Input aria-label="名称" value={nodeForm.name} onChange={event => patchNode({ name: event.target.value })} /></Form.Item>
-            <Form.Item label="服务器"><Select aria-label="服务器" value={nodeForm.server_id || undefined} options={servers.map(server => ({ label: server.name, value: server.id }))} disabled={disabled || !servers.length} onChange={server_id => patchNode({ server_id })} /></Form.Item>
-            <Form.Item label="协议"><Input aria-label="协议" value={nodeForm.protocol} onChange={event => patchNode({ protocol: event.target.value })} /></Form.Item>
-            <Form.Item label="类型"><Select aria-label="类型" value={nodeForm.node_type} options={[{ label: "物理节点", value: "physical" }, { label: "路由节点", value: "routed" }]} onChange={node_type => patchNode({ node_type })} /></Form.Item>
+            <Form.Item label="服务器"><Select aria-label="服务器" value={nodeForm.server_id || undefined}
+              options={servers.map(server => ({ label: `${server.name}（${creationMetadata?.server_kinds[server.server_kind ?? "direct"] ?? "公网直连"}）`, value: server.id }))}
+              disabled={disabled || !servers.length} onChange={selectNodeServer} /></Form.Item>
+            {nodeForm.server_id && <Typography.Paragraph type="secondary">服务器类型：{creationMetadata?.server_kinds[selectedServerKind] ?? "公网直连"}</Typography.Paragraph>}
+            <Form.Item label="协议档案" required><Select aria-label="协议档案" value={selectedCreationProfile?.profile}
+              options={availableCreationProfiles.map(option => ({ label: option.label, value: option.profile }))}
+              disabled={disabled || !availableCreationProfiles.length} onChange={selectNodeProfile} /></Form.Item>
+            {!availableCreationProfiles.length && creationMetadata && <Alert type="error" showIcon title="这类服务器没有可用的协议档案。" />}
+            {selectedCreationProfile && <Alert type="info" showIcon style={{ marginBottom: 16 }} title={selectedCreationProfile.label}
+              description={`${selectedCreationProfile.description}${selectedCreationProfile.fixed_port ? ` 服务端口固定为 ${selectedCreationProfile.fixed_port}。` : ""}`} />}
+            {selectedCreationProfile?.requires_camouflage_pool && <Row gutter={16}>
+              <Col xs={24} sm={15}><Form.Item label="伪装池" required><Select aria-label="伪装池" showSearch optionFilterProp="label" value={nodeForm.camouflage_pool_id || undefined}
+                placeholder="选择已验证的伪装池" options={(camouflageCatalog?.pools ?? []).map(pool => ({ value: pool.id,
+                  label: `${pool.region_label} · ${pool.label} · ${pool.server_name}${usedCamouflagePoolIds.has(pool.id) ? "（已在此服务器使用）" : ""}`,
+                  disabled: usedCamouflagePoolIds.has(pool.id) }))} onChange={selectCamouflagePool} /></Form.Item></Col>
+              <Col xs={24} sm={9}><Form.Item label="伪装 SNI"><Input aria-label="伪装 SNI" readOnly value={selectedCamouflagePool?.server_name ?? ""} /></Form.Item></Col>
+              {camouflageCatalog && <Col span={24}><Alert type="info" showIcon style={{ marginBottom: 16 }} title="伪装池目录会随测量结果变化"
+                description={camouflageCatalog.measurement_notice} /></Col>}
+            </Row>}
+            {selectedCreationProfile?.profile === "mieru" && <>
+              <Row gutter={16}><Col xs={24} sm={14}><Form.Item label="国内入口 IP" required><Input aria-label="国内入口 IP" maxLength={255} value={nodeForm.domestic_entry_ip}
+                onChange={event => patchNode({ domestic_entry_ip: event.target.value })} /></Form.Item></Col>
+                <Col xs={24} sm={10}><Form.Item label="国内入口端口" required><StrictInputNumber aria-label="国内入口端口" allowEmpty aria-valuemin={1} aria-valuemax={65535}
+                  value={nodeForm.domestic_entry_port} onChange={domestic_entry_port => patchNode({ domestic_entry_port })} style={{ width: "100%" }} /></Form.Item></Col></Row>
+              <Form.Item label="端口映射模式" required><Select aria-label="端口映射模式" value={nodeForm.mieru_port_mapping_mode}
+                options={(Object.entries(creationMetadata?.mieru_mapping_modes ?? {}) as Array<[MieruPortMappingMode, string]>).map(([value, label]) => ({ value, label }))}
+                onChange={mieru_port_mapping_mode => patchNode({ mieru_port_mapping_mode, ix_port: mieru_port_mapping_mode === "one-to-one" ? null : nodeForm.ix_port })} /></Form.Item>
+              {nodeForm.mieru_port_mapping_mode === "one-to-one" ? <>
+                <Form.Item label="IX 端口（一一对应）"><StrictInputNumber aria-label="IX 端口（一一对应）" disabled value={nodeForm.domestic_entry_port} onChange={() => {}} style={{ width: "100%" }} /></Form.Item>
+                <Alert type="info" showIcon style={{ marginBottom: 16 }} title={creationMetadata?.mieru_mapping_modes["one-to-one"] ?? "IX 端口与国内入口端口一致。"} />
+              </> : <>
+                <Form.Item label="IX 端口" required><StrictInputNumber aria-label="IX 端口" allowEmpty aria-valuemin={1} aria-valuemax={65535} value={nodeForm.ix_port}
+                  onChange={ix_port => patchNode({ ix_port })} style={{ width: "100%" }} /></Form.Item>
+                <Alert type="warning" showIcon style={{ marginBottom: 16 }} title="请完成国内入口端口转发"
+                  description={creationMetadata?.mieru_mapping_modes.manual ?? "手动填写 IX 端口后，还需在国内入口将流量转发到该 IX 端口。"} />
+              </>}
+            </>}
+            {selectedCreationProfile?.profile === "socks5" && (selectedCreationProfile.warning_server_kinds ?? []).includes(selectedServerKind) && <Alert type="warning" showIcon style={{ marginBottom: 16 }}
+              title={selectedCreationProfile.warning ?? "公网直连服务器使用 SOCKS5 极度不推荐，除非您知道您要做什么。"} />}
+            <Form.Item label="类型"><Input aria-label="类型" value="物理节点（受管运行时）" readOnly /></Form.Item>
             {([{ key: "inbound_tag", label: "入站标签" }, { key: "routed_outbound_tag", label: "出站标签" }, { key: "routed_rule_marktag", label: "路由标记" }, { key: "tag", label: "主要标签" }, { key: "tagsText", label: "标签" }] as const).map(field => <Form.Item key={field.key} label={field.label}><Input aria-label={field.label} value={nodeForm[field.key]} onChange={event => patchNode({ [field.key]: event.target.value })} /></Form.Item>)}
             {nodeForm.node_type === "routed" && <><Form.Item label="父节点"><Select aria-label="父节点" allowClear value={nodeForm.parent_id ?? undefined} options={nodes.filter(node => !node.removal_id && node.server_id === nodeForm.server_id && node.inbound_tag === nodeForm.inbound_tag && node.protocol === nodeForm.protocol).map(node => ({ label: node.name, value: node.id }))} onChange={value => patchNode({ parent_id: value ?? null })} /></Form.Item><Form.Item label="目标节点"><Select aria-label="目标节点" allowClear value={nodeForm.target_node_id ?? undefined} options={nodeOptions} onChange={value => patchNode({ target_node_id: value ?? null })} /></Form.Item></>}
             <Form.Item label="客户端模板"><Input.TextArea aria-label="客户端模板" rows={5} value={nodeForm.clientTemplateText} onChange={event => patchNode({ clientTemplateText: event.target.value })} /></Form.Item>
             <Form.Item label="节点配置"><Input.TextArea aria-label="节点配置" rows={4} value={nodeForm.configText} onChange={event => patchNode({ configText: event.target.value })} /></Form.Item>
             <Form.Item label="已启用"><Switch aria-label="已启用" checked={nodeForm.enabled} onChange={enabled => patchNode({ enabled })} /></Form.Item>
-            <Button type="primary" htmlType="submit" icon={<PlusOutlined />} aria-label="创建节点" disabled={disabled || !servers.length} loading={saving === "node"}>创建节点</Button>
+            <Button type="primary" htmlType="submit" icon={<PlusOutlined />} aria-label="创建节点" disabled={disabled || !servers.length || !selectedCreationProfile} loading={saving === "node"}>创建节点</Button>
           </Form> },
           { key: "plans", label: "套餐", children: <Form layout="vertical" preserve={false} disabled={disabled} onFinish={submitPlan}>
             <Form.Item label="名称"><Input aria-label="名称" value={planForm.name} onChange={event => patchPlan({ name: event.target.value })} /></Form.Item>
@@ -220,8 +330,8 @@ export default function SubscriptionsView() {
             <Form.Item label="套餐"><Select aria-label="套餐" value={assignForm.plan_id || undefined} options={planOptions} onChange={plan_id => patchAssignment({ plan_id })} disabled={disabled || !planOptions.length} /></Form.Item>
             <Form.Item label="开始日期"><Input aria-label="开始日期" type="date" value={assignForm.start_date} onChange={event => patchAssignment({ start_date: event.target.value })} /></Form.Item>
             <Form.Item label="到期日期"><Input aria-label="到期日期" type="date" value={assignForm.expire_date} onChange={event => patchAssignment({ expire_date: event.target.value })} /></Form.Item>
-            <Form.Item label="应用到节点（重启 Xray）"><Switch aria-label="应用到节点（重启 Xray）" checked={assignForm.queue_agent_commands} onChange={queue_agent_commands => patchAssignment({ queue_agent_commands })} /></Form.Item>
-            {assignForm.queue_agent_commands && <Alert type="warning" title="应用此套餐可能重启 Xray 并断开当前客户端。已排队的命令仍需 Agent 确认。" showIcon />}
+            <Form.Item label="同步真实节点账号"><Switch aria-label="同步真实节点账号" checked={assignForm.queue_agent_commands} onChange={queue_agent_commands => patchAssignment({ queue_agent_commands })} /></Form.Item>
+            {assignForm.queue_agent_commands && <Alert type="info" title="默认同步到 Agent；Mihomo 与旧 Xray 运行态会按节点类型分别更新。" showIcon />}
             <Form.Item label="命令超时（毫秒）"><StrictInputNumber aria-label="命令超时（毫秒）" aria-valuemin={1000} aria-valuemax={300000} value={assignForm.command_timeout_ms} onChange={value => patchAssignment({ command_timeout_ms: value ?? Number.NaN })} /></Form.Item>
             <Button type="primary" htmlType="submit" aria-label="分配套餐" aria-busy={saving === "assign"} loading={saving === "assign"} disabled={disabled || !userOptions.length || !planOptions.length}>分配套餐</Button>
           </Form> },

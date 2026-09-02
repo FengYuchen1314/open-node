@@ -11,11 +11,11 @@ vi.mock("../../services/inventory", () => ({ createServer: vi.fn(), createServer
   listAgents: vi.fn(), listCommandStreamFrames: vi.fn(), listServerCommands: vi.fn(), listServers: vi.fn(), queueAgentOperation: vi.fn(), updateServerProbeMetadata: vi.fn() }));
 vi.mock("../../services/branding", async original => ({ ...await original<typeof import("../../services/branding")>(), getPublicBranding: vi.fn() }));
 vi.mock("../components/ServerTrafficPanel", () => ({ default: ({ servers }: { servers: ServerSummary[] }) => <div data-testid="traffic-panel">{servers.length}</div> }));
-vi.mock("../components/AgentBootstrapDialog", () => ({ default: ({ open, serverId }: { open: boolean; serverId: string }) => open ? <div data-testid="bootstrap-dialog-target">{serverId}</div> : null }));
+vi.mock("../components/AgentBootstrapDialog", () => ({ default: ({ open, serverId, serverKind }: { open: boolean; serverId: string; serverKind?: string }) => open ? <div data-testid="bootstrap-dialog-target" data-server-kind={serverKind}>{serverId}</div> : null }));
 vi.mock("../components/AgentLifecycleDialog", () => ({ default: ({ open, serverId, action }: { open: boolean; serverId: string; action: string }) => open ? <div data-testid="lifecycle-dialog-target">{serverId}:{action}</div> : null }));
 vi.mock("../components/ServerManagementDialog", () => ({ default: ({ open, serverId, mode }: { open: boolean; serverId: string; mode: string }) => open ? <div data-testid="management-dialog-target">{serverId}:{mode}</div> : null }));
 vi.mock("../components/CommandInspector", () => ({ default: ({ commands }: { commands: AgentCommand[] }) => <div data-testid="dashboard-commands">{commands.map(command => `${command.id}:${command.status}`).join(",")}</div> }));
-const edge: ServerSummary = { id: "edge", name: "Edge", ip_address: "192.0.2.1", status: "connected", connection_mode: "websocket", listen_port: 0, pull_port: 0,
+const edge: ServerSummary = { id: "edge", name: "Edge", server_kind: "direct", ip_address: "192.0.2.1", status: "connected", connection_mode: "websocket", listen_port: 0, pull_port: 0,
   ipv6_enabled: true, traffic_limit: 0, xray_mode: "external", region_city: "Tokyo", provider_name: "Example", renewal_price: 10, renewal_currency: "USD",
   current_upload_speed: 1024, current_download_speed: 2048, created_at: "2026-08-31", updated_at: "2026-08-31" };
 const other = { ...edge, id: "other", name: "Other", ip_address: "192.0.2.2", status: "offline" as const };
@@ -28,7 +28,7 @@ function cmd(overrides: Partial<AgentCommand> = {}): AgentCommand {
 const agent: AgentRead = { id: "agent", server_id: "edge", hostname: "edge", agent_version: "0.3.0a0", connection_mode: "websocket", listen_port: 0, xray_mode: "external",
   warp_installed: false, registered_at: "2026-08-31", last_seen_at: "2026-08-31", capabilities: {
     rpc: true, stream: true, return_route_test: true, native_limiter: true, user_auto_speed_rules: true, subscription_access: true, node_cleanup: true,
-    xray_config_workspace: true, agent_switch_xray_mode: true, agent_switch_listen_port: true, agent_probe_master_url: true, agent_update_master_url: true } };
+    xray_config_workspace: true, agent_switch_xray_mode: true, agent_switch_listen_port: true, agent_probe_master_url: true, agent_update_master_url: true, managed_protocols: true } };
 async function flush() { await act(async () => { for (let i = 0; i < 12; i += 1) await Promise.resolve(); }); }
 async function mount() { const result = render(<DashboardView />); await flush(); return result; }
 function getButton(name: string) {
@@ -119,11 +119,21 @@ describe("React Dashboard workflows", () => {
     fireEvent.change(screen.getByLabelText("IPv4", { selector: "input[type=text]" }), { target: { value: "192.0.2.9" } });
     fireEvent.change(screen.getByLabelText("新服务器到期日期"), { target: { value: "2026-09-30" } });
     fireEvent.click(getButton("创建服务器")); await flush();
-    expect(createServer).toHaveBeenCalledWith(expect.objectContaining({ name: "New edge", ip_address: "192.0.2.9", ip_address_v6: null,
+    expect(createServer).toHaveBeenCalledWith(expect.objectContaining({ name: "New edge", server_kind: "direct", ip_address: "192.0.2.9", ip_address_v6: null,
       domain: null, domain_v6: null, expires_at: "2026-09-30T00:00:00Z", connection_mode: "auto", xray_mode: "external", listen_port: 23889, ipv6_enabled: true }));
     expect((screen.getByLabelText("Agent 令牌") as HTMLTextAreaElement).value).toBe("private-manual-agent-token");
     fireEvent.click(getButton("隐藏令牌")); expect(screen.queryByLabelText("Agent 令牌")).toBeNull();
     expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
+  }, 30000);
+  it("selects the server kind before creation and carries it into Agent installation", async () => {
+    vi.mocked(createServer).mockResolvedValue({ server: { ...edge, id: "leased", name: "Leased", server_kind: "leased-line" }, agent_token: "private-token", license_required: false });
+    await mount(); fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Leased" } });
+    await select("服务器类型", "专线");
+    expect(screen.getByText("专线服务器仅允许创建 Mieru 节点。")).toBeTruthy();
+    fireEvent.click(getButton("创建服务器")); await flush();
+    expect(createServer).toHaveBeenCalledWith(expect.objectContaining({ name: "Leased", server_kind: "leased-line" }));
+    fireEvent.click(getButton("安装 Agent"));
+    expect(screen.getByTestId("bootstrap-dialog-target").dataset.serverKind).toBe("leased-line");
   }, 30000);
   it("preserves all probe metadata fields and UTC expiry semantics", async () => {
     await mount(); fireEvent.change(screen.getByLabelText("国家"), { target: { value: " JP " } });

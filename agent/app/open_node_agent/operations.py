@@ -19,6 +19,8 @@ from open_node_agent.http01 import HttpChallenges
 from open_node_agent.journal import CommandJournal
 from open_node_agent.lifecycle import HostLifecycle
 from open_node_agent.logs import OwnedLogs
+from open_node_agent.managed_protocols import ENDPOINT as MANAGED_PROTOCOLS_ENDPOINT
+from open_node_agent.managed_protocols import ManagedProtocols
 from open_node_agent.nginx import NginxRuntime
 from open_node_agent.node_cleanup import ENDPOINT as CLEANUP_ENDPOINT
 from open_node_agent.node_cleanup import NodeCleanup
@@ -641,7 +643,11 @@ class Operations:
         self.warp = Warp(runtime)
         self.http01 = HttpChallenges(runtime.config, journal)
         self.takeover = XrayTakeover(runtime, journal)
-        self.subscription_access = SubscriptionAccess(runtime, journal)
+        self.managed_protocols = ManagedProtocols(runtime.config, runtime)
+        self.subscription_access = SubscriptionAccess(runtime, journal, self.managed_protocols)
+        self.managed_protocols.xray_reserved_inbounds = (
+            self.subscription_access.suspended_inbounds
+        )
         self.node_cleanup = NodeCleanup(runtime, journal, self.subscription_access)
         self.agent_management = AgentManagement(runtime.config)
         self.previous_network: dict | None = None
@@ -650,6 +656,7 @@ class Operations:
     async def scan(self) -> dict:
         return {
             **await self.runtime.scan(),
+            **await self.managed_protocols.scan(),
             "nginx": await self.nginx.status(),
             "runtime_release": self.releases.status(),
             "warp": self.warp.snapshot(),
@@ -722,6 +729,8 @@ class Operations:
                 await self.node_cleanup.recover()
             if path == ACCESS_ENDPOINT and method == "POST":
                 return await self.subscription_access.apply(body)
+            if path == MANAGED_PROTOCOLS_ENDPOINT and method == "PUT":
+                return await self.managed_protocols.apply(body)
             if path == "/api/child/limiter":
                 if method == "GET":
                     return await self.runtime.limiter.status()
@@ -780,6 +789,7 @@ class Operations:
                         {key: body[key] for key in SYSTEM_CONFIG_KEYS},
                         stats_address=self.runtime.config.stats_address,
                     )
+                    self.managed_protocols.assert_xray_compatible(candidate)
                     result = await self.runtime.write(
                         candidate,
                         restart=True,
@@ -843,8 +853,10 @@ class Operations:
                     if hashlib.sha256(current).hexdigest() != expected_sha256:
                         raise RuntimeFailure("Xray configuration changed since it was read")
                     expected = decode_config(decode_xray_primary(current))
+                    candidate = decode_config(body.get("content"))
+                    self.managed_protocols.assert_xray_compatible(candidate)
                     result = await self.runtime.write(
-                        body.get("content"),
+                        candidate,
                         restart=True,
                         expected=expected,
                         expected_sha256=expected_sha256,
@@ -869,7 +881,9 @@ class Operations:
                         "path": str(self.runtime.config.xray_config),
                     }
                 if method == "POST":
-                    return await self.runtime.write(body.get("config"))
+                    candidate = decode_config(body.get("config"))
+                    self.managed_protocols.assert_xray_compatible(candidate)
+                    return await self.runtime.write(candidate)
             if path == "/api/child/xray/test-config" and method == "POST":
                 ok, output = await self.runtime.validate(body.get("config"))
                 return {"ok": ok, "output": output}
@@ -930,6 +944,7 @@ class Operations:
                         edit_routing(config, body)
                     else:
                         edit_entries(config, key, body)
+                    self.managed_protocols.assert_xray_compatible(config)
                     return await self.runtime.write(
                         config, restart=not body.get("no_restart", False)
                     )
@@ -941,6 +956,7 @@ class Operations:
                     )
                 for item in body.get("routing_user_additions", []):
                     edit_routing(config, {**item, "action": "add_user_to_rule"})
+                self.managed_protocols.assert_xray_compatible(config)
                 limits = await self.runtime.limiter.provision(body.get("limiter_users", []), config)
                 try:
                     result = await self.runtime.write(

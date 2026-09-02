@@ -1,4 +1,4 @@
-import type { AgentCommand } from "./inventory";
+import type { AgentCommand, ServerKind } from "./inventory";
 import type { UserLimitOverrides } from "./user-limits";
 
 export type ProductUserRole = "admin" | "user";
@@ -10,8 +10,32 @@ export interface SubscriptionIpPolicy {
   updated_at: string | null;
   license_required: false;
 }
-export type ManagedNodeType = "physical" | "routed";
+
+export type ManagedNodeType = "physical" | "routed" | "orchestrated";
+export type ManagedProtocolProfile = "vless-reality-vision" | "vless-xhttp-reality-xmux"
+  | "anytls-shadowtls" | "mieru" | "socks5";
+export type MieruPortMappingMode = "one-to-one" | "manual";
 export type SubscriptionTrafficMode = "oneway" | "twoway";
+
+export interface ManagedNodeCreationOption {
+  profile: ManagedProtocolProfile;
+  protocol: "vless" | "anytls" | "mieru" | "socks";
+  label: string;
+  description: string;
+  allowed_server_kinds: ServerKind[];
+  fixed_port?: number | null;
+  requires_camouflage_pool: boolean;
+  requires_domestic_entry: boolean;
+  warning?: string | null;
+  warning_server_kinds: ServerKind[];
+}
+
+export interface ManagedNodeCreationMetadataResponse {
+  server_kinds: Record<ServerKind, string>;
+  profiles: ManagedNodeCreationOption[];
+  mieru_mapping_modes: Record<MieruPortMappingMode, string>;
+  license_required: false;
+}
 
 export interface SubscriptionAccessResponse {
   username: string;
@@ -99,6 +123,7 @@ export interface ManagedNodeCreateRequest {
   name: string;
   server_id: string;
   protocol: string;
+  protocol_profile?: ManagedProtocolProfile | null;
   node_type?: ManagedNodeType;
   parent_id?: string | null;
   target_node_id?: string | null;
@@ -108,12 +133,19 @@ export interface ManagedNodeCreateRequest {
   tag?: string | null;
   tags?: string[];
   enabled?: boolean;
+  camouflage_pool_id?: string | null;
+  camouflage_sni?: string | null;
+  domestic_entry_ip?: string | null;
+  domestic_entry_port?: number | null;
+  mieru_port_mapping_mode?: MieruPortMappingMode | null;
+  ix_port?: number | null;
   client_template?: Record<string, unknown>;
   config?: Record<string, unknown>;
 }
 
 export interface ManagedNode extends ManagedNodeCreateRequest {
   id: string;
+  runtime_port?: number | null;
   removal_id?: string | null;
   node_type: ManagedNodeType;
   tags: string[];
@@ -303,6 +335,7 @@ export interface SubscriptionTemplatePreset {
   name: string;
   description: string;
   protocol: string;
+  protocol_profile?: ManagedProtocolProfile | null;
   node_type: ManagedNodeType;
   inbound_tag?: string | null;
   routed_outbound_tag?: string | null;
@@ -329,6 +362,12 @@ export interface SubscriptionTemplatePresetApplyRequest {
   tag?: string | null;
   tags?: string[] | null;
   enabled?: boolean;
+  camouflage_pool_id?: string | null;
+  camouflage_sni?: string | null;
+  domestic_entry_ip?: string | null;
+  domestic_entry_port?: number | null;
+  mieru_port_mapping_mode?: MieruPortMappingMode | null;
+  ix_port?: number | null;
 }
 
 export interface SubscriptionCatalogUserEntry {
@@ -350,6 +389,7 @@ export interface SubscriptionCatalogNodeEntry {
   name: string;
   server_name: string;
   protocol: string;
+  protocol_profile?: ManagedProtocolProfile | null;
   node_type: ManagedNodeType;
   inbound_tag?: string | null;
   routed_outbound_tag?: string | null;
@@ -357,6 +397,12 @@ export interface SubscriptionCatalogNodeEntry {
   tag?: string | null;
   tags: string[];
   enabled: boolean;
+  camouflage_pool_id?: string | null;
+  camouflage_sni?: string | null;
+  domestic_entry_ip?: string | null;
+  domestic_entry_port?: number | null;
+  mieru_port_mapping_mode?: MieruPortMappingMode | null;
+  ix_port?: number | null;
   client_template: Record<string, unknown>;
   config: Record<string, unknown>;
 }
@@ -456,6 +502,7 @@ export interface ManagedNodesResponse {
 
 export interface ManagedNodeResponse {
   node: ManagedNode;
+  commands?: AgentCommand[];
   license_required: false;
 }
 

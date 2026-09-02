@@ -3,6 +3,7 @@ import { requestError } from "./request-error";
 import { userPath } from "./user-path";
 import type {
   ManagedNodeCreateRequest,
+  ManagedNodeCreationMetadataResponse,
   ManagedNodeResponse,
   ManagedNodesResponse,
   ProductUserCredentialsResponse,
@@ -262,6 +263,16 @@ export async function listSubscriptionTemplatePresets(
     throw await apiError(response, "获取订阅预设模板失败");
   }
   return response.json() as Promise<SubscriptionTemplatePresetsResponse>;
+}
+
+export async function getManagedNodeCreationMetadata(
+  fetcher = authenticatedFetch,
+): Promise<ManagedNodeCreationMetadataResponse> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/nodes/creation-metadata`);
+  if (!response.ok) {
+    throw await apiError(response, "获取节点创建选项失败");
+  }
+  return response.json() as Promise<ManagedNodeCreationMetadataResponse>;
 }
 
 export async function createManagedNodeFromPreset(

@@ -1,3 +1,4 @@
+import gzip
 import hashlib
 import io
 import json
@@ -59,12 +60,13 @@ def manifest():
     def artifact(filename):
         return {
             "filename": filename,
-            "url": f"{installer.RELEASE_BASE}/{tag}/{filename}",
+            "path": f"{installer.API_PATH}/artifacts/{filename}",
             "sha256": "a" * 64,
+            "bytes": 128,
         }
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "agent": {
             "version": VERSION,
             "source_commit": "6ca84e2" + "0" * 33,
@@ -78,8 +80,21 @@ def manifest():
             "architecture": "x86_64",
             "archive": {
                 "filename": "Xray-linux-64.zip",
-                "url": installer.XRAY_URL,
+                "path": installer.API_PATH + "/artifacts/Xray-linux-64.zip",
                 "sha256": installer.XRAY_SHA256,
+                "bytes": installer.XRAY_BYTES,
+            },
+        },
+        "mihomo": {
+            "version": installer.MIHOMO_VERSION,
+            "assets": {
+                platform_name: {
+                    "filename": expected["filename"],
+                    "path": installer.API_PATH + "/artifacts/" + expected["filename"],
+                    "sha256": expected["sha256"],
+                    "bytes": expected["bytes"],
+                }
+                for platform_name, expected in installer.MIHOMO_ASSETS.items()
             },
         },
         "license_required": False,
@@ -240,11 +255,12 @@ def test_bootstrap_requires_explicit_pinned_manifest_and_exact_build_identity():
         lambda value: value["agent"].update(tag="latest"),
         lambda value: value["agent"].update(source_commit="6ca84e2"),
         lambda value: value["agent"].update(version=[VERSION]),
-        lambda value: value["agent"]["wheel"].update(url="https://mirror.test/agent.whl"),
+        lambda value: value["agent"]["wheel"].update(path="/untrusted/agent.whl"),
         lambda value: value["agent"]["wheel"].update(sha256="A" * 64),
         lambda value: value["agent"]["bootstrap"].update(filename="../service.py"),
         lambda value: value["xray"].update(architecture="arm64"),
         lambda value: value["xray"]["archive"].update(sha256="b" * 64),
+        lambda value: value["mihomo"]["assets"]["linux-amd64"].update(sha256="b" * 64),
         lambda value: value.update(extra="ignored is unsafe"),
     ],
 )
@@ -402,41 +418,26 @@ def test_bootstrap_test_override_does_not_allow_arbitrary_paths(path):
         )
 
 
-@pytest.mark.parametrize(
-    "target",
-    [
-        "http://release-assets.githubusercontent.com/file", "https://evil.example/file",
-        "https://release-assets.githubusercontent.com.evil.test/file",
-        "https://user:password@release-assets.githubusercontent.com/file",
-        "https://release-assets.githubusercontent.com:444/file",
-        "https://github.com/attacker/project/releases/download/v1/file",
-        "https://objects.githubusercontent.com/file#fragment", "https://evil.test/\nfile",
-        "https://release-assets.githubusercontent.com\\@evil.test/file",
-    ],
-)
-def test_bootstrap_release_redirects_are_host_and_tls_restricted(target):
-    with pytest.raises(installer.BootstrapError):
-        installer.validate_redirect(target, initial_url=installer.XRAY_URL)
-
-
-def test_bootstrap_download_checks_redirect_hash_and_private_cache(job):
+def test_bootstrap_download_uses_only_panel_origin_hash_and_private_cache(job):
     data = b"verified fixture artifact"
-    artifact = {**manifest()["agent"]["wheel"], "sha256": digest(data)}
-    location = "https://release-assets.githubusercontent.com/fixture?signature=opaque"
-    client = Client(
-        urllib.error.HTTPError(artifact["url"], 302, "redirect", {"Location": location}, None),
-        Response(data, headers={"Content-Length": str(len(data))}),
-    )
-    result = installer.download_artifact(client, artifact, job.directory, limit=1024)
+    artifact = {
+        **manifest()["agent"]["wheel"], "sha256": digest(data), "bytes": len(data)
+    }
+    client = Client(Response(data, headers={
+        "Content-Length": str(len(data)), "X-Content-SHA256": digest(data),
+    }))
+    result = installer.download_artifact(client, CONTROL, artifact, job.directory, limit=1024)
     assert result.read_bytes() == data
     assert stat.S_IMODE(result.stat().st_mode) == 0o600
     assert result.stat().st_nlink == 1
-    assert len(client.requests) == 2
-    assert client.requests[1].full_url == location
-    assert installer.download_artifact(Client(), artifact, job.directory, limit=1024) == result
+    assert len(client.requests) == 1
+    assert client.requests[0].full_url == CONTROL + artifact["path"]
+    assert installer.download_artifact(
+        Client(), CONTROL, artifact, job.directory, limit=1024
+    ) == result
     result.write_bytes(b"tampered")
     with pytest.raises(installer.BootstrapError, match="SHA-256"):
-        installer.download_artifact(Client(), artifact, job.directory, limit=1024)
+        installer.download_artifact(Client(), CONTROL, artifact, job.directory, limit=1024)
     assert result.read_bytes() == b"tampered"
 
 
@@ -451,10 +452,15 @@ def test_bootstrap_download_checks_redirect_hash_and_private_cache(job):
     ],
 )
 def test_bootstrap_bad_download_never_publishes_an_artifact(job, data, headers, sha256, limit):
-    artifact = {**manifest()["agent"]["wheel"], "sha256": sha256}
+    artifact = {
+        **manifest()["agent"]["wheel"], "sha256": sha256, "bytes": len(data)
+    }
+    headers = {
+        "Content-Length": str(len(data)), "X-Content-SHA256": sha256, **headers,
+    }
     client = Client(Response(data, headers=headers))
     with pytest.raises(installer.BootstrapError):
-        installer.download_artifact(client, artifact, job.directory, limit=limit)
+        installer.download_artifact(client, CONTROL, artifact, job.directory, limit=limit)
     assert not (job.directory / artifact["filename"]).exists()
     assert not list(job.directory.glob(".download-*"))
 
@@ -462,10 +468,10 @@ def test_bootstrap_bad_download_never_publishes_an_artifact(job, data, headers, 
 def test_bootstrap_download_rejects_external_redirect_before_contact(job):
     artifact = manifest()["agent"]["wheel"]
     client = Client(urllib.error.HTTPError(
-        artifact["url"], 302, "redirect", {"Location": "https://evil.test/"}, None
+        CONTROL + artifact["path"], 302, "redirect", {"Location": "https://evil.test/"}, None
     ))
     with pytest.raises(installer.BootstrapError):
-        installer.download_artifact(client, artifact, job.directory, limit=1024)
+        installer.download_artifact(client, CONTROL, artifact, job.directory, limit=1024)
     assert len(client.requests) == 1
 
 
@@ -512,6 +518,27 @@ def test_bootstrap_xray_archive_extracts_only_binary_and_license(job):
     assert not (target / "geoip.dat").exists()
 
 
+def test_bootstrap_mihomo_archive_is_hash_size_and_architecture_bound(job, monkeypatch):
+    binary = bytearray(128)
+    binary[:6] = b"\x7fELF\x02\x01"
+    binary[18:20] = (62).to_bytes(2, "little")
+    compressed = gzip.compress(bytes(binary), mtime=0)
+    expected = {
+        "filename": "fixture-mihomo.gz",
+        "sha256": digest(compressed),
+        "bytes": len(compressed),
+        "machine": 62,
+    }
+    monkeypatch.setattr(installer, "MIHOMO_ASSETS", {"linux-amd64": expected})
+    source = private_file(job.directory / expected["filename"], compressed)
+    target = installer.unpack_mihomo(source, job.directory / "mihomo", "linux-amd64")
+    assert (target / "mihomo").read_bytes() == bytes(binary)
+    assert stat.S_IMODE((target / "mihomo").stat().st_mode) == 0o700
+    source = private_file(job.directory / "bad-mihomo.gz", compressed[:-1] + b"x")
+    with pytest.raises(installer.BootstrapError, match="release pin"):
+        installer.unpack_mihomo(source, job.directory / "bad", "linux-amd64")
+
+
 @pytest.mark.parametrize(
     ("name", "mode"),
     [("../secret", stat.S_IFREG), ("nested/xray", stat.S_IFREG),
@@ -538,7 +565,7 @@ def test_bootstrap_wheel_validates_name_version_and_digest(job):
 
 
 def test_bootstrap_prepares_managed_loopback_only_configuration_and_preserves_it(job):
-    source, xray = installer.prepare_configuration(job, claim())
+    source, xray, mihomo = installer.prepare_configuration(job, claim())
     agent_data = json.loads(source.read_bytes())
     xray_data = json.loads(xray.read_bytes())
     assert agent_data["runtime_mode"] == "managed"
@@ -550,7 +577,9 @@ def test_bootstrap_prepares_managed_loopback_only_configuration_and_preserves_it
     assert xray_data["inbounds"] == []
     assert xray_data["api"]["listen"].startswith("127.0.0.1:")
     assert xray_data["api"]["services"] == ["StatsService"]
-    assert installer.prepare_configuration(job, claim()) == (source, xray)
+    assert json.loads(mihomo.read_bytes()) == installer.mihomo_configuration_data()
+    assert json.loads(mihomo.read_bytes())["listeners"] == []
+    assert installer.prepare_configuration(job, claim()) == (source, xray, mihomo)
     assert stat.S_IMODE(source.stat().st_mode) == 0o600
     changed = {**agent_data, "allow_xray_takeover": True}
     source.write_bytes(installer.json_bytes(changed))
@@ -638,6 +667,7 @@ def test_bootstrap_installer_arguments_never_include_long_lived_token(job, tmp_p
         "manifest": pinned, "service": job.directory / "bootstrap/service.py",
         "wheel": job.directory / pinned["agent"]["wheel"]["filename"],
         "xray": job.directory / "xray/xray",
+        "mihomo": job.directory / "mihomo/mihomo",
     }
     monkeypatch.setattr(installer, "require_fresh_resources", lambda value: None)
 
@@ -663,6 +693,7 @@ def test_bootstrap_installer_arguments_never_include_long_lived_token(job, tmp_p
     assert "--network-diagnostics" not in arguments
     assert "enable-remote" not in arguments
     assert "--config" in arguments and "--xray-config" in arguments
+    assert "--mihomo-config" in arguments and "--mihomo" in arguments
     assert arguments[arguments.index("--root") + 1] == str(job.root)
     assert json.loads((job.directory / "success.json").read_bytes())["version"] == VERSION
 
@@ -673,6 +704,7 @@ def test_bootstrap_claim_and_zero_exit_without_installation_are_not_success(job,
     artifacts = {
         "manifest": manifest(), "service": job.directory / "service.py",
         "wheel": job.directory / "agent.whl", "xray": job.directory / "xray",
+        "mihomo": job.directory / "mihomo",
     }
     with pytest.raises(installer.BootstrapError):
         installer.install_agent(job, claim(), artifacts)
@@ -680,7 +712,7 @@ def test_bootstrap_claim_and_zero_exit_without_installation_are_not_success(job,
     assert (job.directory / "agent-input.json").exists()
 
 
-def test_bootstrap_control_ca_is_separate_from_release_trust(monkeypatch):
+def test_bootstrap_panel_client_uses_only_explicit_or_debian_trust(monkeypatch):
     calls = []
 
     class Context:
@@ -737,7 +769,7 @@ def test_bootstrap_main_prepares_before_claim_and_does_not_leak_failures(
     ]) == 1
     captured = capsys.readouterr()
     assert order == ["prepare", "claim", "install"]
-    assert contexts == [{"ca_data": b"fixture-private-ca"}, {}]
+    assert contexts == [{"ca_data": b"fixture-private-ca"}]
     assert SECRET not in captured.out + captured.err
     assert TICKET not in captured.out + captured.err
     assert "installed and ready" not in captured.out

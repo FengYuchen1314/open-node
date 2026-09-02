@@ -75,6 +75,7 @@ from open_node.domain.inventory import (
     ProbeSysMetrics,
     RenewalCycle,
     ServerCreate,
+    ServerKind,
     ServerProbeMetadataUpdate,
     ServerRead,
     ServerRecord,
@@ -134,8 +135,11 @@ from open_node.domain.probe import (
 from open_node.domain.subscription_links import SubscriptionShortCodeUpdate
 from open_node.domain.subscriptions import (
     ManagedNodeCreate,
+    ManagedNodeCreationMetadataResponse,
+    ManagedNodeCreationOption,
     ManagedNodeRead,
     ManagedNodeType,
+    ManagedProtocolProfile,
     ProductUserCreate,
     ProductUserRead,
     ProductUserRole,
@@ -502,9 +506,12 @@ def required_command_capabilities(path: str, body: Any) -> tuple[str, ...]:
                 _AGENT_SETTINGS_CAPABILITIES.get(path, ""),
                 path in _AGENT_SETTINGS_CAPABILITIES,
             ),
+            ("managed_protocols", path == "/api/child/managed-protocols"),
         )
         if needed and capability
     )
+
+
 _XRAY_MUTATING_PATH_PREFIXES = (
     "/api/child/xray/install",
     "/api/child/xray/install-stream",
@@ -550,18 +557,84 @@ _XRAY_MANAGED_NODE_PROTOCOLS = {
     "http": "http",
 }
 
+_MANAGED_NODE_CREATE_PROTOCOLS = frozenset({"vless", "anytls", "mieru", "socks"})
+_SHARED_443_PROFILES = frozenset(
+    {
+        ManagedProtocolProfile.VLESS_REALITY_VISION.value,
+        ManagedProtocolProfile.VLESS_XHTTP_REALITY_XMUX.value,
+        ManagedProtocolProfile.ANYTLS_SHADOWTLS.value,
+    }
+)
+_VISIBLE_SUBSCRIPTION_NODE_PRESETS = frozenset(
+    {
+        "vless-reality-vision",
+        "vless-xhttp-reality-xmux",
+        "anytls-shadowtls",
+        "mieru",
+        "socks5",
+    }
+)
+
+_MANAGED_NODE_CREATION_OPTIONS = (
+    {
+        "profile": "vless-reality-vision",
+        "protocol": "vless",
+        "label": "VLESS + REALITY + Vision（最佳兼容）",
+        "description": "TCP Vision over REALITY；与其他共享入口按伪装 SNI 分流。",
+        "allowed_server_kinds": ["direct"],
+        "fixed_port": 443,
+        "requires_camouflage_pool": True,
+    },
+    {
+        "profile": "vless-xhttp-reality-xmux",
+        "protocol": "vless",
+        "label": "VLESS + XHTTP + REALITY + XMUX（均衡）",
+        "description": "XHTTP/XMUX over REALITY；与其他共享入口按伪装 SNI 分流。",
+        "allowed_server_kinds": ["direct"],
+        "fixed_port": 443,
+        "requires_camouflage_pool": True,
+    },
+    {
+        "profile": "anytls-shadowtls",
+        "protocol": "anytls",
+        "label": "AnyTLS + ShadowTLS（性能最好）",
+        "description": "AnyTLS 经 ShadowTLS 伪装；与 VLESS 入口共享 443。",
+        "allowed_server_kinds": ["direct"],
+        "fixed_port": 443,
+        "requires_camouflage_pool": True,
+    },
+    {
+        "profile": "mieru",
+        "protocol": "mieru",
+        "label": "Mieru",
+        "description": "专线服务器唯一允许创建的协议；需要国内入口映射信息。",
+        "allowed_server_kinds": ["direct", "leased-line"],
+        "requires_domestic_entry": True,
+    },
+    {
+        "profile": "socks5",
+        "protocol": "socks",
+        "label": "SOCKS5",
+        "description": "家宽落地服务器唯一允许创建的协议。",
+        "allowed_server_kinds": ["direct", "residential"],
+        "warning": "公网直连服务器使用 SOCKS5 极度不推荐，除非您知道您要做什么。",
+        "warning_server_kinds": ["direct"],
+    },
+)
+
 _SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
     {
-        "id": "vless-vision-tls",
-        "name": "VLESS Vision TLS",
-        "description": "VLESS TCP TLS node with Vision flow and UUID credentials.",
+        "id": "vless-reality-vision",
+        "name": "VLESS + REALITY + Vision",
+        "description": "Compatibility-focused VLESS Vision profile over REALITY.",
         "protocol": "vless",
+        "protocol_profile": "vless-reality-vision",
         "node_type": "physical",
         "inbound_tag": "vless-443",
         "routed_outbound_tag": None,
         "routed_rule_marktag": None,
         "tag": "vless",
-        "tags": ["vless", "tls"],
+        "tags": ["vless", "reality", "vision"],
         "client_template": {"email": "{username}__vless-443", "flow": "xtls-rprx-vision"},
         "config": {
             "name": "{server_name} VLESS",
@@ -571,6 +644,41 @@ _SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
             "tls": True,
             "network": "tcp",
             "flow": "xtls-rprx-vision",
+            "encryption": "",
+            "udp": True,
+        },
+    },
+    {
+        "id": "vless-xhttp-reality-xmux",
+        "name": "VLESS + XHTTP + REALITY + XMUX",
+        "description": "Balanced VLESS XHTTP/XMUX profile over REALITY.",
+        "protocol": "vless",
+        "protocol_profile": "vless-xhttp-reality-xmux",
+        "node_type": "physical",
+        "inbound_tag": "vless-xhttp-443",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "vless-xhttp",
+        "tags": ["vless", "xhttp", "reality", "xmux"],
+        "client_template": {"email": "{username}__vless-xhttp-443"},
+        "config": {
+            "name": "{server_name} VLESS XHTTP",
+            "type": "vless",
+            "server": "{server_domain}",
+            "port": 443,
+            "tls": True,
+            "network": "xhttp",
+            "encryption": "",
+            "udp": True,
+            "alpn": ["h2"],
+            "xhttp-opts": {
+                "mode": "auto",
+                "reuse-settings": {
+                    "max-concurrency": "16-32",
+                    "h-max-reusable-secs": "1800-3000",
+                    "h-keep-alive-period": 0,
+                },
+            },
         },
     },
     {
@@ -634,22 +742,24 @@ _SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
         },
     },
     {
-        "id": "anytls",
-        "name": "AnyTLS",
-        "description": "AnyTLS node for the active Xray fork with generated passwords.",
+        "id": "anytls-shadowtls",
+        "name": "AnyTLS + ShadowTLS",
+        "description": "Performance-focused AnyTLS profile behind ShadowTLS.",
         "protocol": "anytls",
+        "protocol_profile": "anytls-shadowtls",
         "node_type": "physical",
         "inbound_tag": "anytls-443",
         "routed_outbound_tag": None,
         "routed_rule_marktag": None,
         "tag": "anytls",
-        "tags": ["anytls", "tls"],
+        "tags": ["anytls", "shadowtls"],
         "client_template": {"email": "{username}__anytls-443"},
         "config": {
             "name": "{server_name} AnyTLS",
             "type": "anytls",
             "server": "{server_domain}",
             "port": 443,
+            "shadow-tls-opts": {"version": 3},
             "udp": True,
             "idle-session-check-interval": 30,
             "idle-session-timeout": 30,
@@ -713,6 +823,7 @@ _SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
         "name": "Mieru",
         "description": "Mieru node for the active Xray fork with username/password credentials.",
         "protocol": "mieru",
+        "protocol_profile": "mieru",
         "node_type": "physical",
         "inbound_tag": "mieru-2999",
         "routed_outbound_tag": None,
@@ -727,6 +838,27 @@ _SUBSCRIPTION_NODE_PRESETS: tuple[dict[str, Any], ...] = (
             "port": 2999,
             "transport": "TCP",
             "udp": False,
+        },
+    },
+    {
+        "id": "socks5",
+        "name": "SOCKS5",
+        "description": "SOCKS5 landing node; intended for residential servers.",
+        "protocol": "socks",
+        "protocol_profile": "socks5",
+        "node_type": "physical",
+        "inbound_tag": "socks5-1080",
+        "routed_outbound_tag": None,
+        "routed_rule_marktag": None,
+        "tag": "socks5",
+        "tags": ["socks5"],
+        "client_template": {"email": "{username}__socks5-1080"},
+        "config": {
+            "name": "{server_name} SOCKS5",
+            "type": "socks5",
+            "server": "{server_domain}",
+            "port": 1080,
+            "udp": True,
         },
     },
     {
@@ -795,6 +927,7 @@ class ServerModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    server_kind: Mapped[str] = mapped_column(String(24), default="direct", index=True)
     agent_token: Mapped[str] = mapped_column(String(96), unique=True, index=True)
     status: Mapped[str] = mapped_column(String(24), index=True)
     ip_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -901,6 +1034,7 @@ class AgentModel(Base):
     capability_agent_switch_listen_port: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_agent_probe_master_url: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_agent_update_master_url: Mapped[bool] = mapped_column(Boolean, default=False)
+    capability_managed_protocols: Mapped[bool] = mapped_column(Boolean, default=False)
     warp_installed: Mapped[bool] = mapped_column(Boolean, default=False)
     same_host_as_master: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -1216,6 +1350,7 @@ class ManagedNodeModel(Base):
         index=True,
     )
     protocol: Mapped[str] = mapped_column(String(40))
+    protocol_profile: Mapped[str | None] = mapped_column(String(48), nullable=True, index=True)
     node_type: Mapped[str] = mapped_column(String(24), default="physical", index=True)
     parent_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("managed_nodes.id", ondelete="SET NULL"), nullable=True
@@ -1232,8 +1367,45 @@ class ManagedNodeModel(Base):
     tag: Mapped[str | None] = mapped_column(String(120), nullable=True)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    camouflage_pool_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    camouflage_sni: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    domestic_entry_ip: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    domestic_entry_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mieru_port_mapping_mode: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    ix_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    runtime_port: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    runtime_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     client_template: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        Index(
+            "uq_managed_node_server_camouflage_pool",
+            "server_id",
+            "camouflage_pool_id",
+            unique=True,
+        ),
+        Index(
+            "uq_managed_node_server_camouflage_sni",
+            "server_id",
+            "camouflage_sni",
+            unique=True,
+        ),
+    )
+
+
+class NodeTopologyModel(Base):
+    __tablename__ = "node_topologies"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("managed_nodes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    stages: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    layout: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    revision: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -1642,8 +1814,7 @@ class InventoryStore:
             )
         if (
             self.federation_state_dir is None
-            and
-            self._engine.dialect.name == "sqlite"
+            and self._engine.dialect.name == "sqlite"
             and database_file not in (None, "", ":memory:")
             and not database_file.startswith("file:")
         ):
@@ -1653,6 +1824,7 @@ class InventoryStore:
         from open_node.services.external_subscriptions import ExternalSourceModel
         from open_node.services.renewals import RenewalRequestModel
         from open_node.services.server_sharing import FederatedServerModel, ServerShareModel
+        from open_node.services.shared_ingress import SharedIngressModel
         from open_node.services.subscriber_auth import SubscriberAccount
         from open_node.services.subscription_customizations import CustomRuleModel
         from open_node.services.subscription_scripts import OverrideScriptModel
@@ -1666,6 +1838,7 @@ class InventoryStore:
         RenewalRequestModel.metadata.create_all(self._engine)
         ServerShareModel.metadata.create_all(self._engine)
         FederatedServerModel.metadata.create_all(self._engine)
+        SharedIngressModel.metadata.create_all(self._engine)
         # Historical SQLite deployments ran with FK enforcement disabled. Refuse
         # to mutate such a database until an operator repairs or restores any
         # existing orphaned rows, then verify again after our own migrations.
@@ -1698,7 +1871,9 @@ class InventoryStore:
         archive_columns_to_backfill: set[str] = set()
         if "telemetry_snapshots" in table_names:
             self._sqlite_add_missing_columns(
-                inspector, "telemetry_snapshots", {"online_collection": "JSON"},
+                inspector,
+                "telemetry_snapshots",
+                {"online_collection": "JSON"},
             )
         if "subscription_plans" in table_names:
             self._sqlite_add_missing_columns(
@@ -1777,6 +1952,7 @@ class InventoryStore:
                     "capability_agent_switch_listen_port": "BOOLEAN NOT NULL DEFAULT 0",
                     "capability_agent_probe_master_url": "BOOLEAN NOT NULL DEFAULT 0",
                     "capability_agent_update_master_url": "BOOLEAN NOT NULL DEFAULT 0",
+                    "capability_managed_protocols": "BOOLEAN NOT NULL DEFAULT 0",
                 },
             )
         if "servers" in table_names:
@@ -1784,6 +1960,7 @@ class InventoryStore:
                 inspector,
                 "servers",
                 {
+                    "server_kind": "VARCHAR(24) NOT NULL DEFAULT 'direct'",
                     "ddns_enabled": "BOOLEAN NOT NULL DEFAULT 0",
                     "ddns_provider_id": "VARCHAR(36)",
                     "ddns_last_synced_at": "DATETIME",
@@ -1859,8 +2036,7 @@ class InventoryStore:
             )
         if "subscription_traffic_ledger" in table_names:
             existing = {
-                column["name"]
-                for column in inspector.get_columns("subscription_traffic_ledger")
+                column["name"] for column in inspector.get_columns("subscription_traffic_ledger")
             }
             additions = {
                 "attributed_node_id": "VARCHAR(36)",
@@ -1875,8 +2051,7 @@ class InventoryStore:
             )
         if "subscription_archived_traffic" in table_names:
             existing = {
-                column["name"]
-                for column in inspector.get_columns("subscription_archived_traffic")
+                column["name"] for column in inspector.get_columns("subscription_archived_traffic")
             }
             additions = {
                 "weighted_upload": "FLOAT NOT NULL DEFAULT 0",
@@ -1893,11 +2068,35 @@ class InventoryStore:
                 inspector,
                 "managed_nodes",
                 {
+                    "protocol_profile": "VARCHAR(48)",
                     "parent_id": "VARCHAR(36) REFERENCES managed_nodes(id) ON DELETE SET NULL",
                     "target_node_id": "VARCHAR(36) REFERENCES managed_nodes(id) ON DELETE SET NULL",
                     "removal_id": "VARCHAR(36) REFERENCES managed_node_removals(id)",
+                    "camouflage_pool_id": "VARCHAR(120)",
+                    "camouflage_sni": "VARCHAR(255)",
+                    "domestic_entry_ip": "VARCHAR(255)",
+                    "domestic_entry_port": "INTEGER",
+                    "mieru_port_mapping_mode": "VARCHAR(24)",
+                    "ix_port": "INTEGER",
+                    "runtime_port": "INTEGER",
+                    "runtime_config": "JSON NOT NULL DEFAULT '{}'",
                 },
             )
+            with self._engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS "
+                        "uq_managed_node_server_camouflage_pool "
+                        "ON managed_nodes (server_id, camouflage_pool_id)"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS "
+                        "uq_managed_node_server_camouflage_sni "
+                        "ON managed_nodes (server_id, camouflage_sni)"
+                    )
+                )
         if "servers" in table_names:
             self._sqlite_add_missing_columns(
                 inspector,
@@ -1960,6 +2159,10 @@ class InventoryStore:
                 user.username: user for user in session.scalars(select(ProductUserModel)).all()
             }
             plans = {plan.id: plan for plan in session.scalars(select(SubscriptionPlanModel)).all()}
+            billing_owners = {
+                plan.id: self._subscription_topology_component_owners(session, plan)
+                for plan in plans.values()
+            }
             credentials = session.scalars(select(SubscriptionCredentialModel)).all()
             exact: dict[tuple[str, str, str], SubscriptionCredentialModel] = {}
             aliases: dict[tuple[str, str, str], SubscriptionCredentialModel] = {}
@@ -1979,7 +2182,12 @@ class InventoryStore:
                 node_id = credential.node_id if credential else None
                 user = users.get(ledger.username)
                 plan = plans.get(user.current_plan_id) if user and user.current_plan_id else None
-                weight = self._subscription_billing_weight_for(plan, node_id)
+                weight = self._subscription_billing_weight_for(
+                    plan,
+                    node_id,
+                    session,
+                    billing_owners.get(plan.id) if plan else None,
+                )
                 if "attributed_node_id" in ledger_columns:
                     ledger.attributed_node_id = node_id
                 if "weighted_upload" in ledger_columns:
@@ -2019,12 +2227,8 @@ class InventoryStore:
             from open_node.services.server_sharing import FederatedServerModel
 
             servers = session.scalars(select(ServerModel).order_by(ServerModel.created_at)).all()
-            federated = {
-                row.id: row for row in session.scalars(select(FederatedServerModel)).all()
-            }
-            return [
-                self._public_server(server, federated.get(server.id)) for server in servers
-            ]
+            federated = {row.id: row for row in session.scalars(select(FederatedServerModel)).all()}
+            return [self._public_server(server, federated.get(server.id)) for server in servers]
 
     def create_server(self, payload: ServerCreate) -> ServerRecord:
         now = datetime.now(tz=UTC)
@@ -2036,6 +2240,7 @@ class InventoryStore:
             server = ServerModel(
                 id=str(uuid4()),
                 name=payload.name,
+                server_kind=payload.server_kind.value,
                 status=ServerStatus.PENDING.value,
                 ip_address=payload.ip_address,
                 ip_address_v6=payload.ip_address_v6,
@@ -2154,26 +2359,21 @@ class InventoryStore:
             agent.capability_user_auto_speed_rules = payload.capabilities.user_auto_speed_rules
             agent.capability_subscription_access = payload.capabilities.subscription_access
             agent.capability_node_cleanup = payload.capabilities.node_cleanup
-            agent.capability_xray_config_workspace = (
-                payload.capabilities.xray_config_workspace
-            )
-            agent.capability_agent_switch_xray_mode = (
-                payload.capabilities.agent_switch_xray_mode
-            )
+            agent.capability_xray_config_workspace = payload.capabilities.xray_config_workspace
+            agent.capability_agent_switch_xray_mode = payload.capabilities.agent_switch_xray_mode
             agent.capability_agent_switch_listen_port = (
                 payload.capabilities.agent_switch_listen_port
             )
-            agent.capability_agent_probe_master_url = (
-                payload.capabilities.agent_probe_master_url
-            )
-            agent.capability_agent_update_master_url = (
-                payload.capabilities.agent_update_master_url
-            )
+            agent.capability_agent_probe_master_url = payload.capabilities.agent_probe_master_url
+            agent.capability_agent_update_master_url = payload.capabilities.agent_update_master_url
+            agent.capability_managed_protocols = payload.capabilities.managed_protocols
             agent.warp_installed = payload.warp_installed
             agent.same_host_as_master = payload.same_host_as_master
             agent.last_seen_at = now
 
             self._queue_xray_snapshot_sync_on_agent_register(session, server, now)
+            if payload.capabilities.managed_protocols:
+                self._queue_managed_runtime_sync_on_agent_register(session, server, now)
 
             session.commit()
             session.refresh(agent)
@@ -2231,12 +2431,15 @@ class InventoryStore:
                 reported_at=reported_at,
                 received_at=now,
                 stats=payload.stats.model_dump(mode="json") if payload.stats else None,
-                online_users=payload.online_users if (
+                online_users=payload.online_users
+                if (
                     payload.online_collection
                     and payload.online_collection.status in {"ready", "limited"}
-                ) else {},
+                )
+                else {},
                 online_collection=payload.online_collection.model_dump(mode="json")
-                if payload.online_collection else None,
+                if payload.online_collection
+                else None,
                 user_speeds=payload.user_speeds,
                 conn_counts=payload.conn_counts,
                 system_rx_total=payload.system.rx_total if payload.system else None,
@@ -3638,18 +3841,82 @@ class InventoryStore:
             server = session.get(ServerModel, str(payload.server_id))
             if not server:
                 raise ServerNotFoundError(f"server not found: {payload.server_id}")
+            self._validate_local_node_creation(server, payload)
             node = self._new_managed_node_model(server, payload, now)
+            self._managed_protocols().prepare(session, server, node)
             self._node_management().validate_node(session, node)
             session.add(node)
             session.commit()
             session.refresh(node)
             return self._managed_node_read(node)
 
+    def managed_protocol_command(self, server_id: UUID) -> AgentCommandCreate:
+        with self._session() as session:
+            server = session.get(ServerModel, str(server_id))
+            if not server:
+                raise ServerNotFoundError(f"server not found: {server_id}")
+            return self._managed_protocols().command(session, server)
+
+    def reconcile_managed_shared_ingress(self, server_id: UUID) -> AgentCommandCreate | None:
+        return self._managed_protocols().reconcile_shared_ingress(server_id)
+
+    @staticmethod
+    def _validate_local_node_creation(
+        server: ServerModel,
+        payload: ManagedNodeCreate,
+    ) -> None:
+        # Routed/catalog nodes are topology objects and may continue to refer to an
+        # externally imported protocol. Only a new physical inbound is constrained.
+        if payload.node_type != ManagedNodeType.PHYSICAL:
+            return
+        protocol = payload.protocol.strip().lower()
+        if protocol == "socks5":
+            protocol = "socks"
+        if payload.protocol_profile is not None and protocol not in _MANAGED_NODE_CREATE_PROTOCOLS:
+            raise ManagedNodeConflict("Unsupported managed protocol profile")
+
+        server_kind = ServerKind(server.server_kind)
+        if server_kind == ServerKind.LEASED_LINE and protocol != "mieru":
+            raise ManagedNodeConflict("Leased-line servers only support Mieru nodes")
+        if server_kind == ServerKind.RESIDENTIAL and protocol != "socks":
+            raise ManagedNodeConflict("Residential servers only support SOCKS5 nodes")
+
+        if payload.protocol_profile is not None:
+            option = next(
+                item
+                for item in _MANAGED_NODE_CREATION_OPTIONS
+                if item["profile"] == payload.protocol_profile.value
+            )
+            if server_kind.value not in option["allowed_server_kinds"]:
+                raise ManagedNodeConflict(
+                    f"{payload.protocol_profile.value} is not allowed on "
+                    f"{server_kind.value} servers"
+                )
+
     def list_subscription_template_presets(self) -> list[SubscriptionTemplatePresetRead]:
         return [
             SubscriptionTemplatePresetRead.model_validate(deepcopy(preset))
             for preset in _SUBSCRIPTION_NODE_PRESETS
+            if preset["id"] in _VISIBLE_SUBSCRIPTION_NODE_PRESETS
         ]
+
+    @staticmethod
+    def managed_node_creation_metadata() -> ManagedNodeCreationMetadataResponse:
+        return ManagedNodeCreationMetadataResponse(
+            server_kinds={
+                "direct": "公网直连",
+                "leased-line": "专线",
+                "residential": "家宽落地",
+            },
+            profiles=[
+                ManagedNodeCreationOption.model_validate(option)
+                for option in _MANAGED_NODE_CREATION_OPTIONS
+            ],
+            mieru_mapping_modes={
+                "one-to-one": "国内入口端口与 IX 端口一一对应",
+                "manual": "手动填写 IX 端口；请同时完成国内入口到 IX 的端口转发",
+            },
+        )
 
     def create_managed_node_from_preset(
         self,
@@ -3669,6 +3936,7 @@ class InventoryStore:
                 name=payload.name or preset.name,
                 server_id=payload.server_id,
                 protocol=preset.protocol,
+                protocol_profile=preset.protocol_profile,
                 node_type=preset.node_type,
                 inbound_tag=payload.inbound_tag
                 if payload.inbound_tag is not None
@@ -3682,6 +3950,12 @@ class InventoryStore:
                 tag=payload.tag if payload.tag is not None else preset.tag,
                 tags=payload.tags if payload.tags is not None else preset.tags,
                 enabled=payload.enabled,
+                camouflage_pool_id=payload.camouflage_pool_id,
+                camouflage_sni=payload.camouflage_sni,
+                domestic_entry_ip=payload.domestic_entry_ip,
+                domestic_entry_port=payload.domestic_entry_port,
+                mieru_port_mapping_mode=payload.mieru_port_mapping_mode,
+                ix_port=payload.ix_port,
                 client_template=deepcopy(preset.client_template),
                 config=config,
             )
@@ -3706,14 +3980,35 @@ class InventoryStore:
             nodes = session.scalars(
                 select(ManagedNodeModel).order_by(ManagedNodeModel.created_at)
             ).all()
-            private_node_ids = set(
-                session.scalars(select(PrivateRoutedNodeModel.node_id)).all()
-            )
+            private_node_ids = set(session.scalars(select(PrivateRoutedNodeModel.node_id)).all())
             nodes = [
-                node
-                for node in nodes
-                if not node.removal_id and node.id not in private_node_ids
+                node for node in nodes if not node.removal_id and node.id not in private_node_ids
             ]
+            topology_ids = {node.id for node in nodes if node.node_type == "orchestrated"}
+            if topology_ids:
+                referenced = next(
+                    (
+                        plan.name
+                        for plan in plans
+                        if topology_ids.intersection(
+                            set(plan.node_ids or [])
+                            | set((plan.node_multipliers or {}).keys())
+                            | set((plan.node_name_overrides or {}).keys())
+                            | set((plan.node_speed_limits or {}).keys())
+                            | set((plan.node_device_limits or {}).keys())
+                        )
+                    ),
+                    None,
+                )
+                if referenced:
+                    raise ManagedNodeConflict(
+                        "Catalog export cannot represent node topologies; "
+                        f"remove them from subscription plan {referenced} first"
+                    )
+            # A topology cannot be restored from the v1 catalog because its ordered
+            # stages and layout are stored in a separate model.  Never emit its
+            # synthetic ManagedNode row as if it were a standalone runnable node.
+            nodes = [node for node in nodes if node.node_type != "orchestrated"]
             node_names = {node.id: node.name for node in nodes}
             servers = session.scalars(select(ServerModel)).all()
             server_names = {server.id: server.name for server in servers}
@@ -3775,6 +4070,7 @@ class InventoryStore:
                         name=node.name,
                         server_name=server_names.get(node.server_id, node.server_id),
                         protocol=node.protocol,
+                        protocol_profile=node.protocol_profile,
                         node_type=ManagedNodeType(node.node_type),
                         parent_name=node_names.get(node.parent_id),
                         target_node_name=node_names.get(node.target_node_id),
@@ -3784,6 +4080,12 @@ class InventoryStore:
                         tag=node.tag,
                         tags=node.tags or [],
                         enabled=node.enabled,
+                        camouflage_pool_id=node.camouflage_pool_id,
+                        camouflage_sni=node.camouflage_sni,
+                        domestic_entry_ip=node.domestic_entry_ip,
+                        domestic_entry_port=node.domestic_entry_port,
+                        mieru_port_mapping_mode=node.mieru_port_mapping_mode,
+                        ix_port=node.ix_port,
                         client_template=node.client_template or {},
                         config=node.config or {},
                     )
@@ -3804,6 +4106,11 @@ class InventoryStore:
         from collections import Counter
 
         from open_node.services.user_limits import apply_overrides, import_overrides
+
+        if any(entry.node_type == ManagedNodeType.ORCHESTRATED for entry in payload.catalog.nodes):
+            raise ManagedNodeConflict(
+                "Node topologies cannot be imported through the v1 subscription catalog"
+            )
 
         now = datetime.now(tz=UTC)
         summary = SubscriptionCatalogImportSummary()
@@ -4323,9 +4630,7 @@ class InventoryStore:
                 selected_override_script_ids or [],
                 "pre_save_nodes",
                 proxies,
-                validator=lambda value: self._validated_script_proxies(
-                    value, client_format
-                ),
+                validator=lambda value: self._validated_script_proxies(value, client_format),
             )
             script_warnings.extend(warnings)
         content, media_type, extension = self._render_subscription_content(
@@ -4370,6 +4675,7 @@ class InventoryStore:
                     raise SubscriptionUnavailableError(
                         "Override scripts require a Clash-compatible mapping"
                     )
+
                 def validate_clash_script(value):
                     value["proxies"] = self._validated_script_proxies(
                         value.get("proxies", []), client_format
@@ -4418,8 +4724,7 @@ class InventoryStore:
                     proxies, client_format, template_content
                 )
                 if post_applied and any(
-                    config.get(key) != initial_config[key]
-                    for key in ("proxy-groups", "rules")
+                    config.get(key) != initial_config[key] for key in ("proxy-groups", "rules")
                 ):
                     script_warnings.append(
                         "Override script rule changes are not preserved by this client format"
@@ -4436,12 +4741,16 @@ class InventoryStore:
                 if include_userinfo
                 else None
             ),
-            warnings=list(dict.fromkeys([
-                *report.warnings,
-                *(extra_warnings or []),
-                *customization_warnings,
-                *script_warnings,
-            ])),
+            warnings=list(
+                dict.fromkeys(
+                    [
+                        *report.warnings,
+                        *(extra_warnings or []),
+                        *customization_warnings,
+                        *script_warnings,
+                    ]
+                )
+            ),
             included_nodes=len(proxies),
             excluded_nodes=sum(not node.available for node in report.nodes),
         )
@@ -4449,15 +4758,11 @@ class InventoryStore:
     @staticmethod
     def _validated_script_proxies(proxies, client_format):
         if not isinstance(proxies, list) or len(proxies) > 10_000:
-            raise SubscriptionUnavailableError(
-                "Override script must return a bounded proxy array"
-            )
+            raise SubscriptionUnavailableError("Override script must return a bounded proxy array")
         result, names = [], set()
         for proxy in proxies:
             if not isinstance(proxy, dict):
-                raise SubscriptionUnavailableError(
-                    "Override script proxy entries must be objects"
-                )
+                raise SubscriptionUnavailableError("Override script proxy entries must be objects")
             name = proxy.get("name")
             if not isinstance(name, str) or not name.strip() or name in names:
                 raise SubscriptionUnavailableError(
@@ -4556,9 +4861,7 @@ class InventoryStore:
         template_reason = None
         if client_format.value in {"clash", "surge", "stash"}:
             template_format = "clash" if client_format.value == "stash" else client_format.value
-            selected = self.subscription_templates().resolve(
-                session, user, plan, template_format
-            )
+            selected = self.subscription_templates().resolve(session, user, plan, template_format)
             content = (
                 template_override
                 if template_override is not None
@@ -4601,6 +4904,29 @@ class InventoryStore:
                     else:
                         name_map[alias] = unique
             prepared.append((identifier, proxy, unique))
+
+        group_name_map: dict[str, str] = {}
+        for _identifier, proxy, _unique in prepared:
+            for group in proxy.get("_open_node_proxy_groups", []):
+                old = str(group.get("name") or "open-node-load-balance")
+                name, suffix = old, 2
+                while name in used_names:
+                    name = f"{old} ({suffix})"
+                    suffix += 1
+                used_names.add(name)
+                group_name_map[old] = name
+                group["name"] = name
+        for _identifier, proxy, _unique in prepared:
+            dialer = proxy.get("dialer-proxy")
+            if isinstance(dialer, str) and dialer in group_name_map:
+                proxy["dialer-proxy"] = group_name_map[dialer]
+            for group in proxy.get("_open_node_proxy_groups", []):
+                group["proxies"] = [
+                    name_map.get(str(member), str(member)) for member in group.get("proxies", [])
+                ]
+
+        evaluated = []
+        topology_reasons: dict[str, str] = {}
         for identifier, proxy, unique in prepared:
             reason = template_reason
             dialer = proxy.get("dialer-proxy")
@@ -4608,7 +4934,30 @@ class InventoryStore:
                 reason = "Dialer proxy reference is ambiguous after node naming"
             elif isinstance(dialer, str) and dialer in name_map:
                 proxy["dialer-proxy"] = name_map[dialer]
-            reason = reason or subscription_clients.unsupported_reason(proxy, client_format.value)
+            validation_proxy = proxy
+            if client_format == SubscriptionClientFormat.STASH and proxy.get(
+                "_open_node_topology_id"
+            ):
+                # Stash supports Mihomo's dialer-proxy/load-balance syntax.  Its
+                # generic node validator intentionally rejects private Panel
+                # metadata, so validate only the public node fields and leave the
+                # chaining key for render_stash to serialize.
+                validation_proxy = subscription_clients.public_proxy(proxy)
+                validation_proxy.pop("dialer-proxy", None)
+            elif (
+                client_format == SubscriptionClientFormat.SURGE
+                and proxy.get("dialer-proxy")
+                and not proxy.get("_open_node_has_load_balance")
+                and not proxy.get("_open_node_proxy_groups")
+            ):
+                # Surge represents a single upstream hop as underlying-proxy.
+                # Load-balancer groups still fail closed because Surge cannot
+                # represent the generated Mihomo policy graph.
+                validation_proxy = subscription_clients.public_proxy(proxy)
+                validation_proxy.pop("dialer-proxy", None)
+            reason = reason or subscription_clients.unsupported_reason(
+                validation_proxy, client_format.value
+            )
             if (
                 reason is None
                 and client_format
@@ -4616,6 +4965,36 @@ class InventoryStore:
                 and self._proxy_uri(proxy) is None
             ):
                 reason = "Node cannot be represented as a proxy URI"
+            topology_id = proxy.get("_open_node_topology_id")
+            if isinstance(topology_id, str) and reason:
+                topology_reasons.setdefault(topology_id, reason)
+            evaluated.append((identifier, proxy, unique, reason))
+
+        reported_topologies: set[str] = set()
+        for identifier, proxy, unique, reason in evaluated:
+            topology_id = proxy.get("_open_node_topology_id")
+            if isinstance(topology_id, str):
+                group_reason = topology_reasons.get(topology_id)
+                if proxy.get("_open_node_hidden"):
+                    if group_reason is None:
+                        proxy["port"] = int(proxy["port"])
+                        proxies.append(proxy)
+                    continue
+                if topology_id not in reported_topologies:
+                    nodes.append(
+                        SubscriptionFormatNode(
+                            node_id=UUID(topology_id),
+                            name=unique,
+                            protocol=subscription_clients.protocol(proxy),
+                            available=group_reason is None,
+                            reason=group_reason,
+                        )
+                    )
+                    reported_topologies.add(topology_id)
+                if group_reason is None:
+                    proxy["port"] = int(proxy["port"])
+                    proxies.append(proxy)
+                continue
             nodes.append(
                 SubscriptionFormatNode(
                     node_id=UUID(identifier),
@@ -4674,9 +5053,7 @@ class InventoryStore:
                         total=entry.upload + entry.download,
                         weighted_upload=entry.weighted_upload,
                         weighted_download=entry.weighted_download,
-                        charged_usage_bytes=int(
-                            entry.weighted_upload + entry.weighted_download
-                        ),
+                        charged_usage_bytes=int(entry.weighted_upload + entry.weighted_download),
                         updated_at=entry.updated_at,
                     )
                     for entry in archived
@@ -5952,6 +6329,10 @@ class InventoryStore:
                 select(SubscriptionPlanModel).where(SubscriptionPlanModel.id.in_(plan_ids))
             ).all()
         }
+        billing_owners = {
+            plan.id: self._subscription_topology_component_owners(session, plan)
+            for plan in plans.values()
+        }
         exact: dict[str, tuple[str, str, float]] = {}
         aliases: dict[str, tuple[str, str, float]] = {}
         for credential in credentials:
@@ -5960,7 +6341,12 @@ class InventoryStore:
             attribution = (
                 credential.username,
                 credential.node_id,
-                self._subscription_billing_weight_for(plan, credential.node_id),
+                self._subscription_billing_weight_for(
+                    plan,
+                    credential.node_id,
+                    session,
+                    billing_owners.get(plan.id) if plan else None,
+                ),
             )
             exact[credential.email] = attribution
             raw_email = (credential.credential or {}).get("email")
@@ -5973,12 +6359,45 @@ class InventoryStore:
         return 2.0 if plan and plan.traffic_mode == SubscriptionTrafficMode.TWOWAY.value else 1.0
 
     @classmethod
+    def _subscription_topology_component_owners(
+        cls,
+        session: Session,
+        plan: SubscriptionPlanModel,
+    ) -> dict[str, str | None]:
+        owners: dict[str, str | None] = {}
+        for entry_id in plan.node_ids or []:
+            entry = session.get(ManagedNodeModel, entry_id)
+            if entry is not None and entry.node_type == "orchestrated":
+                stages = cls._validated_node_topology_stages(session, entry_id)
+                component_ids = (
+                    [component.id for stage in stages for component in stage] if stages else []
+                )
+            else:
+                component_ids = [entry_id]
+            for component_id in component_ids:
+                if component_id not in owners:
+                    owners[component_id] = entry_id
+                elif owners[component_id] != entry_id:
+                    owners[component_id] = None
+        return owners
+
+    @classmethod
     def _subscription_billing_weight_for(
         cls,
         plan: SubscriptionPlanModel | None,
         node_id: str | None,
+        session: Session | None = None,
+        component_owners: dict[str, str | None] | None = None,
     ) -> float:
-        multiplier = float((plan.node_multipliers or {}).get(node_id, 1)) if plan else 1.0
+        billing_node_id = node_id
+        if plan and node_id and session is not None:
+            # Credentials and traffic attribution remain attached to real component
+            # nodes.  A plan-level multiplier, however, belongs to the one visible
+            # topology entry.  Plan validation rejects ambiguous overlaps, so this
+            # mapping is deterministic.
+            owners = component_owners or cls._subscription_topology_component_owners(session, plan)
+            billing_node_id = owners.get(node_id) or node_id
+        multiplier = float((plan.node_multipliers or {}).get(billing_node_id, 1)) if plan else 1.0
         return multiplier * cls._subscription_traffic_factor(plan)
 
     @staticmethod
@@ -6070,6 +6489,7 @@ class InventoryStore:
             name=payload.name,
             server_id=server.id,
             protocol=payload.protocol.lower(),
+            protocol_profile=payload.protocol_profile.value if payload.protocol_profile else None,
             node_type=payload.node_type.value,
             parent_id=str(payload.parent_id) if payload.parent_id else None,
             target_node_id=str(payload.target_node_id) if payload.target_node_id else None,
@@ -6079,6 +6499,16 @@ class InventoryStore:
             tag=payload.tag,
             tags=payload.tags,
             enabled=payload.enabled,
+            camouflage_pool_id=payload.camouflage_pool_id,
+            camouflage_sni=payload.camouflage_sni,
+            domestic_entry_ip=payload.domestic_entry_ip,
+            domestic_entry_port=payload.domestic_entry_port,
+            mieru_port_mapping_mode=(
+                payload.mieru_port_mapping_mode.value if payload.mieru_port_mapping_mode else None
+            ),
+            ix_port=payload.ix_port,
+            runtime_port=None,
+            runtime_config={},
             client_template=payload.client_template,
             config=payload.config,
             created_at=now,
@@ -6092,6 +6522,7 @@ class InventoryStore:
             name=node.name,
             server_id=UUID(node.server_id),
             protocol=node.protocol,
+            protocol_profile=node.protocol_profile,
             node_type=node.node_type,
             parent_id=node.parent_id,
             target_node_id=node.target_node_id,
@@ -6102,6 +6533,13 @@ class InventoryStore:
             tag=node.tag,
             tags=node.tags or [],
             enabled=node.enabled,
+            camouflage_pool_id=node.camouflage_pool_id,
+            camouflage_sni=node.camouflage_sni,
+            domestic_entry_ip=node.domestic_entry_ip,
+            domestic_entry_port=node.domestic_entry_port,
+            mieru_port_mapping_mode=node.mieru_port_mapping_mode,
+            ix_port=node.ix_port,
+            runtime_port=node.runtime_port,
             client_template=node.client_template or {},
             config=node.config or {},
             created_at=node.created_at,
@@ -6110,6 +6548,10 @@ class InventoryStore:
 
     @staticmethod
     def _subscription_template_preset(preset_id: str) -> SubscriptionTemplatePresetRead:
+        if preset_id not in _VISIBLE_SUBSCRIPTION_NODE_PRESETS:
+            raise SubscriptionTemplatePresetNotFoundError(
+                f"subscription preset not found: {preset_id}"
+            )
         for preset in _SUBSCRIPTION_NODE_PRESETS:
             if preset["id"] == preset_id:
                 return SubscriptionTemplatePresetRead.model_validate(deepcopy(preset))
@@ -6218,9 +6660,7 @@ class InventoryStore:
         node_names: dict[str, str],
     ) -> dict[str, Any]:
         return {
-            node_names[node_id]: value
-            for node_id, value in values.items()
-            if node_id in node_names
+            node_names[node_id]: value for node_id, value in values.items() if node_id in node_names
         }
 
     @staticmethod
@@ -6260,6 +6700,7 @@ class InventoryStore:
             name=entry.name,
             server_id=server_id,
             protocol=entry.protocol.lower(),
+            protocol_profile=entry.protocol_profile.value if entry.protocol_profile else None,
             node_type=entry.node_type.value,
             inbound_tag=entry.inbound_tag,
             routed_outbound_tag=entry.routed_outbound_tag,
@@ -6267,6 +6708,14 @@ class InventoryStore:
             tag=entry.tag,
             tags=entry.tags,
             enabled=entry.enabled,
+            camouflage_pool_id=entry.camouflage_pool_id,
+            camouflage_sni=entry.camouflage_sni,
+            domestic_entry_ip=entry.domestic_entry_ip,
+            domestic_entry_port=entry.domestic_entry_port,
+            mieru_port_mapping_mode=(
+                entry.mieru_port_mapping_mode.value if entry.mieru_port_mapping_mode else None
+            ),
+            ix_port=entry.ix_port,
             client_template=entry.client_template,
             config=entry.config,
             created_at=now,
@@ -6282,6 +6731,7 @@ class InventoryStore:
     ) -> None:
         node.server_id = server_id
         node.protocol = entry.protocol.lower()
+        node.protocol_profile = entry.protocol_profile.value if entry.protocol_profile else None
         node.node_type = entry.node_type.value
         node.inbound_tag = entry.inbound_tag
         node.routed_outbound_tag = entry.routed_outbound_tag
@@ -6289,6 +6739,14 @@ class InventoryStore:
         node.tag = entry.tag
         node.tags = entry.tags
         node.enabled = entry.enabled
+        node.camouflage_pool_id = entry.camouflage_pool_id
+        node.camouflage_sni = entry.camouflage_sni
+        node.domestic_entry_ip = entry.domestic_entry_ip
+        node.domestic_entry_port = entry.domestic_entry_port
+        node.mieru_port_mapping_mode = (
+            entry.mieru_port_mapping_mode.value if entry.mieru_port_mapping_mode else None
+        )
+        node.ix_port = entry.ix_port
         node.client_template = entry.client_template
         node.config = entry.config
         node.updated_at = now
@@ -6482,15 +6940,43 @@ class InventoryStore:
     @staticmethod
     def _ensure_plan_nodes_assignable(session: Session, node_ids: list[UUID]) -> None:
         InventoryStore._ensure_managed_nodes_exist(session, node_ids)
+        identifiers = [str(node_id) for node_id in node_ids]
         if session.scalar(
             select(PrivateRoutedNodeModel.node_id)
-            .where(PrivateRoutedNodeModel.node_id.in_([str(node_id) for node_id in node_ids]))
+            .where(PrivateRoutedNodeModel.node_id.in_(identifiers))
             .limit(1)
         ):
             raise ManagedNodeConflict("Private routed nodes cannot be assigned to shared plans")
+        component_owner: dict[str, str] = {}
+        for identifier in identifiers:
+            node = session.get(ManagedNodeModel, identifier)
+            if node.node_type == "orchestrated":
+                stages = InventoryStore._validated_node_topology_stages(session, identifier)
+                if stages is None:
+                    raise ManagedNodeConflict(
+                        f"Node topology {node.name} is invalid or unavailable"
+                    )
+                components = [component.id for stage in stages for component in stage]
+            else:
+                components = [identifier]
+            overlap = next(
+                (
+                    component_id
+                    for component_id in components
+                    if component_id in component_owner
+                    and component_owner[component_id] != identifier
+                ),
+                None,
+            )
+            if overlap:
+                raise ManagedNodeConflict(
+                    "A plan cannot include overlapping topologies or a topology "
+                    "together with one of its component nodes"
+                )
+            component_owner.update({component_id: identifier for component_id in components})
 
     @staticmethod
-    def _effective_subscription_node_ids(
+    def _effective_subscription_entry_ids(
         session: Session,
         user: ProductUserModel,
         plan: SubscriptionPlanModel,
@@ -6526,6 +7012,118 @@ class InventoryStore:
         return list(dict.fromkeys(identifiers))
 
     @staticmethod
+    def _validated_node_topology_stages(
+        session: Session,
+        virtual_id: str,
+    ) -> list[list[ManagedNodeModel]] | None:
+        """Return an intact topology graph, otherwise fail closed.
+
+        Creation-time validation is not enough: component nodes can subsequently be
+        edited or removed and old databases can contain manually modified JSON.  The
+        subscription and provisioning paths therefore re-check the complete graph
+        before creating credentials or emitting client chaining syntax.
+        """
+
+        virtual = session.get(ManagedNodeModel, virtual_id)
+        topology = session.get(NodeTopologyModel, virtual_id)
+        if (
+            virtual is None
+            or virtual.node_type != "orchestrated"
+            or virtual.removal_id
+            or topology is None
+            or not isinstance(topology.stages, list)
+            or not 2 <= len(topology.stages) <= 8
+        ):
+            return None
+
+        stage_identifiers: list[list[str]] = []
+        flattened: list[str] = []
+        for index, stage in enumerate(topology.stages):
+            if not isinstance(stage, dict):
+                return None
+            identifiers = stage.get("node_ids")
+            if (
+                not isinstance(identifiers, list)
+                or not 1 <= len(identifiers) <= 16
+                or any(
+                    not isinstance(identifier, str) or not identifier for identifier in identifiers
+                )
+                or stage.get("load_balance_strategy") != "round-robin"
+                or index == len(topology.stages) - 1
+                and len(identifiers) != 1
+            ):
+                return None
+            stage_identifiers.append(identifiers)
+            flattened.extend(identifiers)
+        if len(set(flattened)) != len(flattened):
+            return None
+
+        rows = session.scalars(
+            select(ManagedNodeModel).where(ManagedNodeModel.id.in_(flattened))
+        ).all()
+        by_id = {row.id: row for row in rows}
+        if len(by_id) != len(flattened):
+            return None
+        private_ids = set(
+            session.scalars(
+                select(PrivateRoutedNodeModel.node_id).where(
+                    PrivateRoutedNodeModel.node_id.in_(flattened)
+                )
+            ).all()
+        )
+        server_ids: set[str] = set()
+        result: list[list[ManagedNodeModel]] = []
+        for identifiers in stage_identifiers:
+            current: list[ManagedNodeModel] = []
+            for identifier in identifiers:
+                component = by_id[identifier]
+                if (
+                    component.node_type != "physical"
+                    or not component.enabled
+                    or component.removal_id
+                    or not component.config
+                    or component.id in private_ids
+                    or component.server_id in server_ids
+                    or session.get(ServerModel, component.server_id) is None
+                ):
+                    return None
+                server_ids.add(component.server_id)
+                current.append(component)
+            result.append(current)
+        exit_node = result[-1][0]
+        if virtual.server_id != exit_node.server_id or virtual.protocol != exit_node.protocol:
+            return None
+        return result
+
+    @staticmethod
+    def _expand_node_topologies(session: Session, node_ids: list[str]) -> list[str]:
+        expanded: list[str] = []
+        for node_id in node_ids:
+            node = session.get(ManagedNodeModel, node_id)
+            if node is None or node.node_type != "orchestrated":
+                expanded.append(node_id)
+                continue
+            if not node.enabled or node.removal_id:
+                continue
+            stages = InventoryStore._validated_node_topology_stages(session, node_id)
+            if stages is None:
+                continue
+            expanded.extend(component.id for stage in stages for component in stage)
+        return list(dict.fromkeys(expanded))
+
+    @staticmethod
+    def _effective_subscription_node_ids(
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        selected_node_ids: set[str] | None = None,
+    ) -> list[str]:
+        entries = InventoryStore._effective_subscription_entry_ids(
+            session, user, plan, selected_node_ids
+        )
+        return InventoryStore._expand_node_topologies(session, entries)
+
+    @staticmethod
     def _subscription_node_allowed(
         session: Session,
         user: ProductUserModel,
@@ -6547,7 +7145,16 @@ class InventoryStore:
         from open_node.services.user_limits import effective_limits
 
         warnings: list[str] = []
-        effective_node_ids = self._effective_subscription_node_ids(session, user, plan)
+        entry_ids = self._effective_subscription_entry_ids(session, user, plan)
+        for entry_id in entry_ids:
+            entry = session.get(ManagedNodeModel, entry_id)
+            if (
+                entry is not None
+                and entry.node_type == "orchestrated"
+                and self._validated_node_topology_stages(session, entry_id) is None
+            ):
+                warnings.append(f"node topology {entry.name} is invalid or unavailable")
+        effective_node_ids = self._expand_node_topologies(session, entry_ids)
         if not effective_node_ids:
             return [], warnings
 
@@ -6675,7 +7282,7 @@ class InventoryStore:
         selected_node_ids: set[str] | None = None,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
         warnings: list[str] = []
-        plan_node_ids = self._effective_subscription_node_ids(
+        plan_node_ids = self._effective_subscription_entry_ids(
             session, user, plan, selected_node_ids
         )
         if not plan_node_ids:
@@ -6694,62 +7301,134 @@ class InventoryStore:
                 continue
             if not node.enabled or node.removal_id:
                 continue
-            if not node.config:
-                warnings.append(f"node {node.name} has no subscription proxy config")
+            if node.node_type == "orchestrated":
+                proxies.extend(self._topology_proxy_configs(session, user, plan, node, warnings))
                 continue
-            server = session.get(ServerModel, node.server_id)
-            if not server:
-                warnings.append(f"node {node.name} points to a missing server")
-                continue
-
-            credential = self._get_or_create_subscription_credential(session, user, node, server)
-            context = self._template_context(user, plan, node, server, credential)
-            rendered = self._render_template(node.config, context)
-            if not isinstance(rendered, dict) or not rendered:
-                warnings.append(f"node {node.name} subscription proxy config is not usable")
-                continue
-
-            proxy = dict(rendered)
-            proxy.setdefault("name", node.name)
-            proxy.setdefault("type", self._proxy_type_for_protocol(node.protocol))
-            is_mieru = subscription_clients.protocol(proxy) == "mieru"
-            scan = (
-                session.get(AgentScanResultModel, server.id)
-                if is_mieru and node.protocol == "mieru"
-                else None
-            )
-            if is_mieru:
-                proxy["udp"] = node.protocol == "mieru" and self._scan_supports_xray_capability(
-                    scan,
-                    "mieru_udp_target",
-                )
-                if not proxy["udp"]:
-                    warnings.append(
-                        f"node {node.name}: Mieru UDP targets require a current "
-                        "patched runtime scan"
-                    )
-            runtime_key_required = proxy.pop("server-key-source", None) == "runtime"
-            server_key = None
-            if runtime_key_required:
-                scan = session.get(AgentScanResultModel, server.id)
-                server_key = self._runtime_shadowsocks_server_key(scan, node)
-                if server_key:
-                    proxy["password"] = server_key
-                else:
-                    warnings.append(
-                        f"node {node.name} needs a current matching Shadowsocks server key"
-                    )
-            provisioned_client = self._provisioning_client_from_credential(
-                user, plan, node, server, credential
-            )
-            self._apply_credential_to_proxy(proxy, node.protocol, provisioned_client)
-            if runtime_key_required and not server_key:
-                proxy["password"] = None
-            proxy["name"] = self._subscription_proxy_name(plan, node, str(proxy["name"]))
-            proxies.append((node.id, proxy))
+            proxy = self._subscription_proxy_for_node(session, user, plan, node, warnings)
+            if proxy is not None:
+                proxy["name"] = self._subscription_proxy_name(plan, node, str(proxy["name"]))
+                proxies.append((node.id, proxy))
 
         session.flush()
         return proxies, warnings
+
+    def _subscription_proxy_for_node(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        node: ManagedNodeModel,
+        warnings: list[str],
+    ) -> dict[str, Any] | None:
+        if not node.config:
+            warnings.append(f"node {node.name} has no subscription proxy config")
+            return None
+        server = session.get(ServerModel, node.server_id)
+        if not server:
+            warnings.append(f"node {node.name} points to a missing server")
+            return None
+        credential = self._get_or_create_subscription_credential(session, user, node, server)
+        context = self._template_context(user, plan, node, server, credential)
+        rendered = self._render_template(node.config, context)
+        if not isinstance(rendered, dict) or not rendered:
+            warnings.append(f"node {node.name} subscription proxy config is not usable")
+            return None
+
+        proxy = dict(rendered)
+        proxy.setdefault("name", node.name)
+        proxy.setdefault("type", self._proxy_type_for_protocol(node.protocol))
+        is_mieru = subscription_clients.protocol(proxy) == "mieru"
+        scan = (
+            session.get(AgentScanResultModel, server.id)
+            if is_mieru and node.protocol == "mieru"
+            else None
+        )
+        if is_mieru:
+            proxy["udp"] = node.protocol == "mieru" and self._scan_supports_xray_capability(
+                scan,
+                "mieru_udp_target",
+            )
+            if not proxy["udp"]:
+                warnings.append(
+                    f"node {node.name}: Mieru UDP targets require a current patched runtime scan"
+                )
+        runtime_key_required = proxy.pop("server-key-source", None) == "runtime"
+        server_key = None
+        if runtime_key_required:
+            scan = session.get(AgentScanResultModel, server.id)
+            server_key = self._runtime_shadowsocks_server_key(scan, node)
+            if server_key:
+                proxy["password"] = server_key
+            else:
+                warnings.append(f"node {node.name} needs a current matching Shadowsocks server key")
+        provisioned_client = self._provisioning_client_from_credential(
+            user, plan, node, server, credential
+        )
+        self._apply_credential_to_proxy(proxy, node.protocol, provisioned_client)
+        if runtime_key_required and not server_key:
+            proxy["password"] = None
+        return proxy
+
+    def _topology_proxy_configs(
+        self,
+        session: Session,
+        user: ProductUserModel,
+        plan: SubscriptionPlanModel,
+        virtual: ManagedNodeModel,
+        warnings: list[str],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        topology = session.get(NodeTopologyModel, virtual.id)
+        stage_nodes = self._validated_node_topology_stages(session, virtual.id)
+        if topology is None or stage_nodes is None:
+            warnings.append(f"node topology {virtual.name} is invalid or unavailable")
+            return []
+
+        graph_id = virtual.id
+        short = graph_id.replace("-", "")[:8]
+        has_load_balance = any(len(stage) > 1 for stage in stage_nodes)
+        stage_proxy_names: list[list[str]] = []
+        generated: list[tuple[str, dict[str, Any]]] = []
+        groups: list[dict[str, Any]] = []
+        for index, components in enumerate(stage_nodes):
+            names = []
+            for component in components:
+                is_exit = index == len(stage_nodes) - 1
+                name = (
+                    self._subscription_proxy_name(plan, virtual, virtual.name)
+                    if is_exit
+                    else f"{virtual.name} · hop {index + 1} · {component.name}"
+                )
+                proxy = self._subscription_proxy_for_node(session, user, plan, component, warnings)
+                if proxy is None:
+                    warnings.append(
+                        f"node topology {virtual.name} could not render every component"
+                    )
+                    return []
+                proxy["name"] = name
+                proxy["_open_node_topology_id"] = graph_id
+                proxy["_open_node_hidden"] = not is_exit
+                proxy["_open_node_has_load_balance"] = has_load_balance
+                if index:
+                    previous_names = stage_proxy_names[index - 1]
+                    proxy["dialer-proxy"] = (
+                        previous_names[0]
+                        if len(previous_names) == 1
+                        else f"open-node-{short}-hop-{index}"
+                    )
+                names.append(name)
+                generated.append((component.id, proxy))
+            stage_proxy_names.append(names)
+            if len(names) > 1:
+                groups.append(
+                    {
+                        "name": f"open-node-{short}-hop-{index + 1}",
+                        "type": "load-balance",
+                        "strategy": "round-robin",
+                        "proxies": names,
+                    }
+                )
+        generated[-1][1]["_open_node_proxy_groups"] = groups
+        return generated
 
     @classmethod
     def _scan_supports_xray_capability(
@@ -6826,6 +7505,10 @@ class InventoryStore:
         node: ManagedNodeModel,
         server: ServerModel,
     ) -> SubscriptionCredentialModel:
+        if node.node_type == "orchestrated":
+            raise ManagedNodeConflict(
+                "Node topology virtual nodes cannot own subscription credentials"
+            )
         existing = session.scalar(
             select(SubscriptionCredentialModel).where(
                 SubscriptionCredentialModel.username == user.username,
@@ -6962,6 +7645,11 @@ class InventoryStore:
             case "trojan" | "anytls":
                 if credential.get("password"):
                     proxy["password"] = credential["password"]
+                    if normalized == "anytls" and isinstance(proxy.get("shadow-tls-opts"), dict):
+                        proxy["shadow-tls-opts"] = {
+                            **proxy["shadow-tls-opts"],
+                            "password": credential["password"],
+                        }
             case "snell":
                 if credential.get("psk"):
                     proxy["psk"] = credential["psk"]
@@ -7041,6 +7729,7 @@ class InventoryStore:
                     "json",
                 )
             case SubscriptionClientFormat.XRAY:
+                ordered = sorted(proxies, key=lambda proxy: bool(proxy.get("_open_node_hidden")))
                 payload = {
                     "log": {"loglevel": "warning"},
                     "inbounds": [
@@ -7052,7 +7741,7 @@ class InventoryStore:
                             "settings": {"auth": "noauth", "udp": True},
                         }
                     ],
-                    "outbounds": [subscription_clients.xray_outbound(proxy) for proxy in proxies],
+                    "outbounds": [subscription_clients.xray_outbound(proxy) for proxy in ordered],
                 }
                 return (
                     json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -7072,8 +7761,17 @@ class InventoryStore:
 
     @staticmethod
     def _render_clash_subscription(proxies: list[dict[str, Any]]) -> str:
+        generated_groups = [
+            deepcopy(group)
+            for proxy in proxies
+            for group in proxy.get("_open_node_proxy_groups", [])
+        ]
+        visible_names = [
+            str(proxy.get("name") or "proxy")
+            for proxy in proxies
+            if not proxy.get("_open_node_hidden")
+        ]
         proxies = [subscription_clients.clash_proxy(proxy) for proxy in proxies]
-        proxy_names = [str(proxy.get("name") or "proxy") for proxy in proxies]
         payload = {
             "mixed-port": 7890,
             "allow-lan": False,
@@ -7084,8 +7782,9 @@ class InventoryStore:
                 {
                     "name": "Proxy",
                     "type": "select",
-                    "proxies": proxy_names,
-                }
+                    "proxies": visible_names,
+                },
+                *generated_groups,
             ],
             "rules": ["MATCH,Proxy"],
         }
@@ -7093,8 +7792,15 @@ class InventoryStore:
 
     @classmethod
     def _render_sing_box_subscription(cls, proxies: list[dict[str, Any]]) -> str:
-        outbounds = [outbound for proxy in proxies if (outbound := cls._sing_box_outbound(proxy))]
-        tags = [str(outbound["tag"]) for outbound in outbounds]
+        converted = [
+            (proxy, outbound) for proxy in proxies if (outbound := cls._sing_box_outbound(proxy))
+        ]
+        outbounds = [outbound for _proxy, outbound in converted]
+        tags = [
+            str(outbound["tag"])
+            for proxy, outbound in converted
+            if not proxy.get("_open_node_hidden")
+        ]
         payload = {
             "log": {"level": "info"},
             "inbounds": [
@@ -7187,6 +7893,8 @@ class InventoryStore:
         transport = subscription_clients.sing_box_transport(proxy)
         if transport:
             outbound["transport"] = transport
+        if proxy.get("dialer-proxy"):
+            outbound["detour"] = str(proxy["dialer-proxy"])
         return outbound
 
     @staticmethod
@@ -7761,6 +8469,9 @@ class InventoryStore:
         }
         upload = 0.0
         download = 0.0
+        billing_owners = (
+            self._subscription_topology_component_owners(session, plan) if plan else None
+        )
         for credential in credentials:
             latest = latest_by_server.get(credential.server_id)
             user_stats = latest.stats.get("user") if latest and latest.stats else None
@@ -7776,7 +8487,12 @@ class InventoryStore:
             )
             if not isinstance(item, dict):
                 continue
-            weight = self._subscription_billing_weight_for(plan, credential.node_id)
+            weight = self._subscription_billing_weight_for(
+                plan,
+                credential.node_id,
+                session,
+                billing_owners,
+            )
             upload += self._traffic_counter_value(item.get("uplink")) * weight
             download += self._traffic_counter_value(item.get("downlink")) * weight
         return upload, download
@@ -7829,9 +8545,7 @@ class InventoryStore:
             username=entry.username,
             server_id=UUID(entry.server_id),
             email=entry.email,
-            attributed_node_id=UUID(entry.attributed_node_id)
-            if entry.attributed_node_id
-            else None,
+            attributed_node_id=UUID(entry.attributed_node_id) if entry.attributed_node_id else None,
             upload=entry.upload,
             download=entry.download,
             total=entry.upload + entry.download,
@@ -8032,6 +8746,16 @@ class InventoryStore:
 
         return PrivateRoutedNodes(self)
 
+    def _node_topologies(self):
+        from open_node.services.node_topologies import NodeTopologies
+
+        return NodeTopologies(self)
+
+    def _managed_protocols(self):
+        from open_node.services.managed_protocols import ManagedProtocols
+
+        return ManagedProtocols(self)
+
     def _subscription_ip_policy(self):
         from open_node.services.subscription_ip_policy import SubscriptionIpPolicy
 
@@ -8072,6 +8796,7 @@ class InventoryStore:
         return ServerRecord(
             id=UUID(server.id),
             name=server.name,
+            server_kind=ServerKind(server.server_kind),
             status=ServerStatus(server.status),
             ip_address=server.ip_address,
             ip_address_v6=server.ip_address_v6,
@@ -8111,7 +8836,8 @@ class InventoryStore:
             federation_prefix=federated.prefix if federated is not None else None,
             federation_allow_manage_xray=(
                 bool((federated.snapshot or {}).get("allow_manage_xray"))
-                if federated is not None else False
+                if federated is not None
+                else False
             ),
             federation_revision=federated.revision if federated is not None else None,
             created_at=server.created_at,
@@ -8121,9 +8847,9 @@ class InventoryStore:
 
     @staticmethod
     def _public_server(server: ServerModel, federated=None) -> ServerRead:
-        payload = InventoryStore._server_record(
-            server, federated
-        ).model_dump(exclude={"agent_token"})
+        payload = InventoryStore._server_record(server, federated).model_dump(
+            exclude={"agent_token"}
+        )
         return ServerRead(**payload)
 
     @staticmethod
@@ -8151,6 +8877,7 @@ class InventoryStore:
                 agent_switch_listen_port=agent.capability_agent_switch_listen_port,
                 agent_probe_master_url=agent.capability_agent_probe_master_url,
                 agent_update_master_url=agent.capability_agent_update_master_url,
+                managed_protocols=agent.capability_managed_protocols,
             ),
             warp_installed=agent.warp_installed,
             same_host_as_master=agent.same_host_as_master,
@@ -8303,10 +9030,16 @@ class InventoryStore:
         from open_node.services.server_sharing import FederatedServerModel
 
         if session.get(FederatedServerModel, server.id) is not None:
-            if payload.method == "POST" and payload.path in {
-                "/api/child/inbounds",
-                "/api/child/subscription-access",
-            } and not payload.query and not payload.stream:
+            if (
+                payload.method == "POST"
+                and payload.path
+                in {
+                    "/api/child/inbounds",
+                    "/api/child/subscription-access",
+                }
+                and not payload.query
+                and not payload.stream
+            ):
                 return
             raise AgentCapabilityUnavailableError(
                 "Shared servers are controlled through the owner's federation interface"
@@ -8615,6 +9348,68 @@ class InventoryStore:
             timeout_ms=_XRAY_SNAPSHOT_REFRESH_TIMEOUT_MS,
         )
         cls._create_command_model(session, server, refresh, now=now)
+
+    def _queue_managed_runtime_sync_on_agent_register(
+        self,
+        session: Session,
+        server: ServerModel,
+        now: datetime,
+    ) -> None:
+        """Reassert Panel-owned Mihomo and shared-ingress state after every registration."""
+
+        from open_node.services.shared_ingress import SharedIngressModel
+
+        pending = session.scalar(
+            select(CommandModel.id)
+            .where(
+                CommandModel.server_id == server.id,
+                CommandModel.path == "/api/child/managed-protocols",
+                CommandModel.status.not_in(
+                    [
+                        AgentCommandStatus.SUCCEEDED.value,
+                        AgentCommandStatus.FAILED.value,
+                        AgentCommandStatus.SKIPPED.value,
+                    ]
+                ),
+            )
+            .limit(1)
+        )
+        if pending is not None:
+            return
+        managed = self._create_command_model(
+            session,
+            server,
+            self._managed_protocols().command(session, server),
+            now=now,
+        )
+        session.flush()
+        ingress = session.get(SharedIngressModel, server.id)
+        if ingress is None:
+            return
+        if ingress.configuration is None:
+            payload = AgentCommandCreate(
+                method="DELETE",
+                path="/api/child/nginx/shared-ingress",
+                body={"revision": ingress.revision},
+                timeout_ms=60_000,
+            )
+        else:
+            payload = AgentCommandCreate(
+                method="PUT",
+                path="/api/child/nginx/shared-ingress",
+                body={
+                    "revision": ingress.revision,
+                    "configuration": deepcopy(ingress.configuration),
+                },
+                timeout_ms=60_000,
+            )
+        self._create_command_model(
+            session,
+            server,
+            payload,
+            now=now,
+            depends_on=managed,
+        )
 
     @staticmethod
     def _should_refresh_xray_snapshot_after(method: str, path: str, body=None) -> bool:
@@ -10322,7 +11117,8 @@ class InventoryStore:
             received_at=snapshot.received_at,
             stats=XrayStats.model_validate(snapshot.stats) if snapshot.stats else None,
             online_users=(snapshot.online_users or {})
-            if online.status in {"ready", "limited"} else {},
+            if online.status in {"ready", "limited"}
+            else {},
             online_collection=online,
             user_speeds=snapshot.user_speeds or {},
             conn_counts=snapshot.conn_counts or {},

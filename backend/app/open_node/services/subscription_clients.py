@@ -64,6 +64,14 @@ def upgrade_options(proxy: dict[str, Any]) -> dict[str, Any]:
     return {"path": ws.get("path", "/"), "host": host, "headers": headers}
 
 
+def public_proxy(proxy: dict[str, Any]) -> dict[str, Any]:
+    result = deepcopy(proxy)
+    for key in list(result):
+        if key.startswith("_open_node_"):
+            result.pop(key, None)
+    return result
+
+
 def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
     if target in EXTRA_FORMATS:
         from open_node.services.subscription_extra_clients import unsupported_reason as extra_reason
@@ -71,6 +79,13 @@ def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
         # Share credential/TLS/type validation, not the target's wire representation.
         return unsupported_reason(proxy, "clash") or extra_reason(proxy, target)
     kind, transport = protocol(proxy), network(proxy)
+    if proxy.get("dialer-proxy"):
+        if target not in {"clash", "stash", "sing-box", "xray"}:
+            return "This client format cannot represent chained proxies"
+        if target == "xray" and proxy.get("_open_node_has_load_balance"):
+            return "Xray subscriptions cannot represent chained load-balancer groups"
+    if proxy.get("_open_node_proxy_groups") and target not in {"clash", "stash"}:
+        return "This client format cannot represent chained load-balancer groups"
     supported = {"vless", "vmess", "trojan", "shadowsocks", "hysteria2", "anytls", "socks", "http"}
     if target in {"clash", "xray"}:
         supported.add("snell")
@@ -89,6 +104,14 @@ def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
         }
     if target in {"uri-list", "base64"}:
         supported.discard("anytls")
+    if proxy.get("shadow-tls-opts") and target != "clash":
+        return "AnyTLS ShadowTLS requires native Mihomo/Clash export"
+    if (
+        target == "xray"
+        and transport == "xhttp"
+        and record(proxy.get("xhttp-opts")).get("reuse-settings")
+    ):
+        return "Mihomo XHTTP XMUX settings require native Clash export"
     if kind not in supported:
         return "Protocol is not supported by this client format"
     if not isinstance(proxy.get("server"), str) or not proxy["server"].strip():
@@ -132,7 +155,7 @@ def unsupported_reason(proxy: dict[str, Any], target: str) -> str | None:
             return "Mieru transport is not supported"
     if kind in {"vless", "vmess", "trojan"}:
         transports = {
-            "clash": {"tcp", "ws", "grpc", "http", "h2", "httpupgrade"},
+            "clash": {"tcp", "ws", "grpc", "http", "h2", "httpupgrade", "xhttp"},
             "sing-box": {"tcp", "ws", "grpc", "h2", "httpupgrade"},
             "xray": {"tcp", "ws", "grpc", "httpupgrade", "xhttp"},
             "uri-list": {"tcp", "ws", "grpc", "httpupgrade"},
@@ -284,7 +307,7 @@ def sing_box_hysteria_options(proxy: dict[str, Any]) -> dict[str, Any]:
 
 
 def clash_proxy(proxy: dict[str, Any]) -> dict[str, Any]:
-    result = deepcopy(proxy)
+    result = public_proxy(proxy)
     kind = protocol(proxy)
     result["type"] = {"shadowsocks": "ss", "socks": "socks5"}.get(kind, kind)
     if kind not in {"http", "mieru"}:
@@ -490,6 +513,8 @@ def xray_outbound(proxy: dict[str, Any]) -> dict[str, Any]:
     else:
         raise ValueError("Unsupported Xray outbound protocol")
     result["settings"] = settings
+    if proxy.get("dialer-proxy"):
+        result["proxySettings"] = {"tag": str(proxy["dialer-proxy"])}
     stream: dict[str, Any] = {"network": network(proxy)}
     tls = sing_box_tls(proxy)
     if tls:

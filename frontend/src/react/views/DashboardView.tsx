@@ -5,7 +5,7 @@ import { DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, ReloadOut
 import type { ColumnsType } from "antd/es/table";
 import { defaultServerCreateRequest, type AgentCommand, type AgentCommandStreamFrame, type AgentRead,
   type AgentOperationKind, type AgentOperationPayload, type AgentScanResult, type AgentTelemetry,
-  type ConnectionMode, type RenewalCycle, type ServerCreateRequest, type ServerProbeMetadataUpdate,
+  type ConnectionMode, type RenewalCycle, type ServerCreateRequest, type ServerKind, type ServerProbeMetadataUpdate,
   type ServerSummary, type XrayMode } from "../../domain/inventory";
 import { diagnosticPaths, latencyCommandTimeout, routeTargets, selectedRouteTargets } from "../../domain/diagnostics";
 import { createServer, createServerCommand, getLatestScanResult, getLatestTelemetry, listAgents,
@@ -40,6 +40,8 @@ const configOperations: Operation[] = [{ title: "Xray 配置", kind: "xray_confi
 const connectionOptions = ["auto", "websocket", "http", "pull"].map(value => ({ value,
   label: { auto: "自动", websocket: "WebSocket", http: "HTTP", pull: "拉取" }[value] }));
 const xrayOptions = [{ value: "external", label: "外部" }, { value: "embedded", label: "嵌入式" }];
+const serverKindNames: Record<ServerKind, string> = { direct: "公网直连", "leased-line": "专线", residential: "家宽落地" };
+const serverKindOptions = (Object.entries(serverKindNames) as Array<[ServerKind, string]>).map(([value, label]) => ({ value, label }));
 const cycleNames: Record<RenewalCycle, string> = { month: "月", quarter: "季度", half_year: "半年", year: "年" };
 const cycleOptions = Object.entries(cycleNames).map(([value, label]) => ({ value, label }));
 const lifecyclePaths = /^\/api\/child\/agent\/(upgrade(?:-stream)?|uninstall(?:-stream)?|rollback)$/;
@@ -100,7 +102,7 @@ export default function DashboardView(_props: DashboardViewProps) {
   const [savingOperation, setSavingOperation] = useState<AgentOperationKind | "">("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [token, setToken] = useState<{ serverId: string; serverName: string; value: string } | null>(null);
+  const [token, setToken] = useState<{ serverId: string; serverName: string; serverKind: ServerKind; value: string } | null>(null);
   const [form, setForm] = useState<ServerCreateRequest>(defaultServerCreateRequest);
   const [metadataTarget, setMetadataTarget] = useState("");
   const [metadata, setMetadata] = useState<ServerProbeMetadataUpdate>(() => metadataFor());
@@ -111,7 +113,7 @@ export default function DashboardView(_props: DashboardViewProps) {
   const [logs, setLogs] = useState({ name: "", all: false, confirmed: false });
   const [streamPort, setStreamPort] = useState(443);
   const [management, setManagement] = useState({ open: false, serverId: "", mode: "edit" as "edit" | "remove" });
-  const [bootstrap, setBootstrap] = useState({ open: false, serverId: "", serverName: "" });
+  const [bootstrap, setBootstrap] = useState({ open: false, serverId: "", serverName: "", serverKind: "direct" as ServerKind });
   const [lifecycle, setLifecycle] = useState({ open: false, serverId: "", action: "agent_upgrade" as AgentLifecycleAction });
   const [xrayDialog, setXrayDialog] = useState({ action: "" as "" | "xray_install" | "xray_remove" | "xray_rollback", target: "", confirmed: false });
   const [xrayRelease, setXrayRelease] = useState({ version: "v26.3.27", sha256: "", state: "preserve" as "preserve" | "start" | "stop" });
@@ -211,7 +213,8 @@ export default function DashboardView(_props: DashboardViewProps) {
       const response = await createServer({ ...form, ...metadataPayload(form), name: form.name.trim(), ip_address: textOrNull(form.ip_address),
         ip_address_v6: textOrNull(form.ip_address_v6), domain: textOrNull(form.domain), domain_v6: textOrNull(form.domain_v6) });
       if (!current(epoch)) return;
-      setToken({ serverId: response.server.id, serverName: response.server.name, value: response.agent_token });
+      setToken({ serverId: response.server.id, serverName: response.server.name,
+        serverKind: response.server.server_kind ?? form.server_kind ?? "direct", value: response.agent_token });
       setForm(defaultServerCreateRequest()); await refreshServers();
     } catch (failure) { if (current(epoch)) report(failure); }
     finally { if (current(epoch)) { control.current.saving = false; setSaving(false); } }
@@ -346,10 +349,11 @@ export default function DashboardView(_props: DashboardViewProps) {
 
   const columns: ColumnsType<ServerSummary> = [
     { title: "名称", key: "name", width: 200, render: (_, server) => <Space orientation="vertical" size={2}>
-      <Space><Typography.Text strong>{server.name}</Typography.Text>{server.is_federated && <Tag color="purple">分享</Tag>}</Space>
+      <Space><Typography.Text strong>{server.name}</Typography.Text>{server.is_federated && <Tag color="purple">分享</Tag>}
+        {!server.is_federated && <Tag>{serverKindNames[server.server_kind ?? "direct"]}</Tag>}</Space>
       <Typography.Text type="secondary">{server.xray_mode === "embedded" ? "嵌入式" : zhStatus(server.xray_mode)} Xray</Typography.Text>
       {!server.is_federated && <Space size={0}><Button type="text" icon={<DownloadOutlined />} aria-label={`在 ${server.name} 上安装 Agent`}
-        onClick={() => setBootstrap({ open: true, serverId: server.id, serverName: server.name })} />
+        onClick={() => setBootstrap({ open: true, serverId: server.id, serverName: server.name, serverKind: server.server_kind ?? "direct" })} />
         <Button type="text" icon={<EditOutlined />} aria-label={`编辑 ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "edit" })} />
         <Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除 ${server.name}`} onClick={() => setManagement({ open: true, serverId: server.id, mode: "remove" })} /></Space>}
     </Space> },
@@ -398,6 +402,9 @@ export default function DashboardView(_props: DashboardViewProps) {
       <Col xs={24} xl={9}><Space orientation="vertical" size="large" style={{ width: "100%" }}>
         <Card title="添加服务器"><Form layout="vertical" onFinish={() => void submitServer()} disabled={saving}>
           <Form.Item label="名称" required><Input aria-label="名称" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></Form.Item>
+          <Form.Item label="服务器类型" required><Select aria-label="服务器类型" value={form.server_kind ?? "direct"} options={serverKindOptions}
+            onChange={(server_kind: ServerKind) => setForm({ ...form, server_kind })} /></Form.Item>
+          <Alert type="info" showIcon style={{ marginBottom: 16 }} title={{ direct: "可创建公网直连协议节点。", "leased-line": "专线服务器仅允许创建 Mieru 节点。", residential: "家宽落地服务器仅允许创建 SOCKS5 节点。" }[form.server_kind ?? "direct"]} />
           <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="IPv4"><Input aria-label="IPv4" value={form.ip_address ?? ""} onChange={event => setForm({ ...form, ip_address: event.target.value })} /></Form.Item></Col>
             <Col xs={24} sm={12}><Form.Item label="连接方式"><Select aria-label="连接方式" value={form.connection_mode} options={connectionOptions} onChange={(value: ConnectionMode) => setForm({ ...form, connection_mode: value })} /></Form.Item></Col></Row>
           <Row gutter={12}><Col xs={24} sm={12}><Form.Item label="端口"><StrictInputNumber aria-label="端口" aria-valuemin={0} aria-valuemax={65535}
@@ -417,7 +424,7 @@ export default function DashboardView(_props: DashboardViewProps) {
           description={<Space orientation="vertical" style={{ width: "100%" }}>
             <Typography.Text>请妥善保存此令牌，用于手动配置 Agent。令牌仅在此处显示。</Typography.Text>
             <Input.TextArea aria-label="Agent 令牌" value={token.value} readOnly rows={2} autoComplete="off" spellCheck={false} style={{ fontFamily: "monospace" }} />
-            <Space wrap><Button aria-label="安装 Agent" onClick={() => setBootstrap({ open: true, serverId: token.serverId, serverName: token.serverName })}>安装 Agent</Button>
+            <Space wrap><Button aria-label="安装 Agent" onClick={() => setBootstrap({ open: true, serverId: token.serverId, serverName: token.serverName, serverKind: token.serverKind })}>安装 Agent</Button>
               <Button aria-label="隐藏令牌" onClick={() => setToken(null)}>隐藏令牌</Button></Space></Space>} />}
         </Card>
         <Card title="探针元数据"><Form layout="vertical" onFinish={() => void submitMetadata()}>

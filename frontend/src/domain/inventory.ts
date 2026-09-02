@@ -1,4 +1,5 @@
 export type ConnectionMode = "auto" | "websocket" | "http" | "pull";
+export type ServerKind = "direct" | "leased-line" | "residential";
 export type ServerStatus = "pending" | "connected" | "offline";
 export type TrafficSource = "xray" | "system";
 export type TrafficStatsMode = "both" | "upload" | "download" | "max";
@@ -109,6 +110,7 @@ export interface AgentCapabilities {
   agent_switch_listen_port: boolean;
   agent_probe_master_url: boolean;
   agent_update_master_url: boolean;
+  managed_protocols: boolean;
 }
 
 export interface AgentRead {
@@ -130,6 +132,7 @@ export interface AgentRead {
 
 export interface ServerCreateRequest {
   name: string;
+  server_kind?: ServerKind;
   ip_address?: string | null;
   ip_address_v6?: string | null;
   domain?: string | null;
@@ -177,6 +180,8 @@ export interface ServerProbeMetadataUpdate {
 export interface ServerSummary {
   id: string;
   name: string;
+  /** Older federated/imported inventory payloads may not carry this field. */
+  server_kind?: ServerKind;
   status: ServerStatus;
   ip_address?: string | null;
   ip_address_v6?: string | null;
@@ -928,6 +933,7 @@ export interface AgentCommandStreamFramesResponse {
 
 export const defaultServerCreateRequest = (): ServerCreateRequest => ({
   name: "",
+  server_kind: "direct",
   ip_address: "",
   ip_address_v6: "",
   domain: "",

@@ -13,12 +13,13 @@ import signal
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Literal, Self
 from urllib.parse import urlsplit
 
 import crossplane
 import httpx
 import psutil
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from open_node_agent.certificates import hostname, validate_pair
 from open_node_agent.host_files import FileTransaction, guarded_path, read_private
@@ -62,6 +63,115 @@ class TunnelDeployment(BaseModel):
     restart_xray: bool = True
 
 
+class SharedIngressRoute(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    node_id: str = Field(
+        min_length=36,
+        max_length=36,
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+    )
+    profile: Literal[
+        "vless-reality-vision",
+        "vless-xhttp-reality-xmux",
+        "anytls-shadowtls",
+    ]
+    sni: str = Field(min_length=1, max_length=253)
+    upstream_address: Literal["127.0.0.1", "::1"] = "127.0.0.1"
+    upstream_port: int = Field(ge=49_152, le=65_535)
+
+    @field_validator("sni")
+    @classmethod
+    def normalize_sni(cls, value: str) -> str:
+        return hostname(value)
+
+
+class SharedIngressWebsite(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    sni: str = Field(min_length=1, max_length=253)
+    upstream_url: str = Field(min_length=1, max_length=2_048)
+    tls_address: Literal["127.0.0.1", "::1"] = "127.0.0.1"
+    tls_port: int = Field(ge=49_152, le=65_535)
+    certificate_name: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[a-zA-Z0-9_.-]+$",
+    )
+    redirect_http: bool = True
+
+    @field_validator("sni")
+    @classmethod
+    def normalize_sni(cls, value: str) -> str:
+        return hostname(value)
+
+    @field_validator("upstream_url")
+    @classmethod
+    def validate_upstream_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if any(character.isspace() or ord(character) < 0x20 for character in normalized) or any(
+            character in normalized for character in "$;{}#"
+        ):
+            raise ValueError("upstream_url contains unsafe characters")
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "upstream_url must be an absolute HTTP(S) URL without credentials or fragment"
+            )
+        try:
+            _ = parsed.port
+            parsed.hostname.encode("idna")
+        except (UnicodeError, ValueError):
+            raise ValueError("upstream_url contains an invalid host or port") from None
+        return normalized
+
+
+class SharedIngressConfiguration(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    listen_port: Literal[443] = 443
+    listen_ipv6: bool = True
+    routes: list[SharedIngressRoute] = Field(default_factory=list, max_length=32)
+    website: SharedIngressWebsite | None = None
+
+    @model_validator(mode="after")
+    def validate_routes(self) -> Self:
+        if not self.routes and self.website is None:
+            raise ValueError("at least one protocol route or website is required")
+        snis: set[str] = set()
+        ports: set[int] = set()
+        nodes: set[str] = set()
+        for route in self.routes:
+            if route.sni in snis:
+                raise ValueError(f"duplicate SNI: {route.sni}")
+            if route.upstream_port in ports:
+                raise ValueError(f"duplicate internal port: {route.upstream_port}")
+            if route.node_id in nodes:
+                raise ValueError(f"duplicate node route: {route.node_id}")
+            snis.add(route.sni)
+            ports.add(route.upstream_port)
+            nodes.add(route.node_id)
+        if self.website is not None:
+            if self.website.sni in snis:
+                raise ValueError(f"duplicate SNI: {self.website.sni}")
+            if self.website.tls_port in ports:
+                raise ValueError(f"duplicate internal port: {self.website.tls_port}")
+        return self
+
+
+class SharedIngressDeclaration(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    revision: int = Field(ge=1)
+    configuration: SharedIngressConfiguration | None = None
+
+
 class NginxRuntime:
     def __init__(self, xray, journal):
         self.xray, self.journal, self.config = xray, journal, xray.config
@@ -71,6 +181,9 @@ class NginxRuntime:
         self.main = self.root / "nginx.conf"
         self.effective = self.state / "effective.conf"
         self.html = self.state / "html"
+        self.shared_ingress_stream = self.root / "stream_servers" / "open-node-shared-ingress.conf"
+        self.shared_ingress_website = self.root / "servers" / "open-node-shared-ingress.conf"
+        self.shared_ingress_declaration = self.state / "shared-ingress.json"
         self.process = None
         self.process_started = None
         self.log_task = None
@@ -108,7 +221,11 @@ class NginxRuntime:
             return self.config_path(path)
         if path.is_relative_to(self.certs):
             return self.cert_path(path)
-        if path in {self.effective, self.html / "index.html"}:
+        if path in {
+            self.effective,
+            self.html / "index.html",
+            self.shared_ingress_declaration,
+        }:
             return guarded_path(self.state, path)
         raise RuntimeFailure("Path is not owned by the host configuration manager")
 
@@ -265,9 +382,7 @@ class NginxRuntime:
         if self.config.nginx_binary is None:
             return None
         try:
-            code, output = await run_command(
-                str(self.config.nginx_binary), "-v", timeout=5
-            )
+            code, output = await run_command(str(self.config.nginx_binary), "-v", timeout=5)
         except (OSError, RuntimeFailure, TimeoutError):
             return None
         if code:
@@ -564,6 +679,321 @@ class NginxRuntime:
                 changes[file] = render(kept)
         return changes, removed
 
+    @staticmethod
+    def _endpoint(address: str, port: int) -> str:
+        return f"[{address}]:{port}" if ":" in address else f"{address}:{port}"
+
+    @staticmethod
+    def _listen_port(node: dict) -> int | None:
+        if node.get("directive") != "listen" or not node.get("args"):
+            return None
+        value = node["args"][0]
+        if not isinstance(value, str):
+            return None
+        raw = value.rsplit(":", 1)[-1]
+        try:
+            port = int(raw)
+        except ValueError:
+            return None
+        return port if 1 <= port <= 65_535 else None
+
+    def _reject_competing_public_443(self) -> None:
+        """Fail instead of deleting or silently shadowing another owned listener."""
+
+        for path in self.files():
+            if path in {self.shared_ingress_stream, self.shared_ingress_website}:
+                continue
+            for node in walk(self.parse(path)):
+                if self._listen_port(node) == 443:
+                    raise RuntimeFailure(
+                        "TCP 443 is already declared by another owned Nginx configuration"
+                    )
+
+    def _shared_ingress_main(self, *, website: bool) -> bytes:
+        main = (
+            self.parse(self.main)
+            if self.main.exists()
+            else [
+                directive("events", block=[directive("worker_connections", "1024")]),
+                directive(
+                    "http",
+                    block=[
+                        directive("access_log", "/dev/stdout"),
+                        directive("include", "servers/*.conf"),
+                    ],
+                ),
+            ]
+        )
+        streams = [item for item in main if item["directive"] == "stream"]
+        if len(streams) > 1 or any("block" not in item for item in streams):
+            raise RuntimeFailure("Shared ingress requires at most one main stream block")
+        if streams:
+            stream = streams[0]
+        else:
+            stream = directive("stream", block=[])
+            main.append(stream)
+        include = directive("include", "stream_servers/*.conf")
+        if not any(
+            item.get("directive") == "include"
+            and item.get("args")
+            in [
+                ["stream_servers/*.conf"],
+                [str(self.root / "stream_servers/*.conf")],
+            ]
+            for item in stream["block"]
+        ):
+            stream["block"].append(include)
+
+        if website:
+            http = [item for item in main if item["directive"] == "http" and "block" in item]
+            if len(http) != 1:
+                raise RuntimeFailure("Website reverse proxy requires exactly one main http block")
+            connection_map = directive(
+                "map",
+                "$http_upgrade",
+                "$open_node_shared_connection_upgrade",
+                block=[directive("default", "upgrade"), directive("", "close")],
+            )
+            existing = [
+                item
+                for item in http[0]["block"]
+                if item.get("directive") == "map"
+                and item.get("args", [])[-1:] == ["$open_node_shared_connection_upgrade"]
+            ]
+
+            def shape(node):
+                return {
+                    key: [shape(item) for item in value] if key == "block" else value
+                    for key, value in node.items()
+                    if key in {"directive", "args", "block"}
+                }
+
+            if existing and (len(existing) != 1 or shape(existing[0]) != shape(connection_map)):
+                raise RuntimeFailure("Existing Nginx map conflicts with managed reverse proxy")
+            if not existing:
+                http[0]["block"].append(connection_map)
+        return render(main)
+
+    def _shared_ingress_stream_config(
+        self,
+        configuration: SharedIngressConfiguration,
+    ) -> bytes:
+        targets = [
+            (route.sni, self._endpoint(route.upstream_address, route.upstream_port))
+            for route in configuration.routes
+        ]
+        if configuration.website is not None:
+            website = configuration.website
+            targets.append((website.sni, self._endpoint(website.tls_address, website.tls_port)))
+        mapping = directive(
+            "map",
+            "$ssl_preread_server_name",
+            "$open_node_shared_ingress_upstream",
+            block=[
+                directive("default", "127.0.0.1:1"),
+                *(directive(sni, target) for sni, target in targets),
+            ],
+        )
+        listeners = [directive("listen", "0.0.0.0:443")]
+        if configuration.listen_ipv6:
+            listeners.append(directive("listen", "[::]:443", "ipv6only=on"))
+        server = directive(
+            "server",
+            block=[
+                *listeners,
+                directive("proxy_pass", "$open_node_shared_ingress_upstream"),
+                directive("ssl_preread", "on"),
+                directive("proxy_connect_timeout", "5s"),
+                directive("proxy_timeout", "1h"),
+            ],
+        )
+        return render([mapping, server])
+
+    def _shared_ingress_website_config(
+        self,
+        website: SharedIngressWebsite,
+        *,
+        listen_ipv6: bool,
+    ) -> bytes:
+        endpoint = self._endpoint(website.tls_address, website.tls_port)
+        location = [
+            directive("proxy_pass", website.upstream_url),
+            directive("proxy_http_version", "1.1"),
+            directive("proxy_set_header", "Host", "$host"),
+            directive("proxy_set_header", "X-Real-IP", "$remote_addr"),
+            directive("proxy_set_header", "X-Forwarded-For", "$proxy_add_x_forwarded_for"),
+            directive("proxy_set_header", "X-Forwarded-Proto", "https"),
+            directive("proxy_set_header", "Upgrade", "$http_upgrade"),
+            directive(
+                "proxy_set_header",
+                "Connection",
+                "$open_node_shared_connection_upgrade",
+            ),
+            directive("proxy_connect_timeout", "15s"),
+            directive("proxy_send_timeout", "60s"),
+            directive("proxy_read_timeout", "60s"),
+        ]
+        if website.upstream_url.lower().startswith("https://"):
+            location.extend(
+                [
+                    directive("proxy_ssl_server_name", "on"),
+                    directive("proxy_ssl_name", "$proxy_host"),
+                    directive("proxy_ssl_verify", "on"),
+                    directive("proxy_ssl_verify_depth", "3"),
+                    directive(
+                        "proxy_ssl_trusted_certificate",
+                        "/etc/ssl/certs/ca-certificates.crt",
+                    ),
+                ]
+            )
+        tls_server = directive(
+            "server",
+            block=[
+                directive("listen", endpoint, "ssl"),
+                directive("server_name", website.sni),
+                directive(
+                    "ssl_certificate",
+                    str(self.certs / (website.certificate_name + ".pem")),
+                ),
+                directive(
+                    "ssl_certificate_key",
+                    str(self.certs / (website.certificate_name + ".key")),
+                ),
+                directive("ssl_protocols", "TLSv1.2", "TLSv1.3"),
+                directive("location", "/", block=location),
+            ],
+        )
+        result = [tls_server]
+        if website.redirect_http:
+            listeners = [directive("listen", "0.0.0.0:80")]
+            if listen_ipv6:
+                listeners.append(directive("listen", "[::]:80", "ipv6only=on"))
+            result.append(
+                directive(
+                    "server",
+                    block=[
+                        *listeners,
+                        directive("server_name", website.sni),
+                        directive("access_log", "off"),
+                        directive("return", "308", "https://$host$request_uri"),
+                    ],
+                )
+            )
+        return render(result)
+
+    def _shared_ingress_declared(self) -> SharedIngressDeclaration | None:
+        if not self.shared_ingress_declaration.exists():
+            return None
+        try:
+            raw = json.loads(read_private(self.shared_ingress_declaration))
+            return SharedIngressDeclaration.model_validate(raw)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            raise RuntimeFailure("Stored shared ingress declaration is invalid") from None
+
+    @staticmethod
+    def _validate_shared_ingress_revision(
+        current: SharedIngressDeclaration | None,
+        candidate: SharedIngressDeclaration,
+    ) -> None:
+        if current is None:
+            return
+        if candidate.revision < current.revision:
+            raise RuntimeFailure("Shared ingress declaration is stale")
+        if candidate.revision == current.revision and candidate != current:
+            raise RuntimeFailure("Shared ingress revision conflicts with stored declaration")
+
+    def shared_ingress_state(self) -> dict:
+        declaration = self._shared_ingress_declared()
+        return {
+            "success": True,
+            "revision": declaration.revision if declaration is not None else 0,
+            "configuration": (
+                declaration.configuration.model_dump(mode="json")
+                if declaration is not None and declaration.configuration is not None
+                else None
+            ),
+        }
+
+    async def deploy_shared_ingress(self, body: object) -> dict:
+        self.require_binary()
+        declaration = SharedIngressDeclaration.model_validate(body)
+        if declaration.configuration is None:
+            raise RuntimeFailure("Shared ingress deployment requires a configuration")
+        self._validate_shared_ingress_revision(
+            self._shared_ingress_declared(),
+            declaration,
+        )
+        configuration = declaration.configuration
+        if configuration.listen_port != 443:
+            raise RuntimeFailure("Managed shared ingress must own public TCP 443")
+        self._reject_competing_public_443()
+        website = configuration.website
+        if website is not None:
+            cert = self.cert_path(website.certificate_name + ".pem")
+            key = self.cert_path(website.certificate_name + ".key")
+            validate_pair(
+                website.sni,
+                read_private(cert).decode(),
+                read_private(key).decode(),
+            )
+        changes = {
+            self.main: self._shared_ingress_main(website=website is not None),
+            self.shared_ingress_stream: self._shared_ingress_stream_config(configuration),
+            self.shared_ingress_website: (
+                self._shared_ingress_website_config(
+                    website,
+                    listen_ipv6=configuration.listen_ipv6,
+                )
+                if website is not None
+                else None
+            ),
+            self.shared_ingress_declaration: (
+                json.dumps(
+                    declaration.model_dump(mode="json"),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            ),
+        }
+        result = await self.apply(changes, activate=True, start_services=True)
+        return {
+            **result,
+            "revision": declaration.revision,
+            "configuration": configuration.model_dump(mode="json"),
+            "nginx": await self.status(),
+        }
+
+    async def delete_shared_ingress(self, body: object) -> dict:
+        if not isinstance(body, dict) or set(body) != {"revision"}:
+            raise RuntimeFailure("Shared ingress removal requires only its revision")
+        declaration = SharedIngressDeclaration.model_validate(
+            {"revision": body["revision"], "configuration": None}
+        )
+        self._validate_shared_ingress_revision(
+            self._shared_ingress_declared(),
+            declaration,
+        )
+        changes = {
+            self.shared_ingress_stream: None,
+            self.shared_ingress_website: None,
+            self.shared_ingress_declaration: (
+                json.dumps(
+                    declaration.model_dump(mode="json"),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            ),
+        }
+        result = await self.apply(changes, activate=True)
+        return {
+            **result,
+            "revision": declaration.revision,
+            "configuration": None,
+            "nginx": await self.status(),
+        }
+
     def default_main(self):
         return render(
             [
@@ -689,6 +1119,13 @@ class NginxRuntime:
                         return {"success": True, "message": f"HTTP {response.status_code}"}
             except httpx.HTTPError:
                 return {"success": False, "message": "Proxy target connection failed"}
+        if path == "/api/child/nginx/shared-ingress":
+            if method == "GET":
+                return self.shared_ingress_state()
+            if method == "PUT":
+                return await self.deploy_shared_ingress(body)
+            if method == "DELETE":
+                return await self.delete_shared_ingress(body)
         prefix = "/api/child/nginx/"
         if not path.startswith(prefix):
             raise NotImplementedError(f"Operation not implemented: {method} {path}")

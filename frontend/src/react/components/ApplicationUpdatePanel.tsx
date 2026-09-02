@@ -19,32 +19,62 @@ const labels: Record<ApplicationUpdateState["status"], string> = {
 };
 const short = (value: string | null) => value === null ? "尚未检查" : value === "unknown" ? "未知" : value.slice(0, 12);
 const displayTime = (value: string | null) => value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
+type PendingFlow = "observe" | "check" | "apply" | "one-click-check" | "one-click-apply";
+interface PendingUpdate { requestId: string | null; flow: PendingFlow }
 
 export default function ApplicationUpdatePanel({ operator }: { operator: OperatorSession }) {
   const scope = useAsyncScope();
-  const busyRef = useRef(false), pendingRequest = useRef<string | null>(null), timer = useRef<number | null>(null);
+  const busyRef = useRef(false), pendingRequest = useRef<PendingUpdate | null>(null), timer = useRef<number | null>(null);
   const [state, setState] = useState<ApplicationUpdateState | null>(null);
   const [busy, setBusy] = useState(""), [confirmed, setConfirmed] = useState(false), [polling, setPolling] = useState(false);
   const [notice, setNotice] = useState<{ type: "error" | "warning" | "success"; text: string } | null>(null);
   const current = useCallback((request: number) => scope.isCurrent(request)
     && authState.session?.authenticated === true && authState.session.username === operator.username
     && authState.session.csrf_token === operator.csrf_token, [scope, operator]);
+  const applyCheckedTarget = useCallback(async (target: string) => {
+    if (busyRef.current) return;
+    const request = scope.begin(); busyRef.current = true; setBusy("one-click");
+    setNotice({ type: "success", text: "检查完成，正在提交已精确绑定的目标版本。" });
+    try {
+      const accepted = await applyApplicationUpdate(target);
+      if (!current(request)) return;
+      pendingRequest.current = { requestId: accepted.request_id, flow: "one-click-apply" };
+      setPolling(true);
+      setNotice({ type: "success", text: "更新请求已受理；宿主机正在备份并验证候选镜像，页面会持续读取结果。" });
+    } catch (error) {
+      if (!current(request)) return;
+      pendingRequest.current = null; setPolling(false);
+      setNotice({
+        type: error instanceof ApplicationUpdateRequestError && !error.outcomeUnknown ? "error" : "warning",
+        text: error instanceof ApplicationUpdateRequestError ? error.message : "未能确认更新操作结果，请重新读取状态；不会自动重复提交。",
+      });
+    } finally { if (current(request)) { busyRef.current = false; setBusy(""); } }
+  }, [current, scope]);
   const read = useCallback(async (request: number, quiet = false) => {
     try {
       const value = await getApplicationUpdate();
       if (!current(request)) return;
       setState(value);
       if (value.status === "checking" || value.status === "updating") {
-        pendingRequest.current = value.request_id; setPolling(true);
-      } else if (pendingRequest.current && value.request_id === pendingRequest.current && terminal.has(value.status)) {
+        const flow = pendingRequest.current?.flow ?? "observe";
+        pendingRequest.current = { requestId: value.request_id, flow }; setPolling(true);
+      } else if (pendingRequest.current && value.request_id === pendingRequest.current.requestId && terminal.has(value.status)) {
+        const flow = pendingRequest.current.flow;
         pendingRequest.current = null; setPolling(false); setConfirmed(false);
+        if (flow === "one-click-check" && value.status === "available" && value.latest_revision) {
+          void applyCheckedTarget(value.latest_revision);
+          return;
+        }
         setNotice({ type: value.status === "succeeded" || value.status === "current" ? "success" : value.status === "available" ? "warning" : "error", text: value.message });
       }
-    } catch {
-      if (current(request) && !quiet) setNotice({ type: "error", text: "无法读取应用更新状态，请稍后重试。" });
+    } catch (error) {
+      if (current(request) && !quiet) setNotice({
+        type: error instanceof ApplicationUpdateRequestError && !error.outcomeUnknown ? "error" : "warning",
+        text: error instanceof ApplicationUpdateRequestError ? error.message : "无法读取应用更新状态，请稍后重试。",
+      });
       if (current(request) && quiet) setNotice({ type: "warning", text: "服务可能正在重启，仍会继续读取更新状态。" });
     }
-  }, [current]);
+  }, [applyCheckedTarget, current]);
   const reload = useCallback(async () => {
     if (busyRef.current) return;
     const request = scope.begin(); busyRef.current = true; setBusy("read"); setNotice(null);
@@ -60,14 +90,18 @@ export default function ApplicationUpdatePanel({ operator }: { operator: Operato
     timer.current = window.setTimeout(() => void tick(), 800);
     return () => { if (timer.current !== null) window.clearTimeout(timer.current); timer.current = null; };
   }, [current, polling, read, scope]);
-  async function enqueue(action: "check" | "apply") {
+  async function enqueue(action: "check" | "apply" | "one-click") {
     if (busyRef.current || (action === "apply" && (!state?.latest_revision || !confirmed))) return;
     const request = scope.begin(); busyRef.current = true; setBusy(action); setNotice(null);
     try {
-      const accepted = action === "check" ? await checkApplicationUpdate() : await applyApplicationUpdate(state!.latest_revision!);
+      const accepted = action === "apply" ? await applyApplicationUpdate(state!.latest_revision!) : await checkApplicationUpdate();
       if (!current(request)) return;
-      pendingRequest.current = accepted.request_id; setPolling(true);
-      setNotice({ type: "success", text: action === "check" ? "检查请求已由宿主机助手受理。" : "更新请求已受理；服务将在备份和候选镜像验证期间短暂重启。" });
+      pendingRequest.current = {
+        requestId: accepted.request_id,
+        flow: action === "one-click" ? "one-click-check" : action,
+      };
+      setPolling(true);
+      setNotice({ type: "success", text: action === "check" ? "检查请求已由宿主机助手受理。" : action === "one-click" ? "一键更新已开始：正在重新检查官方目标提交。" : "更新请求已受理；服务将在备份和候选镜像验证期间短暂重启。" });
     } catch (error) {
       if (!current(request)) return;
       setNotice({ type: error instanceof ApplicationUpdateRequestError && !error.outcomeUnknown ? "error" : "warning",
@@ -75,6 +109,8 @@ export default function ApplicationUpdatePanel({ operator }: { operator: Operato
     } finally { if (current(request)) { busyRef.current = false; setBusy(""); } }
   }
   const canApply = state?.managed === true && state.status === "available" && state.has_update === true && Boolean(state.latest_revision) && confirmed && !busy;
+  const canOneClick = state?.managed === true && !["unavailable", "checking", "updating", "recovery_required"].includes(state.status) && !busy && !polling;
+  const oneClickPending = polling && ["one-click-check", "one-click-apply"].includes(pendingRequest.current?.flow ?? "");
   return <Card title="应用更新" className="branding-settings-card">
     <Alert type="info" showIcon icon={<SafetyCertificateOutlined />} title="更新由宿主机固定功能助手执行；Web 容器没有 Docker socket 或宿主机配置目录权限。更新继续执行 fast-forward 校验、停机备份、候选镜像健康检查和恢复标记。" />
     {notice && <Alert className="form-alert" type={notice.type} showIcon title={notice.text} role="alert" />}
@@ -89,9 +125,13 @@ export default function ApplicationUpdatePanel({ operator }: { operator: Operato
     </>}
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       <Space wrap>
+        <Popconfirm title="执行一键更新？" description="系统会先重新检查官方 main，再把精确提交交给宿主机备份、构建和健康检查。若已是最新版本则不会重装。" okText="开始一键更新" cancelText="取消" disabled={!canOneClick} onConfirm={() => void enqueue("one-click")}>
+          <Button type="primary" icon={<CloudDownloadOutlined />} aria-label="一键更新应用" loading={busy === "one-click" || oneClickPending} disabled={!canOneClick}>一键更新</Button>
+        </Popconfirm>
         <Button icon={<ReloadOutlined />} aria-label="检查应用更新" loading={busy === "check"} disabled={Boolean(busy) || polling || state?.managed === false} onClick={() => void enqueue("check")}>检查更新</Button>
         <Button icon={<ReloadOutlined />} aria-label="重新读取更新状态" loading={busy === "read"} disabled={Boolean(busy)} onClick={() => void reload()}>重新读取状态</Button>
       </Space>
+      <Typography.Text type="secondary">“一键更新”会重新检查目标提交，并只在目标仍完全一致时自动进入安装器更新事务。</Typography.Text>
       {state?.status === "available" && <>
         <Checkbox checked={confirmed} disabled={Boolean(busy) || polling} onChange={event => setConfirmed(event.target.checked)}>我已确认目标提交，并接受更新期间的短暂中断</Checkbox>
         <Popconfirm title="执行应用更新？" description="宿主机会先备份数据，再构建并验证候选镜像。" okText="开始更新" cancelText="取消" disabled={!canApply} onConfirm={() => void enqueue("apply")}>

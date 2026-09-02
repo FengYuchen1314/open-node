@@ -15,6 +15,7 @@ from open_node.api.routes.security import (
 from open_node.domain.subscription_links import SubscriptionShortCodeUpdate
 from open_node.domain.subscriptions import (
     ManagedNodeCreate,
+    ManagedNodeCreationMetadataResponse,
     ManagedNodeResponse,
     ManagedNodesResponse,
     ProductUserActiveUpdate,
@@ -49,6 +50,7 @@ from open_node.services.inventory import (
     DuplicateProductUserError,
     DuplicateSubscriptionPlanNameError,
     InventoryStore,
+    ManagedNodeConflict,
     ManagedNodeNotFoundError,
     ProductUserConflict,
     ProductUserNotFoundError,
@@ -324,15 +326,39 @@ def list_subscription_node_presets(
     return SubscriptionTemplatePresetsResponse(presets=store.list_subscription_template_presets())
 
 
+async def _deploy_managed_node_runtime(
+    node,
+    store: InventoryStore,
+    connections: AgentConnectionManager,
+):
+    if node.protocol_profile is None:
+        return []
+    payloads = [store.managed_protocol_command(node.server_id)]
+    if node.protocol_profile in {
+        "vless-reality-vision",
+        "vless-xhttp-reality-xmux",
+        "anytls-shadowtls",
+    }:
+        ingress = store.reconcile_managed_shared_ingress(node.server_id)
+        if ingress is not None:
+            payloads.append(ingress)
+    commands = store.create_command_sequence(node.server_id, payloads)
+    deployed = [await connections.dispatch_command(store, command) for command in commands]
+    # Runtime declarations contain server-only Reality material.  The durable queue
+    # keeps the complete payload, while this browser response exposes progress only.
+    return [command.model_copy(update={"body": None}) for command in deployed]
+
+
 @router.post(
     "/node-presets/{preset_id}/nodes",
     response_model=ManagedNodeResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_node_from_preset(
+async def create_node_from_preset(
     preset_id: str,
     payload: SubscriptionTemplatePresetApplyRequest,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> ManagedNodeResponse:
     try:
         node = store.create_managed_node_from_preset(preset_id, payload)
@@ -340,7 +366,8 @@ def create_node_from_preset(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return ManagedNodeResponse(node=node)
+    commands = await _deploy_managed_node_runtime(node, store, connections)
+    return ManagedNodeResponse(node=node, commands=commands)
 
 
 @router.get("/catalog/export", response_model=SubscriptionCatalogExportResponse)
@@ -374,16 +401,27 @@ def list_managed_nodes(
     return ManagedNodesResponse(nodes=store.list_managed_nodes())
 
 
+@router.get("/nodes/creation-metadata", response_model=ManagedNodeCreationMetadataResponse)
+def managed_node_creation_metadata(
+    store: Annotated[InventoryStore, Depends(get_inventory_store)],
+) -> ManagedNodeCreationMetadataResponse:
+    return store.managed_node_creation_metadata()
+
+
 @router.post("/nodes", response_model=ManagedNodeResponse, status_code=status.HTTP_201_CREATED)
-def create_managed_node(
+async def create_managed_node(
     payload: ManagedNodeCreate,
     store: Annotated[InventoryStore, Depends(get_inventory_store)],
+    connections: Annotated[AgentConnectionManager, Depends(get_agent_connection_manager)],
 ) -> ManagedNodeResponse:
     try:
         node = store.create_managed_node(payload)
     except ServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return ManagedNodeResponse(node=node)
+    except ManagedNodeConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    commands = await _deploy_managed_node_runtime(node, store, connections)
+    return ManagedNodeResponse(node=node, commands=commands)
 
 
 @router.get("/plans", response_model=SubscriptionPlansResponse)

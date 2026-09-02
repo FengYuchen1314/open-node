@@ -1,9 +1,10 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Descriptions, Form, Input, Modal, Space, Spin, Switch, Typography } from "antd";
-import { DeleteOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { BranchesOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { getServerRemoval, getServerSettings, removeServer, updateServerSettings,
   type RemovalPreview, type ServerSettings } from "../../services/server-management";
 import { zhMessage } from "../../i18n/zh-CN";
+import SharedIngressDialog from "./SharedIngressDialog";
 
 export interface ServerManagementDialogProps {
   open: boolean;
@@ -23,6 +24,7 @@ export default function ServerManagementDialog({ open, onOpenChange, serverId, m
   const [confirmName, setConfirmName] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [syncHosts, setSyncHosts] = useState(true);
+  const [sharedIngressOpen, setSharedIngressOpen] = useState(false);
   const [form, setForm] = useState<ServerSettings>(emptySettings);
   const generation = useRef(0);
   const busyRef = useRef(false);
@@ -87,6 +89,7 @@ export default function ServerManagementDialog({ open, onOpenChange, serverId, m
   }
   useLayoutEffect(() => {
     busyRef.current = false;
+    setSharedIngressOpen(false);
     void load();
     return () => { generation.current += 1; };
   }, [open, serverId, mode]);
@@ -111,7 +114,9 @@ export default function ServerManagementDialog({ open, onOpenChange, serverId, m
         <Form.Item label="启用 IPv6"><Switch aria-label="启用 IPv6" checked={form.ipv6_enabled} disabled={busy}
           onChange={ipv6_enabled => setForm(previous => ({ ...previous, ipv6_enabled }))} /></Form.Item>
         <Checkbox checked={syncHosts} disabled={busy} onChange={event => setSyncHosts(event.target.checked)}>更新匹配的节点地址</Checkbox>
+        <div style={{ marginTop: 16 }}><Button icon={<BranchesOutlined aria-hidden />} disabled={busy} onClick={() => setSharedIngressOpen(true)}>443 分流与网站反向代理</Button></div>
       </Form>}
+      {mode === "edit" && sharedIngressOpen && <SharedIngressDialog open serverId={serverId} onOpenChange={setSharedIngressOpen} />}
       {mode === "remove" && preview && <>
         <Typography.Text strong>{preview.server_name}</Typography.Text>
         <Alert type="warning" showIcon title="不会停止远端服务"

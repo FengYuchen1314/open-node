@@ -183,12 +183,12 @@ describe("inventory API client", () => {
       );
     };
 
-    const response = await createServer({ name: "edge", region_city: "Tokyo" }, fetcher);
+    const response = await createServer({ name: "edge", server_kind: "leased-line", region_city: "Tokyo" }, fetcher);
 
     expect(response.license_required).toBe(false);
     expect(response.server.region_city).toBe("Tokyo");
     expect(headers).toEqual({ "Content-Type": "application/json" });
-    expect(body).toEqual({ name: "edge", region_city: "Tokyo" });
+    expect(body).toEqual({ name: "edge", server_kind: "leased-line", region_city: "Tokyo" });
   });
 
   it("lists servers without sending license headers", async () => {

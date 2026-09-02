@@ -42,21 +42,31 @@ def main():
         if args.check_runtime:
             if (config.state_dir / "xray-release-transaction.json").exists():
                 raise RuntimeFailure("Xray release switch is unresolved; wait for Agent recovery")
-            if not read_state(config.state_dir).current.enabled:
-                print("Xray is removed; no runtime process is required")
-                return
+            if read_state(config.state_dir).current.enabled:
+                code, output = asyncio.run(
+                    run_command(
+                        str(selected_binary(config)),
+                        "run",
+                        "-test",
+                        "-config",
+                        str(config.xray_config),
+                    )
+                )
+                if code:
+                    raise RuntimeFailure(
+                        "Selected Xray configuration check failed: " + output[-2000:]
+                    )
             code, output = asyncio.run(
                 run_command(
-                    str(selected_binary(config)),
-                    "run",
-                    "-test",
-                    "-config",
-                    str(config.xray_config),
+                    str(config.mihomo_binary),
+                    "-t",
+                    "-f",
+                    str(config.mihomo_config),
                 )
             )
             if code:
-                raise RuntimeFailure("Selected Xray configuration check failed: " + output[-2000:])
-            print("Selected Xray runtime and configuration are valid")
+                raise RuntimeFailure("Mihomo configuration check failed: " + output[-2000:])
+            print("Selected Xray and Mihomo runtimes and configurations are valid")
             return
         if args.check:
             print("Agent configuration is valid")

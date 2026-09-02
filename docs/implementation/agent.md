@@ -143,9 +143,12 @@ manifest 状态为 `preparing`、`installed`、`failed`、`removing` 或 `remove
 UID/GID、release 名称和目录所有权任一不匹配都会停止操作。
 
 面板一键安装由 Backend 生成固定 installer/release metadata，默认 root 与 unit 带服务器
-UUID 前 12 位。私有 bootstrap job 保存在 `/var/lib/open-node-agent-bootstrap/`，其中配置
-含长期 Agent Token。它不自动启用 remote lifecycle；主机所有者必须运行 `enable-remote`
-并批准固定 HTTPS release source。
+UUID 前 12 位。清单只包含同源 `/api/v1/agents/bootstrap/artifacts/` 路径、精确字节数和
+SHA-256；子机安装时的 wheel、bootstrap、BUILD 和 Xray 文件全部从面板下载，不访问
+GitHub。面板仅代理代码内固定的上游并在发布私有缓存前校验重定向域名、长度和摘要。
+私有 bootstrap job 保存在 `/var/lib/open-node-agent-bootstrap/`，其中配置含长期 Agent
+Token。它不自动启用 remote lifecycle；主机所有者必须运行 `enable-remote` 并批准固定
+HTTPS release source。
 
 ## 一键卸载
 

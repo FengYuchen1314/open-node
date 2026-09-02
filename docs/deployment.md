@@ -1,4 +1,91 @@
-# Control Plane Deployment
+# 控制面部署
+
+普通用户优先按本节或根目录 [README](../README.md) 部署；后面的英文段落保留完整的
+Compose、代理信任、备份和恢复工程契约。
+
+## 中文快速部署
+
+支持全新的 Debian/Ubuntu 主机，需要 root 或 `sudo`。默认公网模式还需要可路由的公网
+IPv4、空闲的 TCP `443` / `58090`，以及到 GitHub、Docker Hub、npm、PyPI 和 Let's
+Encrypt 的出站网络。TCP `80` 无需开放；已有服务占用 `443` 时应改用本页的手动代理
+方案，不能同时启动受管 Caddy。
+
+```bash
+(
+  set -eu
+  as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+      "$@"
+    else
+      command -v sudo >/dev/null 2>&1 || {
+        echo "需要 root 权限或 sudo" >&2
+        return 1
+      }
+      sudo "$@"
+    fi
+  }
+  if ! command -v curl >/dev/null 2>&1; then
+    as_root apt-get update
+    as_root apt-get install -y --no-install-recommends ca-certificates curl
+  fi
+  installer="$(mktemp)" || exit 1
+  trap 'rm -f -- "$installer"' EXIT
+  trap 'exit 1' HUP INT TERM
+  curl -fsSL https://raw.githubusercontent.com/FengYuchen1314/open-node/main/install.sh -o "$installer" || exit 1
+  as_root bash "$installer"
+)
+```
+
+默认安装使用 SQLite，两个独立 HTTPS 服务必须返回相同公网 IPv4。安装器随后为
+`https://公网IP:58090` 申请受系统信任的 Let's Encrypt `shortlived` IP 证书，并把请求
+转发到 `127.0.0.1:62031 → 容器 62031/tcp`。宿主 `62031` 只绑定回环，不需要也不应该
+对公网开放。
+
+安装器会实时输出公网 IP、数据库、应用健康和 HTTPS 证书进度。只有证书、规范 URL 和
+`/healthz` 连续通过后才退出，并输出：
+
+```text
+ACTION_COMPLETE action=install
+```
+
+IP 证书有效期约 160 小时（约 6 天），由 Caddy 自动续签。TCP `443` 用于
+TLS-ALPN-01，首次签发和续签期间都必须从公网可达；`58090` 不能代替验证端口。安装器
+不会在失败时降级到明文 HTTP、自签证书或 `curl -k`。
+
+默认生命周期命令：
+
+```bash
+sudo bash /opt/open-node/install.sh status
+sudo bash /opt/open-node/install.sh update
+sudo bash /opt/open-node/install.sh setup
+sudo bash /opt/open-node/install.sh create-admin
+sudo bash /opt/open-node/install.sh uninstall
+```
+
+`update` 是一键更新入口；官方 `main`、默认 systemd 和完整安装身份通过校验时，也可在
+“系统设置 → 应用更新”执行。`uninstall` 保留数据；需要决定是否清除数据时运行：
+
+```bash
+sudo bash /opt/open-node/uninstall.sh
+```
+
+提示 `是否彻底清除以上数据？[Y/n]` 时，直接回车默认清除，输入 `n` 才保留。脚本必须
+连接交互式 TTY。
+
+安装失败先运行 `status`，再看默认容器日志：
+
+```bash
+sudo bash /opt/open-node/install.sh status
+sudo docker logs --tail 200 open-node-open-node-1
+sudo docker logs --tail 200 open-node-public-gateway
+sudo ss -ltnp | grep -E ':(443|58090|62031)\b'
+curl -fsS https://PUBLIC_IP:58090/healthz
+```
+
+不要使用 `-k`。没有启用公网网关时不存在 `open-node-public-gateway`；自定义项目名、目录
+或端口时，以 `status` 和私有安装清单显示的身份为准。
+
+## 完整工程参考
 
 The root Dockerfile builds React/Ant Design assets and installs FastAPI in one
 image. FastAPI serves both the application and API on container port 62031; Node and Vite

@@ -1,5 +1,6 @@
 """Guarded credential revocation, with durable suspension of empty listeners."""
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -21,7 +22,20 @@ SECRET_FIELDS = {
     "anytls": ("password",),
     "snell": ("psk",),
     "mieru": ("username", "password"),
+    "socks": ("username", "password"),
+    "socks5": ("username", "password"),
 }
+
+
+def client_value(client, field):
+    aliases = {"username": "user", "password": "pass"}
+    return client.get(field) or client.get(aliases.get(field, ""))
+
+
+def client_name(client, protocol=None):
+    if protocol in {"mieru", "socks", "socks5"}:
+        return client.get("username") or client.get("user") or client.get("email")
+    return client.get("email") or client_value(client, "username")
 
 
 def revision(value):
@@ -34,7 +48,8 @@ class AccessEntry(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     tag: str = Field(min_length=1, max_length=255)
     protocol: Literal[
-        "vless", "vmess", "trojan", "shadowsocks", "hysteria", "anytls", "snell", "mieru"
+        "vless", "vmess", "trojan", "shadowsocks", "hysteria", "anytls", "snell", "mieru",
+        "socks", "socks5"
     ]
     client: dict
     enabled: bool
@@ -43,17 +58,26 @@ class AccessEntry(BaseModel):
 
     @model_validator(mode="after")
     def identity(self):
-        for field in ("email", *SECRET_FIELDS[self.protocol]):
-            if not isinstance(self.client.get(field), str) or not self.client[field].strip():
+        identity = client_name(self.client, self.protocol)
+        if not isinstance(identity, str) or not identity.strip():
+            raise ValueError("Access entries require a credential identity")
+        for field in SECRET_FIELDS[self.protocol]:
+            value = (
+                identity
+                if field == "username" and self.protocol in {"mieru", "socks", "socks5"}
+                else client_value(self.client, field)
+            )
+            if not isinstance(value, str) or not value.strip():
                 raise ValueError("Access entries require a complete credential and email")
         if self.limiter and (
-            self.limiter.inbound_tag != self.tag or self.limiter.user.email != self.client["email"]
+            self.limiter.inbound_tag != self.tag
+            or self.limiter.user.email != self.client.get("email")
         ):
             raise ValueError("Access limiter does not match the credential")
         for route in self.routing_user_additions:
             if (
                 set(route) - {"marktag", "outbound_tag", "user_email"}
-                or route.get("user_email") != self.client["email"]
+                or route.get("user_email") != self.client.get("email")
                 or not (route.get("marktag") or route.get("outbound_tag"))
                 or any(not isinstance(value, str) or not value for value in route.values())
             ):
@@ -68,7 +92,7 @@ class AccessRequest(BaseModel):
 
     @model_validator(mode="after")
     def distinct(self):
-        keys = [(item.tag, item.client["email"]) for item in self.entries]
+        keys = [(item.tag, client_name(item.client, item.protocol)) for item in self.entries]
         if len(keys) != len(set(keys)):
             raise ValueError("Duplicate access credential")
         return self
@@ -89,7 +113,7 @@ def clients(inbound):
 
 
 def secret(client, protocol):
-    return tuple(client.get(field) for field in SECRET_FIELDS[protocol])
+    return tuple(client_value(client, field) for field in SECRET_FIELDS[protocol])
 
 
 def skeleton(inbound):
@@ -103,9 +127,10 @@ def skeleton(inbound):
 
 
 class SubscriptionAccess:
-    def __init__(self, runtime, journal):
+    def __init__(self, runtime, journal, managed_protocols=None):
         self.runtime = runtime
         self.journal = journal
+        self.managed_protocols = managed_protocols
 
     def load(self):
         row = self.journal.db.execute(
@@ -140,16 +165,12 @@ class SubscriptionAccess:
                 "INSERT OR REPLACE INTO settings VALUES (?, ?)", (STATE_KEY, encoded)
             )
 
-    async def apply(self, body):
+    def suspended_inbounds(self):
+        return [copy.deepcopy(record["inbound"]) for record in self.load().values()]
+
+    async def _prepare_xray(self, entries):
         # Imported here because Operations owns the existing protocol and routing editors.
         from open_node_agent.operations import edit_client, edit_routing, routing_rule
-
-        try:
-            request = AccessRequest.model_validate(body)
-        except ValidationError as exc:
-            raise RuntimeFailure("Invalid subscription access payload") from exc
-        if revision(body["entries"]) != request.revision:
-            raise RuntimeFailure("Access revision does not match the requested entries")
         await self.runtime.binding()
         original = self.runtime.read()
         config = copy.deepcopy(original)
@@ -160,7 +181,7 @@ class SubscriptionAccess:
         staged = copy.deepcopy(saved)
         targets = {}
         restoring = []
-        for entry in request.entries:
+        for entry in entries:
             if entry.tag in targets:
                 if targets[entry.tag]["protocol"] != entry.protocol:
                     raise RuntimeFailure("Access entries disagree on the inbound protocol")
@@ -181,7 +202,7 @@ class SubscriptionAccess:
                 target = copy.deepcopy(record["inbound"])
                 restoring.append((record["index"], target))
             else:
-                if any(item.enabled and item.tag == entry.tag for item in request.entries):
+                if any(item.enabled and item.tag == entry.tag for item in entries):
                     raise RuntimeFailure(
                         "Access target is missing and was not suspended by this Agent"
                     )
@@ -194,7 +215,7 @@ class SubscriptionAccess:
             inbounds.insert(min(index, len(inbounds)), target)
 
         limits = []
-        for entry in request.entries:
+        for entry in entries:
             target = targets.get(entry.tag)
             if target is None:
                 continue
@@ -221,7 +242,7 @@ class SubscriptionAccess:
             elif matches:
                 edit_client(target, entry.client, remove=True)
 
-        for entry in request.entries:
+        for entry in entries:
             target = targets.get(entry.tag)
             if (
                 target is not None
@@ -254,16 +275,54 @@ class SubscriptionAccess:
         ok, output = await self.runtime.validate(config)
         if not ok:
             raise RuntimeFailure(f"Xray validation failed before access changes: {output}")
-        await self.runtime.limiter.provision(limits, config)
+        return {
+            "original": original,
+            "config": config,
+            "saved": saved,
+            "staged": staged,
+            "suspended": suspended,
+            "limits": limits,
+        }
+
+    async def _commit_xray(self, plan):
+        config = plan["config"]
+        staged = plan["staged"]
+        suspended = plan["suspended"]
+        saved = plan["saved"]
+        await self.runtime.limiter.provision(plan["limits"], config)
         self.save({**saved, **staged})
-        # Even an idempotent retry restarts a running process: a previous interrupted
-        # write may have persisted credentials without activating that configuration.
-        result = await self.runtime.write(config, restart=True, expected=original)
+        try:
+            # Even an idempotent retry restarts a running process: a previous interrupted
+            # write may have persisted credentials without activating that configuration.
+            result = await self.runtime.write(
+                config, restart=True, expected=plan["original"]
+            )
+        except BaseException:
+            self.save(saved)
+            raise
         for tag in suspended:
             staged[tag]["phase"] = "suspended"
-        self.save(staged)
+        try:
+            self.save(staged)
+        except BaseException:
+            try:
+                await asyncio.shield(
+                    self.runtime.write(
+                        plan["original"], restart=True, expected=config
+                    )
+                )
+                self.save(saved)
+            except Exception as rollback_error:
+                raise RuntimeFailure(
+                    "Xray access journal failed after apply and runtime rollback needs review"
+                ) from rollback_error
+            raise
+        return result
+
+    @staticmethod
+    def _access_result(request, result=None):
         return {
-            **result,
+            **(result or {"success": True, "restart_required": False}),
             "access": {
                 "applied": True,
                 "revision": request.revision,
@@ -271,3 +330,52 @@ class SubscriptionAccess:
                 "disabled": sum(not item.enabled for item in request.entries),
             },
         }
+
+    async def apply(self, body):
+        try:
+            request = AccessRequest.model_validate(body)
+        except ValidationError as exc:
+            raise RuntimeFailure("Invalid subscription access payload") from exc
+        if revision(body["entries"]) != request.revision:
+            raise RuntimeFailure("Access revision does not match the requested entries")
+
+        if self.managed_protocols:
+            self.managed_protocols.assert_xray_compatible(self.runtime.read())
+        managed_tags = self.managed_protocols.tags() if self.managed_protocols else set()
+        managed_entries = [entry for entry in request.entries if entry.tag in managed_tags]
+        xray_entries = [entry for entry in request.entries if entry.tag not in managed_tags]
+
+        managed_before = None
+        managed_after = None
+        if managed_entries:
+            managed_before = self.managed_protocols.load()
+            if managed_before is None:
+                raise RuntimeFailure("Managed protocol state disappeared during access update")
+            managed_after = self.managed_protocols.access_candidate(managed_entries)
+            if managed_after is None:
+                raise RuntimeFailure("Managed access target is missing")
+            await self.managed_protocols.validate_request(managed_after)
+
+        xray_plan = await self._prepare_xray(xray_entries) if xray_entries else None
+
+        # Both complete candidates have now passed their native runtime validators.
+        # Commit Mihomo first, so any Xray/limiter failure can restore Mihomo from
+        # its compare-and-swap snapshot without weakening the existing Xray path.
+        if managed_after is not None:
+            await self.managed_protocols.commit_request(
+                managed_after, expected=managed_before
+            )
+        try:
+            xray_result = await self._commit_xray(xray_plan) if xray_plan else None
+        except BaseException:
+            if managed_after is not None:
+                try:
+                    await self.managed_protocols.rollback_request(
+                        managed_before, expected=managed_after
+                    )
+                except Exception as rollback_error:
+                    raise RuntimeFailure(
+                        "Xray access apply failed and Mihomo rollback requires operator review"
+                    ) from rollback_error
+            raise
+        return self._access_result(request, xray_result)

@@ -70,6 +70,7 @@ TXN_BACKUP_CONTAINER=""
 TXN_ROLLBACK_IMAGE=""
 TXN_VERIFY_VOLUME=""
 TXN_CANDIDATE_ACTIVATED=0
+ACTION_COMPLETE_REACHED=0
 
 log() {
   printf '[open-node] %s\n' "$*"
@@ -2601,6 +2602,12 @@ cleanup_partial_backup() {
 cleanup_transaction_on_exit() {
   local status="$?"
   trap - EXIT INT TERM HUP
+  if [[ "$ACTION_COMPLETE_REACHED" != "1" ]]; then
+    warn "ACTION_INCOMPLETE action=$ACTION status=$status; installer exited before completion"
+    if [[ "$status" -eq 0 ]]; then
+      status=1
+    fi
+  fi
   case "$TXN_PHASE" in
     idle|handled|commit-complete)
       ;;
@@ -3570,6 +3577,7 @@ main() {
     create-admin) create_admin_action ;;
     setup) verify_administrator_action; prepare_browser_setup ;;
   esac
+  ACTION_COMPLETE_REACHED=1
   log "ACTION_COMPLETE action=$ACTION"
 }
 

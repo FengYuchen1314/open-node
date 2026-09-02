@@ -1,146 +1,126 @@
-# Panel-issued Agent installation
+# 从面板一键安装 Agent
 
-The panel follows the official MMWX workflow: create a server, generate its
-installation command, run that command on the remote host, and observe the
-Agent connecting. The behavioral references are the
-[official Agent deployment guide](https://miaomiaowux.com/docs/en/install-agent/)
-and `GetRemoteInstallScript` in the pinned control-plane repository
-`tajiaoyezi/miaomiaowuX` at `c12ce653bc07fe30426b7dfcb85076974b7be0e0`.
-Open Node does not copy the reference's licensing checks or its automatic
-takeover of an existing service.
+Open Node 沿用官方 MMWX 的操作习惯：先在控制面创建服务器，再由面板生成只属于该记录的
+安装命令，最后到远端主机执行并等待 Agent 上线。当前自动安装面向全新的
+**Debian 12 amd64** 主机，要求 root、systemd、Python 3.11+ 和可信 HTTPS；它不会迁移
+整机、自动接管已有 Xray/systemd 服务，也不会安装控制面。
 
-This is a new-host installer for **Debian 12 amd64, Python 3.11+, curl and
-systemd**. It installs a dedicated non-root Agent and a separately managed
-official Xray. It is not a whole-server migration tool, does not configure
-DNS/public TLS, and does not install the control plane itself.
+## 安装前检查
 
-## Before generating a command
+远端服务器必须能通过可信 HTTPS 访问控制面的规范地址。使用根一键安装器部署控制面时，
+该地址会自动设为域名入口，或默认的 `https://公网IP:58090`。必须等控制面安装终端输出：
 
-The remote host must reach the control plane through a trusted HTTPS URL. Set
-`OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL` to that canonical control-plane URL, for
-example `https://control.example.com`. Do not use the public Probe Worker URL.
-The default `/api/v1` API prefix is required. A canonical reverse-proxy path
-prefix is supported; encoded paths, dot segments, query strings, fragments and
-embedded credentials are rejected. Request `Host`/forwarded headers never
-choose the URL embedded in a command.
+```text
+ACTION_COMPLETE action=install
+```
 
-For a manually managed Compose deployment, persist this setting in the private
-environment file used by that deployment and recreate its container using the
-same project, volume and reviewed image. For an installer-managed deployment,
-use the reviewed root installer's explicit setting override; do not hand-edit
-its identity-tracked environment or manifest. See [control-plane
-deployment](deployment.md) for the guarded update procedure.
+再生成 Agent 命令。公网 IP 模式需要让 TCP `443` 持续可达，以便控制面 IP 证书签发和
+续期；`58090` 是面板日常 HTTPS 端口。不要把 Probe Worker 地址当作控制面地址。
 
-The panel remains disabled until a canonical HTTPS URL and bundled, verified
-release metadata are available. This setting does not create DNS records,
-certificates, proxy rules or a Cloudflare account deployment. The remote host
-also needs outbound HTTPS access to GitHub release assets and the package
-repositories used by pip. If Python's venv support or the system CA bundle is
-missing, the generated command permits installation of the fixed Debian
-packages; it does not run a general operating-system upgrade.
+自定义可信反向代理时，可在受管更新中明确设置：
 
-## Install from the panel
+```bash
+sudo env OPEN_NODE_AGENT_BOOTSTRAP_PUBLIC_URL=https://panel.example.com \
+  bash /opt/open-node/install.sh update
+```
 
-1. In the control-plane Overview, create a new server. Do not reuse a server
-   that has already registered an Agent or reported a heartbeat.
-2. Select **Install Agent** in the creation result or the server's console
-   action. Opening the dialog only reads status; it does not issue a ticket.
-3. Choose Auto, WebSocket or HTTP polling. Confirm that this is a new Debian
-   12 amd64 host dedicated to this server record, then generate the command.
-4. Copy and run the complete command in a root shell on that host. Keep it
-   private: the command contains a short-lived installation ticket.
-5. Wait for `Agent installed and ready` from the installer. Check the Agent
-   version, heartbeat and runtime telemetry in the panel before provisioning
-   users or proxy inbounds.
+地址只能是规范的 HTTPS URL，可带固定路径前缀；账号密码、查询参数、片段、点路径和编码
+绕过会被拒绝。不要手改安装器跟踪的 `/etc/open-node/open-node.env` 或安装清单。
 
-The command downloads the installer over HTTPS into a private temporary file,
-checks its SHA-256 against the bytes pinned when the command was generated,
-and only then executes it. The installer downloads versioned Agent artifacts,
-checks their pinned hashes and `BUILD.json` source/version identity, and safely
-extracts the host installer. It separately verifies the pinned official Xray
-archive. Neither an unpinned `latest` download nor `curl | bash` is used.
+## 面板操作
 
-The bundled selection is Agent `0.3.0a2` (an alpha/Preview prerelease) and
-official Xray `v26.3.27` for x86-64. The exact artifact identities are in
-`backend/app/open_node/resources/agent-release.json` and the
-[Agent release record](releases/agent-0.3.0a2.md). New installation configs enable
-online-user statistics on policy level 0, and the Agent reports its owned Nginx
-version when configured; existing hosts are not changed.
+1. 在“服务器”中新建一条记录，不要复用已经注册或仍在心跳的 Agent 身份。
+2. 打开“安装 Agent”。打开窗口只读取状态，不会立即签发票据。
+3. 选择自动、WebSocket 或 HTTP 轮询，确认目标是新的 Debian 12 amd64 主机。
+4. 生成并完整复制命令，在目标主机的 root shell 中执行。命令含短期、一次性安装票据，
+   不要发到聊天、工单或公开日志。
+5. 保持终端打开。只有出现 `Agent installed and ready: ...` 才算完成；随后回到面板核对
+   Agent 版本、心跳、运行时和遥测。
 
-The initial Xray configuration has a loopback-only StatsService, a direct
-outbound and **no public proxy inbound**. Create the intended nodes/inbounds
-separately. Nginx, WARP, raw network capabilities, remote privileged Agent
-lifecycle, and fork-only protocols are not enabled by this entry point. A
-separately reviewed runtime is still needed for protocols absent from the
-official Xray binary. See [fork runtime](fork-runtime.md) and
-[manual Agent deployment](agent-deployment.md).
+安装失败不会伪装成成功，也不会只因为 systemd 进程启动就退出。安装器会等待执行中的
+release、最新本机健康状态、与控制面的认证连接以及受管运行时的期望状态。失败时会保留
+私有输入和诊断信息，供同一安装身份修复和重试。
 
-## Tickets and installation state
+## 文件从哪里下载
 
-- A ticket lasts ten minutes and is stored as a hash, not plaintext, in the
-  control-plane ticket table. The command never contains the long-lived Agent
-  credential; that credential is delivered in an HTTPS POST response.
-- Generating a replacement invalidates an **unclaimed** command. Once claimed,
-  this server cannot receive another installation ticket, even after expiration
-  or revocation. This prevents accidentally placing the same long-lived
-  credential on two machines.
-- The installer persists a private claim nonce before redeeming. After the
-  first claim, only that same nonce can retry for at most two minutes and never
-  beyond the ticket's original expiry. A different nonce is rejected. Once
-  saved locally, the credential is not subject to that retry deadline.
-- Ticket revocation stops future redemption, including retry. It does not
-  retract an already-delivered Agent credential or stop an installed Agent.
-  Use the explicit server/host lifecycle procedures for those operations.
-- **Ticket claimed** and **Agent registered** are distinct observations.
-  Neither alone proves installation succeeded. The host installer requires the
-  expected package version, non-root process identity, authenticated connection
-  and ready runtime before reporting success.
-- Status never returns a ticket or long-lived credential. The dialog clears its
-  command when closed, when switching servers, on replacement/expiration/claim,
-  and after an authentication/status failure. It never persists the command in
-  browser storage. An explicitly copied command can remain in your clipboard or
-  shell history; the panel cannot erase those copies.
+远端 Agent 主机的所有项目文件和固定运行时制品都只从控制面同源端点获取：
 
-Private management routes require administrator authentication and CSRF/Origin
-checks. Public redemption rejects cross-origin browser requests, bounds JSON
-input, rejects duplicate/unknown fields and applies a persistent per-peer rate
-limit in a namespace separate from administrator login. Errors never repeat
-submitted secrets. Installation responses carry `Cache-Control: no-store` and
-`Referrer-Policy: no-referrer`. None of these bootstrap endpoints are allowed
-through the anonymous public Probe Worker.
+```text
+/api/v1/agents/bootstrap/manifest
+/api/v1/agents/bootstrap/installer.py
+/api/v1/agents/bootstrap/artifacts/<固定文件名>
+/api/v1/agents/bootstrap/redeem
+```
 
-## Recovery and ownership
+当前 manifest schema 2 包含 Agent `0.3.0a2` wheel、bootstrap 包、`BUILD.json`、官方
+Xray `v26.3.27` 归档和固定的 Mihomo `v1.19.30` 制品。面板生成命令时会把 installer
+SHA-256 固定下来；installer 再逐项校验 manifest 中的精确路径、文件大小、SHA-256、
+Agent 版本和源码身份。Agent 主机拒绝制品重定向，不使用 `latest`，也不执行
+`curl | bash`。
 
-The installation root and unit use the first twelve hexadecimal digits of the
-server UUID: `/opt/open-node-agent-<suffix>` and
-`open-node-agent-<suffix>.service`. An existing root, account, group, unit or
-drop-in with that identity is rejected, not adopted. The installer neither stops
-nor rewrites unrelated MMWX, Xray or Nginx services.
+控制面自身只代理 manifest 中固定的第三方版本，限制允许的源地址和重定向主机，下载后
+验证字节数和 SHA-256，再写入私有缓存。因而 Agent 主机无需访问 GitHub、项目 Release
+或第三方制品站。若系统缺少 `python3-venv` 或 CA 包，生成命令可以从该主机已经配置的
+Debian APT 仓库安装这两个固定依赖；这不等于所有操作系统软件包都由面板分发，也不会
+执行系统大升级。
 
-Private inputs are retained under
-`/var/lib/open-node-agent-bootstrap/<server-uuid-hex>-<ticket-hash-prefix>`.
-The directory is root-owned mode `0700`; claim/configuration files are `0600`.
-There is no raw ticket in the saved job. The local claim/configuration **does**
-contain the long-lived credential: do not publish it as a diagnostic artifact.
+## 安装结果和安全边界
 
-If download fails before claiming, an unexpired command can be retried. If
-claiming succeeded but no host resources were created, retry the same command
-on the same host; the saved inputs preserve its identity. Partial host
-installation is deliberately not auto-adopted. Follow the existing host
-installer's status/recovery workflow using its retained, verified `service.py`,
-the exact root and unit. Do not work around a failure by issuing another server
-record against an unexplained existing installation or copying its credential
-elsewhere. A control-plane upgrade may change the installer checksum and cause
-an older copied command to fail closed.
+- Agent 使用无登录专用账号和 systemd 运行，不以 root 常驻。
+- Token、配置、命令 journal、状态和缓存使用私有目录；程序、bootstrap 与安装元数据由
+  root 拥有。
+- 受管 Xray 和 Mihomo 文件进入安装根，不覆盖同机未知服务。初始运行时不会自动创建公网
+  代理入站；节点配置由后续受管命令生成。
+- 自动模式优先 WebSocket，必要时回退到 HTTP 轮询。两种方式共享同一认证、命令租约、
+  幂等重放和结果确认规则。
+- 复制过的旧命令可能因票据过期、已兑换、服务器身份变化或控制面更新后 installer
+  checksum 改变而失败。这些情况应回面板重新读取状态并签发命令，不要绕过校验。
 
-For a deliberately private PKI, use a root-owned trusted CA file and set
-`CURL_CA_BUNDLE` for the initial control-plane download and
-`OPEN_NODE_AGENT_CA_FILE` for the Python control-plane client. The CA is copied
-into the owned Agent configuration. GitHub downloads continue to use the Debian
-system CA bundle; a custom control-plane CA does not authorize release assets.
-Do not disable TLS verification.
+私有 CA 场景可为初始 `curl` 设置 root 管理的 `CURL_CA_BUNDLE`，并通过
+`OPEN_NODE_AGENT_CA_FILE` 让 Python 客户端使用同一受信 CA。CA 会复制到 Agent 私有
+配置；因为安装制品全部来自控制面同源，它也验证这些下载。禁止使用 `-k`、关闭证书验证
+或把私有 CA 扩展为对任意外部下载站的信任。
 
-The [testing guide](testing.md) distinguishes security/unit tests, production
-browser acceptance, real systemd bootstrap over both transports, and the
-published Agent download/upgrade/rollback gate. A synthetic registration in a
-browser fixture is not counted as a real installation.
+## 状态和日志
+
+默认 unit 是 `open-node-agent.service`：
+
+```bash
+sudo systemctl status open-node-agent.service --no-pager
+sudo journalctl -u open-node-agent.service -n 200 --no-pager
+```
+
+自定义实例名使用 `open-node-agent-<instance>.service`，把命令里的 unit 替换为安装器实际
+显示的名称。面板中的心跳、版本和命令结果仍是判断认证连接是否完成的依据；本机 unit
+显示 active 不能替代面板确认。
+
+## 卸载
+
+一键安装会留下可校验的 bootstrap helper。也可完整下载仓库里的交互式卸载脚本：
+
+```bash
+(
+  uninstaller="$(mktemp)" || exit 1
+  trap 'rm -f -- "$uninstaller"' EXIT
+  trap 'exit 1' HUP INT TERM
+  curl -fsSL https://raw.githubusercontent.com/FengYuchen1314/open-node/main/agent/uninstall.sh -o "$uninstaller" || exit 1
+  sudo bash "$uninstaller"
+)
+```
+
+脚本必须在交互式 TTY 中运行。它先验证 unit、安装根和 manifest，并在多实例时要求选择
+一个，然后询问 `是否彻底清除以上数据？[Y/n]`。直接回车或输入 `y` 默认彻底清除；输入
+`n` 只删除运行单元和 release 环境，保留配置、Token、journal、日志、运行时和恢复文件。
+非 TTY、EOF、无效输入或身份不一致都会停止。
+
+自定义安装可在已审阅 checkout 中明确指定：
+
+```bash
+sudo bash agent/uninstall.sh \
+  --root /opt/open-node-agent-edge \
+  --unit open-node-agent-edge.service
+```
+
+本机卸载不会自动删除控制面中的服务器记录或 Agent Token，也不会撤销已经下发的公网
+入站、外部 DNS/证书和客户端凭据。应先按实际运行模式撤销这些资源，再卸载 Agent。
+更完整的手工安装、升级、回滚和恢复说明见[Agent 部署](agent-deployment.md)。

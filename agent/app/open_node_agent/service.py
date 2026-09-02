@@ -770,7 +770,16 @@ WantedBy=multi-user.target
             if private:
                 os.chown(path, *self.account_owner())
 
-    def prepare_config(self, release, source, xray_config, xray_binary, asset_dir=None):
+    def prepare_config(
+        self,
+        release,
+        source,
+        xray_config,
+        xray_binary,
+        mihomo_config,
+        mihomo_binary,
+        asset_dir=None,
+    ):
         python = self.release_path(release) / "bin/python"
         script = (
             "import json,sys; from open_node_agent.config import load_config; "
@@ -787,12 +796,15 @@ WantedBy=multi-user.target
             state_dir=str(self.state),
             xray_binary=str(self.root / "runtime/xray"),
             xray_config=str(self.root / "config/xray.json"),
+            mihomo_binary=str(self.root / "runtime/mihomo"),
+            mihomo_config=str(self.root / "config/mihomo.yaml"),
         )
         if config.get("ca_file"):
             target = self.root / "config/ca.pem"
             write_file(target, Path(config["ca_file"]).read_bytes(), owner=self.account_owner())
             config["ca_file"] = str(target)
         write_file(self.root / "runtime/xray", xray_binary.read_bytes(), mode=0o755)
+        write_file(self.root / "runtime/mihomo", mihomo_binary.read_bytes(), mode=0o755)
         if config.get("nginx_binary"):
             target = self.root / "runtime/nginx"
             write_file(target, Path(config["nginx_binary"]).read_bytes(), mode=0o755)
@@ -817,6 +829,11 @@ WantedBy=multi-user.target
                     )
         write_file(
             self.root / "config/xray.json", xray_config.read_bytes(), owner=self.account_owner()
+        )
+        write_file(
+            self.root / "config/mihomo.yaml",
+            mihomo_config.read_bytes(),
+            owner=self.account_owner(),
         )
         write_file(self.config, json.dumps(config, indent=2).encode(), owner=self.account_owner())
 
@@ -856,6 +873,9 @@ else:
         raise SystemExit(0)
     binary = selected_binary(config)
 subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)], check=True)
+subprocess.run(
+    [str(config.mihomo_binary), '-t', '-f', str(config.mihomo_config)], check=True
+)
 """
         command("runuser", "-u", self.user, "--", python, "-c", script, self.config)
 
@@ -999,14 +1019,16 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
         source=None,
         xray_config=None,
         xray_binary=None,
+        mihomo_config=None,
+        mihomo_binary=None,
         asset_dir=None,
         *,
         network_diagnostics=False,
     ):
         if not self.root.exists():
-            if not all((source, xray_config, xray_binary)):
+            if not all((source, xray_config, xray_binary, mihomo_config, mihomo_binary)):
                 raise DeploymentError(
-                    "Fresh installation requires --config, --xray-config, and --xray"
+                    "Fresh installation requires Agent, Xray, and Mihomo inputs"
                 )
             wheel_info(wheel)
             self.initialize(network_diagnostics=network_diagnostics)
@@ -1022,20 +1044,28 @@ subprocess.run([str(binary), 'run', '-test', '-config', str(config.xray_config)]
             if self.record["status"] not in {"removed", "failed", "preparing"}:
                 raise DeploymentError("Already installed; use upgrade")
             if self.record["status"] == "removed" and any(
-                (source, xray_config, xray_binary, asset_dir)
+                (source, xray_config, xray_binary, mihomo_config, mihomo_binary, asset_dir)
             ):
                 raise DeploymentError(
                     "Reinstallation preserves existing configuration; omit source options"
                 )
-            if any((source, xray_config, xray_binary)) and not all(
-                (source, xray_config, xray_binary)
+            if any((source, xray_config, xray_binary, mihomo_config, mihomo_binary)) and not all(
+                (source, xray_config, xray_binary, mihomo_config, mihomo_binary)
             ):
                 raise DeploymentError(
-                    "Retry requires all three source options, or none to keep existing files"
+                    "Retry requires every Agent, Xray, and Mihomo source option"
                 )
         release = self.stage(wheel)
         if source:
-            self.prepare_config(release, source, xray_config, xray_binary, asset_dir)
+            self.prepare_config(
+                release,
+                source,
+                xray_config,
+                xray_binary,
+                mihomo_config,
+                mihomo_binary,
+                asset_dir,
+            )
         self.preflight(release)
         if self.unit_file.exists() or self.unit_file.is_symlink():
             self.verify_unit()
@@ -1122,6 +1152,8 @@ def main():
     install.add_argument("--config", type=Path)
     install.add_argument("--xray-config", type=Path)
     install.add_argument("--xray", type=Path)
+    install.add_argument("--mihomo-config", type=Path)
+    install.add_argument("--mihomo", type=Path)
     install.add_argument("--asset-dir", type=Path)
     install.add_argument(
         "--network-diagnostics",
@@ -1159,6 +1191,8 @@ def main():
                     args.config,
                     args.xray_config,
                     args.xray,
+                    args.mihomo_config,
+                    args.mihomo,
                     args.asset_dir,
                     network_diagnostics=args.network_diagnostics,
                 )

@@ -54,6 +54,9 @@ def api_context(tmp_path: Path, **settings) -> Iterator[BootstrapAPI]:
         database_url=f"sqlite:///{(tmp_path / 'bootstrap-api.db').as_posix()}",
         certificate_state_dir=tmp_path / "certificates",
         agent_bootstrap_public_url=settings.pop("agent_bootstrap_public_url", CONTROL_URL),
+        agent_bootstrap_artifact_dir=settings.pop(
+            "agent_bootstrap_artifact_dir", tmp_path / "agent-artifacts"
+        ),
         **settings,
     )
     app = create_app(configured)
@@ -197,6 +200,51 @@ def test_installer_download_is_public_and_exact_bytes_are_checksum_bound_in_comm
     assert manifest.json() == releases.release_manifest()
     assert agent_installer.validate_manifest(manifest.json()) == manifest.json()
     assert not api.public.cookies
+
+
+def test_every_deployment_artifact_is_served_by_the_panel_with_manifest_pins(
+    api, monkeypatch, tmp_path,
+):
+    manifest = releases.release_manifest()
+    artifacts = [
+        manifest["agent"][key] for key in ("wheel", "bootstrap", "build")
+    ] + [manifest["xray"]["archive"], *manifest["mihomo"]["assets"].values()]
+    requested = []
+
+    def local_artifact(filename):
+        descriptor = api.app.state.agent_bootstrap_artifacts.descriptor(filename)
+        target = tmp_path / filename
+        target.write_bytes(b"fixture")
+        requested.append(filename)
+        return target, releases.AgentArtifact(
+            filename=descriptor.filename,
+            path=descriptor.path,
+            sha256=descriptor.sha256,
+            size=len(b"fixture"),
+            upstream=descriptor.upstream,
+        )
+
+    monkeypatch.setattr(api.app.state.agent_bootstrap_artifacts, "get", local_artifact)
+    for artifact in artifacts:
+        response = api.public.get(artifact["path"])
+        assert response.status_code == 200
+        private(response)
+        assert response.content == b"fixture"
+        assert response.headers["x-content-sha256"] == artifact["sha256"]
+        assert response.headers["content-disposition"].endswith(
+            f'filename="{artifact["filename"]}"'
+        )
+        assert artifact["path"] == api.public_path + "/artifacts/" + artifact["filename"]
+    assert requested == [artifact["filename"] for artifact in artifacts]
+    assert all("github" not in artifact["path"].lower() for artifact in artifacts)
+
+
+def test_unknown_panel_artifact_fails_closed_without_redirecting(api):
+    response = api.public.get(api.public_path + "/artifacts/not-a-release.bin")
+    assert response.status_code == 503
+    private(response)
+    assert response.headers.get("location") is None
+    assert response.json() == {"detail": "Unknown Agent artifact"}
 
 
 def test_control_url_uses_explicit_settings_not_host_or_forwarding_headers(api):
@@ -608,7 +656,7 @@ def test_missing_or_unusable_resources_disable_issue(api, monkeypatch, tmp_path,
 @pytest.mark.parametrize(
     "invalid",
     [
-        "json", "duplicate", "boolean_schema", "extra_field", "missing_build", "url",
+        "json", "duplicate", "boolean_schema", "extra_field", "missing_build", "path",
         "hash", "source", "tag", "xray", "extra_artifact_field", "nonfinite", "large", "deep",
     ],
 )
@@ -622,8 +670,8 @@ def test_invalid_release_manifest_is_unavailable_before_issuing_commands(
         manifest["extra"] = INPUT_SECRET
     elif invalid == "missing_build":
         del manifest["agent"]["build"]
-    elif invalid == "url":
-        manifest["agent"]["wheel"]["url"] = "https://untrusted.example/wheel.whl"
+    elif invalid == "path":
+        manifest["agent"]["wheel"]["path"] = "/untrusted/agent.whl"
     elif invalid == "hash":
         manifest["agent"]["wheel"]["sha256"] = INPUT_SECRET
     elif invalid == "source":

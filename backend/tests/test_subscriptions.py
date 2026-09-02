@@ -576,30 +576,31 @@ def test_subscription_node_preset_creates_renderable_node(tmp_path: Path) -> Non
     presets = presets_response.json()["presets"]
     assert presets_response.json()["license_required"] is False
     assert [preset["id"] for preset in presets] == [
-        "vless-vision-tls",
-        "trojan-tls",
-        "shadowsocks-2022",
-        "hysteria2",
-        "anytls",
-        "snell-v4",
-        "snell-v6",
+        "vless-reality-vision",
+        "vless-xhttp-reality-xmux",
+        "anytls-shadowtls",
         "mieru",
-        "routed-outbound",
+        "socks5",
     ]
     presets_by_id = {preset["id"]: preset for preset in presets}
-    assert presets_by_id["anytls"]["config"]["idle-session-check-interval"] == 30
-    assert presets_by_id["snell-v6"]["client_template"]["v6Mode"] == "default"
-    assert "clientId" not in presets_by_id["snell-v6"]["client_template"]
+    assert presets_by_id["anytls-shadowtls"]["config"]["idle-session-check-interval"] == 30
+    assert "shadow-tls" not in presets_by_id["anytls-shadowtls"]["config"]
+    assert presets_by_id["vless-xhttp-reality-xmux"]["config"]["xhttp-opts"][
+        "reuse-settings"
+    ]["max-concurrency"] == "16-32"
+    assert presets_by_id["anytls-shadowtls"]["config"]["shadow-tls-opts"] == {"version": 3}
     assert presets_by_id["mieru"]["config"]["transport"] == "TCP"
     assert presets_by_id["mieru"]["config"]["udp"] is False
 
     create_response = client.post(
-        "/api/v1/node-presets/vless-vision-tls/nodes",
+        "/api/v1/node-presets/vless-reality-vision/nodes",
         json={
             "server_id": server_id,
             "name": "Preset vless",
             "host": "edge.example.com",
             "port": 8443,
+            "camouflage_pool_id": "los-angeles-ucla",
+            "camouflage_sni": "www.ucla.edu",
             "tags": ["preset", "premium"],
         },
     )
@@ -607,27 +608,23 @@ def test_subscription_node_preset_creates_renderable_node(tmp_path: Path) -> Non
     assert create_response.status_code == 201
     node = create_response.json()["node"]
     assert node["protocol"] == "vless"
-    assert node["inbound_tag"] == "vless-443"
+    assert node["inbound_tag"] == f"open-node-{node['id']}"
     assert node["tags"] == ["preset", "premium"]
-    assert node["config"]["server"] == "edge.example.com"
-    assert node["config"]["port"] == 8443
+    assert node["config"]["server"] == "preset.example.com"
+    assert node["config"]["port"] == 443
+    assert node["protocol_profile"] == "vless-reality-vision"
+    assert node["camouflage_pool_id"] == "los-angeles-ucla"
+    assert node["camouflage_sni"] == "www.ucla.edu"
     assert node["client_template"]["flow"] == "xtls-rprx-vision"
 
-    snell_response = client.post(
+    hidden_response = client.post(
         "/api/v1/node-presets/snell-v6/nodes",
         json={
             "server_id": server_id,
             "host": "snell.example.com",
         },
     )
-    assert snell_response.status_code == 201
-    snell_node = snell_response.json()["node"]
-    assert snell_node["protocol"] == "snell"
-    assert snell_node["inbound_tag"] == "snell-v6-443"
-    assert snell_node["config"]["server"] == "snell.example.com"
-    assert snell_node["config"]["version"] == 6
-    assert snell_node["client_template"]["v6Mode"] == "default"
-    assert "clientId" not in snell_node["client_template"]
+    assert hidden_response.status_code == 404
 
 
 def test_xray_fork_protocols_provision_and_render_subscriptions(tmp_path: Path) -> None:

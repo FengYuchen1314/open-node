@@ -79,6 +79,10 @@ class Agent:
             and not self.runtime.binding_error
             and (not desired or running)
             and (
+                not self.operations.managed_protocols.active()
+                or await self.operations.managed_protocols.runtime.running()
+            )
+            and (
                 not self.journal.desired_running(False, "nginx")
                 or await self.operations.nginx.running()
             ),
@@ -110,6 +114,7 @@ class Agent:
                 "native_limiter": True,
                 "user_auto_speed_rules": True,
                 "subscription_access": True,
+                "managed_protocols": True,
                 "node_cleanup": True,
                 "xray_config_workspace": True,
                 "agent_switch_xray_mode": False,
@@ -391,6 +396,14 @@ class Agent:
                 )
             try:
                 async with self.runtime.lock:
+                    await self.operations.managed_protocols.ensure_started()
+            except (OSError, ValueError, TimeoutError) as exc:
+                log.warning(
+                    "Mihomo unavailable (%s); agent connection remains active",
+                    type(exc).__name__,
+                )
+            try:
+                async with self.runtime.lock:
                     if self.journal.desired_running(False, "nginx"):
                         await self.operations.nginx.start()
             except (OSError, ValueError, TimeoutError) as exc:
@@ -437,5 +450,6 @@ class Agent:
                 await task
         await self.operations.http01.close()
         await self.operations.nginx.close()
+        await self.operations.managed_protocols.close()
         await self.runtime.close()
         self.journal.close()

@@ -33,9 +33,9 @@ def certificate(domain="localhost", *, expired=False, not_yet_valid=False, ip_sa
         .not_valid_before(now + timedelta(days=1) if not_yet_valid else now - timedelta(days=2))
         .not_valid_after(now + timedelta(days=-1 if expired else 3))
         .add_extension(
-            x509.SubjectAlternativeName([
-                x509.IPAddress(ip_address(domain)) if ip_san else x509.DNSName(domain)
-            ]),
+            x509.SubjectAlternativeName(
+                [x509.IPAddress(ip_address(domain)) if ip_san else x509.DNSName(domain)]
+            ),
             critical=False,
         )
         .sign(key, hashes.SHA256())
@@ -102,10 +102,19 @@ async def test_ip_san_certificate_deployment_keeps_exact_matching_and_owned_path
             validate_pair(domain + "%eth0", cert, key)
     nginx = agent.operations.nginx
     await seed(nginx)
-    response = await nginx.handle("POST", "/api/child/cert/deploy", {
-        "domain": domain, "cert_pem": cert, "key_pem": key,
-        "cert_path": "private-ip.pem", "key_path": "private-ip.key", "reload": "none",
-    }, {})
+    response = await nginx.handle(
+        "POST",
+        "/api/child/cert/deploy",
+        {
+            "domain": domain,
+            "cert_pem": cert,
+            "key_pem": key,
+            "cert_path": "private-ip.pem",
+            "key_path": "private-ip.key",
+            "reload": "none",
+        },
+        {},
+    )
     assert response["success"] and key not in str(response)
     assert nginx.cert_path("private-ip.pem").read_text() == cert
     assert nginx.cert_path("private-ip.key").read_text() == key
@@ -517,3 +526,220 @@ async def test_dynamic_content_and_certificate_paths_cannot_escape_owned_roots(a
         nginx.site_path(str(nginx.html / "$uri"))
     with pytest.raises(RuntimeFailure, match="Dynamic"):
         nginx.cert_path("$ssl_server_name.pem")
+
+
+def shared_ingress_body(*, website=False):
+    body = {
+        "listen_port": 443,
+        "listen_ipv6": True,
+        "routes": [
+            {
+                "node_id": "11111111-1111-4111-8111-111111111111",
+                "profile": "vless-reality-vision",
+                "sni": "vision.example.com",
+                "upstream_address": "127.0.0.1",
+                "upstream_port": 62041,
+            },
+            {
+                "node_id": "22222222-2222-4222-8222-222222222222",
+                "profile": "vless-xhttp-reality-xmux",
+                "sni": "xhttp.example.com",
+                "upstream_address": "::1",
+                "upstream_port": 62042,
+            },
+            {
+                "node_id": "33333333-3333-4333-8333-333333333333",
+                "profile": "anytls-shadowtls",
+                "sni": "anytls.example.com",
+                "upstream_address": "127.0.0.1",
+                "upstream_port": 62043,
+            },
+        ],
+        "website": None,
+    }
+    if website:
+        body["website"] = {
+            "sni": "www.example.com",
+            "upstream_url": "https://example.com/app",
+            "tls_address": "127.0.0.1",
+            "tls_port": 62044,
+            "certificate_name": "www.example.com",
+            "redirect_http": True,
+        }
+    return body
+
+
+def shared_ingress_deployment(configuration, revision=1):
+    return {"revision": revision, "configuration": configuration}
+
+
+async def test_shared_ingress_compiles_three_passthrough_profiles_and_website(agent):
+    nginx = agent.operations.nginx
+    cert, key = certificate("www.example.com")
+    atomic_write(nginx.cert_path("www.example.com.pem"), cert.encode())
+    atomic_write(nginx.cert_path("www.example.com.key"), key.encode())
+    nginx.start = AsyncMock()
+
+    body = shared_ingress_body(website=True)
+    result = await nginx.handle(
+        "PUT",
+        "/api/child/nginx/shared-ingress",
+        shared_ingress_deployment(body),
+        {},
+    )
+    assert result["success"] and result["configuration"] == body
+    stream = nginx.shared_ingress_stream.read_text()
+    assert stream.count("vision.example.com") == 1
+    assert stream.count("xhttp.example.com") == 1
+    assert stream.count("anytls.example.com") == 1
+    assert "www.example.com" in stream
+    assert "ssl_preread on;" in stream
+    assert "proxy_pass $open_node_shared_ingress_upstream;" in stream
+    assert "listen 0.0.0.0:443;" in stream
+    assert "listen 0.0.0.0:443 ssl" not in stream
+    assert "127.0.0.1:62041" in stream and "[::1]:62042" in stream
+
+    website = nginx.shared_ingress_website.read_text()
+    assert "listen 127.0.0.1:62044 ssl;" in website
+    assert "proxy_pass https://example.com/app;" in website
+    assert "proxy_ssl_verify on;" in website
+    assert "return 308 https://$host$request_uri;" in website
+    assert "include stream_servers/*.conf;" in nginx.main.read_text()
+    assert "$open_node_shared_connection_upgrade" in nginx.main.read_text()
+    assert nginx.shared_ingress_state()["configuration"] == body
+    assert nginx.shared_ingress_state()["revision"] == 1
+
+    # Reapplying the same declaration is intentionally idempotent.
+    await nginx.handle(
+        "PUT",
+        "/api/child/nginx/shared-ingress",
+        shared_ingress_deployment(body),
+        {},
+    )
+    assert nginx.main.read_text().count("$open_node_shared_connection_upgrade") == 1
+
+    deleted = await nginx.handle("DELETE", "/api/child/nginx/shared-ingress", {"revision": 2}, {})
+    assert deleted["success"] and deleted["configuration"] is None
+    assert not nginx.shared_ingress_stream.exists()
+    assert not nginx.shared_ingress_website.exists()
+    assert nginx.shared_ingress_state()["configuration"] is None
+    assert nginx.shared_ingress_state()["revision"] == 2
+    with pytest.raises(RuntimeFailure, match="stale"):
+        await nginx.handle(
+            "PUT",
+            "/api/child/nginx/shared-ingress",
+            shared_ingress_deployment(body),
+            {},
+        )
+
+    # Leave one compiled candidate available to real-Nginx smoke jobs.
+    await nginx.handle(
+        "PUT",
+        "/api/child/nginx/shared-ingress",
+        shared_ingress_deployment(body, revision=3),
+        {},
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate,message",
+    [
+        (lambda body: body.update({"listen_port": 444}), "literal_error"),
+        (
+            lambda body: body["routes"][0].update({"upstream_address": "0.0.0.0"}),
+            "literal_error",
+        ),
+        (
+            lambda body: body["routes"][0].update({"upstream_port": 443}),
+            "greater_than_equal",
+        ),
+        (
+            lambda body: body["routes"][1].update({"sni": body["routes"][0]["sni"]}),
+            "duplicate SNI",
+        ),
+        (
+            lambda body: body["routes"][1].update(
+                {"upstream_port": body["routes"][0]["upstream_port"]}
+            ),
+            "duplicate internal port",
+        ),
+    ],
+)
+async def test_shared_ingress_rejects_unsafe_or_ambiguous_routes_without_writes(
+    agent, mutate, message
+):
+    nginx = agent.operations.nginx
+    body = shared_ingress_body()
+    mutate(body)
+    with pytest.raises(ValueError, match=message):
+        await nginx.handle(
+            "PUT",
+            "/api/child/nginx/shared-ingress",
+            shared_ingress_deployment(body),
+            {},
+        )
+    assert not nginx.shared_ingress_stream.exists()
+    assert not nginx.shared_ingress_declaration.exists()
+
+
+async def test_shared_ingress_rejects_url_injection_and_competing_443(agent):
+    nginx = agent.operations.nginx
+    injected = shared_ingress_body(website=True)
+    injected["website"]["upstream_url"] = "https://example.net/;include=/etc/passwd"
+    with pytest.raises(ValueError, match="unsafe characters"):
+        await nginx.handle(
+            "PUT",
+            "/api/child/nginx/shared-ingress",
+            shared_ingress_deployment(injected),
+            {},
+        )
+
+    await nginx.apply(
+        {
+            nginx.main: b"events {} stream { include stream_servers/*.conf; }",
+            nginx.config_path("stream_servers/existing.conf"): (
+                b"server { listen 443; proxy_pass 127.0.0.1:62090; }\n"
+            ),
+        }
+    )
+    with pytest.raises(RuntimeFailure, match="already declared"):
+        await nginx.handle(
+            "PUT",
+            "/api/child/nginx/shared-ingress",
+            shared_ingress_deployment(shared_ingress_body()),
+            {},
+        )
+    assert not nginx.shared_ingress_stream.exists()
+
+
+async def test_shared_ingress_activation_failure_rolls_back_all_managed_files(agent):
+    nginx = agent.operations.nginx
+    nginx.start = AsyncMock()
+    original = shared_ingress_body()
+    await nginx.handle(
+        "PUT",
+        "/api/child/nginx/shared-ingress",
+        shared_ingress_deployment(original),
+        {},
+    )
+    old_main = nginx.main.read_bytes()
+    old_stream = nginx.shared_ingress_stream.read_bytes()
+    old_state = nginx.shared_ingress_declaration.read_bytes()
+
+    replacement = shared_ingress_body()
+    replacement["routes"][0]["sni"] = "replacement.example.com"
+    replacement["routes"][0]["upstream_port"] = 62141
+    nginx.running = AsyncMock(return_value=True)
+    nginx.reload = AsyncMock(side_effect=[RuntimeFailure("reload failed"), None])
+    with pytest.raises(RuntimeFailure, match="reload failed"):
+        await nginx.handle(
+            "PUT",
+            "/api/child/nginx/shared-ingress",
+            shared_ingress_deployment(replacement, revision=2),
+            {},
+        )
+    assert nginx.main.read_bytes() == old_main
+    assert nginx.shared_ingress_stream.read_bytes() == old_stream
+    assert nginx.shared_ingress_declaration.read_bytes() == old_state
+    assert nginx.reload.await_count == 2
+    assert not nginx.transaction.record.exists()

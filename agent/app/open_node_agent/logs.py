@@ -10,7 +10,7 @@ from open_node_agent.runtime import RuntimeFailure
 
 LOG_NAMES = tuple(
     service + ".log" + suffix
-    for service in ("agent", "xray", "nginx")
+    for service in ("agent", "xray", "nginx", "mihomo")
     for suffix in ("", ".1", ".2")
 )
 
@@ -42,7 +42,9 @@ class OwnedLogs:
     @contextmanager
     def file(self, directory: int, name: str, *, writable=False):
         if name not in LOG_NAMES:
-            raise RuntimeFailure("Only owned Agent, Xray, and Nginx log files may be accessed")
+            raise RuntimeFailure(
+                "Only owned Agent, Xray, Nginx, and Mihomo log files may be accessed"
+            )
         fd = os.open(
             name,
             (os.O_WRONLY if writable else os.O_RDONLY) | os.O_NOFOLLOW | os.O_NONBLOCK,
@@ -58,7 +60,7 @@ class OwnedLogs:
 
     def tail(self, query: dict) -> dict:
         service = query.get("service", ["agent"])[0]
-        if service not in {"agent", "xray", "nginx"}:
+        if service not in {"agent", "xray", "nginx", "mihomo"}:
             raise RuntimeFailure("Unknown log service")
         lines = int(query.get("lines", ["200"])[0])
         if not 1 <= lines <= 2000:

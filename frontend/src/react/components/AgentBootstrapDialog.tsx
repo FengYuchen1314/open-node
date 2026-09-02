@@ -3,12 +3,14 @@ import { Alert, Button, Checkbox, Descriptions, Form, Input, Modal, Select, Spac
 import { CopyOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useAgentBootstrap } from "../hooks/useAgentBootstrap";
 import { zhMessage } from "../../i18n/zh-CN";
+import type { ServerKind } from "../../domain/inventory";
 
 export interface AgentBootstrapDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   serverId: string;
   serverName: string;
+  serverKind?: ServerKind;
   onUpdated?: () => void;
 }
 
@@ -18,7 +20,9 @@ function date(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString("zh-CN") : "尚未观测到";
 }
 
-export default function AgentBootstrapDialog({ open, onOpenChange, serverId, serverName, onUpdated }: AgentBootstrapDialogProps) {
+const serverKindNames: Record<ServerKind, string> = { direct: "公网直连", "leased-line": "专线", residential: "家宽落地" };
+
+export default function AgentBootstrapDialog({ open, onOpenChange, serverId, serverName, serverKind = "direct", onUpdated }: AgentBootstrapDialogProps) {
   const model = useAgentBootstrap(open, serverId, onUpdated);
   const [copyMessage, setCopyMessage] = useState("");
   const copyEpoch = useRef(0);
@@ -47,6 +51,8 @@ export default function AgentBootstrapDialog({ open, onOpenChange, serverId, ser
     {open && <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       {(model.loading || model.busy) && <Spin aria-label="正在检查安装状态" />}
       <Typography.Text strong>{serverName}</Typography.Text>
+      <Alert type="info" showIcon title={`服务器类型：${serverKindNames[serverKind]}`}
+        description={serverKind === "leased-line" ? "安装完成后，这台服务器仅允许创建 Mieru 节点。" : serverKind === "residential" ? "安装完成后，这台服务器仅允许创建 SOCKS5 节点。" : "请在生成安装命令前确认服务器用途。"} />
       <Typography.Paragraph>在此生成命令，在新的远程服务器上以 root 身份运行，然后等待 Agent 连接。</Typography.Paragraph>
       {model.error && <Alert type="error" showIcon title={zhMessage(model.error)} data-testid="bootstrap-error" />}
       {state && <>

@@ -116,6 +116,14 @@ class ServerStatus(StrEnum):
     OFFLINE = "offline"
 
 
+class ServerKind(StrEnum):
+    """How the server participates in a user-facing proxy topology."""
+
+    DIRECT = "direct"
+    LEASED_LINE = "leased-line"
+    RESIDENTIAL = "residential"
+
+
 class TrafficSource(StrEnum):
     XRAY = "xray"
     SYSTEM = "system"
@@ -243,6 +251,7 @@ class AgentOperationKind(StrEnum):
     AGENT_UNINSTALL = "agent_uninstall"
     AGENT_ROLLBACK = "agent_rollback"
     AGENT_LIFECYCLE = "agent_lifecycle"
+    MANAGED_PROTOCOLS = "managed_protocols"
 
 
 class AgentCapabilities(BaseModel):
@@ -258,10 +267,12 @@ class AgentCapabilities(BaseModel):
     agent_switch_listen_port: bool = False
     agent_probe_master_url: bool = False
     agent_update_master_url: bool = False
+    managed_protocols: bool = False
 
 
 class ServerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    server_kind: ServerKind = ServerKind.DIRECT
     ip_address: str | None = Field(default=None, max_length=255)
     ip_address_v6: str | None = Field(default=None, max_length=255)
     domain: str | None = Field(default=None, max_length=255)
@@ -382,6 +393,7 @@ class ServerTrafficRead(ServerTrafficUpdate):
 class ServerRead(BaseModel):
     id: UUID
     name: str
+    server_kind: ServerKind = ServerKind.DIRECT
     status: ServerStatus
     ip_address: str | None = None
     ip_address_v6: str | None = None

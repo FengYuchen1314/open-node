@@ -283,6 +283,40 @@ def test_transport_and_tls_survive_schema_conversion(transport, options, xray_ke
     assert subscription_clients.sing_box_tls(proxy)["alpn"] == ["h2"]
 
 
+def test_managed_mihomo_only_transport_options_fail_closed_for_other_clients():
+    anytls = {
+        "type": "anytls",
+        "name": "AnyTLS ShadowTLS",
+        "server": "example.com",
+        "port": 443,
+        "password": "fixture-password",
+        "tls": True,
+        "shadow-tls-opts": {"version": 3, "password": "fixture-password"},
+    }
+    assert subscription_clients.unsupported_reason(anytls, "clash") is None
+    for target in ("sing-box", "xray", "surge", "uri-list", "base64"):
+        reason = subscription_clients.unsupported_reason(anytls, target)
+        assert reason is not None and "ShadowTLS" in reason
+
+    xhttp = {
+        "type": "vless",
+        "name": "VLESS XHTTP XMUX",
+        "server": "example.com",
+        "port": 443,
+        "uuid": str(uuid4()),
+        "tls": True,
+        "network": "xhttp",
+        "xhttp-opts": {
+            "path": "/managed",
+            "mode": "auto",
+            "reuse-settings": {"max-concurrency": "16-32"},
+        },
+    }
+    assert subscription_clients.unsupported_reason(xhttp, "clash") is None
+    reason = subscription_clients.unsupported_reason(xhttp, "xray")
+    assert reason is not None and "XMUX" in reason
+
+
 def test_reality_is_not_silently_downgraded_to_tls():
     proxy = {
         "type": "vless",

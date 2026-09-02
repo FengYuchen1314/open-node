@@ -42,6 +42,7 @@ from open_node.domain.speedtests import SPEEDTEST_MESSAGES, SpeedTestError
 from open_node.domain.subscriber_permissions import MESSAGES as SUBSCRIBER_PERMISSION_MESSAGES
 from open_node.domain.subscriber_permissions import SubscriberPermissionsError
 from open_node.services.agent_bootstrap import AgentBootstrapStore
+from open_node.services.agent_bootstrap_release import AgentArtifactStore
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.announcements import AnnouncementStore
 from open_node.services.appearance import AppearanceStore
@@ -664,6 +665,9 @@ def _create_app(active_settings: Settings, backup_writes: BackupWriteBarrier) ->
     app.state.external_subscriptions = app.state.inventory.external_subscriptions()
     app.state.renewals = RenewalStore(app.state.inventory)
     app.state.agent_bootstrap = AgentBootstrapStore(app.state.inventory)
+    app.state.agent_bootstrap_artifacts = AgentArtifactStore(
+        active_settings.agent_bootstrap_artifact_dir
+    )
     app.state.subscriber_auth = SubscriberAuthStore(app.state.inventory, active_settings)
     app.state.certificates = CertificateStore(active_settings, app.state.inventory)
     app.state.ddns = DDNSStore(app.state.inventory, app.state.certificates)

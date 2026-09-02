@@ -14,7 +14,11 @@ from open_node.domain.node_management import (
 )
 from open_node.services.agent_ws import AgentConnectionManager
 from open_node.services.backup_runtime import run_in_backup_thread
-from open_node.services.inventory import InventoryStore, ManagedNodeNotFoundError
+from open_node.services.inventory import (
+    InventoryStore,
+    ManagedNodeConflict,
+    ManagedNodeNotFoundError,
+)
 from open_node.services.node_management import NodeRemovalNotFoundError
 from open_node.services.subscription_access import SubscriptionAccessConflict
 
@@ -28,7 +32,7 @@ def call(operation, *args):
         return operation(*args)
     except (ManagedNodeNotFoundError, NodeRemovalNotFoundError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except SubscriptionAccessConflict as exc:
+    except (ManagedNodeConflict, SubscriptionAccessConflict) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -39,6 +43,20 @@ async def apply(operation, store, connections, *args):
     return result
 
 
+async def reconcile_managed_runtime(store, connections, server_ids):
+    reconciled = []
+    for server_id in dict.fromkeys(server_ids):
+        payloads = [store.managed_protocol_command(server_id)]
+        ingress = store.reconcile_managed_shared_ingress(server_id)
+        if ingress is not None:
+            payloads.append(ingress)
+        commands = store.create_command_sequence(server_id, payloads)
+        for command in commands:
+            deployed = await connections.dispatch_command(store, command)
+            reconciled.append(deployed.model_copy(update={"body": None}))
+    return reconciled
+
+
 @router.get("/nodes/{identifier}/settings", response_model=NodeManagementRead)
 @router.get("/nodes/{identifier}/removal", response_model=NodeManagementRead)
 def settings(identifier: UUID, store: Store):
@@ -47,12 +65,25 @@ def settings(identifier: UUID, store: Store):
 
 @router.put("/nodes/{identifier}/settings", response_model=NodeManagementResult)
 async def update(identifier: UUID, payload: NodeUpdate, store: Store, connections: Connections):
-    return await apply(store._node_management().update, store, connections, identifier, payload)
+    result = await apply(store._node_management().update, store, connections, identifier, payload)
+    if result.node.protocol_profile is not None:
+        result.commands.extend(
+            await reconcile_managed_runtime(store, connections, [result.node.server_id])
+        )
+    return result
 
 
 @router.post("/nodes/{identifier}/remove", response_model=NodeRemovalRead, status_code=202)
 async def remove(identifier: UUID, payload: NodeRemoval, store: Store, connections: Connections):
-    return await apply(store._node_management().remove, store, connections, identifier, payload)
+    result = await apply(store._node_management().remove, store, connections, identifier, payload)
+    result.commands.extend(
+        await reconcile_managed_runtime(
+            store,
+            connections,
+            [step.server_id for step in result.servers],
+        )
+    )
+    return result
 
 
 @router.get("/node-removals/{identifier}", response_model=NodeRemovalRead)
@@ -62,4 +93,12 @@ def status(identifier: UUID, store: Store):
 
 @router.post("/node-removals/{identifier}/retry", response_model=NodeRemovalRead)
 async def retry(identifier: UUID, store: Store, connections: Connections):
-    return await apply(store._node_management().retry, store, connections, identifier)
+    result = await apply(store._node_management().retry, store, connections, identifier)
+    result.commands.extend(
+        await reconcile_managed_runtime(
+            store,
+            connections,
+            [step.server_id for step in result.servers],
+        )
+    )
+    return result

@@ -7,36 +7,10 @@ Open Node 是 MMWX 活跃技术线的开源重构项目，用于管理服务器�
 订阅用户、套餐、流量、证书和公开探针。项目不需要激活码，不连接商业许可证服务器，
 也没有付费功能开关。管理端、用户中心和 Probe 页面以简体中文为主。
 
-实现以 `miaomiaowuX`、`mmw-agent`、`mmwx-probe` 和 `Xray-core-mmwx` 四个官方仓库
-的固定版本为参考，差异与验收情况记录在
-[MMWX 源码对齐表](docs/mmwx-source-parity.md)。
+## 一键安装控制面
 
-> [!IMPORTANT]
-> 当前版本仍处于 Preview 阶段，面向全新部署，不代表已经完整替代所有历史 MMWX 环境。
-> 旧 MMWX 整机迁移、既有主机自动接管、Bot/Mini App 和商业 Reality 资源池不在当前
-> 交付范围。准备投入生产前，请先阅读[使用边界](#使用边界)和
-> [部署文档](docs/deployment.md)。
-
-## 快速部署
-
-### 准备条件
-
-- 一台全新的 Debian 或 Ubuntu Linux 主机；目前重点验证 Debian 12 `amd64`。
-- `root` 权限或可用的 `sudo`。引导命令会在缺少 `curl` 时先安装它，安装器随后检查并
-  安装 Git、Docker 和 Docker Compose v2。
-- 服务器能够访问 GitHub、Docker Hub、npm、PyPI 和 Let's Encrypt ACME 服务。
-- 默认公网模式需要一个可路由的公网 IPv4，并放行入站 TCP `443` 和 `58090`。
-  TCP `80` 不需要开放。
-- 默认 IP 公网模式下，TCP `443`、`58090` 和宿主回环端口 `62031` 不能被其他程序占用。
-  仅启用域名时不使用 `58090`；关闭全部公网入口时只要求宿主回环上游端口可用。
-
-安装器不会修改云安全组、UFW、防火墙或 DNS。主机已有 Nginx、Caddy 等服务占用
-TCP `443` 时，请使用[手动反向代理方案](docs/deployment.md#https-and-proxy-trust)，
-不要直接运行下面的默认命令，也不要同时启动受管公网网关。
-
-### 一键安装
-
-在新主机上完整复制并执行下面的命令：
+在全新的 Debian 或 Ubuntu 主机上完整复制以下命令。可直接使用 `root`，普通用户须有
+`sudo` 权限：
 
 ```bash
 (
@@ -64,7 +38,41 @@ TCP `443` 时，请使用[手动反向代理方案](docs/deployment.md#https-and
 )
 ```
 
-这条命令会先把脚本完整下载到临时文件，再交给 `sudo bash` 执行。全新安装默认：
+默认访问地址是 `https://公网IP:58090`。安装前请放行入站 TCP `443` 和 `58090`；
+`443` 用于 ACME TLS-ALPN-01 签发和续期，`58090` 用于日常 HTTPS 访问，TCP `80`
+无需开放。应用上游只监听宿主回环 `127.0.0.1:62031`，容器内部也固定为 `62031`，
+不要向公网放行该端口。
+
+实现以 `miaomiaowuX`、`mmw-agent`、`mmwx-probe` 和 `Xray-core-mmwx` 四个官方仓库
+的固定版本为参考，差异与验收情况记录在
+[MMWX 源码对齐表](docs/mmwx-source-parity.md)。
+
+> [!IMPORTANT]
+> 当前版本仍处于 Preview 阶段，面向全新部署，不代表已经完整替代所有历史 MMWX 环境。
+> 旧 MMWX 整机迁移、既有主机自动接管、Bot/Mini App 和商业 Reality 资源池不在当前
+> 交付范围。准备投入生产前，请先阅读[使用边界](#使用边界)和
+> [部署文档](docs/deployment.md)。
+
+## 部署说明
+
+### 准备条件
+
+- 一台全新的 Debian 或 Ubuntu Linux 主机；目前重点验证 Debian 12 `amd64`。
+- `root` 权限或可用的 `sudo`。引导命令会在缺少 `curl` 时先安装它，安装器随后检查并
+  安装 Git、Docker 和 Docker Compose v2。
+- 服务器能够访问 GitHub、Docker Hub、npm、PyPI 和 Let's Encrypt ACME 服务。
+- 默认公网模式需要一个可路由的公网 IPv4，并放行入站 TCP `443` 和 `58090`。
+  TCP `80` 不需要开放。
+- 默认 IP 公网模式下，TCP `443`、`58090` 和宿主回环端口 `62031` 不能被其他程序占用。
+  仅启用域名时不使用 `58090`；关闭全部公网入口时只要求宿主回环上游端口可用。
+
+安装器不会修改云安全组、UFW、防火墙或 DNS。主机已有 Nginx、Caddy 等服务占用
+TCP `443` 时，请使用[手动反向代理方案](docs/deployment.md#https-and-proxy-trust)，
+不要使用上述默认公网模式，也不要同时启动受管公网网关。
+
+### 默认安装结果
+
+上面的一键命令会先把脚本完整下载到临时文件，再交给 root 执行。全新安装默认：
 
 - 使用 SQLite；
 - 通过两个独立 HTTPS 服务确认公网 IPv4；
@@ -95,6 +103,9 @@ https://公网 IP:58090
 `127.0.0.1:62031`，再进入容器的 `62031/tcp`。安装器会持续显示数据库、应用和公网
 HTTPS 的等待进度；只有可信证书、规范访问地址和 `/healthz` 连续通过后，才会输出
 `ACTION_COMPLETE action=install`。看到该完成标记前，不要把服务视为安装成功。
+
+IP 证书是短期证书，有效期约 160 小时（约 6 天），Caddy 会自动续签。公网地址必须
+持续可路由，TCP `443` 也要持续可达；只开放 `58090` 无法完成首次签发或后续续期。
 
 ### 常用安装选项
 
@@ -188,7 +199,8 @@ sudo env OPEN_NODE_PUBLIC_IP=off OPEN_NODE_PUBLIC_HOSTNAME= \
 `uninstall` 会保留应用数据卷、可选 PostgreSQL 数据卷、Caddy 状态卷、源码、私有配置、
 安装清单、镜像和备份，不能把它当作彻底清除数据的命令。更新和恢复的事务边界见
 [部署文档](docs/deployment.md)。使用官方 `main`、默认安装器和 systemd 的实例，也可以在
-“系统设置 → 应用更新”中检查和执行更新。
+“系统设置 → 应用更新”中一键检查和执行更新；网页仍调用同一套根安装器事务，不会把
+Docker socket 暴露给应用容器。
 
 如果首次安装改过 `OPEN_NODE_CONFIG_DIR`，以后每个动作都要继续传入同一个目录：
 
@@ -211,6 +223,32 @@ sudo env OPEN_NODE_CONFIG_DIR=/srv/open-node-config \
 
 覆盖 `OPEN_NODE_INSTALL_DIR` 后，生命周期脚本路径也会改变；覆盖
 `OPEN_NODE_PROJECT_NAME` 后，数据卷和网页更新状态目录会使用新的项目名。
+
+## 安装失败排查
+
+先看安装终端最后一条 `PROGRESS` 或错误，不要用 `curl -k` 绕过证书检查，也不要在
+`ACTION_COMPLETE` 出现前手工启动旧容器。默认安装身份可运行：
+
+```bash
+# 重新校验安装清单、容器身份、应用健康和公网 HTTPS
+sudo bash /opt/open-node/install.sh status
+
+# 查看默认控制面容器和公网 Caddy 的最近日志
+sudo docker logs --tail 200 open-node-open-node-1
+sudo docker logs --tail 200 open-node-public-gateway
+
+# 检查三个关键监听端口；62031 应只绑定在 127.0.0.1
+sudo ss -ltnp | grep -E ':(443|58090|62031)\b'
+
+# 用系统信任库检查真实公网健康地址；把地址替换成安装器输出的 IP
+curl -fsS https://PUBLIC_IP:58090/healthz
+```
+
+未启用公网网关时没有 `open-node-public-gateway` 容器，第二条日志命令会提示不存在，这是
+预期结果。覆盖过项目名、安装目录或配置目录时，容器名和命令路径也会变化，以
+`install.sh status` 显示的身份为准。常见失败原因是云安全组或主机防火墙未放行 `443` /
+`58090`、`443` 已被 Nginx/Caddy 占用、两个公网 IP 检测服务结果不一致、CGNAT、DNS
+尚未生效，或公网 IP 已变化。IP 变化后可显式重新运行 `update` 并让 Caddy 申请新证书。
 
 ## 一键卸载
 
@@ -278,7 +316,10 @@ Agent Token 也不会因本机脚本自动删除。
 - 管理员可以查看 Agent 上报的在线用户与 IP；该功能要求 Agent 0.3.0a1 或更高版本，
   已有主机还需要显式启用对应统计配置。
 - 在面板创建服务器后生成一次性安装命令，为新 Debian 12 主机安装非 root Agent 和官方
-  Xray；控制连接支持 WebSocket 与 HTTP 回退。
+  Xray；安装器、Agent wheel、bootstrap、构建身份、固定的 Xray 与 Mihomo 制品都从
+  面板同源 HTTPS 端点拉取并校验大小及 SHA-256。子机不从 GitHub 或外部制品仓库拉项目
+  文件；仅在缺少系统依赖时使用主机已配置的 Debian APT 源。控制连接支持 WebSocket 与
+  HTTP 回退。
 - Agent 命令带持久化日志、租约恢复、依赖关系和结果重放，可处理配置、用户、诊断、日志、
   Nginx、WARP 和运行时生命周期。
 - 支持自管 Xray、外部 systemd Xray、显式多文件接管，以及校验和固定的 Xray
@@ -287,6 +328,31 @@ Agent Token 也不会因本机脚本自动删除。
 
 详见 [Agent 一键安装](docs/agent-bootstrap.md)、[Agent 部署](docs/agent-deployment.md)、
 [Xray 版本管理](docs/xray-releases.md)和[外部 systemd 模式](docs/external-systemd.md)。
+
+### 节点创建、导入与编排
+
+- 面板手工新建节点只展示 5 种受管配置：VLESS + REALITY + Vision、VLESS + XHTTP +
+  REALITY + XMUX、AnyTLS + ShadowTLS、Mieru 和 SOCKS5。旧协议不会混进新建下拉框；
+  受支持的历史节点目录、Xray 扫描结果和外部订阅节点仍可通过各自的预览/导入流程保留；
+  旧 MMWX 用户身份另有独立的受控导入入口。
+- 服务器类型决定可新建协议：公网直连可用以上 5 种（直接暴露 SOCKS5 会显示强警告）；
+  专线只允许 Mieru；家宽落地只允许 SOCKS5。导入不会绕过受管运行时的类型限制，也不会
+  自动接管已有主机服务。
+- 前三种 TLS 配置固定使用公网 `443`。创建时必须从伪装池选择目标，SNI 必须与池记录
+  完全一致；同一服务器不能重复使用伪装池或 SNI。池内的地区、TLS/ALPN 和可达性是最近
+  一次测量结果，部署前仍要复查。
+- 创建 Mieru 时填写国内入口 IP、国内入口端口和映射方式。一一对应模式下 IX 端口等于
+  国内入口端口；手动模式必须另填 IX 端口，并自行完成国内入口到 IX 的端口转发。
+- 服务器配置中的“443 分流与网站反向代理”把前三种协议按唯一 SNI 自动转发到
+  `127.0.0.1:高位运行端口`。同一入口还可配置一个独立网站 SNI、证书名称和无凭据的
+  绝对 HTTP(S) 上游；HTTP → HTTPS `308` 默认开启。该配置独占公网 TCP `443`，保存后
+  还要确认 Agent 命令最终显示成功。
+- “节点编排”页面可把候选节点拖成从左到右的多跳线路。线路至少 2 跳、最多 8 跳；
+  同一跳的多个节点使用轮询负载均衡，最终出口必须只有一个节点。前端和后端都会阻止
+  节点重复、同一服务器再次经过以及回还环路。
+
+详见[节点管理](docs/node-management.md)、[外部订阅](docs/external-subscriptions.md)和
+[订阅系统](docs/subscriptions.md)。
 
 ### 用户、套餐与订阅
 
@@ -398,8 +464,8 @@ Agent Token 也不会因本机脚本自动删除。
 - 受管安装器面向新主机，不接管现有手工 Compose 项目、已有反向代理或历史 MMWX 数据库。
 - 当前发布范围不包含旧 MMWX 整机迁移。仓库里保留的身份导入和旧 Agent 迁移工具属于
   显式、受控流程，不代表安装器会自动迁移旧环境。
-- 面板生成的 Agent 命令用于新 Debian 12 `amd64` 主机，不会自动接管已有服务、安装全部
-  fork-only 协议或创建公网代理入站。
+- 面板生成的 Agent 命令用于新 Debian 12 `amd64` 主机；初始安装不会自动接管已有服务
+  或创建公网代理入站。受管节点和共享入口须在 Agent 上线后由面板明确创建并等待命令成功。
 - 受管公网 HTTPS 依赖操作者拥有公网地址，并保证 TCP `443` 及配置的 HTTPS 端口可达。
   证书、地址或健康检查失败时，安装器会终止，不会降级到明文 HTTP、自签证书或仅回环成功。
 - PostgreSQL 恢复只承诺同一数据库后端、同一 Open Node 源码修订及该修订的精确镜像和

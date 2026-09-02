@@ -34,6 +34,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     OPEN_NODE_DATABASE_URL="sqlite:////var/lib/open-node/open-node.db" \
     OPEN_NODE_CERTIFICATE_STATE_DIR="/var/lib/open-node/certificates" \
+    OPEN_NODE_AGENT_BOOTSTRAP_ARTIFACT_DIR="/var/lib/open-node/agent-artifacts" \
     OPEN_NODE_CERTIFICATE_LEGO_BINARY="/usr/local/bin/lego" \
     OPEN_NODE_FRONTEND_DIR="/opt/open-node/frontend" \
     OPEN_NODE_CORS_ORIGINS="[]" \

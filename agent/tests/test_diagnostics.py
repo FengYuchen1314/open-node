@@ -313,3 +313,28 @@ async def test_agent_log_rotation_redaction_and_line_limit(config):
         logger.setLevel(old_level)
         handler.close()
         await agent.close()
+
+
+async def test_mihomo_log_rotation_listing_tail_and_redaction(config):
+    agent = Agent(config)
+    runtime = agent.operations.managed_protocols.runtime
+    try:
+        runtime.log.warning("token %s", config.token.get_secret_value())
+        logs = OwnedLogs(config)
+        tail = logs.tail({"service": ["mihomo"]})
+        assert config.token.get_secret_value() not in tail["logs"]
+        assert "token [redacted]" in tail["logs"]
+
+        runtime.log_handler.doRollover()
+        runtime.log.warning("managed runtime after rotation")
+        names = {item["name"] for item in logs.list()["files"]}
+        assert names >= {"mihomo.log", "mihomo.log.1"}
+        assert "managed runtime after rotation" in logs.tail(
+            {"service": ["mihomo"]}
+        )["logs"]
+
+        removed = logs.delete({"name": ["mihomo.log.1"]})
+        assert removed["success"] and removed["removed"] == 1
+        assert not (config.state_dir / "mihomo.log.1").exists()
+    finally:
+        await agent.close()

@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authState } from "../../services/auth";
-import { applyApplicationUpdate, checkApplicationUpdate, getApplicationUpdate } from "../../services/application-updates";
+import { ApplicationUpdateRequestError, applyApplicationUpdate, checkApplicationUpdate, getApplicationUpdate } from "../../services/application-updates";
 import { flush, installDom, renderUi } from "../test-utils";
 import ApplicationUpdatePanel from "./ApplicationUpdatePanel";
 
@@ -37,6 +37,31 @@ describe("application update panel", () => {
     expect(checkApplicationUpdate).toHaveBeenCalledOnce(); expect(applyApplicationUpdate).not.toHaveBeenCalled();
     expect(screen.getByText("检查请求已由宿主机助手受理。")).toBeTruthy();
     expect(document.body.textContent).toContain("没有 Docker socket");
+  });
+  it("checks and applies the exact observed revision through one-click update", async () => {
+    renderUi(<ApplicationUpdatePanel operator={operator} />); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "一键更新应用" })); await flush();
+    fireEvent.click(screen.getByText("开始一键更新")); await flush();
+    expect(checkApplicationUpdate).toHaveBeenCalledOnce();
+    expect(applyApplicationUpdate).not.toHaveBeenCalled();
+    expect(screen.getByText("一键更新已开始：正在重新检查官方目标提交。")).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(1000); await flush();
+    expect(applyApplicationUpdate).toHaveBeenCalledOnce();
+    expect(applyApplicationUpdate).toHaveBeenCalledWith(latest);
+    expect(screen.getByText("更新请求已受理；宿主机正在备份并验证候选镜像，页面会持续读取结果。")).toBeTruthy();
+  });
+  it("never replays an apply whose handoff outcome is unknown", async () => {
+    vi.mocked(applyApplicationUpdate).mockRejectedValue(new ApplicationUpdateRequestError(503, "application_update_state_unavailable"));
+    renderUi(<ApplicationUpdatePanel operator={operator} />); await flush();
+    fireEvent.click(screen.getByRole("button", { name: "一键更新应用" })); await flush();
+    fireEvent.click(screen.getByText("开始一键更新")); await flush();
+    await vi.advanceTimersByTimeAsync(1000); await flush();
+    expect(applyApplicationUpdate).toHaveBeenCalledOnce();
+    expect(screen.getByText("更新状态暂时不可用，请稍后重新读取。")).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(10_000); await flush();
+    expect(applyApplicationUpdate).toHaveBeenCalledOnce();
   });
   it("renders unavailable manual guidance and disables the web check", async () => {
     vi.mocked(getApplicationUpdate).mockResolvedValue({ ...state, managed: false, status: "unavailable", latest_revision: null, has_update: null, release_url: null, checked_at: null, message: "当前部署没有可用的宿主机更新助手，请使用安装脚本更新。" });

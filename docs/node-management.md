@@ -1,104 +1,114 @@
-# Managed Node Lifecycle
+# 节点创建、导入与生命周期
 
-Administrator node settings and removal are implemented in the FastAPI/React
-monorepo without a license service. The Subscriptions catalog has edit, remove
-and pending-removal controls. These operate on managed nodes, not subscriber
-account ownership or arbitrary external provider records.
+节点管理位于“订阅管理”。Open Node 把“面板新建受管节点”和“导入已有节点”分开处理：
+新建只提供当前能够自动生成并下发的 5 种配置，导入则尽量保留外部或历史目录中已经支持
+的协议字段。导入成功不等于面板已经接管原服务器上的进程、端口或凭据。
 
-## Editing And Relationships
+## 新建受管节点
 
-- `GET /api/v1/nodes/{id}/settings` returns the node, an opaque revision,
-  affected nodes/plans, shared-resource retention and subscription access state.
-- `PUT /api/v1/nodes/{id}/settings` accepts name, tags, enabled state, public
-  config, client template, parent and target relationships. It requires the
-  displayed revision and explicit runtime-restart acknowledgment.
-- Server, protocol, inbound and routing resource identities are not moved by
-  this editor. Create and provision a replacement node to move endpoints.
-  Changing a display name does not overwrite a custom public config name.
-- A routed node's `parent_id` must have the same server, authenticated inbound
-  and protocol. `target_node_id` records a routed destination, including one
-  on another server. Cycles and links to removing nodes are rejected.
-  These fields record existing relationships; setting them does not deploy a
-  tunnel or infer its host-side configuration.
-- Catalog export/import preserves links by node name. Existing catalogs with
-  no relationship fields remain valid. Imports cannot overwrite the runtime
-  fields of a node with stored credentials; use the guarded editor instead.
+面板当前提供以下 5 种配置：
 
-Disabling a node withdraws its stored credentials, including previously exported
-preview credentials, while retaining their identity for reactivation. Template
-edits update existing managed bindings but do not automatically enroll unrelated
-preview-only subscribers. Matching physical aliases reuse an existing credential;
-different routed destinations receive separate identities when labels collide.
+| 配置 | 服务器类型 | 入口要求 |
+| --- | --- | --- |
+| VLESS + REALITY + Vision | 公网直连 | 公网 443、伪装池和唯一 SNI |
+| VLESS + XHTTP + REALITY + XMUX | 公网直连 | 公网 443、伪装池和唯一 SNI |
+| AnyTLS + ShadowTLS | 公网直连 | 公网 443、伪装池和唯一 SNI |
+| Mieru | 公网直连、专线 | 国内入口 IP/端口和 IX 映射 |
+| SOCKS5 | 公网直连、家宽落地 | 公网直连会显示“极度不推荐”警告 |
 
-## Removal
+服务器类型是后端约束，不只是界面筛选：专线服务器只能新建 Mieru，家宽落地服务器只能
+新建 SOCKS5，公网直连可以选择全部 5 种。请求不符合服务器类型时会被拒绝。
 
-`POST /api/v1/nodes/{id}/remove` requires `expected_revision`, the exact
-`confirm_name`, and `acknowledge_runtime_restart: true`. Missing inbound or
-outbound ownership produces warnings that require
-`acknowledge_unmanaged_resources: true`; those external resources remain the
-operator's responsibility. Removal cannot be cancelled.
+前三种 TLS 配置的客户端端口固定为 `443`，实际协议进程监听互不重复的
+`49152–65535` 回环端口，再由共享入口按 SNI 分流。创建时须从内置伪装池选择一项；
+`camouflage_sni` 必须与该记录的 `server_name` 一致。同一服务器上不能重复使用伪装池、
+SNI 或内部端口。池目录记录地区、TLS 1.3、ALPN、Cloudflare 网段排除和最近一次大陆
+可达性测量，这些状态会变化，创建前应重新检查。
 
-The deletion closure includes explicit descendants, routed destinations that
-depend on a selected target, and legacy routed nodes sharing the last removed
-physical inbound. A physical alias that remains in the catalog protects its
-shared inbound; a remaining outbound alias protects that outbound. Native
-outbound dependency expansion cannot consume another retained catalog node.
+Mieru 表单要求国内入口 IP、国内入口端口和端口映射方式：
 
-The controller persists a job before changing runtime state:
+- “一一对应”会把 IX 端口固定为国内入口端口；传入不同 IX 端口会被拒绝。
+- “手动”必须填写 IX 端口，并由操作者在国内入口完成到该 IX 端口的转发。
+- 受管 Mieru 的 UDP 字段只会在 Agent 上报有效运行时能力后进入订阅，不会信任浏览器
+  或导入文件自行声明的能力。
 
-1. Mark selected nodes as removing/disabled. Remove their plan membership and
-   per-node multiplier, speed and device overrides. Retain accounts, plan dates,
-   subscription links and charged traffic.
-2. Track credential withdrawal, drain previously started runtime mutations and
-   stop queued commands that would restore retired identities or resources.
-3. After confirmed withdrawal, obtain a fresh native resource preview and apply
-   its exact revision with a durable operation UUID. The native operation removes
-   selected listeners, suspended templates, limit policies and dependent Xray
-   outbound/routing resources.
-4. Reconcile affected access again, then remove selected node/credential rows
-   and prune their bindings. Keep the completed job and its revocation evidence.
+## 历史和外部节点
 
-Offline or unsupported Agents leave the job pending or failed. A request
-accepted by the controller is not proof that a client stopped forwarding.
-Only a confirmed job is complete. Existing command history and backups are
-retained; this is not host-wide secret erasure.
+节点目录导入、Xray 运行时扫描和外部订阅各有独立的预览和确认流程。Trojan、VMess、
+Shadowsocks、Hysteria2、Snell 等协议不会出现在 5 种新建配置中，但可在对应导入器能够
+完整表示其关键字段时保留。未知字段、无法安全表示的协议、重复资源身份和已退役凭据会
+被拒绝，导入不会隐式创建公网监听或接管 systemd 服务。旧 MMWX 用户身份、订阅配置和
+套餐映射使用另一套受控导入，不应与节点运行时接管混为一谈。
 
-## Recovery And Coordination
+外部订阅先抓取并保存快照，再由管理员或获准用户选择导入；定时刷新不会在普通用户下载
+订阅时临时访问上游。完整输入语义见[外部订阅](external-subscriptions.md)，旧身份迁移见
+[旧 MMWX 身份](legacy-mmwx-identities.md)。
 
-- `GET /api/v1/node-removals/{id}` reads progress.
-- `POST /api/v1/node-removals/{id}/retry` retries failed withdrawal or cleanup.
-- A failed apply is inspected using its original operation UUID. A prepared
-  operation retries the identical body; a confirmed absent operation permits
-  a new preview. A completed receipt is checked against the original revision
-  and impact before it can finish the job.
-- Jobs, node markers and cleanup identities survive controller/Agent restart.
-  One removal per affected server reserves runtime mutation work. Read-only
-  operations and managed subscription access continue to run.
-- Pending jobs block node creation/edit/import/sync on affected servers,
-  server removal and new change-set reservations. Queued unrelated mutations
-  resume after cleanup; retired credential and resource replays are rejected.
-- If a preview needs corrective work, unrelated administrator runtime writes
-  are available before retrying the preview. A prepared native job with host
-  drift requires restoring its recorded old/intended host state first.
-- Retired resource tags and credential labels cannot be reused by catalog
-  import. Use new resource tags for replacement nodes.
+## 同机 443 分流与网站反向代理
 
-The native [cleanup contract](node-cleanup.md) owns crash recovery. Independent
-host administrators can still replace files or restore backups outside this
-controller's coordination.
+服务器配置页的“443 分流与网站反向代理”只接收 VLESS Reality Vision、VLESS XHTTP
+Reality XMUX 和 AnyTLS ShadowTLS 三种自动路由。节点、SNI、回环地址和高位运行端口来自
+受管节点声明，只读展示为：
 
-## Verification And Scope
+```text
+公网 TCP 443
+   ├─ 唯一节点 SNI ──> 127.0.0.1:节点高位运行端口
+   ├─ 唯一节点 SNI ──> 127.0.0.1:节点高位运行端口
+   └─ 网站 SNI      ──> 绝对 HTTP(S) 上游
+```
 
-`backend/tests/test_node_management.py` covers guarded editing, shared
-credentials, relationship closure/cycles, imported links, schema migration,
-controller restart, pending guards, native confirmation, retry, retired replay
-and preserved user traffic/links. Frontend service tests cover payloads and
-validation; the VPS-only `scripts/vps/smoke-node-management.py` exercises the
-actual dialog at desktop, mobile and narrow widths with real Xray clients,
-shared aliases, routed descendants, a paused/killed Agent and unrelated traffic.
-Run it with both `--transport websocket` and `--transport http`.
+网站入口要求无通配符的唯一 SNI、无账号密码和片段的绝对 `http://` 或 `https://` 上游、
+证书名称，以及一个不与节点冲突的本机 TLS 端口。HTTP → HTTPS `308` 默认开启。节点和
+网站 SNI 不得重复；受管入口会独占公网 TCP `443`，不能与同机其他 Caddy、Nginx 或服务
+同时监听。
 
-Private subscriber ownership, historical mmwx relationship discovery,
-provider/relay-group models, and Nginx/tunnel resource cleanup are separate
-migration work. The explicit relationship model does not claim to discover
-unrecorded cross-server dependencies or provide those remaining workflows.
+保存和禁用都使用配置 revision 做并发检查，并生成 Agent 命令。页面显示“声明已保存”
+不等于主机已经生效，必须继续确认命令状态为“应用成功”；失败或未执行时应先查看命令
+结果和 Agent 日志。
+
+## 拖拽节点编排
+
+“节点编排”把启用的节点组合成逻辑多跳线路。候选节点可拖到空白区形成新一跳，也可拖入
+已有跳数列形成同跳负载均衡，跳数列本身可以拖动或用箭头重排。
+
+- 每条线路至少 2 跳、最多 8 跳；每跳至少 1 个、最多 16 个节点。
+- 同一跳的多个节点只使用 `round-robin` 轮询。
+- 最终出口必须且只能包含一个节点。
+- 同一节点不能重复；同一台服务器也只能经过一次，因此不能建立回还环路。
+- 保存时后端再次执行相同检查。编辑和删除使用 revision；删除还要求输入完整名称。
+
+有效编排保存为可供套餐选择的逻辑节点。节点停用或消失后，包含它的草稿会提示移除，
+不能继续保存。
+
+## 编辑与关系
+
+- `GET /api/v1/nodes/{id}/settings` 返回节点、不可猜测的 revision、受影响节点/套餐、
+  共享资源保留情况和订阅访问状态。
+- `PUT /api/v1/nodes/{id}/settings` 可修改名称、标签、启用状态、公开配置、客户端模板、
+  parent/target 关系；必须提交页面读到的 revision，并确认运行时可能重启。
+- 编辑器不会移动服务器、协议、入站或路由资源。要迁移端点，应新建并部署替代节点。
+- routed 节点的 `parent_id` 必须属于同一服务器、认证入站和协议；`target_node_id` 可指向
+  另一台服务器上的目标。循环、正在删除的节点和无效关系会被拒绝。
+- 关系字段只记录已有拓扑，不会自行部署隧道或猜测主机配置。
+
+停用节点会撤回已保存的凭据，同时保留资源身份以便重新启用。相同物理别名可复用凭据，
+路由目标不同的节点在标签相撞时仍使用独立身份。
+
+## 删除、恢复与协调
+
+`POST /api/v1/nodes/{id}/remove` 要求 `expected_revision`、完整的 `confirm_name` 和
+`acknowledge_runtime_restart: true`。无法证明归属的入站或出站会产生警告，只有再次确认
+`acknowledge_unmanaged_resources: true` 才能继续；这些外部资源仍由操作者负责。
+
+控制面先保存删除任务，再依次停用节点、移出套餐、撤回凭据、排空旧命令、预览并删除
+受管入站/出站/路由，最后重新核对订阅访问并删除目录记录。离线或能力不足的 Agent 会让
+任务保持等待或失败；API 已接受请求不代表客户端已经停止转发。
+
+- `GET /api/v1/node-removals/{id}` 查看进度。
+- `POST /api/v1/node-removals/{id}/retry` 重试失败的撤回或清理。
+- 删除任务、节点标记和 operation UUID 会跨控制面/Agent 重启保存。
+- 同一服务器正在删除时，节点创建、编辑、导入、同步和新的运行时变更会被阻止。
+- 退役资源标签和凭据标签不能由目录导入重新使用；替代节点应使用新身份。
+
+原生清理的崩溃恢复契约见[node-cleanup.md](node-cleanup.md)。主机管理员仍可在控制面之外
+修改文件或恢复备份，Open Node 无法发现未记录的跨服务器依赖。

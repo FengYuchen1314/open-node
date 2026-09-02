@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import email.parser
+import gzip
 import hashlib
 import http.client
 import importlib.util
@@ -36,18 +37,14 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 ROOT_UID = 0
 API_PATH = "/api/v1/agents/bootstrap"
-RELEASE_BASE = "https://github.com/FengYuchen1314/open-node/releases/download"
 XRAY_VERSION = "v26.3.27"
-XRAY_URL = (
-    "https://github.com/XTLS/Xray-core/releases/download/" + XRAY_VERSION + "/Xray-linux-64.zip"
-)
 XRAY_SHA256 = "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"
-ASSET_HOSTS = {"release-assets.githubusercontent.com", "objects.githubusercontent.com"}
+XRAY_BYTES = 21_136_402
 BOOTSTRAP_FILES = {
     "service.py", "lifecycle_protocol.py", "lifecycle_host.py", "lifecycle_report.py", "LICENSE"
 }
@@ -55,6 +52,23 @@ JSON_LIMIT = 64 * 1024
 WHEEL_LIMIT = 32 * 1024 * 1024
 BOOTSTRAP_LIMIT = 8 * 1024 * 1024
 XRAY_LIMIT = 128 * 1024 * 1024
+MIHOMO_LIMIT = 64 * 1024 * 1024
+MIHOMO_EXPANDED_LIMIT = 128 * 1024 * 1024
+MIHOMO_VERSION = "v1.19.30"
+MIHOMO_ASSETS = {
+    "linux-amd64": {
+        "filename": "mihomo-linux-amd64-compatible-v1.19.30.gz",
+        "sha256": "db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9",
+        "bytes": 18_899_951,
+        "machine": 62,
+    },
+    "linux-arm64": {
+        "filename": "mihomo-linux-arm64-v1.19.30.gz",
+        "sha256": "58896873736d28628f66de3677c8654fa0f180662523148e136cff4f6e890069",
+        "bytes": 16_965_828,
+        "machine": 183,
+    },
+}
 CA_LIMIT = 1024 * 1024
 JOB_BASE = Path("/var/lib/open-node-agent-bootstrap")
 INSTALL_BASE = Path("/opt")
@@ -178,23 +192,27 @@ def canonical_secret(value):
     return urlsafe_b64encode(urlsafe_b64decode(value + "=")).decode().rstrip("=") == value
 
 
-def validate_asset(value, *, filename, tag):
-    fields(value, {"filename", "url", "sha256"})
+def validate_asset(value, *, filename, maximum):
+    fields(value, {"filename", "path", "sha256", "bytes"})
     require(
         value["filename"] == filename
-        and value["url"] == f"{RELEASE_BASE}/{tag}/{filename}"
+        and value["path"] == f"{API_PATH}/artifacts/{filename}"
         and isinstance(value["sha256"], str)
         and re.fullmatch(r"[a-f0-9]{64}", value["sha256"]),
-        "Release artifact identity or SHA-256 is invalid",
+        "Panel artifact identity or SHA-256 is invalid",
+    )
+    require(
+        type(value["bytes"]) is int and 1 <= value["bytes"] <= maximum,
+        "Panel artifact size is invalid",
     )
     return value
 
 
 def validate_manifest(value):
-    fields(value, {"schema_version", "agent", "xray", "license_required"})
+    fields(value, {"schema_version", "agent", "xray", "mihomo", "license_required"})
     require(
         type(value["schema_version"]) is int
-        and value["schema_version"] == 1
+        and value["schema_version"] == 2
         and value["license_required"] is False,
         "Unsupported bootstrap manifest",
     )
@@ -212,24 +230,43 @@ def validate_manifest(value):
     validate_asset(
         agent["wheel"],
         filename=f"open_node_agent-{agent['version']}-py3-none-any.whl",
-        tag=agent["tag"],
+        maximum=WHEEL_LIMIT,
     )
     validate_asset(
         agent["bootstrap"],
         filename=f"open-node-agent-bootstrap-{agent['version']}.tar.gz",
-        tag=agent["tag"],
+        maximum=BOOTSTRAP_LIMIT,
     )
-    validate_asset(agent["build"], filename="BUILD.json", tag=agent["tag"])
+    validate_asset(agent["build"], filename="BUILD.json", maximum=JSON_LIMIT)
     xray = fields(value["xray"], {"version", "architecture", "archive"})
-    archive = fields(xray["archive"], {"filename", "url", "sha256"})
+    archive = validate_asset(
+        xray["archive"], filename="Xray-linux-64.zip", maximum=XRAY_LIMIT
+    )
     require(
         xray["version"] == XRAY_VERSION
         and xray["architecture"] == "x86_64"
         and archive == {
-            "filename": "Xray-linux-64.zip", "url": XRAY_URL, "sha256": XRAY_SHA256
+            "filename": "Xray-linux-64.zip",
+            "path": API_PATH + "/artifacts/Xray-linux-64.zip",
+            "sha256": XRAY_SHA256,
+            "bytes": XRAY_BYTES,
         },
         "Xray release does not match the supported pinned artifact",
     )
+    mihomo = fields(value["mihomo"], {"version", "assets"})
+    fields(mihomo["assets"], set(MIHOMO_ASSETS))
+    require(mihomo["version"] == MIHOMO_VERSION, "Unsupported Mihomo release")
+    for platform_name, expected in MIHOMO_ASSETS.items():
+        artifact = validate_asset(
+            mihomo["assets"][platform_name],
+            filename=expected["filename"],
+            maximum=MIHOMO_LIMIT,
+        )
+        require(
+            artifact["sha256"] == expected["sha256"]
+            and artifact["bytes"] == expected["bytes"],
+            "Mihomo release does not match the supported pinned artifact",
+        )
     return value
 
 
@@ -471,7 +508,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def make_client(*, ca_data=None):
     if ca_data is None:
         # Explicit Debian system CA ignores SSL_CERT_FILE/SSL_CERT_DIR supplied
-        # by a caller. A private control-plane CA never authorizes GitHub assets.
+        # by a caller. Every download uses this same control-plane client.
         context = ssl.create_default_context(cafile=str(SYSTEM_CA))
     else:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -526,32 +563,8 @@ def request_json(client, url, *, payload=None):
     return parse_json(body)
 
 
-def validate_redirect(url, *, initial_url):
-    require(
-        string(url, maximum=8192) and url.isascii() and "\\" not in url,
-        "Unsafe release redirect",
-    )
-    try:
-        parts = urlsplit(url)
-        port = parts.port
-    except ValueError:
-        raise BootstrapError("Invalid release redirect") from None
-    require(
-        parts.scheme == "https"
-        and parts.username is None
-        and parts.password is None
-        and not parts.fragment
-        and port in {None, 443}
-        and (
-            parts.hostname in ASSET_HOSTS
-            or (parts.hostname == "github.com" and url == initial_url)
-        ),
-        "Release redirect left the approved GitHub asset hosts",
-    )
-    return url
-
-
-def download_artifact(client, artifact, directory, *, limit):
+def download_artifact(client, control_url, artifact, directory, *, limit):
+    """Download one exact file from the same trusted panel origin, without redirects."""
     private_directory(directory)
     filename = artifact["filename"]
     require(
@@ -562,69 +575,65 @@ def download_artifact(client, artifact, directory, *, limit):
     if os.path.lexists(target):
         data = read_owned(target, limit=limit)
         require(
-            hashlib.sha256(data).hexdigest() == artifact["sha256"],
+            len(data) == artifact["bytes"]
+            and hashlib.sha256(data).hexdigest() == artifact["sha256"],
             "Cached artifact SHA-256 mismatch; refusing overwrite",
         )
         return target
-    initial = artifact["url"]
+    control_url = validate_control_url(control_url)
+    path = artifact["path"]
     require(
-        initial == XRAY_URL
-        or re.fullmatch(
-            re.escape(RELEASE_BASE) + r"/agent-v" + VERSION_PATTERN + r"/[a-zA-Z0-9_.-]+",
-            initial,
-        ),
-        "Artifact URL is outside the fixed project release sources",
+        path == f"{API_PATH}/artifacts/{filename}"
+        and artifact["bytes"] <= limit,
+        "Artifact path is outside the fixed panel resource endpoint",
     )
-    url = initial
     deadline = time.monotonic() + 180
-    for _ in range(6):
-        validate_redirect(url, initial_url=initial)
-        require(time.monotonic() < deadline, "Artifact download exceeded its time limit")
-        try:
-            response = client.open(
-                urllib.request.Request(url, headers={"Accept-Encoding": "identity"}), timeout=30
+    require(time.monotonic() < deadline, "Artifact download exceeded its time limit")
+    request = urllib.request.Request(
+        control_url + path,
+        headers={"Accept": "application/octet-stream", "Accept-Encoding": "identity"},
+    )
+    try:
+        response = client.open(request, timeout=30)
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise BootstrapError(
+            "Panel artifact request failed; redirects are not accepted"
+        ) from None
+    except (OSError, urllib.error.URLError, http.client.HTTPException):
+        raise BootstrapError("Panel artifact HTTPS request failed") from None
+    fd, temporary = tempfile.mkstemp(prefix=".download-", dir=directory)
+    try:
+        with response, os.fdopen(fd, "wb") as output:
+            require(response.status == 200, "Unexpected panel artifact status")
+            declared = bounded_response(response, limit)
+            require(
+                declared == artifact["bytes"]
+                and response.headers.get("X-Content-SHA256") == artifact["sha256"],
+                "Panel artifact headers do not match the manifest",
             )
-        except urllib.error.HTTPError as error:
-            code, location = error.code, error.headers.get("Location")
-            error.close()
-            if code in {301, 302, 303, 307, 308} and location:
-                require(string(location, maximum=8192), "Unsafe release redirect")
-                validate_redirect(urljoin(url, location), initial_url=initial)
-                url = urljoin(url, location)
-                continue
-            raise BootstrapError("Release artifact download failed") from None
-        except (OSError, urllib.error.URLError, http.client.HTTPException):
-            raise BootstrapError("Release artifact HTTPS download failed") from None
-        fd, temporary = tempfile.mkstemp(prefix=".download-", dir=directory)
+            digest, size = hashlib.sha256(), 0
+            while block := response.read(64 * 1024):
+                size += len(block)
+                require(size <= artifact["bytes"], "Panel artifact exceeds its pinned size")
+                require(time.monotonic() < deadline, "Artifact download timed out")
+                digest.update(block)
+                output.write(block)
+            require(size == artifact["bytes"], "Truncated panel artifact")
+            require(digest.hexdigest() == artifact["sha256"], "Artifact SHA-256 mismatch")
+            output.flush()
+            os.fsync(output.fileno())
         try:
-            with response, os.fdopen(fd, "wb") as output:
-                require(response.status == 200, "Unexpected release download status")
-                declared = bounded_response(response, limit)
-                digest, size = hashlib.sha256(), 0
-                while block := response.read(64 * 1024):
-                    size += len(block)
-                    require(size <= limit, "Release artifact exceeds its size limit")
-                    require(time.monotonic() < deadline, "Artifact download timed out")
-                    digest.update(block)
-                    output.write(block)
-                require(declared is None or declared == size, "Truncated release artifact")
-                require(digest.hexdigest() == artifact["sha256"], "Artifact SHA-256 mismatch")
-                output.flush()
-                os.fsync(output.fileno())
-            try:
-                os.link(temporary, target, follow_symlinks=False)
-            except FileExistsError:
-                raise BootstrapError(
-                    "Artifact appeared during download; refusing overwrite"
-                ) from None
-            Path(temporary).unlink()
-            fsync_directory(directory)
-            return target
-        except (OSError, urllib.error.URLError, http.client.HTTPException):
-            raise BootstrapError("Release download or private write failed") from None
-        finally:
-            Path(temporary).unlink(missing_ok=True)
-    raise BootstrapError("Too many release redirects")
+            os.link(temporary, target, follow_symlinks=False)
+        except FileExistsError:
+            raise BootstrapError("Artifact appeared during download; refusing overwrite") from None
+        Path(temporary).unlink()
+        fsync_directory(directory)
+        return target
+    except (OSError, urllib.error.URLError, http.client.HTTPException):
+        raise BootstrapError("Panel artifact download or private write failed") from None
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def extract_files(directory, members):
@@ -716,6 +725,33 @@ def unpack_xray(path, directory):
     return extract_files(directory, files)
 
 
+def unpack_mihomo(path, directory, platform_name):
+    expected = MIHOMO_ASSETS.get(platform_name)
+    require(expected is not None, "Unsupported Mihomo host architecture")
+    compressed = read_owned(path, limit=MIHOMO_LIMIT)
+    require(
+        path.name == expected["filename"]
+        and len(compressed) == expected["bytes"]
+        and hashlib.sha256(compressed).hexdigest() == expected["sha256"],
+        "Mihomo archive does not match its release pin",
+    )
+    try:
+        with gzip.open(path, "rb") as source:
+            binary = source.read(MIHOMO_EXPANDED_LIMIT + 1)
+        require(
+            20 <= len(binary) <= MIHOMO_EXPANDED_LIMIT,
+            "Expanded Mihomo binary exceeds its limit",
+        )
+        require(
+            binary[:6] == b"\x7fELF\x02\x01"
+            and int.from_bytes(binary[18:20], "little") == expected["machine"],
+            "Mihomo binary architecture does not match the host artifact",
+        )
+    except (gzip.BadGzipFile, OSError, EOFError):
+        raise BootstrapError("Invalid Mihomo archive") from None
+    return extract_files(directory, {"mihomo": (binary, 0o700)})
+
+
 def validate_wheel(path, manifest):
     agent = manifest["agent"]
     content = read_owned(path, limit=WHEEL_LIMIT)
@@ -742,7 +778,7 @@ def validate_wheel(path, manifest):
         raise BootstrapError("Invalid Agent wheel") from None
 
 
-def prepare_artifacts(job, control_client, release_client):
+def prepare_artifacts(job, control_client):
     manifest_path = job.directory / "manifest.json"
     if os.path.lexists(manifest_path):
         manifest = validate_manifest(parse_json(read_owned(manifest_path)))
@@ -752,19 +788,48 @@ def prepare_artifacts(job, control_client, release_client):
         )
         write_new(manifest_path, json_bytes(manifest))
     agent = manifest["agent"]
-    build = download_artifact(release_client, agent["build"], job.directory, limit=JSON_LIMIT)
+    build = download_artifact(
+        control_client, job.control_url, agent["build"], job.directory, limit=JSON_LIMIT
+    )
     validate_build(parse_json(read_owned(build)), manifest)
-    wheel = download_artifact(release_client, agent["wheel"], job.directory, limit=WHEEL_LIMIT)
+    wheel = download_artifact(
+        control_client, job.control_url, agent["wheel"], job.directory, limit=WHEEL_LIMIT
+    )
     bootstrap = download_artifact(
-        release_client, agent["bootstrap"], job.directory, limit=BOOTSTRAP_LIMIT
+        control_client,
+        job.control_url,
+        agent["bootstrap"],
+        job.directory,
+        limit=BOOTSTRAP_LIMIT,
     )
     validate_wheel(wheel, manifest)
     helper = unpack_bootstrap(bootstrap, job.directory / "bootstrap")
     xray_archive = download_artifact(
-        release_client, manifest["xray"]["archive"], job.directory, limit=XRAY_LIMIT
+        control_client,
+        job.control_url,
+        manifest["xray"]["archive"],
+        job.directory,
+        limit=XRAY_LIMIT,
     )
     xray = unpack_xray(xray_archive, job.directory / "xray") / "xray"
-    return {"manifest": manifest, "wheel": wheel, "service": helper / "service.py", "xray": xray}
+    platform_name = "linux-amd64"
+    mihomo_archive = download_artifact(
+        control_client,
+        job.control_url,
+        manifest["mihomo"]["assets"][platform_name],
+        job.directory,
+        limit=MIHOMO_LIMIT,
+    )
+    mihomo = unpack_mihomo(
+        mihomo_archive, job.directory / "mihomo", platform_name
+    ) / "mihomo"
+    return {
+        "manifest": manifest,
+        "wheel": wheel,
+        "service": helper / "service.py",
+        "xray": xray,
+        "mihomo": mihomo,
+    }
 
 
 def redeem_claim(job, ticket, client):
@@ -931,10 +996,12 @@ def require_fresh_resources(job):
 
 def prepare_configuration(job, claim):
     config = claim["configuration"]
-    agent_path, xray_path = job.directory / "agent-input.json", job.directory / "xray-input.json"
-    if os.path.lexists(agent_path) or os.path.lexists(xray_path):
+    agent_path = job.directory / "agent-input.json"
+    xray_path = job.directory / "xray-input.json"
+    mihomo_path = job.directory / "mihomo-input.yaml"
+    if any(os.path.lexists(path) for path in (agent_path, xray_path, mihomo_path)):
         require(
-            os.path.lexists(agent_path) and os.path.lexists(xray_path),
+            all(os.path.lexists(path) for path in (agent_path, xray_path, mihomo_path)),
             "Partial private configuration retained; inspect it before retrying",
         )
         agent = parse_json(read_owned(agent_path))
@@ -953,16 +1020,22 @@ def prepare_configuration(job, claim):
             parse_json(read_owned(xray_path)) == expected_xray,
             "Private Xray configuration changed",
         )
-        return agent_path, xray_path
+        require(
+            parse_json(read_owned(mihomo_path)) == mihomo_configuration_data(),
+            "Private Mihomo configuration changed",
+        )
+        return agent_path, xray_path, mihomo_path
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
         address = f"127.0.0.1:{listener.getsockname()[1]}"
     agent, xray = configuration_data(job, claim, address)
+    mihomo = mihomo_configuration_data()
     # Prepare the non-secret runtime config first. An interrupted pair is
     # retained for inspection, never silently overwritten on a future attempt.
+    write_new(mihomo_path, json_bytes(mihomo))
     write_new(xray_path, json_bytes(xray))
     write_new(agent_path, json_bytes(agent))
-    return agent_path, xray_path
+    return agent_path, xray_path, mihomo_path
 
 
 def configuration_data(job, claim, stats_address):
@@ -992,17 +1065,30 @@ def configuration_data(job, claim, stats_address):
     return agent, xray
 
 
+def mihomo_configuration_data():
+    # JSON is a strict YAML 1.2 subset. The Agent replaces this empty, private
+    # seed only with YAML compiled from the managed-protocol DTO.
+    return {
+        "mode": "rule",
+        "log-level": "warning",
+        "allow-lan": False,
+        "listeners": [],
+        "rules": ["MATCH,DIRECT"],
+    }
+
+
 def install_agent(job, claim, artifacts):
     # A ticket claim, process spawn, or a running systemd unit alone is never
     # success. service.py owns its full version/PID/connection/runtime gate.
     require_fresh_resources(job)
-    agent_path, xray_path = prepare_configuration(job, claim)
+    agent_path, xray_path, mihomo_path = prepare_configuration(job, claim)
     run_command(
         [
             sys.executable, "-I", artifacts["service"],
             "--root", job.root, "--unit", job.unit, "--timeout", "90", "install",
             "--wheel", artifacts["wheel"], "--config", agent_path,
             "--xray-config", xray_path, "--xray", artifacts["xray"],
+            "--mihomo-config", mihomo_path, "--mihomo", artifacts["mihomo"],
         ],
         timeout=1200,
     )
@@ -1052,7 +1138,7 @@ def main(argv=None):
     parser.add_argument("--server-id", required=True)
     parser.add_argument(
         "--ca-file", type=Path, default=os.environ.get("OPEN_NODE_AGENT_CA_FILE") or None,
-        help="Control-plane CA only (or OPEN_NODE_AGENT_CA_FILE); GitHub uses system trust",
+        help="Control-plane CA for every installer and artifact request",
     )
     parser.add_argument("--install-dependencies", action="store_true")
     parser.add_argument("--test-directory", type=Path, help=argparse.SUPPRESS)
@@ -1072,9 +1158,8 @@ def main(argv=None):
         with job_lock(job):
             require_fresh_resources(job)
             control_client = make_client(ca_data=ca_data)
-            release_client = make_client()
-            print("Preparing and verifying pinned Agent and Xray artifacts.", flush=True)
-            artifacts = prepare_artifacts(job, control_client, release_client)
+            print("Downloading and verifying all Agent files from the trusted panel.", flush=True)
+            artifacts = prepare_artifacts(job, control_client)
             print(
                 "Artifacts verified. Claiming this server's short-lived bootstrap ticket.",
                 flush=True,

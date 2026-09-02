@@ -233,9 +233,24 @@ main
     assert "ACTION_COMPLETE" not in failure.stdout
 
 
+def test_exit_trap_turns_silent_early_success_into_an_explicit_failure(tmp_path):
+    definitions = installer_definitions(tmp_path)
+    result = run_bash(
+        'source "$1"; TXN_PHASE=idle; exit 0',
+        definitions=definitions,
+    )
+
+    assert result.returncode == 1
+    assert "ACTION_INCOMPLETE action=" in result.stderr
+    assert "status=0" in result.stderr
+    assert "installer exited before completion" in result.stderr
+
+
 def test_progress_contract_is_static_and_gateway_pull_is_visible():
     source = INSTALLER.read_text(encoding="utf-8")
     assert source.count('log "ACTION_COMPLETE action=$ACTION"') == 1
+    assert source.count("ACTION_COMPLETE_REACHED=1") == 1
+    assert "ACTION_INCOMPLETE action=$ACTION" in source
 
     main_start = source.rindex("\nmain() {")
     main_end = source.index('\n}\n\nmain "$@"', main_start)

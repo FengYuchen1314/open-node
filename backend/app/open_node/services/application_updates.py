@@ -173,11 +173,32 @@ class ApplicationUpdateStore:
             except FileExistsError:
                 raise ApplicationUpdateError("application_update_busy", 409) from None
             try:
-                _write_all(descriptor, payload)
-                os.fsync(descriptor)
+                try:
+                    _write_all(descriptor, payload)
+                    os.fsync(descriptor)
+                except OSError:
+                    # A partially written request must not be left for the
+                    # root-owned path helper to interpret. If the helper won
+                    # the race and already consumed it, the outcome is still
+                    # deliberately reported as unknown rather than retried.
+                    try:
+                        os.unlink(REQUEST_FILE, dir_fd=directory)
+                    except OSError:
+                        pass
+                    raise ApplicationUpdateError(
+                        "application_update_state_unavailable", 503
+                    ) from None
             finally:
                 os.close(descriptor)
-            os.fsync(directory)
+            try:
+                os.fsync(directory)
+            except OSError:
+                # The complete request may already be visible to systemd.
+                # Keep it in place and make callers reconcile through GET;
+                # deleting or automatically replaying it would be unsafe.
+                raise ApplicationUpdateError(
+                    "application_update_state_unavailable", 503
+                ) from None
         finally:
             os.close(directory)
         return ApplicationUpdateAccepted(request_id=request_id, action=action)

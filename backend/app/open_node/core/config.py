@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     frontend_dir: Path | None = None
     agent_identity_file: Path | None = None
     agent_bootstrap_public_url: str | None = None
+    agent_bootstrap_artifact_dir: Path = Path("/var/lib/open-node/agent-artifacts")
     source_revision: str = "unknown"
     application_update_dir: Path | None = None
     application_update_state_owner_uid: int = Field(default=0, ge=0, le=2_147_483_647)
@@ -62,6 +63,13 @@ class Settings(BaseSettings):
         from open_node.services.agent_bootstrap import normalize_control_url
 
         return normalize_control_url(value)
+
+    @field_validator("agent_bootstrap_artifact_dir")
+    @classmethod
+    def bootstrap_artifact_path(cls, value: Path) -> Path:
+        if not value.is_absolute() or value == Path(value.anchor) or ".." in value.parts:
+            raise ValueError("Agent artifact cache requires an absolute non-root path")
+        return value
 
     @field_validator("backup_temporary_directory", "control_state_dir")
     @classmethod

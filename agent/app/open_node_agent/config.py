@@ -34,6 +34,8 @@ class AgentConfig(BaseModel):
     state_dir: Path = Path("/var/lib/open-node-agent")
     xray_binary: Path = Path("/usr/local/bin/xray")
     xray_config: Path = Path("/etc/open-node-agent/xray.json")
+    mihomo_binary: Path = Path("/usr/local/bin/mihomo")
+    mihomo_config: Path = Path("/etc/open-node-agent/mihomo.yaml")
     runtime_mode: Literal["managed", "systemd"] = "managed"
     allow_xray_takeover: bool = False
     xray_service: str = Field(
@@ -92,6 +94,8 @@ class AgentConfig(BaseModel):
         "state_dir",
         "xray_binary",
         "xray_config",
+        "mihomo_binary",
+        "mihomo_config",
         "ca_file",
         "nginx_binary",
         "lifecycle_socket",
